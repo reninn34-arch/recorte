@@ -1,0 +1,26 @@
+appId: com.recorte.app
+productName: Recorte
+copyright: Copyright © 2026
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - out/**
+  - package.json
+
+extraResources:
+  - from: python
+    to: python
+
+win:
+  target:
+    - nsis
+  artifactName: ${productName}-${version}-setup.${ext}
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: Recorte
+  language: "1034"
