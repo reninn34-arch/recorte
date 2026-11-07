@@ -212,7 +212,12 @@ export async function preguntarAgente(
       clearTimeout(temporizador)
       limpiar()
       if (codigo === 0 && texto.trim()) resolver(texto)
-      else rechazar(new Error(error.trim().slice(0, 300) || `El agente terminó con código ${codigo}.`))
+      else {
+        // Lo que dijo el agente al fallar (o lo último que imprimió), y qué se lanzó: sin eso
+        // «terminó con código 1» no sirve para saber qué pasó.
+        const dijo = (error.trim() || texto.trim()).slice(-300)
+        rechazar(new Error(dijo ? `${dijo}` : `El agente («${orden.slice(0, 80)}») terminó con código ${codigo} sin decir nada.`))
+      }
     })
     if (archivoPrompt) {
       hijo.stdin.end()
@@ -223,12 +228,14 @@ export async function preguntarAgente(
   })
 }
 
-/** Pregunta a una API de chat compatible con OpenAI. Timeout de 120 s. */
+/** Pregunta a una API de chat compatible con OpenAI. Timeout de 120 s. Con `imagenes`
+ *  (rutas absolutas a JPG/PNG) manda contenido multimodal con `image_url` en base64. */
 export async function preguntarApi(
   promptSistema: string,
   promptUsuario: string,
   config: ConfigIA,
-  senal?: AbortSignal
+  senal?: AbortSignal,
+  imagenes?: string[]
 ): Promise<string> {
   if (senal?.aborted) throw new Parado()
   const base = config.baseUrl.replace(/\/+$/, '')
@@ -236,6 +243,23 @@ export async function preguntarApi(
   const temporizador = setTimeout(() => controlador.abort(), 120_000)
   const alParar = () => controlador.abort()
   senal?.addEventListener('abort', alParar, { once: true })
+
+  // Contenido del usuario: texto solo, o texto + imágenes (modelos con visión).
+  let contenidoUsuario: unknown = promptUsuario
+  if (imagenes?.length) {
+    const partes: unknown[] = [{ type: 'text', text: promptUsuario }]
+    const { readFileSync } = await import('node:fs')
+    for (const ruta of imagenes.slice(0, 8)) {
+      try {
+        const b64 = readFileSync(ruta).toString('base64')
+        const tipo = /\.png$/i.test(ruta) ? 'image/png' : /\.webp$/i.test(ruta) ? 'image/webp' : 'image/jpeg'
+        partes.push({ type: 'image_url', image_url: { url: `data:${tipo};base64,${b64}` } })
+      } catch {
+        // Si una imagen no se puede leer, va sin ella.
+      }
+    }
+    if (partes.length > 1) contenidoUsuario = partes
+  }
 
   try {
     const respuesta = await fetch(`${base}/chat/completions`, {
@@ -252,7 +276,7 @@ export async function preguntarApi(
         temperature: 0.4,
         messages: [
           { role: 'system', content: promptSistema },
-          { role: 'user', content: promptUsuario }
+          { role: 'user', content: contenidoUsuario }
         ]
       })
     })

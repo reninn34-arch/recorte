@@ -1,6 +1,8 @@
 /**
  * Una creación: un video hecho desde cero con IA, sin material importado.
  * Avanza por fases que el usuario ve en el estudio:
+ *   estilo → (solo con referencia) se analiza el material y la referencia, y se
+ *            muestra la ficha de estilo y qué se puede copiar;
  *   guion  → el agente propone las escenas y se cambian hablando con él;
  *   voz    → la narración: una voz de Gemini, tu voz grabada o subida, o ninguna;
  *   video  → el agente compone (HyperFrames) y Recorte renderiza;
@@ -8,8 +10,10 @@
  * Abrir en el editor convierte el MP4 en un proyecto normal, con su timeline.
  */
 
+import type { FichaEstilo, Viabilidad } from './estilo'
+
 export type FormatoCreacion = 'vertical' | 'horizontal'
-export type FaseCreacion = 'guion' | 'voz' | 'video' | 'listo'
+export type FaseCreacion = 'estilo' | 'guion' | 'voz' | 'video' | 'listo'
 
 /** Los agentes que Recorte sabe conectar. */
 export type AgenteId = 'kimi' | 'claude' | 'codex' | 'gemini' | 'opencode' | 'antigravity'
@@ -55,6 +59,8 @@ export interface AdjuntoCreacion {
   archivo: string
   nombre: string
   tipo: 'imagen' | 'video'
+  /** Lo que dura, si es video (segundos). */
+  duracion?: number
 }
 
 export interface MensajeCreacion {
@@ -137,6 +143,12 @@ export interface Creacion {
   duracion: number
   adjuntos: AdjuntoCreacion[]
   fase: FaseCreacion
+  /** Video de referencia cuyo estilo se copia (copiado a `analisis/`; no entra en el video). */
+  referencia?: { archivo: string; nombre: string }
+  /** La ficha de estilo que salió de la referencia (también en `analisis/estilo.json`). */
+  ficha?: FichaEstilo
+  /** El último informe de viabilidad calculado (se recalcula al conectar cosas). */
+  viabilidad?: Viabilidad
   guion?: GuionCreacion
   voz?: VozCreacion
   mensajes: MensajeCreacion[]
@@ -168,6 +180,8 @@ export interface PeticionCreacion {
   duracion: number
   /** Rutas absolutas elegidas por el usuario; se copian a la creación. */
   adjuntos: string[]
+  /** Ruta absoluta del video de referencia cuyo estilo se copia (no entra en el video). */
+  referencia?: string
   /** Quién hace cada paso (modo avanzado); sin esto manda el agente activo. */
   tareas?: TareasCreacion
   /** Imágenes (gratis) y clips de Veo (gastan créditos) generados en Google Flow. */

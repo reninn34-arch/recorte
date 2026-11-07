@@ -258,9 +258,22 @@ export interface RecorteApi {
   importarMusica: (id: string) => Promise<{ ok: boolean; musica?: MusicaTL; error?: string } | null>
   /** Crear con IA: videos desde cero, sin material importado. */
   elegirAdjuntos: () => Promise<string[]>
+  /** El video de referencia cuyo estilo se copia (uno; no entra en el video). */
+  elegirReferencia: () => Promise<string | null>
   creacionesListar: () => Promise<Creacion[]>
   creacionAbrir: (id: string) => Promise<Creacion | null>
   creacionNueva: (peticion: PeticionCreacion) => Promise<Creacion>
+  /** Copiar un estilo: analiza el material y la referencia, y saca la ficha (modo 'gemini': Gemini ve el video completo). */
+  estiloAnalizar: (id: string, modo?: 'gemini') => Promise<Creacion>
+  /** Deja la fase Estilo y pasa al guion. */
+  estiloContinuar: (id: string) => Promise<Creacion>
+  /** Recalcula qué se puede copiar con lo conectado ahora (sin volver a analizar). */
+  estiloViabilidad: (id: string) => Promise<Creacion>
+  /** Edita a mano lo básico de la ficha (subtítulos y ritmo). */
+  estiloFichaGuardar: (
+    id: string,
+    cambios: { subtitulos?: { lleva?: boolean; modo?: 'palabra' | 'frase' }; ritmoSegundos?: number }
+  ) => Promise<Creacion>
   /** Propone el guion, o lo cambia si hay `pedido`. */
   creacionGuion: (id: string, pedido?: string) => Promise<Creacion>
   /** Compone y renderiza; con `pedido` cambia el video ya hecho. */

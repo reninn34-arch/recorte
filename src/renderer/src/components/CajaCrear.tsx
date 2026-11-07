@@ -85,6 +85,7 @@ export function CajaCrear({
   const [formato, setFormato] = useState<FormatoCreacion>('vertical')
   const [duracion, setDuracion] = useState(30)
   const [adjuntos, setAdjuntos] = useState<string[]>([])
+  const [referencia, setReferencia] = useState<string | null>(null)
   const [falta, setFalta] = useState(false)
   // Quién lo hace: null = optimizado (el agente activo hace todo con su modelo de siempre).
   const [porPaso, setPorPaso] = useState(false)
@@ -140,6 +141,11 @@ export function CajaCrear({
     if (rutas.length) setAdjuntos((a) => [...a, ...rutas.filter((r) => !a.includes(r))].slice(0, 12))
   }
 
+  async function elegirReferencia() {
+    const ruta = await window.recorte.elegirReferencia()
+    if (ruta) setReferencia(ruta)
+  }
+
   function enviar() {
     if (!peticion.trim()) {
       setFalta(true)
@@ -154,6 +160,7 @@ export function CajaCrear({
       formato,
       duracion,
       adjuntos,
+      ...(referencia ? { referencia } : {}),
       tareas,
       ...(imagenes || videos
         ? {
@@ -262,10 +269,30 @@ export function CajaCrear({
             ))}
           </div>
         )}
+        {referencia && (
+          <div className="crear-adjuntos">
+            <span className="crear-adjunto is-referencia" title={`${referencia} — Se analiza para copiar su edición; no entra en tu video.`}>
+              <Icon name="film" size={11} /> Estilo de: {referencia.split(/[\\/]/).pop()}
+              <button aria-label="Quitar la referencia" onClick={() => setReferencia(null)}>
+                <Icon name="x" size={11} />
+              </button>
+            </span>
+            <span className="tl-dim cc-nota-ref">Se analiza para copiar su edición; no entra en tu video.</span>
+          </div>
+        )}
 
         <div className="cc-fila">
           <button type="button" className="cc-redondo" onClick={() => void adjuntar()} title="Tus fotos o clips para el video" aria-label="Adjuntar">
             <Icon name="paperclip" size={15} />
+          </button>
+          <button
+            type="button"
+            className={`cc-redondo ${referencia ? 'is-on' : ''}`}
+            onClick={() => void elegirReferencia()}
+            title="Video de referencia: se analiza para copiar su edición; no entra en tu video"
+            aria-label="Video de referencia"
+          >
+            <Icon name="film" size={15} />
           </button>
 
           <Menu

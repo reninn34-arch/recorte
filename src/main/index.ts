@@ -36,6 +36,11 @@ import { Creaciones, EXTENSIONES_ADJUNTOS, pasoGuion, pasoVideo, type ConfigAgen
 import { convertirAVoz, generarVozGemini, prepararVoz } from './voz'
 import { montarVozEnVideo } from './montajevoz'
 import { conectarVozGoogle, desconectarVozGoogle, estadoVozGoogle, generarVozGoogle } from './vozgoogle'
+import { analizarMaterialCreacion } from './estilo/material'
+import { medirReferencia } from './estilo/referencia'
+import { analizarConGeminiVideo, interpretarEstilo } from './estilo/ficha'
+import { viabilidadDe } from './estilo/viabilidad'
+import { guardar } from './disco'
 import { pideMontarVoz, textoNarracion, VOCES_GEMINI } from '../shared/creacion'
 import type { Creacion, EleccionTarea, MensajeCreacion, NivelModelo, PeticionCreacion, TareasCreacion } from '../shared/creacion'
 import { turnoAgente } from './chat'
@@ -270,6 +275,89 @@ app.whenReady().then(() => {
   ipcMain.handle('creacion:parar', (_evento, id: unknown) => typeof id === 'string' && pararTrabajo(`creacion:${id}`))
   const textoError = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
+  // ===== Copiar un estilo: análisis del material y de la referencia =====
+  ipcMain.handle('estilo:analizar', (_evento, id: unknown, modo: unknown) =>
+    conCreacion(id, async (c, senal) => {
+      const carpeta = creaciones.carpeta(c.id)
+      try {
+        // Fase 1: el material del usuario, en local.
+        await analizarMaterialCreacion(c, carpeta, (pct, texto) => enviarProgreso({ id: c.id, fase: 'creacion', pct: pct * 0.5, texto }), senal)
+        // Fase 2: medir la referencia y que el agente la interprete.
+        if (c.referencia) {
+          const rutaRef = join(carpeta, c.referencia.archivo)
+          const medido = await medirReferencia(rutaRef, carpeta, (pct, texto) => enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.5 + pct * 0.35, texto }), senal)
+          enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.88, texto: 'El agente está estudiando el estilo' })
+          let ficha
+          if (modo === 'gemini') {
+            const clave = await ajustes.claveVoz()
+            if (!clave) throw new Error('Para analizar con Gemini hace falta tu llave de AI Studio (Ajustes → Voz).')
+            try {
+              ficha = await analizarConGeminiVideo(rutaRef, medido, clave, carpeta, senal)
+            } catch (e) {
+              if (esParado(e)) throw e
+              c.mensajes.push(mensaje('agente', `Gemini no pudo ver el video (${textoError(e)}). Lo analizo con tu agente, por fotogramas.`))
+              ficha = await interpretarEstilo(carpeta, medido, await configParaTarea(c.tareas?.guion), senal)
+            }
+          } else {
+            ficha = await interpretarEstilo(carpeta, medido, await configParaTarea(c.tareas?.guion), senal)
+          }
+          // Si el agente no dio un ritmo, el de la ficha es el medido (así se ve y se puede editar).
+          if (!ficha.ritmoSegundos && medido.medianaPlano > 0) {
+            ficha.ritmoSegundos = Math.round(medido.medianaPlano * 10) / 10
+            guardar(join(carpeta, 'analisis', 'estilo.json'), JSON.stringify(ficha, null, 2))
+          }
+          c.ficha = ficha
+          c.viabilidad = (await viabilidadDe(c, ajustes)) ?? undefined
+          c.mensajes.push(
+            mensaje(
+              'agente',
+              `Estilo analizado: ${ficha.resumen}${ficha.nota ? ` ${ficha.nota}` : ficha.aproximada ? ' (ficha aproximada: tu agente no vio las imágenes, salió de lo medido).' : ''} Se puede copiar en un ${c.viabilidad?.porcentaje ?? '?'} % con lo que tienes conectado.`
+            )
+          )
+        }
+      } catch (e) {
+        // Como en el guion y el video: parar o fallar deja un mensaje en el chat, no solo un aviso.
+        c.mensajes.push(
+          esParado(e)
+            ? mensaje('agente', 'Lo paraste. Cuando quieras, vuelve a darle a «Analizar el estilo».')
+            : mensaje('agente', `No pude analizar el estilo: ${textoError(e)}`, true)
+        )
+      }
+      enviarProgreso({ id: c.id, fase: 'creacion', pct: 1, texto: 'Listo' })
+      return creaciones.guardar(c)
+    })
+  )
+  ipcMain.handle('estilo:continuar', (_evento, id: unknown) =>
+    conCreacion(id, async (c) => {
+      if (c.fase === 'estilo') c.fase = 'guion'
+      return creaciones.guardar(c)
+    })
+  )
+  // Se recalcula al conectar algo (Flow, ChatGPT, la voz), sin volver a analizar.
+  ipcMain.handle('estilo:viabilidad', (_evento, id: unknown) =>
+    conCreacion(id, async (c) => {
+      c.viabilidad = (await viabilidadDe(c, ajustes)) ?? undefined
+      return creaciones.guardar(c)
+    })
+  )
+  // Editar a mano lo básico de la ficha: subtítulos y ritmo.
+  ipcMain.handle('estilo:ficha-guardar', (_evento, id: unknown, cambios: unknown) =>
+    conCreacion(id, async (c) => {
+      if (!c.ficha) throw new Error('Todavía no hay ficha de estilo.')
+      const x = (cambios ?? {}) as { subtitulos?: { lleva?: unknown; modo?: unknown }; ritmoSegundos?: unknown }
+      if (x.subtitulos && typeof x.subtitulos === 'object') {
+        if (typeof x.subtitulos.lleva === 'boolean') c.ficha.subtitulos.lleva = x.subtitulos.lleva
+        if (x.subtitulos.modo === 'palabra' || x.subtitulos.modo === 'frase') c.ficha.subtitulos.modo = x.subtitulos.modo
+      }
+      if (typeof x.ritmoSegundos === 'number' && Number.isFinite(x.ritmoSegundos)) {
+        c.ficha.ritmoSegundos = Math.min(20, Math.max(0.3, x.ritmoSegundos))
+      }
+      guardar(join(creaciones.carpeta(c.id), 'analisis', 'estilo.json'), JSON.stringify(c.ficha, null, 2))
+      c.viabilidad = (await viabilidadDe(c, ajustes)) ?? undefined
+      return creaciones.guardar(c)
+    })
+  )
+
   ipcMain.handle('dialog:open-adjuntos', async () => {
     const r = await dialog.showOpenDialog({
       title: 'Fotos o clips para tu video',
@@ -277,6 +365,14 @@ app.whenReady().then(() => {
       filters: [{ name: 'Fotos y videos', extensions: EXTENSIONES_ADJUNTOS }]
     })
     return r.canceled ? [] : r.filePaths
+  })
+  ipcMain.handle('dialog:open-referencia', async () => {
+    const r = await dialog.showOpenDialog({
+      title: 'El video cuyo estilo quieres copiar',
+      properties: ['openFile'],
+      filters: [{ name: 'Video', extensions: ['mp4', 'mov', 'webm', 'mkv', 'm4v'] }]
+    })
+    return r.canceled ? null : (r.filePaths[0] ?? null)
   })
   const destrabar = (c: Creacion): Creacion => {
     if (c.fase === 'video' && !creandoAhora.has(c.id)) {
@@ -306,6 +402,7 @@ app.whenReady().then(() => {
       formato: x.formato === 'horizontal' ? 'horizontal' : 'vertical',
       duracion: typeof x.duracion === 'number' ? x.duracion : 30,
       adjuntos: Array.isArray(x.adjuntos) ? x.adjuntos.filter((a): a is string => typeof a === 'string') : [],
+      ...(typeof x.referencia === 'string' && /\.(mp4|mov|webm|mkv|m4v)$/i.test(x.referencia) ? { referencia: x.referencia } : {}),
       tareas: limpiarTareas(x.tareas),
       ...(x.flow && typeof x.flow === 'object'
         ? (() => {
@@ -330,9 +427,23 @@ app.whenReady().then(() => {
       if (texto) c.mensajes.push(mensaje('usuario', texto))
       c.fase = 'guion'
       creaciones.guardar(c)
+      // Si hay videos tuyos, el guionista recibe qué se dice y en qué segundo (local y en caché:
+      // la primera vez tarda lo que tarde Whisper; después es instantáneo).
+      if (c.adjuntos.some((a) => a.tipo === 'video')) {
+        try {
+          await analizarMaterialCreacion(c, creaciones.carpeta(c.id), (pct, t) => enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.02 + pct * 0.08, texto: t }), senal)
+        } catch (e) {
+          if (esParado(e)) {
+            c.mensajes.push(mensaje('agente', 'Lo paraste mientras miraba tu material.'))
+            enviarProgreso({ id: c.id, fase: 'creacion', pct: 1, texto: 'Listo' })
+            return creaciones.guardar(c)
+          }
+          // Si el análisis falla, el guion se escribe igual (con solo los nombres de archivo).
+        }
+      }
       enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.1, texto: c.guion ? 'Cambiando el guion' : 'Escribiendo el guion' })
       try {
-        const r = await pasoGuion(c, await configParaTarea(c.tareas?.guion), texto, senal, bloqueGustos())
+        const r = await pasoGuion(c, creaciones.carpeta(c.id), await configParaTarea(c.tareas?.guion), texto, senal, bloqueGustos())
         c.guion = r.guion
         const aprendidos = agregarGustos(r.aprendido, 'aprendido').map((g) => g.texto)
         c.mensajes.push({

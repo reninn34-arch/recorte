@@ -738,6 +738,14 @@ export default function App() {
             quitar: () => vozCreacion((id) => window.recorte.creacionQuitarVoz(id)),
             montar: () => vozCreacion((id) => window.recorte.creacionMontarVoz(id))
           }}
+          estilo={{
+            geminiDisponible: Boolean(estadoVoz.tieneClave),
+            analizar: (modo) => vozCreacion((id) => window.recorte.estiloAnalizar(id, modo)),
+            continuar: () => vozCreacion((id) => window.recorte.estiloContinuar(id)),
+            recalcular: () => vozCreacion((id) => window.recorte.estiloViabilidad(id)),
+            guardarFicha: (ficha) => vozCreacion((id) => window.recorte.estiloFichaGuardar(id, ficha)),
+            irAAjustes: () => setVista('ajustes')
+          }}
         />
         {aviso && <Toast text={aviso} />}
         <AvisoActualizacion />

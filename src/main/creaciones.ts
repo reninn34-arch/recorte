@@ -19,9 +19,13 @@ import { ejecutar, extraerHtml } from './crear'
 import { guardar } from './disco'
 import { esParado, extraerJson, Parado, preguntarAgente, preguntarApi, type ConfigIA } from './ia'
 import { crearPortada } from './render'
+import { probeVideo } from './ffmpeg'
 import { pedirFlow } from './flow'
 import { generarImagenChatGPT } from './imagenchatgpt'
 import { MODELO_CHATGPT } from '../shared/flow'
+import { bloqueEstiloGuion, resumenMaterial } from '../shared/estilo'
+import { leerAnalisisMaterial } from './estilo/material'
+import { leerEstiloMedido } from './estilo/referencia'
 
 /**
  * Creaciones: videos desde cero con IA. Cada una es una carpeta
@@ -88,6 +92,21 @@ export class Creaciones {
     mkdirSync(media, { recursive: true })
     mkdirSync(join(carpeta, 'salidas'), { recursive: true })
 
+    // La referencia se copia a analisis/: se estudia su edición, no entra en el video.
+    let referencia: Creacion['referencia']
+    if (p.referencia && existsSync(p.referencia)) {
+      mkdirSync(join(carpeta, 'analisis'), { recursive: true })
+      const destino = join(carpeta, 'analisis', 'referencia.mp4')
+      const ffmpeg = resolverBinario('ffmpeg') ?? 'ffmpeg'
+      const r = await ejecutar(
+        [`"${ffmpeg}"`, '-y', '-v', 'error', '-i', `"${p.referencia}"`, '-vf', `"scale='min(1080,iw)':-2"`,
+          '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-c:a', 'aac', '-movflags', '+faststart', `"${destino}"`],
+        carpeta,
+        10 * 60_000
+      )
+      if (r.codigo === 0 && existsSync(destino)) referencia = { archivo: 'analisis/referencia.mp4', nombre: basename(p.referencia) }
+    }
+
     const adjuntos: AdjuntoCreacion[] = []
     for (const [i, ruta] of p.adjuntos.slice(0, 12).entries()) {
       if (!existsSync(ruta)) continue
@@ -99,14 +118,19 @@ export class Creaciones {
       } else if (EXT_VIDEO.includes(ext)) {
         const ffmpeg = resolverBinario('ffmpeg') ?? 'ffmpeg'
         const archivo = `adjunto-${i + 1}.mp4`
-        // Hasta 20 s por clip, en H.264 + AAC: lo que HyperFrames reproduce sin sorpresas.
+        // Completo (hasta 30 min), en H.264 + AAC: lo que HyperFrames reproduce sin sorpresas.
+        // El agente usa trozos con data-media-start; antes se cortaba a 20 s y el material
+        // largo no servía para elegir sus mejores partes.
         const r = await ejecutar(
-          [`"${ffmpeg}"`, '-y', '-v', 'error', '-i', `"${ruta}"`, '-t', '20', '-vf', `"scale='min(1080,iw)':-2"`,
+          [`"${ffmpeg}"`, '-y', '-v', 'error', '-i', `"${ruta}"`, '-t', String(MAX_MATERIAL), '-vf', `"scale='min(1080,iw)':-2"`,
             '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-c:a', 'aac', '-movflags', '+faststart', `"${join(media, archivo)}"`],
           carpeta,
-          180_000
+          40 * 60_000
         )
-        if (r.codigo === 0) adjuntos.push({ archivo: `media/${archivo}`, nombre: basename(ruta), tipo: 'video' })
+        if (r.codigo === 0) {
+          const duracion = await probeVideo(join(media, archivo)).then((i) => Math.round(i.duration * 10) / 10, () => undefined)
+          adjuntos.push({ archivo: `media/${archivo}`, nombre: basename(ruta), tipo: 'video', ...(duracion ? { duracion } : {}) })
+        }
       }
     }
 
@@ -120,7 +144,8 @@ export class Creaciones {
       formato: p.formato === 'horizontal' ? 'horizontal' : 'vertical',
       duracion: Math.min(180, Math.max(5, Math.round(p.duracion) || 30)),
       adjuntos,
-      fase: 'guion',
+      fase: referencia ? 'estilo' : 'guion',
+      ...(referencia ? { referencia } : {}),
       mensajes: [],
       version: 0,
       ...(p.tareas && (p.tareas.guion || p.tareas.video) ? { tareas: p.tareas } : {}),
@@ -230,10 +255,18 @@ export async function generarMedioFlow(
   return fallos
 }
 
+/** Como mucho tanto de cada video del usuario (segundos). */
+const MAX_MATERIAL = 30 * 60
+
+const mmssAdjunto = (s: number): string => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`
+
 function listaAdjuntos(c: Creacion): string {
   if (!c.adjuntos.length) return 'Sin material del usuario: todo es tipografía, formas y color.'
   return `Material del usuario (úsalo, es lo que hace único el video):\n${c.adjuntos
-    .map((a) => `- ${a.archivo} (${a.tipo === 'imagen' ? 'foto' : 'clip de video con su audio'}, «${a.nombre}»)`)
+    .map(
+      (a) =>
+        `- ${a.archivo} (${a.tipo === 'imagen' ? 'foto' : `video con su audio${a.duracion ? `, dura ${mmssAdjunto(a.duracion)}` : ''}`}, «${a.nombre}»)`
+    )
     .join('\n')}`
 }
 
@@ -259,7 +292,19 @@ function guionConVoz(c: Creacion): string {
     .join('\n')
 }
 
-function promptGuion(c: Creacion, pedido?: string, gustos = ''): string {
+/** La ficha de estilo de la referencia (si la creación copia un estilo), lista para el prompt. */
+function bloqueEstilo(c: Creacion, carpeta: string): string {
+  if (!c.ficha) return ''
+  return `${bloqueEstiloGuion(c.ficha, leerEstiloMedido(carpeta))}\n\n`
+}
+
+/** El resumen del material ya analizado (planos y tiempos), si existe. */
+function bloqueMaterial(carpeta: string): string {
+  const resumen = resumenMaterial(leerAnalisisMaterial(carpeta)?.videos ?? [])
+  return resumen ? `${resumen}\n` : ''
+}
+
+function promptGuion(c: Creacion, carpeta: string, pedido?: string, gustos = ''): string {
   const estilo = estiloPorId(c.estilo)
   return `Eres el guionista y director de un video corto. Diseñas el guion por escenas antes de que se produzca.
 
@@ -271,7 +316,7 @@ ${c.peticion}
 Tipo de video: ${estilo.nombre}. Dirección editorial:
 ${estilo.guia}
 
-Formato: ${c.formato === 'vertical' ? 'vertical 9:16 (TikTok, Reels, Shorts)' : 'horizontal 16:9 (YouTube)'}. Duración objetivo: unos ${c.duracion} segundos.
+${bloqueEstilo(c, carpeta)}${bloqueMaterial(carpeta)}Formato: ${c.formato === 'vertical' ? 'vertical 9:16 (TikTok, Reels, Shorts)' : 'horizontal 16:9 (YouTube)'}. Duración objetivo: unos ${c.duracion} segundos.
 ${listaAdjuntos(c)}
 ${c.guion ? `\nGuion actual:\n${guionTexto(c.guion)}\n` : ''}${c.mensajes.length ? `\nConversación:\n${conversacion(c.mensajes)}\n` : ''}${pedido ? `\nCAMBIO QUE PIDE AHORA EL USUARIO: ${pedido}\n` : ''}
 ${gustos ? `\n${gustos}\n` : ''}${bloqueFlowGuion(c)}Reglas: el primer segundo engancha; una idea por escena; "texto" es lo que se lee en pantalla y es corto (máximo ~12 palabras); "narracion" es lo que dice la voz en esa escena, natural y hablado (unas 2,5 palabras por segundo de la escena), y no repite el texto palabra por palabra; la suma de duraciones se acerca a la duración objetivo; en "visual" di qué se ve, y si usas material del usuario nombra su archivo (media/…).
@@ -280,7 +325,7 @@ Responde SOLO con JSON:
 {"mensaje": "una o dos frases para el usuario sobre lo que hiciste", "propuestas": ["…"], "aprendido": [], "guion": {"titulo": "…", "escenas": [{"texto": "…", "narracion": "…", "visual": "…", ${c.flow?.imagenes ? '"imagen": "…", ' : ''}${c.flow?.videos ? '"clip": "…", ' : ''}"duracion": 3}]}}`
 }
 
-function promptComposicion(c: Creacion, htmlPrevio: string | null, pedido?: string, gustos = ''): string {
+function promptComposicion(c: Creacion, carpeta: string, htmlPrevio: string | null, pedido?: string, gustos = ''): string {
   const { ancho, alto } = dimensiones(c)
   const estilo = estiloPorId(c.estilo)
   const reglas = `Reglas inviolables de HyperFrames:
@@ -291,7 +336,7 @@ function promptComposicion(c: Creacion, htmlPrevio: string | null, pedido?: stri
 - Una sola timeline pausada: const tl = gsap.timeline({ paused: true }); … window.__timelines["main"] = tl;
 - Anima con fromTo (nunca CSS transform + tween a la vez); no animes visibility/autoAlpha en elementos .clip; sin Math.random ni relojes; sin <br>.
 - Fotos del usuario: <img src="media/…"> dentro de su escena, object-fit: cover; puedes moverlas despacio (Ken Burns) con fromTo de scale.
-- Clips de video del usuario: cada <video> es su propia escena a nivel raíz: <video class="clip" src="media/…" playsinline data-has-audio="true" data-start="X" data-duration="D" data-track-index="0"></video>. Nunca envuelvas un <video> en un elemento con data-start; nunca llames play/pause/seek.
+- Clips de video del usuario: cada <video> es su propia escena a nivel raíz: <video class="clip" src="media/…" playsinline data-has-audio="true" data-start="X" data-duration="D" data-media-start="S" data-track-index="0"></video>. data-media-start es el segundo DEL ARCHIVO donde empieza el trozo (el material puede durar minutos: usa solo los trozos que sirven, con los tiempos de lo que se dice). Nunca envuelvas un <video> en un elemento con data-start; nunca llames play/pause/seek.
 - Texto en español, grande y legible (mínimo ${c.formato === 'vertical' ? 56 : 48} px).`
 
   const voz = c.voz
@@ -322,7 +367,7 @@ ${c.guion ? guionTexto(c.guion) : c.peticion}
 
 Petición original: ${c.peticion}
 Tipo de video: ${estilo.nombre}. ${estilo.guia}
-${listaAdjuntos(c)}${listaFlow(c)}
+${bloqueEstilo(c, carpeta)}${listaAdjuntos(c)}${listaFlow(c)}
 ${voz}${gustos ? `\n${gustos}` : ''}
 Dirección: el primer segundo es lo más fuerte; cada escena tiene su propia composición (no repitas el mismo layout); color con intención y contraste; tipografía con jerarquía; movimientos con easing, sin relleno.
 ${reglas}
@@ -344,12 +389,13 @@ async function preguntar(prompt: string, sistema: string, config: ConfigAgente, 
 /** Propone o cambia el guion. Devuelve el guion nuevo y el mensaje del agente. */
 export async function pasoGuion(
   c: Creacion,
+  carpeta: string,
   config: ConfigAgente,
   pedido?: string,
   senal?: AbortSignal,
   gustos = ''
 ): Promise<{ guion: GuionCreacion; mensaje: string; propuestas: string[]; aprendido: string[] }> {
-  const texto = await preguntar(promptGuion(c, pedido, gustos), 'Eres guionista de video y respondes solo con JSON.', config, senal)
+  const texto = await preguntar(promptGuion(c, carpeta, pedido, gustos), 'Eres guionista de video y respondes solo con JSON.', config, senal)
   const datos = extraerJson(texto) as { mensaje?: unknown; guion?: unknown }
   const guion = validarGuion(datos.guion ?? datos)
   if (!guion) throw new Error('El agente no devolvió un guion válido.')
@@ -381,7 +427,7 @@ export async function pasoVideo(
   const fallosFlow = previo ? [] : await generarMedioFlow(c, carpeta, onProgreso, senal)
   onProgreso(0.25, previo ? 'El agente está aplicando tu cambio' : 'El agente está diseñando las escenas')
   const respuesta = await preguntar(
-    promptComposicion(c, previo, pedido, gustos),
+    promptComposicion(c, carpeta, previo, pedido, gustos),
     'Eres un editor de video que diseña con código y responde solo con HTML.',
     config,
     senal

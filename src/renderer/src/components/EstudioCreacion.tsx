@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { duracionEnVoz, duracionGuion, type Creacion } from '../../../shared/creacion'
 import { PasoVoz, type ControlVoz } from './PasoVoz'
+import { PasoEstilo, type ControlEstilo } from './PasoEstilo'
 import { estiloPorId } from '../../../shared/estilos'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
@@ -20,9 +21,11 @@ export function EstudioCreacion({
   onMostrar,
   onVolver,
   onParar,
-  voz
+  voz,
+  estilo
 }: {
   voz: ControlVoz
+  estilo?: ControlEstilo
   creacion: Creacion
   trabajando: boolean
   progreso: { pct: number; texto?: string } | null
@@ -40,7 +43,7 @@ export function EstudioCreacion({
   const lista = useRef<HTMLDivElement | null>(null)
   const c = creacion
   const hecho = Boolean(c.salida)
-  const estilo = estiloPorId(c.estilo)
+  const estiloEditorial = estiloPorId(c.estilo)
 
   useEffect(() => {
     setDesde(trabajando ? Date.now() : null)
@@ -65,6 +68,9 @@ export function EstudioCreacion({
 
   const fases = [
     { nombre: 'Idea', hecha: true, actual: false },
+    ...(c.referencia
+      ? [{ nombre: 'Estilo', hecha: Boolean(c.ficha) && c.fase !== 'estilo', actual: c.fase === 'estilo' }]
+      : []),
     { nombre: 'Guion', hecha: Boolean(c.guion), actual: c.fase === 'guion' },
     { nombre: 'Voz', hecha: Boolean(c.voz), actual: c.fase === 'voz' },
     { nombre: 'Video', hecha: hecho && c.fase !== 'video', actual: c.fase === 'video' },
@@ -80,7 +86,7 @@ export function EstudioCreacion({
         <div className="estudio-titulo">
           <strong>{c.guion?.titulo ?? c.nombre}</strong>
           <span>
-            {estilo.nombre} · {c.formato === 'vertical' ? 'Vertical 9:16' : 'Horizontal 16:9'} · {c.duracion} s
+            {estiloEditorial.nombre} · {c.formato === 'vertical' ? 'Vertical 9:16' : 'Horizontal 16:9'} · {c.duracion} s
           </span>
         </div>
         <div className="estudio-fases">
@@ -174,6 +180,10 @@ export function EstudioCreacion({
         </aside>
 
         <section className="estudio-centro">
+          {c.fase === 'estilo' && estilo && (
+            <PasoEstilo creacion={c} ocupado={trabajando} progreso={progreso} control={estilo} />
+          )}
+
           {c.fase === 'video' && trabajando && (
             <div className="estudio-progreso">
               <span>{progreso?.texto ?? 'Haciendo el video'}</span>
@@ -258,7 +268,8 @@ export function EstudioCreacion({
               </ol>
             </div>
           ) : (
-            !trabajando && (
+            !trabajando &&
+            c.fase !== 'estilo' && (
               <div className="estudio-vacio">
                 <p>Todavía no hay guion.</p>
                 <button className="btn primary" onClick={() => onGuion()}>
@@ -267,7 +278,7 @@ export function EstudioCreacion({
               </div>
             )
           )}
-          {!c.guion && trabajando && (
+          {!c.guion && trabajando && c.fase !== 'estilo' && (
             <div className="estudio-vacio">
               <p>El agente está escribiendo el guion…</p>
             </div>

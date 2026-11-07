@@ -1973,6 +1973,26 @@ button { cursor: pointer; }
 .estudio-escena-lado { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 .estudio-medio { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line-2); background: #000; }
 .estudio-vacio { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 60px 0; color: var(--muted); }
+/* «Copiar un estilo»: la ficha y el informe de viabilidad de la fase Estilo. */
+.paso-estilo { gap: 14px; }
+.pe-ficha { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); }
+.pe-resumen { margin: 0 0 4px; font-size: 14px; line-height: 1.55; }
+.pe-aviso { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; font-size: 12.5px; color: var(--accent); }
+.pe-fila { display: flex; gap: 8px; align-items: baseline; font-size: 13.5px; line-height: 1.5; }
+.pe-fila > span:last-child { min-width: 0; }
+.pe-titulo { flex: none; width: 110px; color: var(--dim); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding-top: 1px; }
+.pe-num { width: 64px; padding: 2px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 13px; text-align: center; }
+.pe-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.pe-select { padding: 2px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 12.5px; }
+.pe-viabilidad { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); }
+.pe-viabilidad .estudio-guion-cabeza { margin-bottom: 0; }
+.pe-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.pe-lista li { display: flex; gap: 8px; align-items: baseline; font-size: 13px; line-height: 1.5; }
+.pe-lista li svg { flex: none; position: relative; top: 2px; }
+.pe-lista li.ok svg { color: var(--ok, #4caf7d); }
+.pe-lista li.falta svg { color: var(--danger); }
+.pe-lista li.falta span { color: var(--muted); }
+
 
 .inicio-grid {
   display: grid;
@@ -2457,6 +2477,9 @@ button { cursor: pointer; }
 .cc-pastilla .logo-agente { border-radius: 5px !important; }
 .cc-redondo { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line-2); background: var(--bg); color: var(--muted); }
 .cc-redondo:hover { color: var(--text); border-color: var(--muted); }
+.cc-redondo.is-on { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
+.crear-adjunto.is-referencia { border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent); }
+.cc-nota-ref { width: 100%; font-size: 11px; }
 .cc-segmento { display: inline-flex; padding: 2px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--bg); }
 .cc-segmento button { height: 24px; padding: 0 11px; border: none; border-radius: 999px; background: none; color: var(--muted); font-size: 12px; }
 .cc-segmento button.is-on { background: color-mix(in srgb, var(--accent) 18%, var(--panel-3)); color: var(--accent); }
@@ -2571,3 +2594,5 @@ button { cursor: pointer; }
 /* Ajustes → Herramientas de video: progreso de una descarga */
 .op-fila-texto .herr-progreso { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; color: var(--muted); }
 .herr-progreso .tl-progreso { flex: 0 0 140px; }
+
+.pe-lista li.parcial svg { color: #f2c14e; }

@@ -24,6 +24,31 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.4',
+    fecha: '2026-11-07',
+    resumen: 'Copia el estilo de edición de un video de referencia: Recorte lo mide, tu agente lo estudia y te dice qué se puede copiar con lo que tienes conectado.',
+    novedades: [
+      {
+        icono: 'film',
+        titulo: 'Video de referencia en Crear con IA',
+        texto:
+          'Junto al clip de adjuntos hay un botón nuevo para subir un video cuyo estilo quieres copiar. Se analiza para copiar su edición; no entra en tu video.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Fase Estilo: ficha e informe de viabilidad',
+        texto:
+          'Recorte mide la referencia en tu equipo (planos, ritmo, voz, color) y tu agente estudia los fotogramas. Ves la ficha de estilo —editable en ritmo y subtítulos— y qué porcentaje se puede copiar con lo conectado hoy, con atajos para conectar lo que falta.'
+      },
+      {
+        icono: 'layers',
+        titulo: 'Tus videos entran completos y el agente sabe qué dicen',
+        texto:
+          'Antes solo se usaban los primeros 20 s de cada video tuyo; ahora entran completos. Al escribir el guion, el agente recibe qué se dice en cada segundo y elige los mejores trozos, y si hay referencia, también su ficha de estilo.'
+      }
+    ]
+  },
+  {
     version: '0.1.3',
     fecha: '2026-11-07',
     resumen: 'Las herramientas de video se bajan con un botón: ya no hay que instalar nada a mano.',

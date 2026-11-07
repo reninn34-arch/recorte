@@ -9,6 +9,7 @@ import type { Project, TranscriptSegment } from '../shared/types'
 import { rutaFfmpeg } from './ffmpeg'
 
 import { pythonPropio } from './herramientas'
+import { matarArbol } from './ia'
 
 const exec = promisify(execFile)
 
@@ -65,8 +66,10 @@ export async function transcribir(
 export async function transcribirArchivo(
   ruta: string,
   salida: string,
-  onProgreso: (pct: number, texto?: string) => void
+  onProgreso: (pct: number, texto?: string) => void,
+  senal?: AbortSignal
 ): Promise<ResultadoTranscripcion> {
+  if (senal?.aborted) return { ok: false, error: 'Lo paraste.' }
   const python = await buscarPython()
   if (!python) {
     return { ok: false, error: 'No encontré Python. Instala Python 3.10 o superior y vuelve a intentarlo.' }
@@ -95,8 +98,15 @@ export async function transcribirArchivo(
     const terminar = (resultado: ResultadoTranscripcion) => {
       if (resuelto) return
       resuelto = true
+      senal?.removeEventListener('abort', alParar)
       resolve(resultado)
     }
+    const alParar = () => {
+      // Parar mata el Python (y lo que lance) para no seguir gastando equipo.
+      matarArbol(hijo)
+      terminar({ ok: false, error: 'Lo paraste.' })
+    }
+    senal?.addEventListener('abort', alParar, { once: true })
 
     const procesarLinea = (linea: string) => {
       const progreso = /^PROGRESO\s+([\d.]+)\s*(.*)$/.exec(linea)

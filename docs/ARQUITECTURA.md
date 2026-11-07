@@ -361,6 +361,47 @@ Fase **Voz** entre Guion y Video (`PasoVoz.tsx`, `src/main/voz.ts`):
 - El agente compone sin audio con esos tiempos; tras el render, FFmpeg mezcla la voz en el MP4.
 - Cambiar el guion quita la voz (ya no le corresponde) y lo avisa en el chat.
 
+### Copiar un estilo (video de referencia)
+
+En la caja de Crear hay un segundo botón redondo (icono de película) para subir **un video de
+referencia**: se copia su estilo de edición; el video no entra en la pieza final. Con referencia,
+la creación gana la fase **Estilo** (la primera) y `Creacion` guarda `referencia`, `ficha` y
+`viabilidad`. La referencia se convierte a `analisis/referencia.mp4` (H.264, ≤1080p).
+Tus videos entran **completos** a `media/` (hasta 30 min, antes se cortaban a 20 s) y la composición
+usa trozos con `data-media-start`.
+
+- **Análisis local, sin gastar créditos** (`src/main/estilo/`):
+  - `material.ts`: los videos del usuario se analizan una vez —también sin referencia, antes de
+    escribir el guion— (caché por tamaño y fecha en
+    `analisis/material.json`): planos por detección de escena de FFmpeg, miniaturas y una hoja de
+    contacto. Respeta «Parar» (mata el FFmpeg en marcha).
+  - `referencia.ts`: la referencia se mide igual y además loudness, silencios, 8 colores medios,
+    hasta 24 fotogramas (`ref-NN.jpg`) y 3 hojas de contacto, y transcripción Whisper. Resultado en
+    `analisis/estilo-medido.json`.
+  - `ficha.ts`: el agente de la tarea «guion» estudia los fotogramas y lo medido, y devuelve la
+    **ficha de estilo** (JSON validado con `validarFicha`, en `analisis/estilo.json`). Los agentes
+    CLI reciben las rutas absolutas de las imágenes en el prompt; por API van en base64 (máx. 8).
+    Si el agente no ve imágenes o falla, la ficha se arma solo con lo medido (`aproximada: true`).
+    Modo opcional `gemini`: con la clave de AI Studio, el «flash» más nuevo que liste la API ve el
+    video completo junto con lo medido (Files API: subida resumable, espera a ACTIVE,
+    `generateContent`, borrado). Sin probar con una llave real. Ver imágenes por ruta: comprobado
+    con Kimi; con Claude Code, Codex y Gemini CLI, sin comprobar. Si no se da ritmo, la ficha lleva
+    el medido.
+  - `viabilidad.ts`: cruza la ficha con lo conectado hoy (Flow, ChatGPT, voz, HyperFrames) y con la
+    creación (¿hay material?) y da un porcentaje por recurso (material 30, motion 15, subtítulos 15,
+    recorte 10, imagen 10, clip 10, voz 5, música 5). Solo marca «sí» lo que Recorte hace hoy:
+    subtítulos palabra por palabra cuentan como «parcial» (salen por frase) y los recortes de
+    persona se sustituyen (aún no se quita el fondo).
+- **Interfaz** (`PasoEstilo.tsx`): ficha editable a mano en ritmo y subtítulos
+  (`estilo:ficha-guardar`), informe de viabilidad con «Conectar en Ajustes», «Ya lo conecté»
+  (`estilo:viabilidad` recalcula sin volver a analizar) y «Continuar así» (`estilo:continuar` pasa
+  al guion).
+- **El guion y la composición reciben el estilo**: `promptGuion` y `promptComposicion` insertan
+  `bloqueEstiloGuion(ficha, medido)` y `resumenMaterial(videos)` — el agente puede pedir trozos
+  concretos del material por archivo y segundos.
+- IPC: `dialog:open-referencia`, `creacion:nueva` (acepta `referencia`), `estilo:analizar`,
+  `estilo:continuar`, `estilo:viabilidad`, `estilo:ficha-guardar`.
+
 ## Ajustes
 
 `Opciones.tsx` reúne todo lo que conecta Recorte, en una columna:
