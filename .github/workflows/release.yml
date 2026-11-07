@@ -26,6 +26,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npx electron-vite build
+      - run: node scripts/licencia-instalador.mjs
       - run: npx electron-builder --win --publish never
       - name: Crear el release con el instalador
         shell: bash

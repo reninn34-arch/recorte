@@ -24,6 +24,18 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.10',
+    fecha: '2026-11-07',
+    resumen: 'La licencia del instalador ya se lee bien.',
+    novedades: [
+      {
+        icono: 'check',
+        titulo: 'Licencia legible',
+        texto: 'Al instalar Recorte, el acuerdo de licencia se ve con sus tildes, eñes y comillas, en vez de caracteres raros.'
+      }
+    ]
+  },
+  {
     version: '0.1.9',
     fecha: '2026-11-07',
     resumen: 'El modo agente trabaja mucho más rápido: mira un vistazo de tus archivos en vez de abrirlos enteros.',

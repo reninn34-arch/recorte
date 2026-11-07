@@ -26,7 +26,8 @@ nsis:
   shortcutName: Recorte
   language: "1034"
   # El instalador muestra la licencia y pide aceptarla.
-  license: LICENSE
+  # Copia con marca UTF-8 (la genera scripts/licencia-instalador.mjs; sin ella salen mal las tildes).
+  license: build/licencia-instalador.txt
 
 # Las versiones se publican en GitHub Releases; la app instalada las busca ahí
 # (electron-updater) y avisa al usuario. Ver docs/ARQUITECTURA.md → «Publicar una versión».
