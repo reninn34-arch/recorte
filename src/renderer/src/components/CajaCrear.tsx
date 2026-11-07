@@ -9,7 +9,7 @@ import {
   type NivelModelo,
   type PeticionCreacion
 } from '../../../shared/creacion'
-import { MODELOS_IMAGEN, MODELOS_VIDEO } from '../../../shared/flow'
+import { MODELO_CHATGPT, MODELOS_IMAGEN, MODELOS_VIDEO } from '../../../shared/flow'
 import { favorito } from '../../../shared/gustos'
 import type { Agentes } from '../hooks/agentes'
 import { Icon } from '../Icons'
@@ -92,6 +92,7 @@ export function CajaCrear({
   const [tVideo, setTVideo] = useState<EleccionTarea | null>(null)
   // Google Flow
   const [conFlow, setConFlow] = useState(false)
+  const [conChatGPT, setConChatGPT] = useState(false)
   const [derechos, setDerechos] = useState(false)
   const [modeloImagen, setModeloImagen] = useState<string | null>(MODELOS_IMAGEN[0])
   const [modeloVideo, setModeloVideo] = useState<string | null>(null)
@@ -113,10 +114,19 @@ export function CajaCrear({
 
   useEffect(() => {
     void window.recorte
+      .chatgptEstado()
+      .then((e) => setConChatGPT(e.conectado))
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    void window.recorte
       .flowEstado()
       .then((e) => {
         setConFlow(e.cuentas.length > 0)
         setDerechos(e.derechos)
+        // Sin Flow, Nano Banana no está: se empieza sin imágenes (o con ChatGPT, si lo elige).
+        if (!e.cuentas.length) setModeloImagen((m) => (m && MODELOS_IMAGEN.includes(m) ? null : m))
       })
       .catch(() => {})
   }, [])
@@ -136,7 +146,7 @@ export function CajaCrear({
       return
     }
     const tareas = porPaso && (tGuion || tVideo) ? { ...(tGuion ? { guion: tGuion } : {}), ...(tVideo ? { video: tVideo } : {}) } : undefined
-    const imagenes = conFlow && Boolean(modeloImagen)
+    const imagenes = Boolean(modeloImagen) && (modeloImagen === MODELO_CHATGPT ? conChatGPT : conFlow)
     const videos = conFlow && Boolean(modeloVideo)
     onCrear({
       peticion: peticion.trim(),
@@ -150,7 +160,7 @@ export function CajaCrear({
             flow: {
               imagenes,
               videos,
-              ...(modeloImagen ? { modeloImagen } : {}),
+              ...(imagenes && modeloImagen ? { modeloImagen } : {}),
               ...(modeloVideo ? { modeloVideo } : {})
             }
           }
@@ -255,7 +265,7 @@ export function CajaCrear({
 
         <div className="cc-fila">
           <button type="button" className="cc-redondo" onClick={() => void adjuntar()} title="Tus fotos o clips para el video" aria-label="Adjuntar">
-            <Icon name="upload" size={15} />
+            <Icon name="paperclip" size={15} />
           </button>
 
           <Menu
@@ -317,23 +327,38 @@ export function CajaCrear({
             }
           </Menu>
 
-          {conFlow ? (
+          {conFlow || conChatGPT ? (
             <>
-              <Menu activo={Boolean(modeloImagen)} etiqueta={<><Icon name="layers" size={13} /> {modeloImagen ?? 'Sin imágenes'}</>} ancho={260}>
+              <Menu activo={Boolean(modeloImagen)} etiqueta={<><Icon name="image" size={13} /> {modeloImagen ?? 'Sin imágenes'}</>} ancho={280}>
                 {(cerrar) => (
                   <>
                     <Opcion elegida={!modeloImagen} onClick={() => (setModeloImagen(null), cerrar())} nota="solo texto y formas">
                       Sin imágenes
                     </Opcion>
-                    {MODELOS_IMAGEN.map((m) => (
-                      <Opcion key={m} elegida={modeloImagen === m} onClick={() => (setModeloImagen(m), cerrar())} nota="gratis">
-                        {m}
+                    {conFlow && <span className="cc-grupo-nombre">Google Flow</span>}
+                    {conFlow &&
+                      MODELOS_IMAGEN.map((m) => (
+                        <Opcion key={m} elegida={modeloImagen === m} onClick={() => (setModeloImagen(m), cerrar())} nota="gratis">
+                          {m}
+                        </Opcion>
+                      ))}
+                    <span className="cc-grupo-nombre">ChatGPT</span>
+                    {conChatGPT ? (
+                      <Opcion elegida={modeloImagen === MODELO_CHATGPT} onClick={() => (setModeloImagen(MODELO_CHATGPT), cerrar())} nota="con tu plan de ChatGPT">
+                        {MODELO_CHATGPT}
                       </Opcion>
-                    ))}
-                    <p className="cc-nota">Google Flow hace las imágenes que pida el guion, con tus cuentas de Google.</p>
+                    ) : (
+                      <p className="cc-nota">Conecta «ChatGPT (Codex)» en Ajustes → Agentes para hacer imágenes con tu cuenta de ChatGPT.</p>
+                    )}
+                    <p className="cc-nota">
+                      {modeloImagen === MODELO_CHATGPT
+                        ? 'ChatGPT hace las imágenes que pida el guion, una a la vez, con el modelo de imágenes de tu plan.'
+                        : 'Hace las imágenes que pida el guion, con tus cuentas.'}
+                    </p>
                   </>
                 )}
               </Menu>
+              {conFlow && (
               <Menu activo={Boolean(modeloVideo)} etiqueta={<><Icon name="film" size={13} /> {modeloVideo ? modeloVideo.replace('Veo 3.1 - ', 'Veo ') : 'Sin clips'}</>} ancho={280}>
                 {(cerrar) => (
                   <>
@@ -349,7 +374,8 @@ export function CajaCrear({
                   </>
                 )}
               </Menu>
-              {hayFotos && (
+              )}
+              {conFlow && hayFotos && (
                 <button
                   type="button"
                   className={`cc-pastilla ${derechos ? 'is-on' : 'is-aviso'}`}

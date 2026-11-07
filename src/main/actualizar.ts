@@ -25,6 +25,18 @@ function explicar(e: unknown): string {
   return t.split(String.fromCharCode(10))[0].slice(0, 200)
 }
 
+/** La primera frase de las notas del release (vienen en HTML o Markdown). */
+function resumenNotas(notas: unknown): string | undefined {
+  const texto = (Array.isArray(notas) ? notas.map((n) => (n as { note?: string }).note ?? '').join(' ') : typeof notas === 'string' ? notas : '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[*_`#]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!texto) return undefined
+  const frase = texto.split(/(?<=[.!?])\s/)[0]
+  return frase.slice(0, 180)
+}
+
 function avisar(cambio: Partial<EstadoActualizacion>): void {
   estado = { ...estado, ...cambio }
   for (const w of BrowserWindow.getAllWindows()) w.webContents.send('actualizacion', estado)
@@ -59,10 +71,12 @@ export function prepararActualizaciones(): void {
   if (!app.isPackaged) return
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
-  autoUpdater.on('update-available', (info) => avisar({ fase: 'bajando', nueva: info.version, pct: 0 }))
+  autoUpdater.on('update-available', (info) => avisar({ fase: 'bajando', nueva: info.version, pct: 0, notas: resumenNotas(info.releaseNotes) }))
   autoUpdater.on('update-not-available', () => avisar({ fase: 'al-dia', revisado: Date.now() }))
   autoUpdater.on('download-progress', (p) => avisar({ fase: 'bajando', pct: Math.round(p.percent) }))
-  autoUpdater.on('update-downloaded', (info) => avisar({ fase: 'lista', nueva: info.version, pct: 100 }))
+  autoUpdater.on('update-downloaded', (info) =>
+    avisar({ fase: 'lista', nueva: info.version, pct: 100, notas: resumenNotas(info.releaseNotes) ?? estado.notas })
+  )
   autoUpdater.on('error', (e) => avisar({ fase: 'error', error: explicar(e) }))
   setTimeout(() => void buscarActualizacion(), 8_000)
   setInterval(() => void buscarActualizacion(), CADA)

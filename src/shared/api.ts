@@ -50,6 +50,7 @@ export interface EstadoSistema {
 export interface Preferencias {
   avisoNotificacion: boolean
   avisoSonido: boolean
+  novedadesVistas?: string
 }
 
 /** Un proveedor que trabaja solo con su llave de API (endpoint compatible con OpenAI). */
@@ -124,6 +125,8 @@ export interface EstadoActualizacion {
   pct?: number
   revisado?: number
   error?: string
+  /** El resumen de la versión nueva (de las notas del release). */
+  notas?: string
 }
 
 export interface Progreso {
@@ -295,6 +298,8 @@ export interface RecorteApi {
   pararAgente: (id: string) => Promise<boolean>
   /** Para lo que el agente esté haciendo en esa creación (guion, Flow, render). */
   creacionParar: (id: string) => Promise<boolean>
+  /** Si se pueden hacer imágenes con la cuenta de ChatGPT (Codex instalado y con sesión). */
+  chatgptEstado: () => Promise<{ instalado: boolean; conectado: boolean; conCuenta: boolean }>
   /** Actualizaciones desde GitHub Releases (solo en la app instalada). */
   actualizacionEstado: () => Promise<EstadoActualizacion>
   actualizacionBuscar: () => Promise<EstadoActualizacion>

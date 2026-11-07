@@ -5,6 +5,7 @@ import { BrandView } from './components/BrandView'
 import { AgentePanel } from './components/AgentePanel'
 import { Editor } from './components/Editor'
 import { AvisoActualizacion } from './components/AvisoActualizacion'
+import { Novedades } from './components/Novedades'
 import { Inicio } from './components/Inicio'
 import { CrearIA } from './components/CrearIA'
 import { EstudioCreacion } from './components/EstudioCreacion'
@@ -73,6 +74,7 @@ export default function App() {
   const [cola, setCola] = useState<RenderJob[]>([])
   const [progreso, setProgreso] = useState<Progreso | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
+  const [verNovedades, setVerNovedades] = useState(false)
   const [cargando, setCargando] = useState(true)
   const [importando, setImportando] = useState(false)
   const [generando, setGenerando] = useState(false)
@@ -663,9 +665,10 @@ export default function App() {
   if (vista === 'ajustes' && !proyecto) {
     return (
       <>
-        <Opciones agentes={agentes} onAviso={setAviso} onVolver={() => setVista('inicio')} />
+        <Opciones agentes={agentes} onAviso={setAviso} onVolver={() => setVista('inicio')} onNovedades={() => setVerNovedades(true)} />
         {aviso && <Toast text={aviso} />}
         <AvisoActualizacion />
+        <Novedades forzar={verNovedades} onCerrar={() => setVerNovedades(false)} />
       </>
     )
   }
@@ -682,6 +685,7 @@ export default function App() {
         />
         {aviso && <Toast text={aviso} />}
         <AvisoActualizacion />
+        <Novedades forzar={verNovedades} onCerrar={() => setVerNovedades(false)} />
       </>
     )
   }
@@ -737,6 +741,7 @@ export default function App() {
         />
         {aviso && <Toast text={aviso} />}
         <AvisoActualizacion />
+        <Novedades forzar={verNovedades} onCerrar={() => setVerNovedades(false)} />
       </>
     )
   }
@@ -774,6 +779,7 @@ export default function App() {
         />
         {aviso && <Toast text={aviso} />}
         <AvisoActualizacion />
+        <Novedades forzar={verNovedades} onCerrar={() => setVerNovedades(false)} />
       </>
     )
   }
@@ -867,7 +873,7 @@ export default function App() {
               {vista === 'marca' && (
                 <BrandView project={proyecto} onChange={cambiarMarca} onSave={guardarMarca} />
               )}
-              {vista === 'ajustes' && <Opciones agentes={agentes} onAviso={setAviso} />}
+              {vista === 'ajustes' && <Opciones agentes={agentes} onAviso={setAviso} onNovedades={() => setVerNovedades(true)} />}
             </div>
           )}
         </div>
@@ -875,6 +881,7 @@ export default function App() {
 
       {aviso && <Toast text={aviso} />}
         <AvisoActualizacion />
+        <Novedades forzar={verNovedades} onCerrar={() => setVerNovedades(false)} />
     </div>
   )
 }

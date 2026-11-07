@@ -1,159 +1,75 @@
-import type { ReactNode } from 'react'
+import {
+  Check,
+  ChevronRight,
+  Clock,
+  Copy,
+  Download,
+  Film,
+  Folder,
+  Gift,
+  Image,
+  KeyRound,
+  Layers,
+  Music,
+  Palette,
+  Paperclip,
+  Pause,
+  Play,
+  Plus,
+  Redo2,
+  Scissors,
+  Search,
+  Settings,
+  SlidersHorizontal,
+  Sparkles,
+  Trash2,
+  Type,
+  Undo2,
+  Upload,
+  X,
+  type LucideIcon
+} from 'lucide-react'
 
-export type IconName =
-  | 'scissors'
-  | 'folder'
-  | 'palette'
-  | 'settings'
-  | 'upload'
-  | 'sparkles'
-  | 'play'
-  | 'check'
-  | 'x'
-  | 'film'
-  | 'chevron'
-  | 'sliders'
-  | 'clock'
-  | 'download'
-  | 'plus'
-  | 'search'
-  | 'layers'
-  | 'pause'
-  | 'undo'
-  | 'redo'
-  | 'type'
-  | 'trash'
-  | 'copy'
-  | 'music'
-  | 'key'
+/**
+ * Los iconos de la app, de Lucide (licencia ISC, uso comercial permitido): un solo
+ * set dibujado con la misma retícula y el mismo trazo, para que ninguno desentone.
+ * El nombre de cada uno es el de la app; si falta uno, se agrega aquí.
+ */
 
-const paths: Record<IconName, ReactNode> = {
-  scissors: (
-    <>
-      <circle cx="6" cy="6" r="2.5" />
-      <circle cx="6" cy="18" r="2.5" />
-      <path d="M8.2 7.6 20 18M8.2 16.4 20 6" />
-    </>
-  ),
-  folder: <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z" />,
-  palette: (
-    <>
-      <path d="M12 3a9 9 0 0 0 0 18h1.2a1.8 1.8 0 0 0 1.3-3.1 1.8 1.8 0 0 1 1.3-3.1H18A3 3 0 0 0 21 12a9 9 0 0 0-9-9Z" />
-      <circle cx="7.5" cy="11" r=".8" fill="currentColor" />
-      <circle cx="9.5" cy="7" r=".8" fill="currentColor" />
-      <circle cx="14" cy="6.5" r=".8" fill="currentColor" />
-    </>
-  ),
-  settings: (
-    <>
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.1 2.1-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21h-3v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1-2.1-2.1.1-.1A1.7 1.7 0 0 0 7 15a1.7 1.7 0 0 0-1.6-1H5v-3h.4A1.7 1.7 0 0 0 7 9a1.7 1.7 0 0 0-.3-1.9l-.1-.1 2.1-2.1.1.1A1.7 1.7 0 0 0 10.7 5a1.7 1.7 0 0 0 1-1.6V3h3v.4a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1 2.1 2.1-.1.1A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.6 1h.4v3H21a1.7 1.7 0 0 0-1.6 1Z" />
-    </>
-  ),
-  upload: (
-    <>
-      <path d="M12 16V4m0 0L7 9m5-5 5 5" />
-      <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
-    </>
-  ),
-  sparkles: (
-    <>
-      <path d="m12 3 1.4 4.1L17.5 8.5l-4.1 1.4L12 14l-1.4-4.1-4.1-1.4 4.1-1.4L12 3Z" />
-      <path d="M18.5 14.5l.7 2.3 2.3.7-2.3.7-.7 2.3-.7-2.3-2.3-.7 2.3-.7.7-2.3Z" />
-    </>
-  ),
-  play: <path d="M8 5.5v13l11-6.5-11-6.5Z" />,
-  check: <path d="m5 12 4 4L19 6" />,
-  x: <path d="M6 6l12 12M18 6 6 18" />,
-  film: (
-    <>
-      <rect x="3" y="5" width="18" height="14" rx="2" />
-      <path d="M7 5v14M17 5v14M3 9h4M3 15h4M17 9h4M17 15h4" />
-    </>
-  ),
-  chevron: <path d="m9 6 6 6-6 6" />,
-  sliders: (
-    <>
-      <path d="M4 7h10M18 7h2M4 17h2M10 17h10" />
-      <circle cx="16" cy="7" r="2" />
-      <circle cx="8" cy="17" r="2" />
-    </>
-  ),
-  clock: (
-    <>
-      <circle cx="12" cy="12" r="8.5" />
-      <path d="M12 7v5l3 2" />
-    </>
-  ),
-  download: (
-    <>
-      <path d="M12 4v12m0 0 4-4m-4 4-4-4" />
-      <path d="M4 19h16" />
-    </>
-  ),
-  plus: <path d="M12 5v14M5 12h14" />,
-  key: (
-    <>
-      <circle cx="8" cy="15.5" r="4.5" />
-      <path d="m11.2 12.3 8.3-8.3M17 6l2.5 2.5M14.5 8.5 17 11" />
-    </>
-  ),
-  search: (
-    <>
-      <circle cx="11" cy="11" r="7" />
-      <path d="m20 20-4-4" />
-    </>
-  ),
-  layers: (
-    <>
-      <path d="m12 3 9 5-9 5-9-5 9-5Z" />
-      <path d="m3 12 9 5 9-5M3 16l9 5 9-5" />
-    </>
-  ),
-  pause: <path d="M8.5 5v14M15.5 5v14" />,
-  undo: (
-    <>
-      <path d="M9 14 4 9l5-5" />
-      <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
-    </>
-  ),
-  redo: (
-    <>
-      <path d="m15 14 5-5-5-5" />
-      <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
-    </>
-  ),
-  type: <path d="M5 7V5h14v2M9.5 19h5M12 5v14" />,
-  trash: <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" />,
-  music: (
-    <>
-      <path d="M9 18V5l11-2v13" />
-      <circle cx="6.5" cy="18" r="2.5" />
-      <circle cx="17.5" cy="16" r="2.5" />
-    </>
-  ),
-  copy: (
-    <>
-      <rect x="8" y="8" width="12" height="12" rx="2" />
-      <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
-    </>
-  )
-}
+const ICONOS = {
+  scissors: Scissors,
+  folder: Folder,
+  palette: Palette,
+  settings: Settings,
+  upload: Upload,
+  sparkles: Sparkles,
+  play: Play,
+  check: Check,
+  x: X,
+  film: Film,
+  chevron: ChevronRight,
+  sliders: SlidersHorizontal,
+  clock: Clock,
+  download: Download,
+  plus: Plus,
+  search: Search,
+  layers: Layers,
+  pause: Pause,
+  undo: Undo2,
+  redo: Redo2,
+  type: Type,
+  trash: Trash2,
+  copy: Copy,
+  music: Music,
+  key: KeyRound,
+  paperclip: Paperclip,
+  image: Image,
+  gift: Gift
+} satisfies Record<string, LucideIcon>
+
+export type IconName = keyof typeof ICONOS
 
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      {paths[name]}
-    </svg>
-  )
+  const Dibujo = ICONOS[name]
+  return <Dibujo size={size} strokeWidth={size <= 14 ? 2 : 1.75} absoluteStrokeWidth={false} aria-hidden="true" focusable={false} />
 }

@@ -20,6 +20,8 @@ import { guardar } from './disco'
 import { esParado, extraerJson, Parado, preguntarAgente, preguntarApi, type ConfigIA } from './ia'
 import { crearPortada } from './render'
 import { pedirFlow } from './flow'
+import { generarImagenChatGPT } from './imagenchatgpt'
+import { MODELO_CHATGPT } from '../shared/flow'
 
 /**
  * Creaciones: videos desde cero con IA. Cada una es una carpeta
@@ -149,7 +151,8 @@ function dimensiones(c: Creacion): { ancho: number; alto: number } {
 /** Lo que el guionista sabe de Google Flow, si el usuario lo eligió. */
 function bloqueFlowGuion(c: Creacion): string {
   if (!c.flow?.imagenes && !c.flow?.videos) return ''
-  const partes: string[] = ['Puedes pedir material generado con Google Flow para las escenas:']
+  const quien = c.flow.modeloImagen === MODELO_CHATGPT && !c.flow.videos ? 'ChatGPT' : 'Google Flow'
+  const partes: string[] = [`Puedes pedir material generado con ${quien} para las escenas:`]
   if (c.flow.imagenes) {
     partes.push('- "imagen": descripción de una imagen (foto realista, ilustración, producto…) para esa escena. Úsala donde una imagen cuente más que tipografía; no en todas. Describe sujeto, encuadre, luz y estilo, sin texto dentro de la imagen.')
   }
@@ -197,6 +200,12 @@ export async function generarMedioFlow(
         const modelo = esClip ? c.flow!.modeloVideo : c.flow!.modeloImagen
         // El tope de cada clip es lo que cuesta su modelo (nunca menos que el tope de siempre).
         const tope = esClip ? Math.max(TOPE_CLIP_VEO, COSTO_CLIP[modelo ?? ''] ?? 0) : undefined
+        if (!esClip && modelo === MODELO_CHATGPT) {
+          // Con la cuenta de ChatGPT del usuario (Codex), no con Flow.
+          const archivo = await generarImagenChatGPT({ prompt, formato }, destino, `chatgpt-escena-${i + 1}`, senal)
+          e.medio = { archivo: `media/${basename(archivo)}`, tipo: 'imagen' }
+          return
+        }
         const r = await pedirFlow(
           { tipo: esClip ? 'video' : 'imagen', prompt, formato, ...(modelo ? { modelo } : {}), ...(tope ? { tope } : {}) },
           destino,
@@ -210,7 +219,10 @@ export async function generarMedioFlow(
         fallos.push(`escena ${i + 1}: ${x instanceof Error ? x.message : String(x)}`)
       } finally {
         hechas += 1
-        onProgreso(0.05 + (hechas / pendientes.length) * 0.2, `Generando en Google Flow (${hechas}/${pendientes.length})`)
+        onProgreso(
+          0.05 + (hechas / pendientes.length) * 0.2,
+          `${c.flow!.modeloImagen === MODELO_CHATGPT && !c.flow!.videos ? 'Generando con ChatGPT' : 'Generando las imágenes'} (${hechas}/${pendientes.length})`
+        )
       }
     })
   )
@@ -408,6 +420,6 @@ export async function pasoVideo(
     portada: portadaAbs ? `salidas/${basename(portadaAbs)}` : undefined,
     mensaje:
       (previo ? `Hecho: versión ${version} con tu cambio.` : `Tu video está listo (versión ${version}).`) +
-      (fallosFlow.length ? ` Google Flow no pudo con: ${fallosFlow.join('; ')}.` : '')
+      (fallosFlow.length ? ` No pude generar: ${fallosFlow.join('; ')}.` : '')
   }
 }

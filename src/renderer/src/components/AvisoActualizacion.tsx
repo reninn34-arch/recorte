@@ -32,6 +32,7 @@ export function AvisoActualizacion() {
       <Icon name="sparkles" size={16} />
       <div className="actualizacion-texto">
         <strong>Recorte {e.nueva} está lista</strong>
+        {e.notas && <span className="actualizacion-notas">{e.notas}</span>}
         <span>Reinicia para instalarla. Tus proyectos no se tocan.</span>
       </div>
       <button className="btn small ghost" onClick={() => setLuego(true)} title="Se instalará sola cuando cierres Recorte">
@@ -45,7 +46,7 @@ export function AvisoActualizacion() {
 }
 
 /** Ajustes → la versión instalada y «Buscar actualizaciones». */
-export function FilaVersion() {
+export function FilaVersion({ onNovedades }: { onNovedades?: () => void }) {
   const [e, setE] = useState<EstadoActualizacion | null>(null)
   useEffect(() => {
     void window.recorte.actualizacionEstado().then(setE).catch(() => {})
@@ -68,6 +69,11 @@ export function FilaVersion() {
         <span>{texto}</span>
       </div>
       <div className="op-fila-lado">
+        {onNovedades && (
+          <button className="btn small ghost" onClick={onNovedades}>
+            <Icon name="gift" size={14} /> Novedades
+          </button>
+        )}
         {e.fase === 'lista' ? (
           <button className="btn small primary" onClick={() => void window.recorte.actualizacionInstalar()}>
             Reiniciar y actualizar

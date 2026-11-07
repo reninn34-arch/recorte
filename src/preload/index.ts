@@ -73,6 +73,7 @@ const api: RecorteApi = {
   gustosOlvidar: () => ipcRenderer.invoke('gustos:olvidar'),
   gustoSenal: (tipo, detalle) => ipcRenderer.invoke('gustos:senal', tipo, detalle),
   creacionParar: (id) => ipcRenderer.invoke('creacion:parar', id),
+  chatgptEstado: () => ipcRenderer.invoke('chatgpt:estado'),
   actualizacionEstado: () => ipcRenderer.invoke('actualizacion:estado'),
   actualizacionBuscar: () => ipcRenderer.invoke('actualizacion:buscar'),
   actualizacionInstalar: () => ipcRenderer.invoke('actualizacion:instalar'),

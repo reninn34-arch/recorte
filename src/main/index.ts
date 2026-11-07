@@ -18,7 +18,8 @@ import { conectarAgente, estadoAgentes, prepararAgentes, versionesAgentes, agent
 import { estadoSistema, instalarHerramienta } from './sistema'
 import { carpetaPorDefecto, copiarAVideos, carpetaDelProyecto } from './carpetas'
 import { abrirFlow, agregarCuentaFlow, ajustesFlow, estadoFlow, leerSaldosFlow, pedirFlow, quitarCuentaFlow } from './flow'
-import { MODELOS_IMAGEN, MODELOS_VIDEO, type PedidoFlow } from '../shared/flow'
+import { MODELO_CHATGPT, MODELOS_IMAGEN, MODELOS_VIDEO, type PedidoFlow } from '../shared/flow'
+import { estadoChatGPT } from './imagenchatgpt'
 import { definirEntornoAgentes, empezarTrabajo, esParado, pararTrabajo, terminarTrabajo } from './ia'
 import { comandoConNivel } from './modelos'
 import { crearMiniatura, crearProxy, probeVideo } from './ffmpeg'
@@ -310,7 +311,9 @@ app.whenReady().then(() => {
               flow: {
                 imagenes: Boolean(f.imagenes),
                 videos: Boolean(f.videos),
-                ...(typeof f.modeloImagen === 'string' && MODELOS_IMAGEN.includes(f.modeloImagen) ? { modeloImagen: f.modeloImagen } : {}),
+                ...(typeof f.modeloImagen === 'string' && (MODELOS_IMAGEN.includes(f.modeloImagen) || f.modeloImagen === MODELO_CHATGPT)
+                  ? { modeloImagen: f.modeloImagen }
+                  : {}),
                 ...(typeof f.modeloVideo === 'string' && MODELOS_VIDEO.includes(f.modeloVideo) ? { modeloVideo: f.modeloVideo } : {})
               }
             }
@@ -1323,6 +1326,7 @@ app.whenReady().then(() => {
   // Parar al agente del chat: corta su proceso (o la petición a la API) al instante.
   ipcMain.handle('agente:parar', (_evento, id: unknown) => typeof id === 'string' && pararTrabajo(`chat:${id}`))
 
+  ipcMain.handle('chatgpt:estado', () => estadoChatGPT())
   ipcMain.handle('actualizacion:estado', () => estadoActualizacion())
   ipcMain.handle('actualizacion:buscar', () => buscarActualizacion())
   ipcMain.handle('actualizacion:instalar', () => instalarActualizacion())

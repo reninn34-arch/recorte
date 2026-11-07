@@ -41,6 +41,8 @@ export interface Preferencias {
   /** Notificación del sistema cuando termina un trabajo largo y Recorte no está a la vista. */
   avisoNotificacion: boolean
   avisoSonido: boolean
+  /** La última versión cuyas novedades vio (para mostrarlas una sola vez). */
+  novedadesVistas?: string
 }
 
 const PREFERENCIAS: Preferencias = { avisoNotificacion: true, avisoSonido: true }
@@ -235,6 +237,7 @@ export class Ajustes {
     const limpio: Partial<Preferencias> = {}
     if (typeof cambio.avisoNotificacion === 'boolean') limpio.avisoNotificacion = cambio.avisoNotificacion
     if (typeof cambio.avisoSonido === 'boolean') limpio.avisoSonido = cambio.avisoSonido
+    if (typeof cambio.novedadesVistas === 'string') limpio.novedadesVistas = cambio.novedadesVistas.slice(0, 20)
     const siguiente: AjustesEnDisco = { ...actual, preferencias: { ...PREFERENCIAS, ...actual.preferencias, ...limpio } }
     this.cache = siguiente
     guardar(rutaAjustes(), JSON.stringify(siguiente, null, 2))

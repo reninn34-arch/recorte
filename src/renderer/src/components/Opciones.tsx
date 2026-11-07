@@ -153,7 +153,17 @@ function ApiPropia({ agentes, onAviso }: { agentes: Agentes; onAviso: (t: string
   )
 }
 
-export function Opciones({ agentes, onAviso, onVolver }: { agentes: Agentes; onAviso: (t: string) => void; onVolver?: () => void }) {
+export function Opciones({
+  agentes,
+  onAviso,
+  onVolver,
+  onNovedades
+}: {
+  agentes: Agentes
+  onAviso: (t: string) => void
+  onVolver?: () => void
+  onNovedades?: () => void
+}) {
   const [sistema, setSistema] = useState<EstadoSistema | null>(null)
   const [midiendo, setMidiendo] = useState(false)
   const [instalando, setInstalando] = useState<string | null>(null)
@@ -378,7 +388,7 @@ export function Opciones({ agentes, onAviso, onVolver }: { agentes: Agentes; onA
         </Seccion>
 
         <Seccion titulo="Versión">
-          <FilaVersion />
+          <FilaVersion onNovedades={onNovedades} />
         </Seccion>
 
         <Seccion titulo="Espacio en disco">

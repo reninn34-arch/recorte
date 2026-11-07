@@ -8,6 +8,8 @@
 export type TipoFlow = 'imagen' | 'video'
 
 export const MODELOS_IMAGEN = ['Nano Banana 2.1', 'Nano Banana Pro', 'Nano Banana 2 Lite']
+/** Imágenes con la cuenta de ChatGPT del usuario, vía Codex (ver main/imagenchatgpt.ts). */
+export const MODELO_CHATGPT = 'ChatGPT Imágenes'
 export const MODELOS_VIDEO = ['Veo 3.1 - Lite', 'Veo 3.1 - Fast', 'Veo 3.1 - Quality', 'Omni 1.1 Flash']
 
 /** El botón de cada proporción se reconoce por su icono: el texto cambia con el idioma de la cuenta. */

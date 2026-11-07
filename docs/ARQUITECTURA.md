@@ -452,3 +452,14 @@ Pendiente: generar B-roll desde el editor (necesita varias fuentes en la timelin
 - El repositorio tiene que ser público para que la app lea los releases sin token.
 - El instalador no está firmado: Windows SmartScreen avisa la primera vez («Más información →
   Ejecutar de todas formas»). Firmarlo requiere un certificado de firma de código.
+
+## Novedades, iconos e imágenes con ChatGPT
+
+- `shared/novedades.ts`: lo nuevo de cada versión. La ventana `Novedades.tsx` se abre una vez tras
+  actualizar (`Preferencias.novedadesVistas`) y desde Ajustes → Versión; el workflow saca de ahí las
+  notas del release (`scripts/notas-version.mjs`) y el aviso de versión nueva muestra su resumen.
+  **Antes de `npm version`, agrega la entrada de la versión nueva arriba del todo.**
+- Iconos: `Icons.tsx` usa Lucide (ISC) con los nombres de la app.
+- Imágenes con ChatGPT (`main/imagenchatgpt.ts`): con Codex conectado con la cuenta de ChatGPT, se le
+  pide usar su herramienta de imágenes y se toma el archivo de `~/.codex/generated_images`. Una a la
+  vez. El modelo lo pone OpenAI (no se puede elegir versión).

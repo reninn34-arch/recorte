@@ -49,7 +49,7 @@ const AGENTES: DefAgente[] = [
   },
   {
     id: 'codex',
-    nombre: 'Codex',
+    nombre: 'ChatGPT (Codex)',
     binario: 'codex',
     comando: 'codex exec',
     paquete: '@openai/codex',
