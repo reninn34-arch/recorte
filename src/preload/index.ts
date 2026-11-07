@@ -82,6 +82,11 @@ const api: RecorteApi = {
     ipcRenderer.on('actualizacion', listener)
     return () => ipcRenderer.removeListener('actualizacion', listener)
   },
+  onHerramienta: (cb) => {
+    const listener = (_evento: Electron.IpcRendererEvent, p: { id: string; pct: number; texto: string }) => cb(p)
+    ipcRenderer.on('herramienta', listener)
+    return () => ipcRenderer.removeListener('herramienta', listener)
+  },
   onProgreso: (cb) => {
     const listener = (_evento: Electron.IpcRendererEvent, progreso: Progreso) => cb(progreso)
     ipcRenderer.on('progreso', listener)

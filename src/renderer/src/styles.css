@@ -2567,3 +2567,7 @@ button { cursor: pointer; }
 .novedades-item strong { display: block; font-size: 14px; margin-bottom: 2px; }
 .novedades-item p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--dim); }
 .novedades-pie { display: flex; justify-content: flex-end; }
+
+/* Ajustes → Herramientas de video: progreso de una descarga */
+.op-fila-texto .herr-progreso { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.herr-progreso .tl-progreso { flex: 0 0 140px; }

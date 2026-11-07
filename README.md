@@ -39,8 +39,9 @@ Edita hablando, crea videos desde cero y aprende cómo te gusta editar.</p>
 1. [Descarga **Recorte-Setup.exe**](https://github.com/reninn34-arch/recorte/releases/latest/download/Recorte-Setup.exe) y ábrelo.
 2. Si Windows dice «Windows protegió tu PC», da clic en **Más información** y luego en
    **Ejecutar de todas formas** (el instalador todavía no está firmado).
-3. Al abrir Recorte, conecta tu agente. En **Ajustes → Herramientas de video** se instala
-   lo que falte (FFmpeg, Python para transcribir, HyperFrames para Crear con IA).
+3. Al abrir Recorte, conecta tu agente. En **Ajustes → Herramientas de video**, el botón
+   **Instalar todo lo que falta** baja FFmpeg, Python con sus paquetes, Node.js y HyperFrames
+   a la carpeta de Recorte, sin instalar nada en Windows.
 
 ### Actualizaciones
 

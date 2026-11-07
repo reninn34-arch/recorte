@@ -463,3 +463,17 @@ Pendiente: generar B-roll desde el editor (necesita varias fuentes en la timelin
 - Imágenes con ChatGPT (`main/imagenchatgpt.ts`): con Codex conectado con la cuenta de ChatGPT, se le
   pide usar su herramienta de imágenes y se toma el archivo de `~/.codex/generated_images`. Una a la
   vez. El modelo lo pone OpenAI (no se puede elegir versión).
+
+## Herramientas que se bajan con un botón
+
+- `main/herramientas.ts`: FFmpeg (compilación GPL de BtbN, trae x264), Python 3.12 portátil
+  (python-build-standalone, con pip) y Node.js LTS (zip de nodejs.org) se bajan a
+  `<userData>/herramientas/<id>` desde su página oficial, se comprueba su SHA-256 (el `digest` de
+  GitHub o el archivo de sumas) y se descomprimen con el `tar` de Windows.
+- `activarHerramientas()` pone sus carpetas al frente del PATH del proceso al arrancar y tras cada
+  descarga: todo lo que lanza Recorte (`ffmpeg`, `python`, `npm`, los agentes) usa la suya.
+  `buscarPython()` prueba primero el Python propio.
+- Ajustes → Herramientas de video: «Descargar» por herramienta (con progreso por el canal
+  `herramienta`) e «Instalar todo lo que falta» (FFmpeg → Python → paquetes → Node → HyperFrames).
+- Recorte no reparte FFmpeg en su instalador: el usuario lo baja de su página y la app lo llama
+  como programa aparte.

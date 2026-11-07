@@ -24,6 +24,24 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.3',
+    fecha: '2026-11-07',
+    resumen: 'Las herramientas de video se bajan con un botón: ya no hay que instalar nada a mano.',
+    novedades: [
+      {
+        icono: 'download',
+        titulo: 'FFmpeg, Python y Node.js con un botón',
+        texto:
+          'En Ajustes → Herramientas de video, «Descargar» baja cada una de su página oficial a la carpeta de Recorte y comprueba que llegó bien. No se instala nada en Windows ni se tocan las que ya tengas.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Instalar todo lo que falta',
+        texto: 'Un solo botón baja e instala, en orden, lo que le falte a tu equipo: FFmpeg, Python con sus paquetes, Node.js y HyperFrames.'
+      }
+    ]
+  },
+  {
     version: '0.1.2',
     fecha: '2026-11-07',
     resumen: 'Imágenes con tu cuenta de ChatGPT, iconos nuevos y esta ventana para contarte lo nuevo.',

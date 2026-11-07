@@ -16,6 +16,7 @@ import type { AjustesIA, Project } from '../shared/types'
 import { Ajustes } from './ajustes'
 import { conectarAgente, estadoAgentes, prepararAgentes, versionesAgentes, agenteDeOrden, VARIABLE_LLAVE } from './agentes'
 import { estadoSistema, instalarHerramienta } from './sistema'
+import { activarHerramientas } from './herramientas'
 import { carpetaPorDefecto, copiarAVideos, carpetaDelProyecto } from './carpetas'
 import { abrirFlow, agregarCuentaFlow, ajustesFlow, estadoFlow, leerSaldosFlow, pedirFlow, quitarCuentaFlow } from './flow'
 import { MODELO_CHATGPT, MODELOS_IMAGEN, MODELOS_VIDEO, type PedidoFlow } from '../shared/flow'
@@ -84,6 +85,8 @@ function crearVentana(): void {
 }
 
 app.whenReady().then(() => {
+  // Lo que Recorte bajó (FFmpeg, Python, Node.js) va primero en el PATH de todo lo que lanza.
+  activarHerramientas()
   prepararAgentes()
   prepararActualizaciones()
   const proyectos = new Proyectos()
@@ -771,7 +774,11 @@ app.whenReady().then(() => {
     await shell.openPath(app.getPath('userData'))
   })
   ipcMain.handle('sistema:instalar', (_evento, id: unknown) =>
-    typeof id === 'string' ? instalarHerramienta(id) : { ok: false, error: 'Herramienta desconocida.' }
+    typeof id === 'string'
+      ? instalarHerramienta(id, (pct, texto) => {
+          for (const w of BrowserWindow.getAllWindows()) w.webContents.send('herramienta', { id, pct, texto })
+        })
+      : { ok: false, error: 'Herramienta desconocida.' }
   )
   ipcMain.handle('preferencias:cargar', () => ajustes.preferencias())
   ipcMain.handle('preferencias:guardar', (_evento, cambio: unknown) => ajustes.guardarPreferencias((cambio ?? {}) as object))

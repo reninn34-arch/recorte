@@ -46,7 +46,17 @@ function Interruptor({ activo, onCambiar, etiqueta }: { activo: boolean; onCambi
   )
 }
 
-function FilaHerramienta({ h, onInstalar, instalando }: { h: Herramienta; onInstalar: () => void; instalando: boolean }) {
+function FilaHerramienta({
+  h,
+  onInstalar,
+  instalando,
+  progreso
+}: {
+  h: Herramienta
+  onInstalar: () => void
+  instalando: boolean
+  progreso?: { pct: number; texto: string }
+}) {
   const logo = h.id === 'ffmpeg' || h.id === 'python' || h.id === 'node' ? h.id : null
   return (
     <div className="op-fila">
@@ -60,15 +70,31 @@ function FilaHerramienta({ h, onInstalar, instalando }: { h: Herramienta; onInst
       <div className="op-fila-texto">
         <strong>{h.nombre}</strong>
         <span>{h.descripcion}</span>
+        {instalando && progreso && (
+          <span className="herr-progreso">
+            <span className="tl-progreso">
+              <span style={{ width: `${Math.round(progreso.pct * 100)}%` }} />
+            </span>
+            {progreso.texto}
+          </span>
+        )}
       </div>
       <div className="op-fila-lado">
         <span className="ag-estado">
           <span className={`agente-punto ${h.estado === 'ok' ? 'ok' : h.estado === 'falta' ? 'aviso' : ''}`} />
           {h.estado === 'ok' ? h.version : h.estado === 'opcional' ? 'Opcional' : (h.detalle ?? 'No está')}
         </span>
-        {h.estado === 'falta' && h.instalable && (
+        {h.estado === 'falta' && (h.instalable || h.descargable) && (
           <button className="btn small primary" onClick={onInstalar} disabled={instalando}>
-            {instalando ? 'Instalando…' : 'Instalar'}
+            {instalando
+              ? progreso && progreso.pct > 0 && progreso.pct < 1
+                ? `${Math.round(progreso.pct * 100)}%`
+                : h.descargable
+                  ? 'Bajando…'
+                  : 'Instalando…'
+              : h.descargable
+                ? 'Descargar'
+                : 'Instalar'}
           </button>
         )}
         {h.estado === 'falta' && !h.instalable && h.ayuda && (
@@ -171,6 +197,10 @@ export function Opciones({
   const [pidiendoClave, setPidiendoClave] = useState(false)
   const [clave, setClave] = useState('')
   const [prefs, setPrefs] = useState<Preferencias | null>(null)
+  const [progresoH, setProgresoH] = useState<Record<string, { pct: number; texto: string }>>({})
+  const [todo, setTodo] = useState(false)
+
+  useEffect(() => window.recorte.onHerramienta((p) => setProgresoH((x) => ({ ...x, [p.id]: { pct: p.pct, texto: p.texto } }))), [])
 
   async function medir() {
     setMidiendo(true)
@@ -187,14 +217,32 @@ export function Opciones({
     void window.recorte.preferenciasCargar().then(setPrefs).catch(() => {})
   }, [])
 
-  async function instalar(id: string) {
+  async function instalar(id: string, avisar = true): Promise<boolean> {
     setInstalando(id)
     try {
       const r = await window.recorte.sistemaInstalar(id)
-      onAviso(r.ok ? 'Instalado.' : `No pude instalarlo: ${r.error ?? ''}`)
+      const nombre = sistema?.herramientas.find((h) => h.id === id)?.nombre ?? id
+      if (avisar || !r.ok) onAviso(r.ok ? `${nombre} listo.` : `No pude con ${nombre}: ${r.error ?? ''}`)
       await medir()
+      return r.ok
     } finally {
       setInstalando(null)
+    }
+  }
+
+  /** Baja e instala, en orden, todo lo que falta (Python antes que sus paquetes, Node antes que HyperFrames). */
+  async function instalarTodo() {
+    setTodo(true)
+    try {
+      for (const id of ['ffmpeg', 'python', 'paquetes-python', 'node', 'hyperframes']) {
+        const actual = (await window.recorte.sistemaEstado()).herramientas.find((h) => h.id === id)
+        if (!actual || actual.estado !== 'falta' || !(actual.instalable || actual.descargable)) continue
+        if (!(await instalar(id, false))) return
+      }
+      onAviso('Listo: tienes todas las herramientas de video.')
+    } finally {
+      setTodo(false)
+      await medir()
     }
   }
 
@@ -410,10 +458,26 @@ export function Opciones({
           </div>
         </Seccion>
 
-        <Seccion titulo="Herramientas de video">
+        <Seccion
+          titulo="Herramientas de video"
+          extra={
+            sistema?.herramientas.some((h) => h.estado === 'falta' && (h.instalable || h.descargable)) ? (
+              <button className="btn small primary" onClick={() => void instalarTodo()} disabled={todo || instalando !== null}>
+                <Icon name="download" size={14} /> {todo ? 'Instalando…' : 'Instalar todo lo que falta'}
+              </button>
+            ) : undefined
+          }
+          nota="Se bajan de su página oficial a la carpeta de Recorte y se comprueban antes de usarlas. No se instala nada en Windows ni se tocan las que ya tengas."
+        >
           {sistema ? (
             sistema.herramientas.map((h) => (
-              <FilaHerramienta key={h.id} h={h} instalando={instalando === h.id} onInstalar={() => void instalar(h.id)} />
+              <FilaHerramienta
+                key={h.id}
+                h={h}
+                instalando={instalando === h.id}
+                progreso={progresoH[h.id]}
+                onInstalar={() => void instalar(h.id)}
+              />
             ))
           ) : (
             <div className="op-fila"><span className="tl-dim">Revisando…</span></div>

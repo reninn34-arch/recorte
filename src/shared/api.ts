@@ -33,6 +33,8 @@ export interface Herramienta {
   detalle?: string
   /** Se instala con un botón desde Ajustes. */
   instalable?: boolean
+  /** Se baja con un botón a la carpeta de Recorte (FFmpeg, Python, Node.js). */
+  descargable?: boolean
   /** Si no, la página donde se descarga. */
   ayuda?: string
 }
@@ -306,6 +308,8 @@ export interface RecorteApi {
   /** Cierra, instala la versión ya bajada y vuelve a abrir Recorte. */
   actualizacionInstalar: () => Promise<void>
   onActualizacion: (cb: (e: EstadoActualizacion) => void) => () => void
+  /** Progreso de una herramienta que se baja o se instala desde Ajustes. */
+  onHerramienta: (cb: (p: { id: string; pct: number; texto: string }) => void) => () => void
   onProgreso: (cb: (p: Progreso) => void) => () => void
   platform: string
 }

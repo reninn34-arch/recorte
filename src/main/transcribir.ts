@@ -8,6 +8,8 @@ import type { Progreso } from '../shared/api'
 import type { Project, TranscriptSegment } from '../shared/types'
 import { rutaFfmpeg } from './ffmpeg'
 
+import { pythonPropio } from './herramientas'
+
 const exec = promisify(execFile)
 
 export interface ResultadoTranscripcion {
@@ -20,6 +22,9 @@ export interface ResultadoTranscripcion {
 export async function buscarPython(): Promise<{ cmd: string; args: string[] } | null> {
   const candidatos: { cmd: string; args: string[] }[] = []
   if (process.env.RECORTE_PYTHON) candidatos.push({ cmd: process.env.RECORTE_PYTHON, args: [] })
+  // El Python que bajó Recorte (Ajustes → Herramientas de video) va antes que el del sistema.
+  const propio = pythonPropio()
+  if (propio) candidatos.push({ cmd: propio, args: [] })
   candidatos.push({ cmd: 'python', args: [] }, { cmd: 'py', args: ['-3'] })
 
   for (const candidato of candidatos) {

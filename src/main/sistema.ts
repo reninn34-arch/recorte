@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { exec } from 'node:child_process'
+import { exec, spawn } from 'node:child_process'
 import { mkdirSync, statfsSync } from 'node:fs'
 import { readdir, stat } from 'node:fs/promises'
 import { cpus, totalmem } from 'node:os'
@@ -9,6 +9,8 @@ import { pathAmpliado, resolverBinario } from './binarios'
 import { rutaFfmpeg } from './ffmpeg'
 import { buscarPython, rutaScriptPython } from './transcribir'
 import { edgeExe } from './vozgoogle'
+import { descargarHerramienta } from './herramientas'
+import { matarArbol } from './ia'
 
 /**
  * Lo que Ajustes enseña del equipo: el procesador, la memoria y la tarjeta gráfica, el
@@ -60,9 +62,11 @@ async function tamano(ruta: string, limite = 20000): Promise<number> {
   return total
 }
 
+const enWindows = process.platform === 'win32'
+
 async function herramientas(): Promise<Herramienta[]> {
   const python = await buscarPython()
-  const comandoPython = python ? [python.cmd, ...python.args].join(' ') : null
+  const comandoPython = python ? [python.cmd, ...python.args].map((x) => (x.includes(' ') ? `"${x}"` : x)).join(' ') : null
   const [ff, py, paquetes, hf, npm] = await Promise.all([
     correr(`"${rutaFfmpeg()}" -version`),
     comandoPython ? correr(`${comandoPython} --version`) : Promise.resolve({ ok: false, salida: '' }),
@@ -84,7 +88,9 @@ async function herramientas(): Promise<Herramienta[]> {
       descripcion: 'Lee, corta, mezcla y exporta los videos. Lo usa todo Recorte.',
       estado: ff.ok ? 'ok' : 'falta',
       version: ff.ok ? version(ff.salida.split('\n')[0]) : null,
-      ayuda: ff.ok ? undefined : 'https://ffmpeg.org/download.html'
+      detalle: ff.ok ? undefined : 'No está',
+      descargable: !ff.ok && enWindows,
+      ayuda: ff.ok || enWindows ? undefined : 'https://ffmpeg.org/download.html'
     },
     {
       id: 'python',
@@ -92,7 +98,8 @@ async function herramientas(): Promise<Herramienta[]> {
       descripcion: 'Corre la transcripción en tu equipo y el seguimiento de caras.',
       estado: py.ok ? 'ok' : 'falta',
       version: py.ok ? version(py.salida) : null,
-      ayuda: py.ok ? undefined : 'https://www.python.org/downloads/'
+      descargable: !py.ok && enWindows,
+      ayuda: py.ok || enWindows ? undefined : 'https://www.python.org/downloads/'
     },
     {
       id: 'paquetes-python',
@@ -118,7 +125,8 @@ async function herramientas(): Promise<Herramienta[]> {
       descripcion: 'Con npm, Recorte baja los agentes y HyperFrames.',
       estado: npm.ok ? 'ok' : 'falta',
       version: npm.ok ? `npm ${version(npm.salida) ?? ''}`.trim() : null,
-      ayuda: npm.ok ? undefined : 'https://nodejs.org/'
+      descargable: !npm.ok && enWindows,
+      ayuda: npm.ok || enWindows ? undefined : 'https://nodejs.org/'
     },
     {
       id: 'edge',
@@ -157,17 +165,76 @@ export async function estadoSistema(): Promise<EstadoSistema> {
   }
 }
 
-/** Instala lo que se puede instalar desde la app (los paquetes de Python y HyperFrames). */
-export async function instalarHerramienta(id: string): Promise<{ ok: boolean; error?: string }> {
+/**
+ * pip como proceso directo (no `exec`): sin entrada, sin barra de progreso y leyendo su
+ * salida en vivo para contar qué baja. Con `exec` se quedaba colgado hasta el límite.
+ */
+function pip(
+  python: { cmd: string; args: string[] },
+  args: string[],
+  onProgreso: (pct: number, texto: string) => void,
+  limite = 30 * 60_000
+): Promise<{ ok: boolean; error?: string }> {
+  return new Promise((resolver) => {
+    const hijo = spawn(
+      python.cmd,
+      [...python.args, '-m', 'pip', ...args, '--disable-pip-version-check', '--no-input', '--progress-bar', 'off', '--no-warn-script-location'],
+      { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PATH: pathAmpliado(), PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' } }
+    )
+    let salida = ''
+    let vistos = 0
+    const leer = (b: Buffer) => {
+      const t = b.toString('utf8')
+      salida = (salida + t).slice(-8000)
+      for (const m of t.matchAll(/(?:Downloading|Using cached)\s+(\S+?)(?:-\d[^\s]*)?\.(?:whl|tar\.gz)/g)) {
+        vistos += 1
+        onProgreso(Math.min(0.85, 0.05 + vistos * 0.03), `Bajando ${m[1].replace(/_/g, '-')}`)
+      }
+      if (/Installing collected packages/.test(t)) onProgreso(0.9, 'Instalando los paquetes')
+    }
+    hijo.stdout.on('data', leer)
+    hijo.stderr.on('data', leer)
+    const reloj = setTimeout(() => {
+      matarArbol(hijo)
+      resolver({ ok: false, error: 'pip tardó demasiado (30 min). Revisa tu conexión y prueba otra vez.' })
+    }, limite)
+    hijo.on('error', (e) => {
+      clearTimeout(reloj)
+      resolver({ ok: false, error: e.message })
+    })
+    hijo.on('close', (codigo) => {
+      clearTimeout(reloj)
+      resolver(codigo === 0 ? { ok: true } : { ok: false, error: salida.trim().split(/\r?\n/).slice(-4).join(' ').slice(-300) })
+    })
+  })
+}
+
+/**
+ * Instala lo que se puede desde la app: baja FFmpeg, Python o Node.js a la carpeta de
+ * Recorte (ver herramientas.ts), o instala los paquetes de Python y HyperFrames.
+ */
+export async function instalarHerramienta(
+  id: string,
+  onProgreso: (pct: number, texto: string) => void = () => {}
+): Promise<{ ok: boolean; error?: string }> {
+  if (id === 'ffmpeg' || id === 'python' || id === 'node') {
+    try {
+      await descargarHerramienta(id, onProgreso)
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  }
   if (id === 'paquetes-python') {
     const python = await buscarPython()
-    if (!python) return { ok: false, error: 'Primero instala Python 3.10 o superior.' }
-    const r = await correr(`${[python.cmd, ...python.args].join(' ')} -m pip install -r "${rutaScriptPython('requirements.txt')}"`, 20 * 60_000)
-    return r.ok ? { ok: true } : { ok: false, error: r.salida.trim().slice(-300) }
+    if (!python) return { ok: false, error: 'Primero descarga Python (justo arriba).' }
+    onProgreso(0.05, 'Preparando faster-whisper, NumPy y OpenCV (unos minutos)')
+    return pip(python, ['install', '-r', rutaScriptPython('requirements.txt')], onProgreso)
   }
   if (id === 'hyperframes') {
     const destino = join(app.getPath('userData'), 'agentes')
     mkdirSync(destino, { recursive: true })
+    onProgreso(0.1, 'Instalando HyperFrames')
     const r = await correr(`npm install --no-audit --no-fund --prefix "${destino}" hyperframes@latest`, 10 * 60_000)
     return r.ok && resolverBinario('hyperframes') ? { ok: true } : { ok: false, error: r.salida.trim().slice(-300) || 'npm no pudo instalarlo.' }
   }
