@@ -21,6 +21,7 @@ import { esParado, extraerJson, Parado, preguntarAgente, preguntarApi, type Conf
 import { crearPortada } from './render'
 import { probeVideo } from './ffmpeg'
 import { pedirFlow } from './flow'
+import { copiarEntrada } from './modoagente'
 import { generarImagenChatGPT } from './imagenchatgpt'
 import { MODELO_CHATGPT } from '../shared/flow'
 import { bloqueEstiloGuion, resumenMaterial } from '../shared/estilo'
@@ -108,7 +109,9 @@ export class Creaciones {
     }
 
     const adjuntos: AdjuntoCreacion[] = []
-    for (const [i, ruta] of p.adjuntos.slice(0, 12).entries()) {
+    // Modo agente: los archivos van tal cual a trabajo/entrada (sin convertir: color y calidad exactos).
+    if (p.modo === 'agente') adjuntos.push(...copiarEntrada(p.adjuntos, carpeta))
+    for (const [i, ruta] of (p.modo === 'agente' ? [] : p.adjuntos.slice(0, 12)).entries()) {
       if (!existsSync(ruta)) continue
       const ext = extname(ruta).toLowerCase()
       if (EXT_IMAGEN.includes(ext)) {
@@ -144,7 +147,8 @@ export class Creaciones {
       formato: p.formato === 'horizontal' ? 'horizontal' : 'vertical',
       duracion: Math.min(180, Math.max(5, Math.round(p.duracion) || 30)),
       adjuntos,
-      fase: referencia ? 'estilo' : 'guion',
+      fase: p.modo === 'agente' ? 'plan' : referencia ? 'estilo' : 'guion',
+      ...(p.modo === 'agente' ? { modo: 'agente' as const, agente: { registro: [], rondas: 0 } } : {}),
       ...(referencia ? { referencia } : {}),
       mensajes: [],
       version: 0,

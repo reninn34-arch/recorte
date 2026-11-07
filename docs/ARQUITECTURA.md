@@ -518,3 +518,29 @@ Pendiente: generar B-roll desde el editor (necesita varias fuentes en la timelin
   `herramienta`) e «Instalar todo lo que falta» (FFmpeg → Python → paquetes → Node → HyperFrames).
 - Recorte no reparte FFmpeg en su instalador: el usuario lo baja de su página y la app lo llama
   como programa aparte.
+
+## Modo agente (Crear con IA)
+
+En la caja de Crear, **Agente | Guiado**. Guiado es el flujo de siempre (guion → voz → video con
+HyperFrames). En **Agente**, el agente conectado trabaja como un editor con herramientas:
+
+- `main/modoagente.ts`: cada creación tiene `trabajo/` con los archivos del usuario **tal cual** en
+  `entrada/` (sin convertir), un manual (`AGENTS.md` y `CLAUDE.md`, mismo texto: lo leen Claude Code,
+  Codex, Kimi y OpenCode) con las herramientas disponibles (rutas de FFmpeg, Python, HyperFrames) y
+  el método: entender → mirar los archivos → medir → elegir herramienta → hacer → **comprobar con
+  fotogramas** → entregar `resultado.json`.
+- `comandoAgentico()` lanza el agente en `trabajo/` con permiso para usar herramientas sin preguntar,
+  según el agente: Claude Code `--permission-mode acceptEdits --allowedTools "Bash Read Write Edit
+  Glob Grep" --output-format stream-json --verbose` (solo escribe en su carpeta; el stream-json se ve
+  en vivo); Kimi `--auto`; Codex `-s workspace-write -C <carpeta>`; OpenCode `--auto --dir`; Gemini
+  CLI `--yolo` (sin probar). Antigravity y las API sin herramientas no pueden usar este modo.
+- Pasos (IPC `agente:plan`, `agente:hacer`): primero un **plan corto** (JSON `entendi/pasos/
+  preguntas/herramienta`, sin producir nada) con el botón «Hazlo»; luego **hacer**. Recorte revisa la
+  entrega por su cuenta (`revisarYPublicar`: que abra, cuánto dura y mide, 5 fotogramas) y, si falla,
+  el agente corrige una vez. El final va a `salidas/agente-vN` y a la carpeta de videos. Un mensaje
+  en el chat después del resultado es un **cambio**: el agente parte de sus archivos y toca solo eso.
+- Los fallos de sesión o límite del plan se traducen (`explicarFallo` en `ia.ts`) para el usuario.
+- `PanelAgente.tsx`: plan, registro en vivo de lo que hace, y la revisión (fotogramas y
+  comprobaciones). Prueba: `npm run prueba:modo-agente` (con un «Claude» de prueba en el PATH).
+- Probado de punta a punta con el agente de prueba. Con agentes reales: pendiente (la sesión de
+  Claude Code de la máquina de desarrollo estaba caducada).

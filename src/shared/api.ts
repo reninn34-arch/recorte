@@ -264,6 +264,10 @@ export interface RecorteApi {
   creacionAbrir: (id: string) => Promise<Creacion | null>
   creacionNueva: (peticion: PeticionCreacion) => Promise<Creacion>
   /** Copiar un estilo: analiza el material y la referencia, y saca la ficha (modo 'gemini': Gemini ve el video completo). */
+  /** Modo agente: el agente mira los archivos y propone un plan (o pregunta). */
+  agentePlan: (id: string, pedido?: string) => Promise<Creacion>
+  /** Modo agente: hace (o cambia) el video con herramientas, se comprueba y entrega. */
+  agenteHacer: (id: string, pedido?: string) => Promise<Creacion>
   estiloAnalizar: (id: string, modo?: 'gemini') => Promise<Creacion>
   /** Deja la fase Estilo y pasa al guion. */
   estiloContinuar: (id: string) => Promise<Creacion>

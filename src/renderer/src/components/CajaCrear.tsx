@@ -11,6 +11,7 @@ import {
 } from '../../../shared/creacion'
 import { MODELO_CHATGPT, MODELOS_IMAGEN, MODELOS_VIDEO } from '../../../shared/flow'
 import { favorito } from '../../../shared/gustos'
+import type { ModoCreacion } from '../../../shared/creacion'
 import type { Agentes } from '../hooks/agentes'
 import { Icon } from '../Icons'
 import { LogoAgente, LogoProveedor } from './Logos'
@@ -86,6 +87,15 @@ export function CajaCrear({
   const [duracion, setDuracion] = useState(30)
   const [adjuntos, setAdjuntos] = useState<string[]>([])
   const [referencia, setReferencia] = useState<string | null>(null)
+  // Agente: trabaja con herramientas (plan → hacer → comprobar). Guiado: guion → voz → video.
+  const puedeAgente = Boolean(agentes.activo && ['claude', 'kimi', 'codex', 'opencode', 'gemini'].includes(agentes.activo.id))
+  const [modo, setModo] = useState<ModoCreacion>(puedeAgente ? 'agente' : 'guiado')
+  const enAgente = modo === 'agente'
+  const modoTocado = useRef(false)
+  // Los agentes se cargan un momento después: si el usuario no eligió, pasa a «Agente» cuando se pueda.
+  useEffect(() => {
+    if (!modoTocado.current) setModo(puedeAgente ? 'agente' : 'guiado')
+  }, [puedeAgente])
   const [falta, setFalta] = useState(false)
   // Quién lo hace: null = optimizado (el agente activo hace todo con su modelo de siempre).
   const [porPaso, setPorPaso] = useState(false)
@@ -154,6 +164,10 @@ export function CajaCrear({
     const tareas = porPaso && (tGuion || tVideo) ? { ...(tGuion ? { guion: tGuion } : {}), ...(tVideo ? { video: tVideo } : {}) } : undefined
     const imagenes = Boolean(modeloImagen) && (modeloImagen === MODELO_CHATGPT ? conChatGPT : conFlow)
     const videos = conFlow && Boolean(modeloVideo)
+    if (enAgente) {
+      onCrear({ peticion: peticion.trim(), estilo, formato, duracion, adjuntos, modo: 'agente', tareas })
+      return
+    }
     onCrear({
       peticion: peticion.trim(),
       estilo,
@@ -285,6 +299,21 @@ export function CajaCrear({
           <button type="button" className="cc-redondo" onClick={() => void adjuntar()} title="Tus fotos o clips para el video" aria-label="Adjuntar">
             <Icon name="paperclip" size={15} />
           </button>
+          <div className="cc-segmento" role="radiogroup" aria-label="Cómo se hace">
+            <button
+              type="button"
+              className={enAgente ? 'is-on' : ''}
+              disabled={!puedeAgente}
+              onClick={() => ((modoTocado.current = true), setModo('agente'))}
+              title={puedeAgente ? 'El agente mira tus archivos, te propone un plan y lo hace con herramientas, comprobando antes de entregar' : 'Necesita un agente instalado (Claude Code, Kimi, Codex u OpenCode)'}
+            >
+              Agente
+            </button>
+            <button type="button" className={!enAgente ? 'is-on' : ''} onClick={() => ((modoTocado.current = true), setModo('guiado'))} title="Paso a paso: guion → voz → video">
+              Guiado
+            </button>
+          </div>
+          {!enAgente && (
           <button
             type="button"
             className={`cc-redondo ${referencia ? 'is-on' : ''}`}
@@ -294,7 +323,9 @@ export function CajaCrear({
           >
             <Icon name="film" size={15} />
           </button>
+          )}
 
+          {!enAgente && (
           <Menu
             ancho={300}
             etiqueta={
@@ -330,6 +361,8 @@ export function CajaCrear({
             )}
           </Menu>
 
+          )}
+
           <div className="cc-segmento" role="radiogroup" aria-label="Formato">
             {(['vertical', 'horizontal'] as const).map((f) => (
               <button
@@ -354,7 +387,7 @@ export function CajaCrear({
             }
           </Menu>
 
-          {conFlow || conChatGPT ? (
+          {enAgente ? null : conFlow || conChatGPT ? (
             <>
               <Menu activo={Boolean(modeloImagen)} etiqueta={<><Icon name="image" size={13} /> {modeloImagen ?? 'Sin imágenes'}</>} ancho={280}>
                 {(cerrar) => (
@@ -436,6 +469,12 @@ export function CajaCrear({
         </div>
       </div>
       {falta && <p className="crear-error">Escribe qué video quieres para empezar.</p>}
+      {enAgente && (
+        <p className="cc-nota-modo">
+          <Icon name="sparkles" size={12} /> Modo agente: mira tus archivos de verdad, te propone un plan corto y, cuando le digas «Hazlo», lo hace con
+          FFmpeg, Python o HyperFrames y comprueba el resultado antes de entregarlo. Usa más mensajes de tu plan del agente.
+        </p>
+      )}
       {!agentes.listo && agentes.cargado && (
         <p className="crear-error">
           Conecta un agente para crear con IA: él escribe el guion y diseña el video.{' '}

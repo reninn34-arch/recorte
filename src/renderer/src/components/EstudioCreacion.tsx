@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { duracionEnVoz, duracionGuion, type Creacion } from '../../../shared/creacion'
 import { PasoVoz, type ControlVoz } from './PasoVoz'
 import { PasoEstilo, type ControlEstilo } from './PasoEstilo'
+import { PanelAgente } from './PanelAgente'
+import { esAprobacion } from '../../../shared/modoagente'
 import { estiloPorId } from '../../../shared/estilos'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
@@ -22,10 +24,13 @@ export function EstudioCreacion({
   onVolver,
   onParar,
   voz,
-  estilo
+  estilo,
+  agente
 }: {
   voz: ControlVoz
   estilo?: ControlEstilo
+  /** Modo agente: pedir (o rehacer) el plan, y hacer o cambiar el video. */
+  agente?: { plan: (pedido?: string) => void; hacer: (pedido?: string) => void }
   creacion: Creacion
   trabajando: boolean
   progreso: { pct: number; texto?: string } | null
@@ -57,16 +62,37 @@ export function EstudioCreacion({
     lista.current?.scrollTo({ top: lista.current.scrollHeight, behavior: 'smooth' })
   }, [c.mensajes.length, trabajando])
 
-  function enviar() {
-    const pedido = texto.trim()
-    if (!pedido || trabajando) return
-    setTexto('')
+  const modoAgente = c.modo === 'agente' && agente
+
+  /** Lo que escribe el usuario: en modo agente, aprueba el plan, lo cambia o cambia el video. */
+  function pedir(pedido: string) {
+    if (modoAgente) {
+      if (c.agente?.resultado) agente.hacer(pedido)
+      else if (c.agente?.plan && esAprobacion(pedido)) agente.hacer(pedido)
+      else agente.plan(pedido)
+      return
+    }
     // Con el video hecho, los cambios van al video; antes, al guion.
     if (hecho) onVideo(pedido)
     else onGuion(pedido)
   }
 
-  const fases = [
+  function enviar() {
+    const pedido = texto.trim()
+    if (!pedido || trabajando) return
+    setTexto('')
+    pedir(pedido)
+  }
+
+  const fases = modoAgente
+    ? [
+        { nombre: 'Idea', hecha: true, actual: false },
+        { nombre: 'Plan', hecha: Boolean(c.agente?.plan), actual: c.fase === 'plan' },
+        { nombre: 'Hacer', hecha: Boolean(c.agente?.resultado) && c.fase !== 'video', actual: c.fase === 'video' },
+        { nombre: 'Revisar', hecha: false, actual: c.fase === 'listo' },
+        { nombre: 'Editor', hecha: Boolean(c.proyectoEditor), actual: false }
+      ]
+    : [
     { nombre: 'Idea', hecha: true, actual: false },
     ...(c.referencia
       ? [{ nombre: 'Estilo', hecha: Boolean(c.ficha) && c.fase !== 'estilo', actual: c.fase === 'estilo' }]
@@ -121,8 +147,8 @@ export function EstudioCreacion({
                         className="chip"
                         onClick={() => {
                           void window.recorte.gustoSenal('eligio', t)
-                          if (hecho) onVideo(t)
-                          else onGuion(t)
+                          if (modoAgente && t === 'Hazlo') agente.hacer()
+                          else pedir(t)
                         }}
                       >
                         {t}
@@ -149,12 +175,28 @@ export function EstudioCreacion({
             )}
           </div>
           <div className="chat-redactar">
-            <span className="tl-dim">{hecho ? 'Tu mensaje cambia el video (se vuelve a renderizar).' : 'Tu mensaje cambia el guion.'}</span>
+            <span className="tl-dim">
+              {modoAgente
+                ? c.agente?.resultado
+                  ? 'Tu mensaje cambia el video: el agente toca solo eso y vuelve a comprobar.'
+                  : 'Contesta sus preguntas o dile qué cambiar del plan; «Hazlo» para empezar.'
+                : hecho
+                  ? 'Tu mensaje cambia el video (se vuelve a renderizar).'
+                  : 'Tu mensaje cambia el guion.'}
+            </span>
             <div className="chat-caja">
               <textarea
                 value={texto}
                 rows={2}
-                placeholder={hecho ? 'Haz el título más grande y más rápido el final' : 'Hazlo más corto y empieza con una pregunta'}
+                placeholder={
+                  modoAgente
+                    ? c.agente?.resultado
+                      ? 'Haz el brillo más fino y que dure 2 s más'
+                      : 'Hazlo, o: que el después entre por la derecha'
+                    : hecho
+                      ? 'Haz el título más grande y más rápido el final'
+                      : 'Hazlo más corto y empieza con una pregunta'
+                }
                 onChange={(e) => setTexto(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Escape' && trabajando) {
@@ -184,7 +226,11 @@ export function EstudioCreacion({
             <PasoEstilo creacion={c} ocupado={trabajando} progreso={progreso} control={estilo} />
           )}
 
-          {c.fase === 'video' && trabajando && (
+          {modoAgente && trabajando && (
+            <PanelAgente creacion={c} trabajando progreso={progreso} onPlan={() => agente.plan()} onHacer={() => agente.hacer()} onParar={onParar} />
+          )}
+
+          {!modoAgente && c.fase === 'video' && trabajando && (
             <div className="estudio-progreso">
               <span>{progreso?.texto ?? 'Haciendo el video'}</span>
               <span className="tl-progreso">
@@ -216,6 +262,10 @@ export function EstudioCreacion({
                 <span className="tl-dim">Versión {c.version}. En el editor lo cortas, le pones música, rótulos o zoom.</span>
               </div>
             </div>
+          )}
+
+          {modoAgente && !trabajando && (
+            <PanelAgente creacion={c} trabajando={false} progreso={progreso} onPlan={() => agente.plan()} onHacer={() => agente.hacer()} onParar={onParar} />
           )}
 
           {c.guion && c.fase !== 'video' && <PasoVoz creacion={c} ocupado={trabajando} control={voz} />}
@@ -269,7 +319,8 @@ export function EstudioCreacion({
             </div>
           ) : (
             !trabajando &&
-            c.fase !== 'estilo' && (
+            c.fase !== 'estilo' &&
+            !modoAgente && (
               <div className="estudio-vacio">
                 <p>Todavía no hay guion.</p>
                 <button className="btn primary" onClick={() => onGuion()}>
@@ -278,7 +329,7 @@ export function EstudioCreacion({
               </div>
             )
           )}
-          {!c.guion && trabajando && c.fase !== 'estilo' && (
+          {!c.guion && trabajando && c.fase !== 'estilo' && !modoAgente && (
             <div className="estudio-vacio">
               <p>El agente está escribiendo el guion…</p>
             </div>

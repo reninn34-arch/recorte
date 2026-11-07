@@ -24,6 +24,34 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.5',
+    fecha: '2026-11-07',
+    resumen: 'Modo agente: tu agente trabaja como un editor de verdad, con herramientas, y comprueba antes de entregarte.',
+    novedades: [
+      {
+        icono: 'sparkles',
+        titulo: 'Modo agente en Crear con IA',
+        texto:
+          'Elige «Agente» en la caja: mira tus archivos de verdad, te propone un plan corto y, cuando le dices «Hazlo», lo hace con FFmpeg, Python o HyperFrames. Sirve para cualquier cosa: un reel, un recurso con croma, una comparativa.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Se comprueba antes de entregar',
+        texto: 'Saca fotogramas de lo que hizo, los mira y corrige. Recorte también lo revisa y te enseña esos fotogramas junto al video.'
+      },
+      {
+        icono: 'undo',
+        titulo: 'Cambios sobre lo mismo',
+        texto: '«Haz el brillo más fino»: el agente parte de su trabajo y cambia solo eso, conservando lo que te gustó.'
+      },
+      {
+        icono: 'key',
+        titulo: 'Avisos claros del agente',
+        texto: 'Si la sesión de tu agente caducó o llegó al límite de su plan, ahora te lo dice en claro y te indica qué hacer.'
+      }
+    ]
+  },
+  {
     version: '0.1.4',
     fecha: '2026-11-07',
     resumen: 'Copia el estilo de edición de un video de referencia: Recorte lo mide, tu agente lo estudia y te dice qué se puede copiar con lo que tienes conectado.',

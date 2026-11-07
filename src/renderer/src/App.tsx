@@ -399,7 +399,10 @@ export default function App() {
       setCreacion(nueva)
       setVista('estudio')
       setCreando(false)
-      await pasoCreacion(nueva.id, () => window.recorte.creacionGuion(nueva.id))
+      // Modo agente: primero el plan. Con referencia: la fase Estilo espera al usuario
+      // (antes se saltaba directo al guion). Si no, el guion, como siempre.
+      if (nueva.modo === 'agente') await pasoCreacion(nueva.id, () => window.recorte.agentePlan(nueva.id))
+      else if (nueva.fase !== 'estilo') await pasoCreacion(nueva.id, () => window.recorte.creacionGuion(nueva.id))
     } catch (error) {
       setAviso(`No pude empezar: ${mensajeDe(error)}`)
     } finally {
@@ -737,6 +740,10 @@ export default function App() {
             subir: () => vozCreacion((id) => window.recorte.creacionVozPropia(id)),
             quitar: () => vozCreacion((id) => window.recorte.creacionQuitarVoz(id)),
             montar: () => vozCreacion((id) => window.recorte.creacionMontarVoz(id))
+          }}
+          agente={{
+            plan: (pedido) => vozCreacion((id) => window.recorte.agentePlan(id, pedido)),
+            hacer: (pedido) => vozCreacion((id) => window.recorte.agenteHacer(id, pedido))
           }}
           estilo={{
             geminiDisponible: Boolean(estadoVoz.tieneClave),

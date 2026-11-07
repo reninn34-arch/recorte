@@ -15,7 +15,8 @@
     "prueba:agente": "node scripts/prueba-agente.mjs",
     "prueba:crear": "node scripts/prueba-crear.mjs",
     "prueba:estilo": "node scripts/prueba-estilo.mjs",
-    "package": "electron-vite build && electron-builder"
+    "package": "electron-vite build && electron-builder",
+    "prueba:modo-agente": "node scripts/prueba-modo-agente.mjs"
   },
   "dependencies": {
     "electron-updater": "^6.8.11",

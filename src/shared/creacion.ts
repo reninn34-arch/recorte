@@ -11,9 +11,12 @@
  */
 
 import type { FichaEstilo, Viabilidad } from './estilo'
+import type { EstadoModoAgente } from './modoagente'
 
 export type FormatoCreacion = 'vertical' | 'horizontal'
-export type FaseCreacion = 'estilo' | 'guion' | 'voz' | 'video' | 'listo'
+export type FaseCreacion = 'plan' | 'estilo' | 'guion' | 'voz' | 'video' | 'listo'
+/** guiado: guion → voz → video (HyperFrames). agente: el agente trabaja con herramientas (ver modoagente.ts). */
+export type ModoCreacion = 'guiado' | 'agente'
 
 /** Los agentes que Recorte sabe conectar. */
 export type AgenteId = 'kimi' | 'claude' | 'codex' | 'gemini' | 'opencode' | 'antigravity'
@@ -143,6 +146,10 @@ export interface Creacion {
   duracion: number
   adjuntos: AdjuntoCreacion[]
   fase: FaseCreacion
+  /** Cómo se hace: guiado (por defecto en las viejas) o con el agente trabajando con herramientas. */
+  modo?: ModoCreacion
+  /** El estado del modo agente: plan, registro y resultado. */
+  agente?: EstadoModoAgente
   /** Video de referencia cuyo estilo se copia (copiado a `analisis/`; no entra en el video). */
   referencia?: { archivo: string; nombre: string }
   /** La ficha de estilo que salió de la referencia (también en `analisis/estilo.json`). */
@@ -182,6 +189,8 @@ export interface PeticionCreacion {
   adjuntos: string[]
   /** Ruta absoluta del video de referencia cuyo estilo se copia (no entra en el video). */
   referencia?: string
+  /** Guiado o agente (por defecto, guiado). */
+  modo?: ModoCreacion
   /** Quién hace cada paso (modo avanzado); sin esto manda el agente activo. */
   tareas?: TareasCreacion
   /** Imágenes (gratis) y clips de Veo (gastan créditos) generados en Google Flow. */

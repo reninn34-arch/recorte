@@ -93,12 +93,27 @@ let entornoAgentes: (orden: string) => Promise<Record<string, string>> = async (
 export function definirEntornoAgentes(fn: (orden: string) => Promise<Record<string, string>>): void {
   entornoAgentes = fn
 }
+/** Las variables extra de un agente (las usa también el modo agente, que lo lanza aparte). */
+export function entornoParaAgente(orden: string): Promise<Record<string, string>> {
+  return entornoAgentes(orden).catch(() => ({}))
+}
 
 // ---------------------------------------------------------------------------
 // Parar al agente: cada trabajo largo tiene su clave («chat:<proyecto>»,
 // «creacion:<id>») y su señal. Parar corta el proceso del agente (con todo lo que
 // lanzó) o la petición a la API: deja de gastar en ese mismo instante.
 // ---------------------------------------------------------------------------
+
+/** El fallo de un agente en palabras del usuario (sesión caducada, límite del plan…). */
+export function explicarFallo(texto: string): string {
+  if (/authenticat|oauth|session expired|not logged in|unauthori[sz]ed|\b401\b|credential/i.test(texto)) {
+    return 'La sesión de tu agente caducó o se cerró. Vuelve a conectarlo en Inicio (botón «Conectar») e inténtalo otra vez.'
+  }
+  if (/rate.?limit|usage limit|quota|\b429\b|too many requests|limit reached/i.test(texto)) {
+    return 'Tu agente llegó al límite de uso de su plan por ahora. Espera un rato o usa otro agente.'
+  }
+  return texto
+}
 
 export class Parado extends Error {
   constructor() {
@@ -216,7 +231,7 @@ export async function preguntarAgente(
         // Lo que dijo el agente al fallar (o lo último que imprimió), y qué se lanzó: sin eso
         // «terminó con código 1» no sirve para saber qué pasó.
         const dijo = (error.trim() || texto.trim()).slice(-300)
-        rechazar(new Error(dijo ? `${dijo}` : `El agente («${orden.slice(0, 80)}») terminó con código ${codigo} sin decir nada.`))
+        rechazar(new Error(dijo ? explicarFallo(dijo) : `El agente («${orden.slice(0, 80)}») terminó con código ${codigo} sin decir nada.`))
       }
     })
     if (archivoPrompt) {

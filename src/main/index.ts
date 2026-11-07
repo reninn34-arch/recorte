@@ -37,6 +37,8 @@ import { convertirAVoz, generarVozGemini, prepararVoz } from './voz'
 import { montarVozEnVideo } from './montajevoz'
 import { conectarVozGoogle, desconectarVozGoogle, estadoVozGoogle, generarVozGoogle } from './vozgoogle'
 import { analizarMaterialCreacion } from './estilo/material'
+import { anotar, pasoHacer, pasoPlan, revisarYPublicar } from './modoagente'
+import { esAprobacion } from '../shared/modoagente'
 import { medirReferencia } from './estilo/referencia'
 import { analizarConGeminiVideo, interpretarEstilo } from './estilo/ficha'
 import { viabilidadDe } from './estilo/viabilidad'
@@ -327,6 +329,84 @@ app.whenReady().then(() => {
       return creaciones.guardar(c)
     })
   )
+  // ===== Modo agente: el agente trabaja con herramientas en la carpeta de la creación =====
+  const avisarAgente = (c: Creacion, linea: string, pct: number) => {
+    if (!c.agente) c.agente = { registro: [], rondas: 0 }
+    anotar(c.agente, linea)
+    enviarProgreso({ id: c.id, fase: 'creacion', pct, texto: linea.slice(0, 140) })
+  }
+  ipcMain.handle('agente:plan', (_evento, id: unknown, pedido: unknown) =>
+    conCreacion(id, async (c, senal) => {
+      const texto = typeof pedido === 'string' && pedido.trim() ? pedido.trim().slice(0, 2000) : undefined
+      if (texto) c.mensajes.push(mensaje('usuario', texto))
+      c.fase = 'plan'
+      creaciones.guardar(c)
+      enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.1, texto: 'El agente está mirando tus archivos' })
+      try {
+        const plan = await pasoPlan(c, creaciones.carpeta(c.id), await configParaTarea(c.tareas?.video), (l) => avisarAgente(c, l, 0.4), senal)
+        c.agente = { ...(c.agente ?? { registro: [], rondas: 0 }), plan }
+        const partes = [plan.entendi, ...plan.pasos.map((p, i) => `${i + 1}. ${p}`)]
+        if (plan.preguntas.length) partes.push(`Antes de hacerlo: ${plan.preguntas.join(' ')}`)
+        c.mensajes.push({
+          ...mensaje('agente', partes.join('\n')),
+          propuestas: plan.preguntas.length ? [] : ['Hazlo']
+        })
+      } catch (e) {
+        if (esParado(e)) c.mensajes.push(mensaje('agente', 'Lo paraste. Cuando quieras, escríbeme qué hacemos.'))
+        else c.mensajes.push(mensaje('agente', `No pude preparar el plan: ${textoError(e)}`, true))
+      }
+      enviarProgreso({ id: c.id, fase: 'creacion', pct: 1, texto: 'Listo' })
+      return creaciones.guardar(c)
+    })
+  )
+  ipcMain.handle('agente:hacer', (_evento, id: unknown, pedido: unknown) =>
+    conCreacion(id, async (c, senal) => {
+      const texto = typeof pedido === 'string' && pedido.trim() ? pedido.trim().slice(0, 2000) : undefined
+      if (texto) c.mensajes.push(mensaje('usuario', texto))
+      const faseAntes = c.fase
+      c.fase = 'video'
+      if (!c.agente) c.agente = { registro: [], rondas: 0 }
+      c.agente.registro = []
+      creaciones.guardar(c)
+      const carpeta = creaciones.carpeta(c.id)
+      const config = await configParaTarea(c.tareas?.video)
+      try {
+        enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.05, texto: 'El agente está trabajando' })
+        // Si pide un cambio sobre lo hecho, va como pedido; si solo aprobó el plan, sin pedido.
+        const cambio = texto && !esAprobacion(texto) ? texto : undefined
+        await pasoHacer(c, carpeta, config, cambio, (l) => avisarAgente(c, l, 0.5), senal)
+        let revisado = await revisarYPublicar(c, carpeta, c.version + 1)
+        if (revisado.problemas.length) {
+          // Recorte encontró algo mal: el agente lo corrige una vez.
+          avisarAgente(c, `Recorte revisó y encontró: ${revisado.problemas.join(' ')}`, 0.85)
+          await pasoHacer(c, carpeta, config, `La revisión de Recorte encontró problemas en tu entrega: ${revisado.problemas.join(' ')} Corrígelo y vuelve a entregar.`, (l) => avisarAgente(c, l, 0.9), senal)
+          revisado = await revisarYPublicar(c, carpeta, c.version + 1)
+        }
+        if (!revisado.resultado) throw new Error(revisado.problemas.join(' '))
+        c.version += 1
+        c.agente.rondas += 1
+        c.agente.resultado = revisado.resultado
+        if (revisado.resultado.tipo === 'video') {
+          c.salida = revisado.resultado.archivo
+          c.portada = revisado.resultado.revision[1] ?? revisado.resultado.revision[0]
+        }
+        c.fase = 'listo'
+        const copia = revisado.resultado.tipo === 'video' ? await copiarCreacion(c) : null
+        const comprobado = revisado.resultado.comprobaciones.length ? ` Comprobé: ${revisado.resultado.comprobaciones.join('; ')}.` : ''
+        c.mensajes.push({
+          ...mensaje('agente', `${revisado.resultado.resumen}${comprobado}${copia ? ` Guardado en ${copia}.` : ''}`),
+          propuestas: []
+        })
+      } catch (e) {
+        c.fase = c.agente?.resultado ? 'listo' : faseAntes === 'video' ? 'plan' : faseAntes
+        if (esParado(e)) c.mensajes.push(mensaje('agente', c.agente?.resultado ? 'Lo paraste. La versión anterior sigue intacta.' : 'Lo paraste. El plan sigue aquí.'))
+        else c.mensajes.push(mensaje('agente', `No pude terminarlo: ${textoError(e)}`, true))
+      }
+      enviarProgreso({ id: c.id, fase: 'creacion', pct: 1, texto: 'Listo' })
+      return creaciones.guardar(c)
+    })
+  )
+
   ipcMain.handle('estilo:continuar', (_evento, id: unknown) =>
     conCreacion(id, async (c) => {
       if (c.fase === 'estilo') c.fase = 'guion'
@@ -375,6 +455,11 @@ app.whenReady().then(() => {
     return r.canceled ? null : (r.filePaths[0] ?? null)
   })
   const destrabar = (c: Creacion): Creacion => {
+    if (c.modo === 'agente' && c.fase === 'video' && !creandoAhora.has(c.id)) {
+      // Se cerró la app con el agente trabajando: vuelve a donde estaba.
+      c.fase = c.agente?.resultado ? 'listo' : 'plan'
+      return creaciones.guardar(c)
+    }
     if (c.fase === 'video' && !creandoAhora.has(c.id)) {
       c.fase = c.salida ? 'listo' : c.voz ? 'voz' : 'guion'
       creaciones.guardar(c)
@@ -402,6 +487,7 @@ app.whenReady().then(() => {
       formato: x.formato === 'horizontal' ? 'horizontal' : 'vertical',
       duracion: typeof x.duracion === 'number' ? x.duracion : 30,
       adjuntos: Array.isArray(x.adjuntos) ? x.adjuntos.filter((a): a is string => typeof a === 'string') : [],
+      ...(x.modo === 'agente' ? { modo: 'agente' as const } : {}),
       ...(typeof x.referencia === 'string' && /\.(mp4|mov|webm|mkv|m4v)$/i.test(x.referencia) ? { referencia: x.referencia } : {}),
       tareas: limpiarTareas(x.tareas),
       ...(x.flow && typeof x.flow === 'object'
