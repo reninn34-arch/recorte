@@ -2,8 +2,9 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, extname, join, resolve } from 'node:path'
 import { app, shell } from 'electron'
+import { pathAmpliado } from './binarios'
 import { matarArbol, Parado } from './ia'
 
 /**
@@ -95,6 +96,147 @@ function lanzar(): ChildProcess {
   return spawn(exe, [], { cwd: tmpdir(), env, windowsHide: true, stdio: 'pipe' })
 }
 
+/**
+ * Las «manos» de Antigravity en el modo agente: por ACP, el agente le pide al cliente que lea
+ * y escriba archivos y que ejecute comandos (terminal/*). Recorte lo hace SOLO dentro de la
+ * carpeta de trabajo de la creación (`raiz`): cualquier ruta fuera se rechaza.
+ * Métodos según https://agentclientprotocol.com/protocol/file-system y /terminals.
+ */
+interface Terminal {
+  hijo: ChildProcess
+  salida: string
+  truncada: boolean
+  limite: number
+  fin?: { exitCode: number | null; signal: string | null }
+  esperas: ((r: { exitCode: number | null; signal: string | null }) => void)[]
+}
+
+export class Manos {
+  private terminales = new Map<string, Terminal>()
+  private siguiente = 0
+  private raiz: string
+
+  constructor(
+    raiz: string,
+    private onLinea: (t: string) => void
+  ) {
+    this.raiz = resolve(raiz)
+  }
+
+  /** La ruta, si está dentro de la carpeta de trabajo; si no, error. */
+  private dentro(ruta: unknown): string {
+    if (typeof ruta !== 'string' || !ruta) throw new Error('Falta la ruta.')
+    const r = resolve(this.raiz, ruta)
+    const a = process.platform === 'win32' ? r.toLowerCase() : r
+    const b = process.platform === 'win32' ? this.raiz.toLowerCase() : this.raiz
+    if (a !== b && !a.startsWith(b.endsWith('\\') || b.endsWith('/') ? b : b + (process.platform === 'win32' ? '\\' : '/'))) {
+      throw new Error(`Recorte solo deja trabajar dentro de la carpeta del video: ${ruta}`)
+    }
+    return r
+  }
+
+  atiende(metodo: string): boolean {
+    return metodo === 'fs/read_text_file' || metodo === 'fs/write_text_file' || metodo.startsWith('terminal/')
+  }
+
+  async contestar(metodo: string, p: Record<string, unknown>): Promise<unknown> {
+    switch (metodo) {
+      case 'fs/read_text_file': {
+        const texto = readFileSync(this.dentro(p.path), 'utf8')
+        const linea = typeof p.line === 'number' ? Math.max(1, p.line) : 1
+        const limite = typeof p.limit === 'number' ? p.limit : undefined
+        if (linea === 1 && limite === undefined) return { content: texto }
+        const lineas = texto.split('\n')
+        return { content: lineas.slice(linea - 1, limite ? linea - 1 + limite : undefined).join('\n') }
+      }
+      case 'fs/write_text_file': {
+        const ruta = this.dentro(p.path)
+        mkdirSync(dirname(ruta), { recursive: true })
+        writeFileSync(ruta, typeof p.content === 'string' ? p.content : '', 'utf8')
+        this.onLinea(`Escribe: ${ruta.slice(this.raiz.length + 1)}`)
+        return {}
+      }
+      case 'terminal/create': {
+        const cwd = this.dentro(typeof p.cwd === 'string' && p.cwd ? p.cwd : this.raiz)
+        const comando = typeof p.command === 'string' ? p.command : ''
+        if (!comando) throw new Error('Falta el comando.')
+        const args = Array.isArray(p.args) ? p.args.filter((x): x is string => typeof x === 'string') : []
+        // Con shell, como en una terminal (deja usar .cmd y comandos compuestos); los
+        // argumentos con espacios o símbolos van entre comillas.
+        const citar = (x: string) => (/^[\w./:=@%+,-]+$/.test(x) ? x : `"${x.replace(/"/g, '\\"')}"`)
+        const linea = [comando, ...args.map(citar)].join(' ')
+        const extra = Array.isArray(p.env)
+          ? Object.fromEntries(
+              (p.env as { name?: unknown; value?: unknown }[])
+                .filter((v) => typeof v.name === 'string' && typeof v.value === 'string')
+                .map((v) => [v.name as string, v.value as string])
+            )
+          : {}
+        const hijo = spawn(linea, { cwd, shell: true, windowsHide: true, env: { ...process.env, PATH: pathAmpliado(), ...extra } })
+        const id = `term_${++this.siguiente}`
+        const t: Terminal = { hijo, salida: '', truncada: false, limite: typeof p.outputByteLimit === 'number' ? p.outputByteLimit : 1_000_000, esperas: [] }
+        const anadir = (b: Buffer) => {
+          t.salida += b.toString('utf8')
+          if (Buffer.byteLength(t.salida) > t.limite) {
+            t.salida = t.salida.slice(-Math.floor(t.limite / 2))
+            t.truncada = true
+          }
+        }
+        hijo.stdout?.on('data', anadir)
+        hijo.stderr?.on('data', anadir)
+        const cerrar = (exitCode: number | null, signal: string | null) => {
+          if (t.fin) return
+          t.fin = { exitCode, signal }
+          for (const r of t.esperas) r(t.fin)
+          t.esperas = []
+        }
+        hijo.on('error', (e) => {
+          anadir(Buffer.from(String(e.message)))
+          cerrar(1, null)
+        })
+        hijo.on('close', (c, s) => cerrar(c, s))
+        this.terminales.set(id, t)
+        this.onLinea(`Terminal: ${linea.slice(0, 160)}`)
+        return { terminalId: id }
+      }
+      case 'terminal/output': {
+        const t = this.terminal(p.terminalId)
+        return { output: t.salida, truncated: t.truncada, ...(t.fin ? { exitStatus: t.fin } : {}) }
+      }
+      case 'terminal/wait_for_exit': {
+        const t = this.terminal(p.terminalId)
+        if (t.fin) return t.fin
+        return new Promise((r) => t.esperas.push(r))
+      }
+      case 'terminal/kill': {
+        const t = this.terminal(p.terminalId)
+        if (!t.fin) matarArbol(t.hijo)
+        return {}
+      }
+      case 'terminal/release': {
+        const t = this.terminal(p.terminalId)
+        if (!t.fin) matarArbol(t.hijo)
+        this.terminales.delete(String(p.terminalId))
+        return {}
+      }
+      default:
+        throw new Error('Recorte no admite esta petición del agente.')
+    }
+  }
+
+  private terminal(id: unknown): Terminal {
+    const t = this.terminales.get(String(id))
+    if (!t) throw new Error('Esa terminal no existe.')
+    return t
+  }
+
+  /** Al cerrar la sesión: nada queda corriendo. */
+  cerrarTodo(): void {
+    for (const t of this.terminales.values()) if (!t.fin) matarArbol(t.hijo)
+    this.terminales.clear()
+  }
+}
+
 /** JSON-RPC por líneas: lo mínimo para hablar ACP. */
 class Rpc {
   private siguiente = 0
@@ -107,7 +249,8 @@ class Rpc {
       alAvisar: (metodo: string, params: Record<string, unknown>) => void
       alTexto: (linea: string) => void
       alCerrar: (error: Error) => void
-    }
+    },
+    private manos?: Manos
   ) {
     hijo.stdout!.setEncoding('utf8')
     hijo.stdout!.on('data', (trozo: string) => {
@@ -147,7 +290,9 @@ class Rpc {
     let resultado: unknown
     let error: { code: number; message: string } | undefined
     try {
-      if (metodo === 'session/request_permission') {
+      if (this.manos?.atiende(metodo)) {
+        resultado = await this.manos.contestar(metodo, params)
+      } else if (metodo === 'session/request_permission') {
         const ops = (params.options ?? []) as { optionId: string; kind: string }[]
         const elegida = ops.find((o) => o.kind === 'allow_once') ?? ops.find((o) => o.kind === 'allow_always')
         resultado = elegida
@@ -190,36 +335,108 @@ interface SesionAcp {
   rpc: Rpc
   hijo: ChildProcess
   sessionId: string
+  /** Si el agente acepta imágenes dentro del pedido. */
+  imagenes: boolean
 }
 
 /** Abre un proceso, lo inicializa y crea una sesión. Tarda unos 40 s la primera vez. */
-async function abrirSesion(eventos: {
-  alTexto: (linea: string) => void
-  alAvisar: (metodo: string, params: Record<string, unknown>) => void
-}): Promise<SesionAcp> {
+async function abrirSesion(
+  eventos: {
+    alTexto: (linea: string) => void
+    alAvisar: (metodo: string, params: Record<string, unknown>) => void
+  },
+  /** Modo agente: trabaja en esta carpeta, con permiso para escribir y terminal (solo ahí). */
+  manos?: { cwd: string; manos: Manos }
+): Promise<SesionAcp> {
   const hijo = lanzar()
   let cerrado: Error | null = null
-  const rpc = new Rpc(hijo, {
-    alAvisar: eventos.alAvisar,
-    alTexto: eventos.alTexto,
-    alCerrar: (e) => {
-      cerrado = e
-    }
-  })
-  await rpc.pedir(
+  const rpc = new Rpc(
+    hijo,
+    {
+      alAvisar: eventos.alAvisar,
+      alTexto: eventos.alTexto,
+      alCerrar: (e) => {
+        cerrado = e
+      }
+    },
+    manos?.manos
+  )
+  const ini = await rpc.pedir<{ agentCapabilities?: { promptCapabilities?: { image?: boolean } } }>(
     'initialize',
     {
       protocolVersion: 1,
-      clientCapabilities: { fs: { readTextFile: true, writeTextFile: false }, terminal: false },
+      clientCapabilities: manos
+        ? { fs: { readTextFile: true, writeTextFile: true }, terminal: true }
+        : { fs: { readTextFile: true, writeTextFile: false }, terminal: false },
       clientInfo: { name: 'recorte', version: '0.1' }
     },
     180_000
   )
   // Con el token guardado esto vuelve al instante; sin él, abre el navegador y espera.
   await rpc.pedir('authenticate', { methodId: 'oauth-personal' }, 10 * 60_000)
-  const s = await rpc.pedir<{ sessionId: string }>('session/new', { cwd: tmpdir(), mcpServers: [] }, 180_000)
+  const s = await rpc.pedir<{ sessionId: string }>('session/new', { cwd: manos?.cwd ?? tmpdir(), mcpServers: [] }, 180_000)
   if (cerrado) throw cerrado
-  return { rpc, hijo, sessionId: s.sessionId }
+  return { rpc, hijo, sessionId: s.sessionId, imagenes: Boolean(ini?.agentCapabilities?.promptCapabilities?.image) }
+}
+
+const MIME: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' }
+
+/**
+ * Modo agente con Antigravity: abre una sesión en `cwd` con «manos» (archivos y terminal,
+ * solo ahí), le pasa el pedido (con las imágenes, si las acepta) y devuelve lo que dijo.
+ * Lo que va haciendo (sus pasos y cada comando) llega por `onLinea`.
+ */
+export async function trabajarAntigravity(
+  prompt: string,
+  cwd: string,
+  onLinea: (t: string) => void,
+  senal?: AbortSignal,
+  timeoutMs = 40 * 60_000,
+  imagenes: string[] = []
+): Promise<string> {
+  if (senal?.aborted) throw new Parado()
+  onLinea('Arrancando Antigravity (tarda unos segundos)')
+  let texto = ''
+  const manos = new Manos(cwd, onLinea)
+  const sesion = await abrirSesion(
+    {
+      alTexto: () => {},
+      alAvisar: (metodo, params) => {
+        if (metodo !== 'session/update') return
+        const u = params.update as { sessionUpdate?: string; content?: { type?: string; text?: string }; title?: string } | undefined
+        if (u?.sessionUpdate === 'agent_message_chunk' && u.content?.type === 'text') texto += u.content.text ?? ''
+        else if (u?.sessionUpdate === 'tool_call' && typeof u.title === 'string') onLinea(u.title.slice(0, 160))
+      }
+    },
+    { cwd, manos }
+  )
+  const partes: unknown[] = [{ type: 'text', text: prompt }]
+  if (sesion.imagenes) {
+    for (const ruta of imagenes.slice(0, 6)) {
+      const mime = MIME[extname(ruta).toLowerCase()]
+      if (!mime || !existsSync(ruta)) continue
+      partes.push({ type: 'image', mimeType: mime, data: readFileSync(ruta).toString('base64') })
+    }
+  }
+  let alParar = () => {}
+  const parado = new Promise<never>((_, mal) => {
+    alParar = () => {
+      manos.cerrarTodo()
+      matarArbol(sesion.hijo)
+      mal(new Parado())
+    }
+    if (senal?.aborted) alParar()
+    else senal?.addEventListener('abort', alParar, { once: true })
+  })
+  parado.catch(() => {})
+  try {
+    await Promise.race([sesion.rpc.pedir('session/prompt', { sessionId: sesion.sessionId, prompt: partes }, timeoutMs), parado])
+    return texto
+  } finally {
+    senal?.removeEventListener('abort', alParar)
+    manos.cerrarTodo()
+    sesion.hijo.kill()
+  }
 }
 
 /**

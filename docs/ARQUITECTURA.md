@@ -533,7 +533,11 @@ HyperFrames). En **Agente**, el agente conectado trabaja como un editor con herr
   según el agente: Claude Code `--permission-mode acceptEdits --allowedTools "Bash Read Write Edit
   Glob Grep" --output-format stream-json --verbose` (solo escribe en su carpeta; el stream-json se ve
   en vivo); Kimi `--auto`; Codex `-s workspace-write -C <carpeta>`; OpenCode `--auto --dir`; Gemini
-  CLI `--yolo` (sin probar). Antigravity y las API sin herramientas no pueden usar este modo.
+  CLI `--yolo` (sin probar). **Antigravity** va por ACP: Recorte le hace de «manos» (`Manos` en
+  `antigravity.ts`): `fs/read_text_file`, `fs/write_text_file` y `terminal/*` (create, output,
+  wait_for_exit, kill, release; ver agentclientprotocol.com), solo dentro de `trabajo/`; las fotos
+  van como imágenes en el pedido si el agente las acepta. Las API sin herramientas no pueden usar
+  este modo.
 - Pasos (IPC `agente:plan`, `agente:hacer`): primero un **plan corto** (JSON `entendi/pasos/
   preguntas/herramienta`, sin producir nada) con el botón «Hazlo»; luego **hacer**. Recorte revisa la
   entrega por su cuenta (`revisarYPublicar`: que abra, cuánto dura y mide, 5 fotogramas) y, si falla,

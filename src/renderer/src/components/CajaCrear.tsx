@@ -88,7 +88,7 @@ export function CajaCrear({
   const [adjuntos, setAdjuntos] = useState<string[]>([])
   const [referencia, setReferencia] = useState<string | null>(null)
   // Agente: trabaja con herramientas (plan → hacer → comprobar). Guiado: guion → voz → video.
-  const puedeAgente = Boolean(agentes.activo && ['claude', 'kimi', 'codex', 'opencode', 'gemini'].includes(agentes.activo.id))
+  const puedeAgente = Boolean(agentes.activo && ['claude', 'antigravity', 'kimi', 'codex', 'opencode', 'gemini'].includes(agentes.activo.id))
   const [modo, setModo] = useState<ModoCreacion>(puedeAgente ? 'agente' : 'guiado')
   const enAgente = modo === 'agente'
   const modoTocado = useRef(false)
@@ -105,7 +105,7 @@ export function CajaCrear({
   const [conFlow, setConFlow] = useState(false)
   const [conChatGPT, setConChatGPT] = useState(false)
   const [derechos, setDerechos] = useState(false)
-  const [modeloImagen, setModeloImagen] = useState<string | null>(MODELOS_IMAGEN[0])
+  const [modeloImagen, setModeloImagen] = useState<string | null>(null)
   const [modeloVideo, setModeloVideo] = useState<string | null>(null)
   const tocado = useRef(false)
 
@@ -305,7 +305,7 @@ export function CajaCrear({
               className={enAgente ? 'is-on' : ''}
               disabled={!puedeAgente}
               onClick={() => ((modoTocado.current = true), setModo('agente'))}
-              title={puedeAgente ? 'El agente mira tus archivos, te propone un plan y lo hace con herramientas, comprobando antes de entregar' : 'Necesita un agente instalado (Claude Code, Kimi, Codex u OpenCode)'}
+              title={puedeAgente ? 'El agente mira tus archivos, te propone un plan y lo hace con herramientas, comprobando antes de entregar' : 'Necesita un agente que trabaje con herramientas (Claude Code, Antigravity, Kimi, Codex u OpenCode)'}
             >
               Agente
             </button>

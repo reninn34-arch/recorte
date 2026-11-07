@@ -24,6 +24,24 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.7',
+    fecha: '2026-11-07',
+    resumen: 'Antigravity también trabaja en modo agente, y las imágenes generadas ya no vienen elegidas por defecto.',
+    novedades: [
+      {
+        icono: 'sparkles',
+        titulo: 'Antigravity en modo agente',
+        texto:
+          'Con tu cuenta de Google, Antigravity ahora puede hacer videos en modo agente: mira tus fotos, escribe sus archivos y ejecuta FFmpeg o Python, siempre dentro de la carpeta del video.'
+      },
+      {
+        icono: 'image',
+        titulo: 'Sin imágenes por defecto',
+        texto: 'En Crear con IA, «Imágenes» empieza en «Sin imágenes»: tú eliges si quieres que se generen y con qué.'
+      }
+    ]
+  },
+  {
     version: '0.1.6',
     fecha: '2026-11-07',
     resumen: 'Al día con los modelos nuevos de Google Flow.',

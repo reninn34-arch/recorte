@@ -166,6 +166,9 @@ export function comandoAgentico(base: string, cwd: string): { orden: string; age
     case 'gemini':
       // Sin probar: Gemini CLI no estaba instalado al escribir esto.
       return { agente, orden: `${b} --yolo` }
+    case 'antigravity':
+      // Por ACP: Recorte le hace de «manos» (archivos y terminal) solo dentro de su carpeta.
+      return { agente, orden: 'antigravity:acp' }
     default:
       return null
   }
@@ -215,9 +218,17 @@ export async function trabajarAgente(
   prompt: string,
   onLinea: (texto: string) => void,
   senal?: AbortSignal,
-  timeoutMs = 40 * 60_000
+  timeoutMs = 40 * 60_000,
+  imagenes: string[] = []
 ): Promise<string> {
   if (senal?.aborted) throw new Parado()
+  if (orden === 'antigravity:acp') {
+    const { trabajarAntigravity } = await import('./antigravity')
+    return trabajarAntigravity(prompt, cwd, onLinea, senal, timeoutMs, imagenes).catch((e: unknown) => {
+      if (e instanceof Parado) throw e
+      throw new Error(explicarFallo(e instanceof Error ? e.message : String(e)))
+    })
+  }
   let comando = orden
   let archivoPrompt: string | null = null
   if (comando.includes('{prompt}')) {
@@ -295,6 +306,11 @@ export async function trabajarAgente(
 // Los pasos
 // ---------------------------------------------------------------------------
 
+/** Las imágenes que subió el usuario (rutas absolutas), para los agentes que las reciben en el pedido. */
+function imagenesDeEntrada(c: Creacion, carpeta: string): string[] {
+  return c.adjuntos.filter((a) => a.tipo === 'imagen').map((a) => join(carpeta, a.archivo))
+}
+
 function contexto(c: Creacion): string {
   const archivos = c.adjuntos.length
     ? c.adjuntos.map((a) => `- ${a.archivo.replace(/^trabajo\//, '')} (${a.tipo === 'imagen' ? 'imagen' : 'video'}, «${a.nombre}»)`).join('\n')
@@ -316,7 +332,7 @@ export async function pasoPlan(
 ): Promise<PlanAgente> {
   const trabajo = carpetaTrabajo(carpeta)
   const cmd = config.activa && config.proveedor === 'cli' ? comandoAgentico(config.comandoCli, trabajo) : null
-  if (!cmd) throw new Error('El modo agente necesita un agente instalado que trabaje con herramientas (Claude Code, Kimi, Codex u OpenCode). Conéctalo en Inicio.')
+  if (!cmd) throw new Error('El modo agente necesita un agente que trabaje con herramientas (Claude Code, Antigravity, Kimi, Codex u OpenCode). Conéctalo en Inicio.')
   await escribirManual(carpeta, c)
   const prompt = `Lee AGENTS.md (tu manual) y sigue sus pasos 1 a 3: entiende el pedido, mira de verdad los archivos de entrada/ y mide lo que importe.
 TODAVÍA NO HAGAS EL VIDEO ni crees archivos en salida/.
@@ -325,7 +341,7 @@ ${contexto(c)}
 
 Responde SOLO con JSON, sin texto alrededor:
 {"entendi": "qué vas a hacer, en 1-2 frases, con los datos que mediste", "pasos": ["paso corto", "…"], "preguntas": ["solo si de verdad no puedes decidir algo importante"], "herramienta": "FFmpeg | Python + FFmpeg | HyperFrames | …"}`
-  const respuesta = await trabajarAgente(cmd.orden, trabajo, prompt, onLinea, senal, 15 * 60_000)
+  const respuesta = await trabajarAgente(cmd.orden, trabajo, prompt, onLinea, senal, 15 * 60_000, imagenesDeEntrada(c, carpeta))
   const plan = validarPlan(extraerJson(respuesta))
   if (!plan) throw new Error('El agente no devolvió un plan.')
   return plan
@@ -342,7 +358,7 @@ export async function pasoHacer(
 ): Promise<string> {
   const trabajo = carpetaTrabajo(carpeta)
   const cmd = config.activa && config.proveedor === 'cli' ? comandoAgentico(config.comandoCli, trabajo) : null
-  if (!cmd) throw new Error('El modo agente necesita un agente instalado que trabaje con herramientas (Claude Code, Kimi, Codex u OpenCode). Conéctalo en Inicio.')
+  if (!cmd) throw new Error('El modo agente necesita un agente que trabaje con herramientas (Claude Code, Antigravity, Kimi, Codex u OpenCode). Conéctalo en Inicio.')
   await escribirManual(carpeta, c)
   const resultadoJson = join(trabajo, 'resultado.json')
   if (existsSync(resultadoJson)) rmSync(resultadoJson, { force: true })
@@ -353,7 +369,7 @@ export async function pasoHacer(
 ${contexto(c)}
 ${plan ? `\nEL PLAN QUE EL USUARIO APROBÓ:\n${plan.entendi}\n${plan.pasos.map((p) => `- ${p}`).join('\n')}\n` : ''}${hay ? `\nYA HICISTE UNA VERSIÓN: ${hay.archivo.replace(/^salidas\//, '')} (lo que dijiste: ${hay.resumen}). Tus archivos de trabajo siguen en esta carpeta: parte de ellos y cambia solo lo que se pide, conservando lo que al usuario le gustó.\n` : ''}${pedido ? `\nLO QUE PIDE AHORA EL USUARIO: ${pedido}\n` : ''}
 Cuando termines y lo hayas comprobado mirando los fotogramas, escribe resultado.json como dice el manual.`
-  return trabajarAgente(cmd.orden, trabajo, prompt, onLinea, senal)
+  return trabajarAgente(cmd.orden, trabajo, prompt, onLinea, senal, 40 * 60_000, imagenesDeEntrada(c, carpeta))
 }
 
 // ---------------------------------------------------------------------------
