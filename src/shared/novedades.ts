@@ -24,6 +24,24 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.9',
+    fecha: '2026-11-07',
+    resumen: 'El modo agente trabaja mucho más rápido: mira un vistazo de tus archivos en vez de abrirlos enteros.',
+    novedades: [
+      {
+        icono: 'clock',
+        titulo: 'Plan en pocos minutos',
+        texto:
+          'Recorte prepara un vistazo de tus archivos (miniaturas de las fotos, fotogramas y audio de los videos) y el agente lo mira en segundos. El plan es solo un vistazo; lo pesado se hace al darle a «Hazlo», sin repetir lo que ya vio.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Sabes cuánto lleva',
+        texto: 'La barra ya no inventa un porcentaje: muestra el tiempo que lleva frente a lo que suele tardar ese paso, te avisa si se pasa, y debajo ves lo último que hizo el agente.'
+      }
+    ]
+  },
+  {
     version: '0.1.8',
     fecha: '2026-11-07',
     resumen: 'Sube tus fotos del iPhone (HEIC) y carpetas comprimidas (.zip) directamente.',

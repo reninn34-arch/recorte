@@ -2611,3 +2611,5 @@ button { cursor: pointer; }
 
 .cc-nota-modo { display: flex; gap: 6px; align-items: baseline; margin: 8px 4px 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
 .cc-segmento button:disabled { opacity: 0.4; cursor: not-allowed; }
+.tl-progreso.is-pasado span { background: #f2c14e; }
+.pa-pasado { font-size: 12px; line-height: 1.5; color: #f2c14e; }

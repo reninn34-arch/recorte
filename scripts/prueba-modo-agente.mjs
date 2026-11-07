@@ -172,6 +172,13 @@ try {
   if (!conPlan.mensajes.at(-1).propuestas?.includes('Hazlo')) throw new Error('El plan debió ofrecer «Hazlo».')
   if (!conPlan.agente.registro.some((l) => l.startsWith('Read:'))) throw new Error('El registro debió mostrar lo que hizo el agente.')
   console.log('plan del agente con «Hazlo» y registro en vivo ✓')
+  // El vistazo: Recorte prepara miniaturas y LEEME para que el agente no abra los originales.
+  for (const f of ['LEEME.txt', 'fotos.jpg']) {
+    if (!existsSync(join(carpeta, 'trabajo', 'vistazo', f))) throw new Error(`Falta vistazo/${f}.`)
+  }
+  if (!readFileSync(join(carpeta, 'trabajo', 'vistazo', 'LEEME.txt'), 'utf8').includes('fotos.jpg')) throw new Error('El LEEME del vistazo no describe las fotos.')
+  if (!readFileSync(join(carpeta, 'trabajo', 'AGENTS.md'), 'utf8').includes('Trabaja rápido')) throw new Error('El manual no explica cómo trabajar rápido.')
+  console.log('vistazo preparado (miniaturas y LEEME) y manual con el método rápido ✓')
 
   const hecha = await evaluar(cliente, `window.recorte.agenteHacer(${JSON.stringify(c.id)})`, 5 * 60_000)
   const res = hecha.agente?.resultado

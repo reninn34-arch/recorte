@@ -330,6 +330,8 @@ app.whenReady().then(() => {
     })
   )
   // ===== Modo agente: el agente trabaja con herramientas en la carpeta de la creación =====
+  /** El avance según el tiempo: se acerca al 95 % sin llegar (lo que suele tardar = ~63 %). */
+  const pctPorTiempo = (desde: number, suele: number) => 0.05 + 0.9 * (1 - Math.exp(-(Date.now() - desde) / 1000 / suele))
   const avisarAgente = (c: Creacion, linea: string, pct: number) => {
     if (!c.agente) c.agente = { registro: [], rondas: 0 }
     anotar(c.agente, linea)
@@ -343,7 +345,8 @@ app.whenReady().then(() => {
       creaciones.guardar(c)
       enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.1, texto: 'El agente está mirando tus archivos' })
       try {
-        const plan = await pasoPlan(c, creaciones.carpeta(c.id), await configParaTarea(c.tareas?.video), (l) => avisarAgente(c, l, 0.4), senal)
+        const desde = Date.now()
+        const plan = await pasoPlan(c, creaciones.carpeta(c.id), await configParaTarea(c.tareas?.video), (l) => avisarAgente(c, l, pctPorTiempo(desde, 180)), senal)
         c.agente = { ...(c.agente ?? { registro: [], rondas: 0 }), plan }
         const partes = [plan.entendi, ...plan.pasos.map((p, i) => `${i + 1}. ${p}`)]
         if (plan.preguntas.length) partes.push(`Antes de hacerlo: ${plan.preguntas.join(' ')}`)
@@ -374,7 +377,8 @@ app.whenReady().then(() => {
         enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.05, texto: 'El agente está trabajando' })
         // Si pide un cambio sobre lo hecho, va como pedido; si solo aprobó el plan, sin pedido.
         const cambio = texto && !esAprobacion(texto) ? texto : undefined
-        await pasoHacer(c, carpeta, config, cambio, (l) => avisarAgente(c, l, 0.5), senal)
+        const desde = Date.now()
+        await pasoHacer(c, carpeta, config, cambio, (l) => avisarAgente(c, l, pctPorTiempo(desde, 480)), senal)
         let revisado = await revisarYPublicar(c, carpeta, c.version + 1)
         if (revisado.problemas.length) {
           // Recorte encontró algo mal: el agente lo corrige una vez.

@@ -535,9 +535,16 @@ HyperFrames). En **Agente**, el agente conectado trabaja como un editor con herr
   en vivo); Kimi `--auto`; Codex `-s workspace-write -C <carpeta>`; OpenCode `--auto --dir`; Gemini
   CLI `--yolo` (sin probar). **Antigravity** va por ACP: Recorte le hace de «manos» (`Manos` en
   `antigravity.ts`): `fs/read_text_file`, `fs/write_text_file` y `terminal/*` (create, output,
-  wait_for_exit, kill, release; ver agentclientprotocol.com), solo dentro de `trabajo/`; las fotos
-  van como imágenes en el pedido si el agente las acepta. Las API sin herramientas no pueden usar
-  este modo.
+  wait_for_exit, kill, release; ver agentclientprotocol.com), solo dentro de `trabajo/`; en vez de
+  las fotos originales recibe las hojas del vistazo como imágenes en el pedido. Las API sin
+  herramientas no pueden usar este modo.
+- **Vistazo** (`prepararVistazo`, en segundos y una sola vez): `trabajo/vistazo/` con `fotos.jpg`
+  (todas las fotos en miniatura 360×480, mismo formato de color, en hoja de hasta 4 columnas),
+  `video-NN.jpg` (12 fotogramas por video), `audio-NN.wav` (16 kHz mono) y `LEEME.txt`. El manual
+  pide mirar eso antes que los originales; el plan es solo un vistazo (sin medir a fondo ni
+  renderizar, límite 30 min) y deja apuntes en `notas.md` que «hacer» reutiliza.
+- La barra del panel es de **tiempo**: lo que lleva frente a lo habitual (plan ~5 min, hacer
+  ~15 min), en ámbar y con aviso si se pasa; el avance real es la lista de lo último que hizo.
 - Pasos (IPC `agente:plan`, `agente:hacer`): primero un **plan corto** (JSON `entendi/pasos/
   preguntas/herramienta`, sin producir nada) con el botón «Hazlo»; luego **hacer**. Recorte revisa la
   entrega por su cuenta (`revisarYPublicar`: que abra, cuánto dura y mide, 5 fotogramas) y, si falla,

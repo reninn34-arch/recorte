@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import type { Creacion } from '../../../shared/creacion'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
@@ -26,14 +27,41 @@ export function PanelAgente({
   const a = c.agente
   const plan = a?.plan
   const res = a?.resultado
+  // Cuánto lleva trabajando (se cuenta aquí: el proceso principal solo manda lo que hace).
+  const desde = useRef<number | null>(null)
+  const [, latido] = useState(0)
+  useEffect(() => {
+    if (!trabajando) {
+      desde.current = null
+      return
+    }
+    desde.current = Date.now()
+    const reloj = setInterval(() => latido((x) => x + 1), 1000)
+    return () => clearInterval(reloj)
+  }, [trabajando])
+  const lleva = desde.current ? Math.floor((Date.now() - desde.current) / 1000) : 0
+  const mm = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+  // La barra es de TIEMPO, no un porcentaje inventado: se llena hasta lo que suele tardar
+  // este paso y, si se pasa, lo dice. El avance real es la lista de lo que va haciendo.
+  const habitual = c.fase === 'plan' ? 5 * 60 : 15 * 60
+  const pasado = lleva > habitual
 
   if (trabajando) {
     return (
       <div className="estudio-progreso panel-agente">
-        <span>{c.fase === 'plan' ? 'El agente está mirando tus archivos' : 'El agente está trabajando'}</span>
-        <span className="tl-progreso">
-          <span style={{ width: `${Math.round((progreso?.pct ?? 0.05) * 100)}%` }} />
+        <span>
+          {c.fase === 'plan' ? 'El agente está mirando tus archivos' : 'El agente está trabajando'} · lleva {mm(lleva)}
+          <span className="tl-dim"> de ~{habitual / 60} min habituales</span>
         </span>
+        <span className={`tl-progreso ${pasado ? 'is-pasado' : ''}`} title="Tiempo transcurrido frente a lo que suele tardar este paso">
+          <span style={{ width: `${Math.min(100, Math.round((lleva / habitual) * 100))}%` }} />
+        </span>
+        {pasado && (
+          <span className="pa-pasado">
+            Está tardando más de lo habitual. Mira abajo lo último que hizo: si sigue avanzando, espera; si lleva mucho en lo
+            mismo, puedes pararlo.
+          </span>
+        )}
         {a?.registro.length ? (
           <ol className="pa-registro">
             {a.registro.slice(-10).map((l, i) => (
@@ -43,7 +71,11 @@ export function PanelAgente({
         ) : (
           <span className="tl-dim">{progreso?.texto ?? 'Empezando…'}</span>
         )}
-        <span className="tl-dim">Mira los archivos, hace, comprueba sus fotogramas y corrige antes de entregarte. Puede tardar varios minutos.</span>
+        <span className="tl-dim">
+          {c.fase === 'plan'
+            ? 'En el plan solo mira un vistazo de tus archivos y te propone cómo hacerlo.'
+            : 'Hace el video, saca fotogramas para comprobarlo y corrige antes de entregarte.'}
+        </span>
         <button className="btn small ghost" onClick={onParar}>
           Parar
         </button>

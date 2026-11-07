@@ -102,10 +102,21 @@ Eres el editor de video de Recorte. Trabajas en ESTA carpeta y en ninguna otra. 
 - \`entrada/\`: los archivos originales del usuario (no los modifiques ni los borres).
 - \`salida/\`: donde dejas el resultado final.
 - \`revision/\`: donde sacas fotogramas de tu resultado para comprobarlo.
+- \`vistazo/\`: lo que preparó Recorte para mirar rápido (miniaturas, fotogramas, audio y LEEME.txt).
+- \`notas.md\`: tus apuntes del plan (lo que ya viste y mediste).
 - Cualquier otro archivo de trabajo (scripts, composiciones, temporales) va aquí mismo, en esta carpeta.
 
 Herramientas:
 ${(await herramientasDisponibles()).join('\n')}
+
+## Trabaja rápido (como un editor con oficio)
+- Mira primero \`vistazo/\` (léete \`vistazo/LEEME.txt\`): hojas con todas las fotos en miniatura y fotogramas de cada
+  video, y el audio en WAV ligero. Abre un original de \`entrada/\` solo si necesitas un detalle concreto, y entonces
+  recorta esa zona en vez de mirar la foto entera.
+- Una pregunta, una medición corta: un script de segundos (ffprobe, el volumen cada 0,1 s, los golpes, el color de
+  una zona). No recorras videos fotograma a fotograma ni repitas lo que ya mediste.
+- Antes del render completo, genera unos pocos fotogramas clave, míralos y corrige. Renderiza entero solo al final.
+- Si hay \`notas.md\`, léelo: es lo que ya miraste en el plan. Apunta ahí lo que midas (tiempos, colores, zonas).
 
 ## El método (síguelo siempre)
 1. **Entiende el pedido.** ¿Es un video para redes, un recurso para otro editor (sin textos, con croma…),
@@ -306,9 +317,94 @@ export async function trabajarAgente(
 // Los pasos
 // ---------------------------------------------------------------------------
 
-/** Las imágenes que subió el usuario (rutas absolutas), para los agentes que las reciben en el pedido. */
-function imagenesDeEntrada(c: Creacion, carpeta: string): string[] {
-  return c.adjuntos.filter((a) => a.tipo === 'imagen').map((a) => join(carpeta, a.archivo))
+// ---------------------------------------------------------------------------
+// El vistazo: lo que Recorte prepara para que el agente no tenga que abrir los originales
+// ---------------------------------------------------------------------------
+
+const mmss = (s: number): string => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`
+
+/**
+ * `trabajo/vistazo/`: una hoja con todas las fotos en miniatura (fotos.jpg), una hoja de
+ * fotogramas por video (video-NN.jpg), el audio de cada video en WAV ligero (audio-NN.wav,
+ * 16 kHz mono, para medir golpes o transcribir rápido) y LEEME.txt con qué es cada cosa.
+ * Mirar esto cuesta segundos; abrir las fotos de 12 MP y recorrer los videos, minutos.
+ */
+export async function prepararVistazo(c: Creacion, carpeta: string): Promise<string[]> {
+  const trabajo = carpetaTrabajo(carpeta)
+  const dir = join(trabajo, 'vistazo')
+  const leeme = join(dir, 'LEEME.txt')
+  const hojas: string[] = []
+  if (existsSync(leeme)) {
+    for (const n of readdirSync(dir)) if (/^(fotos|video-\d+)\.jpg$/.test(n)) hojas.push(join(dir, n))
+    return hojas
+  }
+  mkdirSync(join(dir, 'tmp'), { recursive: true })
+  const ffmpeg = resolverBinario('ffmpeg') ?? 'ffmpeg'
+  const lineas: string[] = ['Vistazo que preparó Recorte (míralo antes que los originales de entrada/):', '']
+
+  const fotos = c.adjuntos.filter((a) => a.tipo === 'imagen')
+  if (fotos.length) {
+    const lista: string[] = []
+    for (const a of fotos) {
+      // Numeradas seguidas (solo las que salen): una secuencia con huecos se corta ahí.
+      const mini = join(dir, 'tmp', `m${String(lista.length + 1).padStart(2, '0')}.jpg`)
+      // Todas del mismo tamaño y formato de color (las JPG del móvil y las HEIC convertidas
+      // no coinciden, y FFmpeg corta la hoja al primer cambio).
+      const r = await ejecutar(
+        [`"${ffmpeg}"`, '-y', '-v', 'error', '-i', `"${join(carpeta, a.archivo)}"`, '-frames:v', '1', '-vf',
+          `"scale=360:480:force_original_aspect_ratio=decrease,pad=360:480:(ow-iw)/2:(oh-ih)/2:black,format=yuvj420p"`, '-q:v', '4', `"${mini}"`],
+        trabajo,
+        60_000
+      )
+      if (r.codigo === 0 && existsSync(mini)) lista.push(`  ${lista.length + 1}. ${a.archivo.replace(/^trabajo\//, '')} («${a.nombre}»)`)
+    }
+    const columnas = Math.min(4, Math.max(1, lista.length))
+    const filas = Math.ceil(lista.length / columnas)
+    const r = !lista.length ? { codigo: 1 } : await ejecutar(
+      [`"${ffmpeg}"`, '-y', '-v', 'error', '-i', `"${join(dir, 'tmp', 'm%02d.jpg')}"`, '-vf', `tile=${columnas}x${filas}:padding=6:color=white`, '-frames:v', '1', '-q:v', '3', `"${join(dir, 'fotos.jpg')}"`],
+      trabajo,
+      60_000
+    )
+    if (r.codigo === 0) {
+      hojas.push(join(dir, 'fotos.jpg'))
+      lineas.push(`fotos.jpg: las ${lista.length} fotos en miniatura, de izquierda a derecha y de arriba abajo:`, ...lista, '')
+    }
+  }
+
+  for (const [i, a] of c.adjuntos.filter((x) => x.tipo === 'video').entries()) {
+    const n = String(i + 1).padStart(2, '0')
+    const ruta = join(carpeta, a.archivo)
+    let info = ''
+    try {
+      const v = await probeVideo(ruta)
+      info = `${mmss(v.duration)} (${v.duration.toFixed(2)} s), ${v.width}×${v.height}, ${v.hasAudio ? 'con audio' : 'sin audio'}`
+      const fps = Math.max(0.05, 12 / Math.max(1, v.duration))
+      const r = await ejecutar(
+        [`"${ffmpeg}"`, '-y', '-v', 'error', '-i', `"${ruta}"`, '-vf', `fps=${fps.toFixed(4)},scale=240:-2,tile=6x2:padding=4:color=white`, '-frames:v', '1', '-q:v', '4', `"${join(dir, `video-${n}.jpg`)}"`],
+        trabajo,
+        120_000
+      )
+      if (r.codigo === 0) hojas.push(join(dir, `video-${n}.jpg`))
+      if (v.hasAudio) {
+        await ejecutar([`"${ffmpeg}"`, '-y', '-v', 'error', '-i', `"${ruta}"`, '-vn', '-ac', '1', '-ar', '16000', `"${join(dir, `audio-${n}.wav`)}"`], trabajo, 120_000)
+      }
+    } catch {
+      info = 'no se pudo leer'
+    }
+    lineas.push(
+      `video-${n}.jpg: 12 fotogramas repartidos de ${a.archivo.replace(/^trabajo\//, '')} («${a.nombre}») — ${info}.`,
+      ...(existsSync(join(dir, `audio-${n}.wav`)) ? [`audio-${n}.wav: su audio en WAV 16 kHz mono (para medir golpes o transcribir rápido).`] : []),
+      ''
+    )
+  }
+  rmSync(join(dir, 'tmp'), { recursive: true, force: true })
+  writeFileSync(leeme, lineas.join('\n'), 'utf8')
+  return hojas
+}
+
+/** Lo que ven en el pedido los agentes que reciben imágenes (Antigravity): las hojas del vistazo, no los originales. */
+async function imagenesDeEntrada(c: Creacion, carpeta: string): Promise<string[]> {
+  return prepararVistazo(c, carpeta)
 }
 
 function contexto(c: Creacion): string {
@@ -334,14 +430,18 @@ export async function pasoPlan(
   const cmd = config.activa && config.proveedor === 'cli' ? comandoAgentico(config.comandoCli, trabajo) : null
   if (!cmd) throw new Error('El modo agente necesita un agente que trabaje con herramientas (Claude Code, Antigravity, Kimi, Codex u OpenCode). Conéctalo en Inicio.')
   await escribirManual(carpeta, c)
-  const prompt = `Lee AGENTS.md (tu manual) y sigue sus pasos 1 a 3: entiende el pedido, mira de verdad los archivos de entrada/ y mide lo que importe.
-TODAVÍA NO HAGAS EL VIDEO ni crees archivos en salida/.
+  onLinea('Recorte prepara un vistazo de tus archivos')
+  await prepararVistazo(c, carpeta)
+  const prompt = `Lee AGENTS.md (tu manual). Esto es SOLO EL PLAN: un vistazo rápido, de pocos minutos.
+Mira vistazo/LEEME.txt y las hojas de vistazo/ (miniaturas y fotogramas), entiende el pedido y propón cómo lo harás.
+TODAVÍA NO HAGAS EL VIDEO: no midas el audio a fondo, no hagas pruebas ni renders y no crees nada en salida/.
+Escribe en notas.md, en pocas líneas, lo que viste (qué es cada archivo y lo importante de cada uno) para usarlo después.
 
 ${contexto(c)}
 
 Responde SOLO con JSON, sin texto alrededor:
 {"entendi": "qué vas a hacer, en 1-2 frases, con los datos que mediste", "pasos": ["paso corto", "…"], "preguntas": ["solo si de verdad no puedes decidir algo importante"], "herramienta": "FFmpeg | Python + FFmpeg | HyperFrames | …"}`
-  const respuesta = await trabajarAgente(cmd.orden, trabajo, prompt, onLinea, senal, 15 * 60_000, imagenesDeEntrada(c, carpeta))
+  const respuesta = await trabajarAgente(cmd.orden, trabajo, prompt, onLinea, senal, 30 * 60_000, await imagenesDeEntrada(c, carpeta))
   const plan = validarPlan(extraerJson(respuesta))
   if (!plan) throw new Error('El agente no devolvió un plan.')
   return plan
@@ -364,12 +464,13 @@ export async function pasoHacer(
   if (existsSync(resultadoJson)) rmSync(resultadoJson, { force: true })
   const plan = c.agente?.plan
   const hay = c.agente?.resultado
-  const prompt = `Lee AGENTS.md (tu manual) y sigue el método completo, del paso 1 al 7.
+  await prepararVistazo(c, carpeta)
+  const prompt = `Lee AGENTS.md (tu manual) y sigue el método completo, del paso 1 al 7. Empieza por notas.md y vistazo/: no repitas lo que ya viste.
 
 ${contexto(c)}
 ${plan ? `\nEL PLAN QUE EL USUARIO APROBÓ:\n${plan.entendi}\n${plan.pasos.map((p) => `- ${p}`).join('\n')}\n` : ''}${hay ? `\nYA HICISTE UNA VERSIÓN: ${hay.archivo.replace(/^salidas\//, '')} (lo que dijiste: ${hay.resumen}). Tus archivos de trabajo siguen en esta carpeta: parte de ellos y cambia solo lo que se pide, conservando lo que al usuario le gustó.\n` : ''}${pedido ? `\nLO QUE PIDE AHORA EL USUARIO: ${pedido}\n` : ''}
 Cuando termines y lo hayas comprobado mirando los fotogramas, escribe resultado.json como dice el manual.`
-  return trabajarAgente(cmd.orden, trabajo, prompt, onLinea, senal, 40 * 60_000, imagenesDeEntrada(c, carpeta))
+  return trabajarAgente(cmd.orden, trabajo, prompt, onLinea, senal, 40 * 60_000, await imagenesDeEntrada(c, carpeta))
 }
 
 // ---------------------------------------------------------------------------
