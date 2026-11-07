@@ -1,6 +1,6 @@
 appId: com.recorte.app
 productName: Recorte
-copyright: Copyright © 2026
+copyright: Copyright © 2026 reninn34-arch. Todos los derechos reservados.
 
 directories:
   output: release
@@ -17,13 +17,16 @@ extraResources:
 win:
   target:
     - nsis
-  artifactName: ${productName}-${version}-setup.${ext}
+  # Nombre fijo: el botón del README baja siempre la última (releases/latest/download/…).
+  artifactName: ${productName}-Setup.${ext}
 
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   shortcutName: Recorte
   language: "1034"
+  # El instalador muestra la licencia y pide aceptarla.
+  license: LICENSE
 
 # Las versiones se publican en GitHub Releases; la app instalada las busca ahí
 # (electron-updater) y avisa al usuario. Ver docs/ARQUITECTURA.md → «Publicar una versión».
@@ -32,3 +35,4 @@ publish:
   owner: reninn34-arch
   repo: recorte
   releaseType: release
+  # Lo sube el workflow con `gh release create` (ver .github/workflows/release.yml).

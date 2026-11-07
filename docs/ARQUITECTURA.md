@@ -446,8 +446,9 @@ Pendiente: generar B-roll desde el editor (necesita varias fuentes en la timelin
   `electron-updater` (`main/actualizar.ts`): revisa al abrir y cada 4 h, baja en segundo plano y
   muestra «Recorte X está lista · Reiniciar y actualizar» (si no, se instala al cerrar).
 - Para sacar una versión: `npm version patch` (o `minor`) y `git push --follow-tags`. El workflow
-  `.github/workflows/release.yml` compila el instalador en Windows y lo sube con `latest.yml`.
-  A mano: `GH_TOKEN=… npm run publicar`.
+  `.github/workflows/release.yml` compila el instalador en Windows y crea el release con `gh`
+  (instalador, `.blockmap` y `latest.yml`). No uses `--publish always` de electron-builder: sube
+  los archivos en paralelo y puede crear dos releases con la misma etiqueta.
 - El repositorio tiene que ser público para que la app lea los releases sin token.
 - El instalador no está firmado: Windows SmartScreen avisa la primera vez («Más información →
   Ejecutar de todas formas»). Firmarlo requiere un certificado de firma de código.

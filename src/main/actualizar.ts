@@ -8,8 +8,8 @@ import type { EstadoActualizacion } from '../shared/api'
  * segundo plano y avisa al usuario para que reinicie y la instale (si no, se instala
  * sola al cerrar). Solo en la app instalada: en desarrollo no hay nada que actualizar.
  *
- * Para publicar una versión: sube `version` en package.json y corre
- * `npm run publicar` con GH_TOKEN (ver docs/ARQUITECTURA.md).
+ * Para publicar una versión: `npm version patch` y `git push --follow-tags`; el workflow
+ * compila el instalador y crea el release (ver docs/ARQUITECTURA.md).
  */
 
 const { autoUpdater } = electronUpdater

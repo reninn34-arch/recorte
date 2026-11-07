@@ -1,6 +1,9 @@
 # Publica una versión: al subir una etiqueta vX.Y.Z (npm version patch && git push --follow-tags)
 # compila el instalador de Windows y lo sube a GitHub Releases con latest.yml, que es lo
 # que mira la app instalada para avisar de la actualización.
+#
+# electron-builder solo compila; el release lo crea `gh` en un solo paso. (Si electron-builder
+# publica, sube cada archivo en paralelo y puede crear dos releases con la misma etiqueta.)
 name: Publicar versión
 
 on:
@@ -15,14 +18,21 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run typecheck
       - run: npx electron-vite build
-      - run: npx electron-builder --win --publish always
+      - run: npx electron-builder --win --publish never
+      - name: Crear el release con el instalador
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            release/*-Setup.exe release/*-Setup.exe.blockmap release/latest.yml \
+            --title "Recorte ${GITHUB_REF_NAME#v}" \
+            --generate-notes

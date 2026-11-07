@@ -1,0 +1,44 @@
+LICENCIA DE SOFTWARE PROPIETARIO — RECORTE
+
+Copyright (c) 2026 reninn34-arch. Todos los derechos reservados.
+
+Recorte (el «Software») incluye su código fuente, sus instaladores, su documentación,
+su diseño, sus textos y sus recursos gráficos. El Software es propiedad de su autor y
+está protegido por las leyes de derechos de autor y los tratados internacionales.
+
+1. CÓDIGO VISIBLE NO ES CÓDIGO LIBRE
+   Que el código fuente se pueda ver en este repositorio no concede ninguna licencia de
+   uso, copia ni modificación. Solo se permite leerlo en GitHub con fines informativos.
+
+2. USO DEL PROGRAMA
+   Se permite descargar el instalador publicado por el autor en los «Releases» de este
+   repositorio e instalarlo para uso personal, bajo los términos de esta licencia. El
+   autor puede cambiar estas condiciones, o empezar a cobrar por versiones futuras, en
+   cualquier momento.
+
+3. LO QUE NO ESTÁ PERMITIDO sin un permiso escrito del autor:
+   a) Copiar, reproducir o redistribuir el Software, o cualquier parte de él.
+   b) Modificarlo, adaptarlo, traducirlo o crear obras derivadas.
+   c) Venderlo, alquilarlo, sublicenciarlo, ofrecerlo como servicio o usarlo dentro de
+      otro producto o servicio comercial.
+   d) Descompilarlo o hacerle ingeniería inversa, salvo donde la ley lo permita de forma
+      expresa aunque se pacte lo contrario.
+   e) Quitar u ocultar los avisos de derechos de autor, las marcas o esta licencia.
+
+4. COMPONENTES DE TERCEROS
+   El Software usa componentes de terceros (por ejemplo Electron, React, FFmpeg, y los
+   logotipos listados en src/renderer/src/assets/logos/LICENCIAS.md). Cada uno conserva
+   su propia licencia, que sigue aplicándose a ese componente. Las marcas de terceros
+   pertenecen a sus dueños.
+
+5. SIN GARANTÍA
+   El Software se entrega «tal cual», sin garantías de ningún tipo. En la medida en que
+   la ley lo permita, el autor no responde por daños, pérdida de datos ni pérdida de
+   ingresos derivados de su uso.
+
+6. TERMINACIÓN
+   Esta licencia termina automáticamente si se incumple cualquiera de sus condiciones.
+   En ese caso hay que dejar de usar el Software y borrar todas sus copias.
+
+Para pedir permisos, licencias comerciales o colaborar, contacta al autor a través de
+https://github.com/reninn34-arch.
