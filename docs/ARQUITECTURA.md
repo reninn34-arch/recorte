@@ -548,3 +548,11 @@ HyperFrames). En **Agente**, el agente conectado trabaja como un editor con herr
   comprobaciones). Prueba: `npm run prueba:modo-agente` (con un «Claude» de prueba en el PATH).
 - Probado de punta a punta con el agente de prueba. Con agentes reales: pendiente (la sesión de
   Claude Code de la máquina de desarrollo estaba caducada).
+
+## Archivos que sube el usuario: zip y HEIC
+
+`main/archivos.ts` (`prepararArchivos`) prepara los adjuntos de Crear con IA (guiado y agente):
+los `.zip` se leen en la propia app (stored/deflate, sin ZIP64; el `tar` de Windows falla con
+carpetas que terminan en espacio, como las de Google Drive) y se sacan solo fotos y videos con los
+nombres limpios; las fotos HEIC/HEIF se pasan a JPG con FFmpeg. Lo que no sirve se avisa en el
+primer mensaje de la creación.

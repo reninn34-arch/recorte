@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import {
   duracionEnVoz,
@@ -22,6 +22,7 @@ import { crearPortada } from './render'
 import { probeVideo } from './ffmpeg'
 import { pedirFlow } from './flow'
 import { copiarEntrada } from './modoagente'
+import { EXT_IMAGEN, EXT_VIDEO, EXTENSIONES_SUBIBLES, prepararArchivos } from './archivos'
 import { generarImagenChatGPT } from './imagenchatgpt'
 import { MODELO_CHATGPT } from '../shared/flow'
 import { bloqueEstiloGuion, resumenMaterial } from '../shared/estilo'
@@ -44,9 +45,8 @@ export interface ConfigAgente {
   api?: ConfigIA
 }
 
-const EXT_IMAGEN = ['.jpg', '.jpeg', '.png', '.webp']
-const EXT_VIDEO = ['.mp4', '.mov', '.webm', '.mkv', '.m4v']
-export const EXTENSIONES_ADJUNTOS = [...EXT_IMAGEN, ...EXT_VIDEO].map((e) => e.slice(1))
+/** Lo que se puede elegir al adjuntar: fotos (también HEIC del iPhone), videos y .zip. */
+export const EXTENSIONES_ADJUNTOS = EXTENSIONES_SUBIBLES
 
 export class Creaciones {
   readonly raiz: string
@@ -109,9 +109,12 @@ export class Creaciones {
     }
 
     const adjuntos: AdjuntoCreacion[] = []
+    // Los .zip se abren y las fotos HEIC/HEIF del iPhone pasan a JPG; lo que no sirve se avisa.
+    const preparando = join(carpeta, '.preparando')
+    const { listos, descartados } = await prepararArchivos(p.adjuntos, preparando)
     // Modo agente: los archivos van tal cual a trabajo/entrada (sin convertir: color y calidad exactos).
-    if (p.modo === 'agente') adjuntos.push(...copiarEntrada(p.adjuntos, carpeta))
-    for (const [i, ruta] of (p.modo === 'agente' ? [] : p.adjuntos.slice(0, 12)).entries()) {
+    if (p.modo === 'agente') adjuntos.push(...copiarEntrada(listos, carpeta))
+    for (const [i, ruta] of (p.modo === 'agente' ? [] : listos.slice(0, 12)).entries()) {
       if (!existsSync(ruta)) continue
       const ext = extname(ruta).toLowerCase()
       if (EXT_IMAGEN.includes(ext)) {
@@ -137,6 +140,8 @@ export class Creaciones {
       }
     }
 
+    rmSync(preparando, { recursive: true, force: true })
+
     const nombre = p.peticion.replace(/\s+/g, ' ').trim().slice(0, 60) || 'Video con IA'
     const ahora = Date.now()
     return this.guardar({
@@ -150,7 +155,9 @@ export class Creaciones {
       fase: p.modo === 'agente' ? 'plan' : referencia ? 'estilo' : 'guion',
       ...(p.modo === 'agente' ? { modo: 'agente' as const, agente: { registro: [], rondas: 0 } } : {}),
       ...(referencia ? { referencia } : {}),
-      mensajes: [],
+      mensajes: descartados.length
+        ? [{ id: randomUUID(), rol: 'agente' as const, texto: `No pude usar: ${descartados.join('; ')}.`, fecha: Date.now(), error: true }]
+        : [],
       version: 0,
       ...(p.tareas && (p.tareas.guion || p.tareas.video) ? { tareas: p.tareas } : {}),
       ...(p.flow && (p.flow.imagenes || p.flow.videos)

@@ -56,7 +56,7 @@ export function copiarEntrada(rutas: string[], carpeta: string): { archivo: stri
   mkdirSync(entrada, { recursive: true })
   mkdirSync(join(carpetaTrabajo(carpeta), 'salida'), { recursive: true })
   const copiados: { archivo: string; nombre: string; tipo: 'imagen' | 'video' }[] = []
-  for (const [i, ruta] of rutas.slice(0, 20).entries()) {
+  for (const [i, ruta] of rutas.slice(0, 30).entries()) {
     if (!existsSync(ruta)) continue
     const ext = extname(ruta).toLowerCase()
     const tipo = EXT_VIDEO.includes(ext) ? 'video' : EXT_IMAGEN.includes(ext) ? 'imagen' : null

@@ -144,7 +144,7 @@ export function CajaCrear({
 
   const conectados = agentes.lista.filter((a) => a.conectado && a.instalado)
   const activo = agentes.activo
-  const hayFotos = adjuntos.some((r) => /\.(jpe?g|png|webp)$/i.test(r))
+  const hayFotos = adjuntos.some((r) => /\.(jpe?g|png|webp|heic|heif|zip)$/i.test(r))
 
   async function adjuntar() {
     const rutas = await window.recorte.elegirAdjuntos()

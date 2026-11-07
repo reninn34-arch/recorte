@@ -24,6 +24,19 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.8',
+    fecha: '2026-11-07',
+    resumen: 'Sube tus fotos del iPhone (HEIC) y carpetas comprimidas (.zip) directamente.',
+    novedades: [
+      {
+        icono: 'paperclip',
+        titulo: 'Zip y fotos HEIC',
+        texto:
+          'En Crear con IA ya puedes adjuntar un .zip (se abre y se usan sus fotos y videos) y fotos HEIC/HEIF del iPhone (se pasan a JPG solas). Si algo no se puede usar, te lo dice en el chat.'
+      }
+    ]
+  },
+  {
     version: '0.1.7',
     fecha: '2026-11-07',
     resumen: 'Antigravity también trabaja en modo agente, y las imágenes generadas ya no vienen elegidas por defecto.',
