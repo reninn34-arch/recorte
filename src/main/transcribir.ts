@@ -48,6 +48,20 @@ export async function transcribir(
   carpeta: string,
   onProgreso: (p: Progreso) => void
 ): Promise<ResultadoTranscripcion> {
+  if (!existsSync(proyecto.source.path)) {
+    return { ok: false, error: 'El video original ya no está en esa ruta. Vuelve a importarlo.' }
+  }
+  return transcribirArchivo(proyecto.source.path, join(carpeta, 'transcripcion.json'), (pct, texto) =>
+    onProgreso({ id: proyecto.id, fase: 'transcripcion', pct, texto })
+  )
+}
+
+/** Transcribe cualquier audio o video con tiempos por palabra (lo usa también la voz de una creación). */
+export async function transcribirArchivo(
+  ruta: string,
+  salida: string,
+  onProgreso: (pct: number, texto?: string) => void
+): Promise<ResultadoTranscripcion> {
   const python = await buscarPython()
   if (!python) {
     return { ok: false, error: 'No encontré Python. Instala Python 3.10 o superior y vuelve a intentarlo.' }
@@ -57,25 +71,12 @@ export async function transcribir(
   if (!existsSync(script)) {
     return { ok: false, error: `Falta el script de transcripción en ${script}.` }
   }
+  if (!existsSync(ruta)) return { ok: false, error: 'No encuentro el archivo a transcribir.' }
 
-  if (!existsSync(proyecto.source.path)) {
-    return { ok: false, error: 'El video original ya no está en esa ruta. Vuelve a importarlo.' }
-  }
-
-  const salida = join(carpeta, 'transcripcion.json')
   const modelo = process.env.RECORTE_MODELO ?? 'small'
-  const args = [
-    ...python.args,
-    script,
-    proyecto.source.path,
-    salida,
-    '--modelo',
-    modelo,
-    '--ffmpeg',
-    rutaFfmpeg()
-  ]
+  const args = [...python.args, script, ruta, salida, '--modelo', modelo, '--ffmpeg', rutaFfmpeg()]
 
-  onProgreso({ id: proyecto.id, fase: 'transcripcion', pct: 0.01, texto: 'Preparando la transcripción' })
+  onProgreso(0.01, 'Preparando la transcripción')
 
   return new Promise((resolve) => {
     const hijo = spawn(python.cmd, args, {
@@ -94,14 +95,7 @@ export async function transcribir(
 
     const procesarLinea = (linea: string) => {
       const progreso = /^PROGRESO\s+([\d.]+)\s*(.*)$/.exec(linea)
-      if (progreso) {
-        onProgreso({
-          id: proyecto.id,
-          fase: 'transcripcion',
-          pct: Math.min(Number(progreso[1]), 1),
-          texto: progreso[2] || undefined
-        })
-      }
+      if (progreso) onProgreso(Math.min(Number(progreso[1]), 1), progreso[2] || undefined)
       if (linea.startsWith('ERROR ')) error = linea.slice(6).trim()
     }
 
@@ -115,16 +109,8 @@ export async function transcribir(
     hijo.stdout.on('data', (buf) => leer(buf.toString('utf8')))
     hijo.stderr.on('data', (buf) => {
       // faster-whisper escribe ahí el progreso de la descarga del modelo.
-      const texto = buf.toString('utf8')
-      const descarga = /(\d+)%/.exec(texto)
-      if (descarga) {
-        onProgreso({
-          id: proyecto.id,
-          fase: 'transcripcion',
-          pct: Math.min(0.15, Number(descarga[1]) / 100 * 0.15),
-          texto: 'Descargando el modelo de voz'
-        })
-      }
+      const descarga = /(\d+)%/.exec(buf.toString('utf8'))
+      if (descarga) onProgreso(Math.min(0.15, (Number(descarga[1]) / 100) * 0.15), 'Descargando el modelo de voz')
     })
 
     hijo.on('error', (e) => terminar({ ok: false, error: e.message }))
@@ -140,13 +126,10 @@ export async function transcribir(
           language?: string
           segments?: TranscriptSegment[]
         }
-        onProgreso({ id: proyecto.id, fase: 'transcripcion', pct: 1, texto: 'Transcripción lista' })
+        onProgreso(1, 'Transcripción lista')
         terminar({ ok: true, transcript: datos.segments ?? [], language: datos.language })
       } catch (e) {
-        terminar({
-          ok: false,
-          error: `No pude leer la transcripción: ${e instanceof Error ? e.message : String(e)}`
-        })
+        terminar({ ok: false, error: `No pude leer la transcripción: ${e instanceof Error ? e.message : String(e)}` })
       }
     })
   })

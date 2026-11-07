@@ -1,0 +1,471 @@
+import {
+  ajustarClip,
+  ajustesDe,
+  anadirTexto,
+  cambiarMusica,
+  ponerMusica,
+  borrarClip,
+  borrarTexto,
+  borrarTramo,
+  cambiarTexto,
+  dividir,
+  duracionTimeline,
+  FUENTE_PRINCIPAL,
+  moverClip,
+  nuevoId,
+  recortarClip,
+  timelineDesdeCortes,
+  tramos,
+  type PosicionTexto,
+  type Timeline
+} from './timeline'
+import { INSTRUCCIONES_CRITERIO } from './gustos'
+import type { TranscriptSegment } from './types'
+
+/**
+ * El chat con el agente que edita. El agente no toca la timeline directamente:
+ * responde un mensaje y una lista de operaciones (este contrato). Recorte las valida y
+ * las aplica en la interfaz como un solo paso de deshacer. Así cualquier agente —CLI o
+ * API— edita con las mismas herramientas que el usuario, y todo se puede revertir.
+ */
+
+export type OperacionTL =
+  | { op: 'borrar_tramo'; desde: number; hasta: number }
+  | { op: 'quitar_pausas'; minimo?: number }
+  | { op: 'dividir'; en: number }
+  | { op: 'borrar_clip'; clip: number }
+  | { op: 'mover_clip'; clip: number; a: number }
+  | { op: 'recortar_clip'; clip: number; entrada?: number; salida?: number }
+  | { op: 'anadir_texto'; inicio: number; duracion?: number; texto: string; posicion?: PosicionTexto }
+  | { op: 'cambiar_texto'; texto_n: number; texto?: string; inicio?: number; duracion?: number; posicion?: PosicionTexto }
+  | { op: 'borrar_texto'; texto_n: number }
+  | { op: 'reconstruir'; cortes: { entrada: number; salida: number }[] }
+  | { op: 'zoom'; clip?: number; zoom: number }
+  | { op: 'color'; clip?: number; brillo?: number; contraste?: number; saturacion?: number }
+  | { op: 'musica'; volumen?: number; ducking?: boolean }
+  | { op: 'quitar_musica' }
+
+export interface MensajeChat {
+  id: string
+  rol: 'usuario' | 'agente'
+  texto: string
+  fecha: number
+  /** Lo que el agente cambió, en palabras, para el historial del chat. */
+  cambios?: string[]
+  /** Operaciones que no se pudieron aplicar. */
+  fallos?: string[]
+  error?: boolean
+  /** Contexto del editor al escribir (cabezal, elegido). */
+  referencia?: string
+  /** La timeline justo antes de este mensaje del usuario: para volver a ese punto. */
+  antes?: Timeline
+  /** El usuario paró al agente en este turno. */
+  parado?: boolean
+  /** Siguientes pasos que propone el agente (botones que el usuario puede elegir). */
+  propuestas?: string[]
+  /** Gustos que el agente aprendió en este turno. */
+  aprendido?: string[]
+}
+
+export const MAX_MENSAJES = 60
+
+/** Cuánta pausa se deja antes y después de cada palabra al quitar silencios. */
+const MARGEN_PAUSA = 0.12
+
+function mmss(s: number): string {
+  const t = Math.max(0, s)
+  const m = Math.floor(t / 60)
+  const r = t - m * 60
+  return `${m}:${r.toFixed(1).padStart(4, '0')}`
+}
+
+function num(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+/** Las pausas largas de la voz, en tiempo de timeline, listas para borrar. */
+export function pausasEnTimeline(tl: Timeline, transcript: TranscriptSegment[] | undefined, minimo = 0.6): [number, number][] {
+  if (!transcript?.length) return []
+  const pausas: [number, number][] = []
+  for (const tr of tramos(tl)) {
+    if (tr.clip.fuente !== FUENTE_PRINCIPAL) continue
+    const palabras = transcript
+      .flatMap((s) => s.words)
+      .filter((w) => w.end > tr.clip.entrada && w.start < tr.clip.salida)
+      .sort((a, b) => a.start - b.start)
+    if (palabras.length === 0) continue
+    // Huecos: antes de la primera palabra, entre palabras y después de la última.
+    const bordes: [number, number][] = [[tr.clip.entrada, palabras[0].start]]
+    for (let i = 1; i < palabras.length; i++) bordes.push([palabras[i - 1].end, palabras[i].start])
+    bordes.push([palabras[palabras.length - 1].end, tr.clip.salida])
+    bordes.forEach(([a, b], k) => {
+      // En los bordes del clip no hace falta respiro: el silencio se quita entero.
+      const desde = k === 0 ? tr.clip.entrada : Math.max(a + MARGEN_PAUSA, tr.clip.entrada)
+      const hasta = k === bordes.length - 1 ? tr.clip.salida : Math.min(b - MARGEN_PAUSA, tr.clip.salida)
+      if (b - a >= minimo && hasta - desde > 0.05) {
+        pausas.push([tr.inicio + desde - tr.clip.entrada, tr.inicio + hasta - tr.clip.entrada])
+      }
+    })
+  }
+  return pausas
+}
+
+/** Valida la forma de lo que devolvió el agente. Lo que no encaja se descarta. */
+export function validarOperaciones(crudo: unknown): OperacionTL[] {
+  if (!Array.isArray(crudo)) return []
+  const ops: OperacionTL[] = []
+  for (const o of crudo.slice(0, 200)) {
+    if (!o || typeof o !== 'object') continue
+    const x = o as Record<string, unknown>
+    const pos = (v: unknown): PosicionTexto | undefined => (v === 'arriba' || v === 'centro' || v === 'abajo' ? v : undefined)
+    switch (x.op) {
+      case 'borrar_tramo': {
+        const d = num(x.desde), h = num(x.hasta)
+        if (d !== null && h !== null) ops.push({ op: 'borrar_tramo', desde: d, hasta: h })
+        break
+      }
+      case 'quitar_pausas':
+        ops.push({ op: 'quitar_pausas', minimo: num(x.minimo) ?? undefined })
+        break
+      case 'dividir': {
+        const en = num(x.en)
+        if (en !== null) ops.push({ op: 'dividir', en })
+        break
+      }
+      case 'borrar_clip': {
+        const c = num(x.clip)
+        if (c !== null) ops.push({ op: 'borrar_clip', clip: c })
+        break
+      }
+      case 'mover_clip': {
+        const c = num(x.clip), a = num(x.a)
+        if (c !== null && a !== null) ops.push({ op: 'mover_clip', clip: c, a })
+        break
+      }
+      case 'recortar_clip': {
+        const c = num(x.clip)
+        if (c !== null) ops.push({ op: 'recortar_clip', clip: c, entrada: num(x.entrada) ?? undefined, salida: num(x.salida) ?? undefined })
+        break
+      }
+      case 'anadir_texto': {
+        const i = num(x.inicio)
+        if (i !== null && typeof x.texto === 'string' && x.texto.trim()) {
+          ops.push({ op: 'anadir_texto', inicio: i, duracion: num(x.duracion) ?? undefined, texto: x.texto.slice(0, 200), posicion: pos(x.posicion) })
+        }
+        break
+      }
+      case 'cambiar_texto': {
+        const n = num(x.texto_n)
+        if (n !== null) {
+          ops.push({
+            op: 'cambiar_texto',
+            texto_n: n,
+            texto: typeof x.texto === 'string' ? x.texto.slice(0, 200) : undefined,
+            inicio: num(x.inicio) ?? undefined,
+            duracion: num(x.duracion) ?? undefined,
+            posicion: pos(x.posicion)
+          })
+        }
+        break
+      }
+      case 'borrar_texto': {
+        const n = num(x.texto_n)
+        if (n !== null) ops.push({ op: 'borrar_texto', texto_n: n })
+        break
+      }
+      case 'zoom': {
+        const z = num(x.zoom)
+        if (z !== null) ops.push({ op: 'zoom', clip: num(x.clip) ?? undefined, zoom: z })
+        break
+      }
+      case 'color': {
+        const o2 = { op: 'color' as const, clip: num(x.clip) ?? undefined, brillo: num(x.brillo) ?? undefined, contraste: num(x.contraste) ?? undefined, saturacion: num(x.saturacion) ?? undefined }
+        if (o2.brillo !== undefined || o2.contraste !== undefined || o2.saturacion !== undefined) ops.push(o2)
+        break
+      }
+      case 'musica': {
+        const v = num(x.volumen)
+        const d = typeof x.ducking === 'boolean' ? x.ducking : undefined
+        if (v !== null || d !== undefined) ops.push({ op: 'musica', volumen: v ?? undefined, ducking: d })
+        break
+      }
+      case 'quitar_musica':
+        ops.push({ op: 'quitar_musica' })
+        break
+      case 'reconstruir': {
+        if (!Array.isArray(x.cortes)) break
+        const cortes = x.cortes
+          .map((c) => ({ entrada: num((c as Record<string, unknown>)?.entrada), salida: num((c as Record<string, unknown>)?.salida) }))
+          .filter((c): c is { entrada: number; salida: number } => c.entrada !== null && c.salida !== null)
+        if (cortes.length) ops.push({ op: 'reconstruir', cortes })
+        break
+      }
+    }
+  }
+  return ops
+}
+
+/**
+ * Aplica las operaciones en orden; cada una ve la timeline que dejó la anterior.
+ * Los `borrar_tramo` seguidos se aplican del último al primero, así sus tiempos se
+ * refieren todos a la timeline de antes y no se corren entre sí.
+ */
+export function aplicarOperaciones(
+  inicial: Timeline,
+  ops: OperacionTL[],
+  contexto: { duracionFuente: number; transcript?: TranscriptSegment[] }
+): { timeline: Timeline; cambios: string[]; fallos: string[] } {
+  let tl = inicial
+  const cambios: string[] = []
+  const fallos: string[] = []
+  const lista = [...ops]
+
+  for (let i = 0; i < lista.length; i++) {
+    // Agrupa una racha de borrar_tramo y la aplica de atrás hacia delante.
+    if (lista[i].op === 'borrar_tramo') {
+      let j = i
+      while (j < lista.length && lista[j].op === 'borrar_tramo') j++
+      const tramosBorrar = (lista.slice(i, j) as Extract<OperacionTL, { op: 'borrar_tramo' }>[])
+        .map((o) => [Math.min(o.desde, o.hasta), Math.max(o.desde, o.hasta)] as const)
+        .sort((a, b) => b[0] - a[0])
+      let total = 0
+      for (const [a, b] of tramosBorrar) {
+        const antes = duracionTimeline(tl)
+        tl = borrarTramo(tl, a, b)
+        total += antes - duracionTimeline(tl)
+      }
+      if (total > 0) cambios.push(tramosBorrar.length === 1 ? `Quité ${mmss(tramosBorrar[0][0])}–${mmss(tramosBorrar[0][1])}` : `Quité ${tramosBorrar.length} tramos (${total.toFixed(1)} s)`)
+      else fallos.push('Los tramos a borrar no caían dentro de la timeline.')
+      i = j - 1
+      continue
+    }
+
+    const o = lista[i]
+    const clipEn = (n: number) => tl.clips[Math.round(n) - 1]
+    const textoEn = (n: number) => tl.textos[Math.round(n) - 1]
+
+    switch (o.op) {
+      case 'quitar_pausas': {
+        const pausas = pausasEnTimeline(tl, contexto.transcript, Math.max(0.3, o.minimo ?? 0.6))
+        if (!pausas.length) {
+          fallos.push(contexto.transcript?.length ? 'No encontré pausas largas.' : 'Para quitar pausas hace falta transcribir el video.')
+          break
+        }
+        const antes = duracionTimeline(tl)
+        for (const [a, b] of [...pausas].sort((x, y) => y[0] - x[0])) tl = borrarTramo(tl, a, b)
+        cambios.push(`Quité ${pausas.length} pausas (${(antes - duracionTimeline(tl)).toFixed(1)} s)`)
+        break
+      }
+      case 'dividir': {
+        const nueva = dividir(tl, o.en)
+        if (nueva === tl) fallos.push(`No pude dividir en ${mmss(o.en)}.`)
+        else cambios.push(`Dividí en ${mmss(o.en)}`)
+        tl = nueva
+        break
+      }
+      case 'borrar_clip': {
+        const c = clipEn(o.clip)
+        if (!c) fallos.push(`No existe el clip ${o.clip}.`)
+        else {
+          tl = borrarClip(tl, c.id)
+          cambios.push(`Borré el clip ${o.clip}`)
+        }
+        break
+      }
+      case 'mover_clip': {
+        const c = clipEn(o.clip)
+        if (!c) fallos.push(`No existe el clip ${o.clip}.`)
+        else {
+          tl = moverClip(tl, c.id, Math.round(o.a) - 1)
+          cambios.push(`Moví el clip ${o.clip} a la posición ${o.a}`)
+        }
+        break
+      }
+      case 'recortar_clip': {
+        const c = clipEn(o.clip)
+        if (!c) {
+          fallos.push(`No existe el clip ${o.clip}.`)
+          break
+        }
+        if (o.entrada !== undefined) tl = recortarClip(tl, c.id, 'entrada', o.entrada, contexto.duracionFuente)
+        if (o.salida !== undefined) tl = recortarClip(tl, c.id, 'salida', o.salida, contexto.duracionFuente)
+        cambios.push(`Recorté el clip ${o.clip}`)
+        break
+      }
+      case 'anadir_texto': {
+        const r = anadirTexto(tl, o.inicio, o.texto)
+        if (r.timeline === tl) {
+          fallos.push('No pude añadir el texto: la timeline está vacía.')
+          break
+        }
+        tl = cambiarTexto(r.timeline, r.id, { duracion: o.duracion ?? 3, posicion: o.posicion ?? 'abajo' })
+        cambios.push(`Añadí el texto «${o.texto}» en ${mmss(o.inicio)}`)
+        break
+      }
+      case 'cambiar_texto': {
+        const t = textoEn(o.texto_n)
+        if (!t) {
+          fallos.push(`No existe el texto ${o.texto_n}.`)
+          break
+        }
+        const cambio: Parameters<typeof cambiarTexto>[2] = {}
+        if (o.texto !== undefined) cambio.texto = o.texto
+        if (o.inicio !== undefined) cambio.inicio = o.inicio
+        if (o.duracion !== undefined) cambio.duracion = o.duracion
+        if (o.posicion !== undefined) cambio.posicion = o.posicion
+        tl = cambiarTexto(tl, t.id, cambio)
+        cambios.push(`Cambié el texto ${o.texto_n}`)
+        break
+      }
+      case 'borrar_texto': {
+        const t = textoEn(o.texto_n)
+        if (!t) fallos.push(`No existe el texto ${o.texto_n}.`)
+        else {
+          tl = borrarTexto(tl, t.id)
+          cambios.push(`Borré el texto «${t.texto}»`)
+        }
+        break
+      }
+      case 'zoom':
+      case 'color': {
+        const destino = o.clip === undefined ? null : clipEn(o.clip)
+        if (o.clip !== undefined && !destino) {
+          fallos.push(`No existe el clip ${o.clip}.`)
+          break
+        }
+        const cambio =
+          o.op === 'zoom'
+            ? { zoom: o.zoom }
+            : {
+                ...(o.brillo !== undefined ? { brillo: o.brillo } : {}),
+                ...(o.contraste !== undefined ? { contraste: o.contraste } : {}),
+                ...(o.saturacion !== undefined ? { saturacion: o.saturacion } : {})
+              }
+        tl = ajustarClip(tl, destino ? destino.id : null, cambio)
+        const donde = destino ? `al clip ${o.clip}` : 'a todos los clips'
+        if (o.op === 'zoom') cambios.push(`Puse zoom ${Math.round(Math.min(2, Math.max(1, o.zoom)) * 100)} % ${donde}`)
+        else cambios.push(o.saturacion === 0 ? `Pasé a blanco y negro ${donde.replace('al ', 'el ').replace('a todos', 'todos')}` : `Ajusté el color ${donde}`)
+        break
+      }
+      case 'musica': {
+        if (!tl.musica) {
+          fallos.push('Todavía no hay música: añádela con el botón «Música» de la timeline.')
+          break
+        }
+        tl = cambiarMusica(tl, { ...(o.volumen !== undefined ? { volumen: o.volumen } : {}), ...(o.ducking !== undefined ? { ducking: o.ducking } : {}) })
+        const partes: string[] = []
+        if (o.volumen !== undefined) partes.push(`volumen ${Math.round(tl.musica!.volumen * 100)} %`)
+        if (o.ducking !== undefined) partes.push(o.ducking ? 'baja con la voz' : 'volumen fijo')
+        cambios.push(`Música: ${partes.join(', ')}`)
+        break
+      }
+      case 'quitar_musica': {
+        if (!tl.musica) break
+        tl = ponerMusica(tl, undefined)
+        cambios.push('Quité la música')
+        break
+      }
+      case 'reconstruir': {
+        const cortes = o.cortes
+          .map((c) => ({ start: Math.max(0, Math.min(c.entrada, c.salida)), end: Math.min(contexto.duracionFuente, Math.max(c.entrada, c.salida)) }))
+          .filter((c) => c.end - c.start >= 0.1)
+        if (!cortes.length) {
+          fallos.push('Los cortes del material no eran válidos.')
+          break
+        }
+        const nueva = timelineDesdeCortes(cortes)
+        // Los rótulos que sigan cabiendo se conservan.
+        const total = duracionTimeline(nueva)
+        tl = { ...nueva, textos: tl.textos.filter((t) => t.inicio < total).map((t) => ({ ...t, id: t.id || nuevoId('texto') })) }
+        cambios.push(`Armé la edición con ${cortes.length} ${cortes.length === 1 ? 'corte' : 'cortes'} del material (${total.toFixed(1)} s)`)
+        break
+      }
+    }
+  }
+  return { timeline: tl, cambios, fallos }
+}
+
+/** Lo que el agente ve de la timeline: clips, textos y la voz en tiempo de timeline. */
+export function describirTimelineParaAgente(
+  tl: Timeline,
+  transcript: TranscriptSegment[] | undefined,
+  duracionFuente: number,
+  limite = 30_000
+): string {
+  const lineas: string[] = []
+  lineas.push(`Material fuente: ${duracionFuente.toFixed(1)} s. Timeline: ${duracionTimeline(tl).toFixed(1)} s.`)
+  lineas.push('Clips (pista de video, en orden, sin huecos):')
+  for (const tr of tramos(tl)) {
+    const a = ajustesDe(tr.clip)
+    const extra = tr.clip.ajustes
+      ? ` [zoom ${a.zoom}, brillo ${a.brillo}, contraste ${a.contraste}, saturación ${a.saturacion}]`
+      : ''
+    lineas.push(`  ${tr.indice + 1}. timeline ${tr.inicio.toFixed(2)}–${tr.fin.toFixed(2)} ← fuente ${tr.clip.entrada.toFixed(2)}–${tr.clip.salida.toFixed(2)}${extra}`)
+  }
+  if (tl.clips.length === 0) lineas.push('  (vacía)')
+  lineas.push('Textos (rótulos):')
+  tl.textos.forEach((t, i) => lineas.push(`  ${i + 1}. ${t.inicio.toFixed(2)}–${(t.inicio + t.duracion).toFixed(2)} ${t.posicion}: «${t.texto}»`))
+  if (tl.textos.length === 0) lineas.push('  (ninguno)')
+  lineas.push(
+    tl.musica
+      ? `Música: «${tl.musica.nombre}», volumen ${tl.musica.volumen.toFixed(2)}, ${tl.musica.ducking ? 'baja cuando hay voz' : 'volumen fijo'}.`
+      : 'Música: ninguna (solo el usuario puede elegir el archivo, con el botón «Música»).'
+  )
+
+  if (transcript?.length) {
+    // La voz en tiempo de timeline, por frases, con los tiempos de fuente para reconstruir.
+    lineas.push('Voz dentro de la timeline [timeline | fuente] texto:')
+    const voz: string[] = []
+    for (const tr of tramos(tl)) {
+      for (const seg of transcript) {
+        if (seg.end <= tr.clip.entrada || seg.start >= tr.clip.salida) continue
+        const ini = Math.max(seg.start, tr.clip.entrada)
+        const fin = Math.min(seg.end, tr.clip.salida)
+        const palabras = seg.words.filter((w) => w.end > ini && w.start < fin).map((w) => w.text)
+        const texto = (palabras.length ? palabras.join(' ') : seg.text).replace(/\s+/g, ' ').trim()
+        if (texto) voz.push(`  [${(tr.inicio + ini - tr.clip.entrada).toFixed(2)} | ${ini.toFixed(2)}–${fin.toFixed(2)}] ${texto}`)
+      }
+    }
+    lineas.push(...voz)
+    // Lo que quedó fuera de la timeline también sirve para reconstruir.
+    const dentro = (t: number) => tl.clips.some((c) => t >= c.entrada && t < c.salida)
+    const fuera = transcript.filter((s) => !dentro((s.start + s.end) / 2))
+    if (fuera.length) {
+      lineas.push('Voz del material que NO está en la timeline [fuente] texto:')
+      for (const s of fuera) lineas.push(`  [${s.start.toFixed(2)}–${s.end.toFixed(2)}] ${s.text.replace(/\s+/g, ' ').trim()}`)
+    }
+  } else {
+    lineas.push('El video aún no está transcrito: no sabes qué se dice.')
+  }
+
+  const texto = lineas.join('\n')
+  return texto.length > limite ? `${texto.slice(0, limite)}\n… (recortado)` : texto
+}
+
+export const INSTRUCCIONES_AGENTE = `Eres el editor de video de Recorte. Editas la timeline del usuario hablando con él en español.
+Respondes SOLO con un objeto JSON, sin texto alrededor:
+{"mensaje": "lo que le dices al usuario, breve", "operaciones": [ ... ]}
+
+Operaciones disponibles (los tiempos van en segundos con decimales):
+- {"op":"borrar_tramo","desde":T,"hasta":T}  borra un tramo de la TIMELINE (lo de después se corre). Varios seguidos se aplican del último al primero, así que usa los tiempos de la timeline actual.
+- {"op":"quitar_pausas","minimo":0.6}  quita los silencios de la voz más largos que "minimo" (Recorte los calcula con precisión con la transcripción; úsala en vez de calcular tú las pausas).
+- {"op":"dividir","en":T}  divide el clip bajo el segundo T de la timeline.
+- {"op":"borrar_clip","clip":N}  borra el clip N (numerados desde 1).
+- {"op":"mover_clip","clip":N,"a":M}  lleva el clip N a la posición M.
+- {"op":"recortar_clip","clip":N,"entrada":F,"salida":F}  cambia los bordes del clip N en tiempo de FUENTE (uno o ambos).
+- {"op":"anadir_texto","inicio":T,"duracion":S,"texto":"…","posicion":"arriba|centro|abajo"}  añade un rótulo en tiempo de timeline.
+- {"op":"cambiar_texto","texto_n":N, "texto":"…", "inicio":T, "duracion":S, "posicion":"…"}  cambia el rótulo N.
+- {"op":"borrar_texto","texto_n":N}
+- {"op":"reconstruir","cortes":[{"entrada":F,"salida":F}, …]}  rehace la pista de video con estos tramos de la FUENTE, en este orden (para resúmenes, versiones cortas o reordenar por contenido). Los clips nuevos salen sin zoom ni color.
+- {"op":"zoom","clip":N,"zoom":Z}  acercamiento centrado del clip N, de 1 (nada) a 2 (el doble). Sin "clip", a todos. Para enfatizar una frase: divide antes y después y pon zoom 1.15–1.3 a ese clip (punch-in).
+- {"op":"color","clip":N,"brillo":B,"contraste":C,"saturacion":S}  brillo -0.3 a 0.3 (0 neutro), contraste 0.5 a 1.8 (1 neutro), saturación 0 (blanco y negro) a 2 (1 neutro). Sin "clip", a todos. Pon solo lo que cambies.
+- {"op":"musica","volumen":V,"ducking":true|false}  volumen 0 a 1 de la música ya puesta (bajo la voz suele ir bien 0.2–0.4); ducking hace que baje sola cuando hay voz.
+- {"op":"quitar_musica"}
+
+Las operaciones se aplican en orden y cada una ve la timeline que dejó la anterior.
+Corta siempre en fronteras de frase: usa los tiempos de la voz. No inventes contenido que no está en la transcripción.
+Si el usuario solo pregunta algo, responde con "operaciones": [].
+No puedes elegir ni crear archivos de música: si no hay música y la piden, dile que la añada con el botón «Música» y que luego tú la ajustas.
+Si algo no se puede hacer con estas operaciones (transiciones, efectos, velocidad), dilo en el mensaje y no lo simules.
+
+${INSTRUCCIONES_CRITERIO}`

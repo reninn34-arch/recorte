@@ -1,3 +1,22 @@
+import type { MensajeChat } from './chat'
+import type { Timeline } from './timeline'
+
+/** Un video o una imagen que el usuario agregó al proyecto; sus clips lo nombran por `id`. */
+export interface MedioProyecto {
+  id: string
+  /** Ruta absoluta del archivo original (no se copia). */
+  ruta: string
+  nombre: string
+  tipo: 'video' | 'imagen'
+  /** Segundos; en una imagen, lo más que puede durar su clip. */
+  duracion: number
+  ancho: number
+  alto: number
+  conAudio: boolean
+  /** Miniatura dentro de la carpeta del proyecto (`medios/<id>.jpg`). */
+  miniatura?: string
+}
+
 export type ClipStatus = 'sugerido' | 'elegido' | 'renderizando' | 'listo' | 'error'
 
 export type Encuadre = 'cara' | 'centro' | 'division'
@@ -72,6 +91,14 @@ export interface Project {
   recetaSalida?: string
   /** MP4 de un video creado desde cero con HyperFrames (fase 2). */
   creacionSalida?: string
+  /** La edición viva: lo que se ve en el monitor y lo que se exporta. */
+  timeline?: Timeline
+  /** Más videos e imágenes del proyecto, además del principal (la biblioteca de Medios). */
+  medios?: MedioProyecto[]
+  /** Último MP4 exportado desde la timeline. */
+  timelineSalida?: string
+  /** La conversación con el agente que edita este proyecto. */
+  chat?: MensajeChat[]
 }
 
 /**

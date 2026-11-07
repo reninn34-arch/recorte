@@ -2,6 +2,7 @@ import { protocol } from 'electron'
 import { createReadStream, statSync } from 'node:fs'
 import { extname, resolve, sep } from 'node:path'
 import { Readable } from 'node:stream'
+import type { Creaciones } from './creaciones'
 import type { Proyectos } from './proyectos'
 
 const TIPOS: Record<string, string> = {
@@ -15,6 +16,13 @@ const TIPOS: Record<string, string> = {
   '.png': 'image/png',
   '.webp': 'image/webp',
   '.srt': 'text/plain; charset=utf-8',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.ogg': 'audio/ogg',
+  '.opus': 'audio/ogg',
+  '.flac': 'audio/flac',
   '.json': 'application/json; charset=utf-8'
 }
 
@@ -23,11 +31,19 @@ const TIPOS: Record<string, string> = {
  * `fuente` es el video original; el resto, archivos dentro de la carpeta del proyecto.
  * Soporta rangos para que el reproductor pueda adelantar y atrasar.
  */
-export function registrarMedia(proyectos: Proyectos): void {
+export function registrarMedia(proyectos: Proyectos, creaciones: Creaciones): void {
   protocol.handle('recorte-media', async (request) => {
     const url = new URL(request.url)
     const id = url.hostname
     const relativo = decodeURIComponent(url.pathname.replace(/^\//, ''))
+
+    // `medio/<id>`: un video o una imagen de la biblioteca del proyecto (su archivo original).
+    if (relativo.startsWith('medio/')) {
+      const proyecto = proyectos.get(id)
+      const medio = proyecto?.medios?.find((m) => m.id === relativo.slice(6))
+      if (!medio) return new Response('No encontrado', { status: 404 })
+      return servirArchivo(medio.ruta, request)
+    }
 
     if (relativo === 'fuente') {
       const proyecto = proyectos.get(id)
@@ -35,8 +51,10 @@ export function registrarMedia(proyectos: Proyectos): void {
       return servirArchivo(proyecto.source.path, request)
     }
 
+    // `c-<id>` es una creación con IA; lo demás, un proyecto del editor.
     const carpeta = (() => {
       try {
+        if (id.startsWith('c-')) return resolve(creaciones.carpeta(id.slice(2)))
         return resolve(proyectos.carpeta(id))
       } catch {
         return null

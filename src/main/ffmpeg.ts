@@ -57,6 +57,19 @@ export async function probeVideo(ruta: string): Promise<VideoInfo> {
   }
 }
 
+/** Duración de cualquier audio o video, en segundos (0 si no se puede leer). */
+export async function duracionMedio(ruta: string): Promise<number> {
+  try {
+    const { stdout } = await exec(rutaFfprobe(), ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', ruta], {
+      timeout: 30_000
+    })
+    const d = Number(stdout.trim())
+    return Number.isFinite(d) ? d : 0
+  } catch {
+    return 0
+  }
+}
+
 export async function crearMiniatura(ruta: string, salida: string, segundo: number): Promise<void> {
   await exec(
     rutaFfmpeg(),
@@ -90,6 +103,10 @@ export function crearProxy(
         '-c:v', 'libx264',
         '-preset', 'veryfast',
         '-crf', '26',
+        // Un fotograma clave por segundo: la timeline salta entre cortes y
+        // buscar en el proxy debe ser casi instantáneo.
+        '-g', '30',
+        '-keyint_min', '30',
         '-c:a', 'aac',
         '-b:a', '96k',
         '-movflags', '+faststart',

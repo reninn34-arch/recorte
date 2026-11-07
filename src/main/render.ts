@@ -13,13 +13,13 @@ export interface ResultadoRender {
   cover?: string
 }
 
-interface Bloque {
+export interface Bloque {
   start: number
   end: number
   texto: string
 }
 
-function colorAss(hex: string): string {
+export function colorAss(hex: string): string {
   const coincidencia = /^#?([0-9a-f]{6})$/i.exec(hex)
   if (!coincidencia) return '&H00FFFFFF'
   const [r, g, b] = [
@@ -30,7 +30,7 @@ function colorAss(hex: string): string {
   return `&H00${b}${g}${r}`.toUpperCase()
 }
 
-function tiempoAss(segundos: number): string {
+export function tiempoAss(segundos: number): string {
   const total = Math.max(0, segundos)
   const horas = Math.floor(total / 3600)
   const minutos = Math.floor((total % 3600) / 60)
@@ -48,7 +48,7 @@ function tiempoSrt(segundos: number): string {
   return `${String(horas).padStart(2, '0')}:${String(minutos).padStart(2, '0')}:${String(segundosEnteros).padStart(2, '0')},${String(milisegundos).padStart(3, '0')}`
 }
 
-function escapar(texto: string): string {
+export function escapar(texto: string): string {
   return texto
     .replace(/\\/g, '\\\\')
     .replace(/{/g, '\\{')
@@ -57,7 +57,7 @@ function escapar(texto: string): string {
     .trim()
 }
 
-function nombreSeguro(texto: string): string {
+export function nombreSeguro(texto: string): string {
   return (
     texto
       .normalize('NFD')
@@ -69,7 +69,7 @@ function nombreSeguro(texto: string): string {
   )
 }
 
-function construirBloques(proyecto: Project, clip: ClipSuggestion): Bloque[] {
+export function construirBloques(proyecto: Project, clip: ClipSuggestion): Bloque[] {
   const duracion = clip.end - clip.start
   const palabras: Word[] = []
 
@@ -171,7 +171,7 @@ ${eventos}
   return nombre
 }
 
-function construirSrt(bloques: Bloque[]): string {
+export function construirSrt(bloques: Bloque[]): string {
   return `${bloques
     .map(
       (bloque, indice) =>
@@ -226,7 +226,7 @@ function filtroCara(
 }
 
 /** Extrae un fotograma del MP4 ya renderizado: la portada sale con subtítulos y marca. */
-function crearPortada(salida: string, duracion: number): Promise<string | undefined> {
+export function crearPortada(salida: string, duracion: number): Promise<string | undefined> {
   return new Promise((resolver) => {
     const portada = salida.replace(/\.mp4$/i, '.jpg')
     const instante = Math.min(1.2, Math.max(0.2, duracion * 0.2))

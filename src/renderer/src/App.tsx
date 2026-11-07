@@ -1,19 +1,49 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Progreso } from '../../shared/api'
+import type { OpcionesExport, Preferencias, Progreso } from '../../shared/api'
 import type { BrandKit, ClipSuggestion, Project, RenderJob } from '../../shared/types'
 import { BrandView } from './components/BrandView'
 import { AgentePanel } from './components/AgentePanel'
 import { Editor } from './components/Editor'
-import { SettingsView } from './components/SettingsView'
+import { AvisoActualizacion } from './components/AvisoActualizacion'
+import { Inicio } from './components/Inicio'
+import { CrearIA } from './components/CrearIA'
+import { EstudioCreacion } from './components/EstudioCreacion'
+import type { Creacion, PeticionCreacion } from '../../shared/creacion'
+import type { PuenteEditor } from './components/ChatAgente'
+import type { MensajeChat } from '../../shared/chat'
+import { useAgentes } from './hooks/agentes'
+import { Opciones } from './components/Opciones'
 import { Sidebar } from './components/Sidebar'
 import { Toast } from './components/Toast'
 import { TopBar } from './components/TopBar'
 import { Icon } from './Icons'
+import { timelineInicial, type Timeline } from '../../shared/timeline'
 
 /** La transcripción no entra en la huella: es grande y el guardado la omite. */
 function huella(proyecto: Project): string {
   const { transcript: _transcript, ...meta } = proyecto
   return JSON.stringify(meta)
+}
+
+/** Dos notas cortas: el aviso de que algo terminó. */
+function campana() {
+  try {
+    const ctx = new AudioContext()
+    ;[660, 990].forEach((f, i) => {
+      const osc = ctx.createOscillator()
+      const gan = ctx.createGain()
+      osc.frequency.value = f
+      gan.gain.setValueAtTime(0.0001, ctx.currentTime + i * 0.14)
+      gan.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + i * 0.14 + 0.02)
+      gan.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + i * 0.14 + 0.3)
+      osc.connect(gan).connect(ctx.destination)
+      osc.start(ctx.currentTime + i * 0.14)
+      osc.stop(ctx.currentTime + i * 0.14 + 0.32)
+    })
+    setTimeout(() => void ctx.close(), 900)
+  } catch {
+    // Sin audio: el aviso queda en la notificación.
+  }
 }
 
 function mensajeDe(error: unknown): string {
@@ -36,7 +66,7 @@ function colaDe(proyecto: Project): RenderJob[] {
 }
 
 export default function App() {
-  const [vista, setVista] = useState('proyectos')
+  const [vista, setVista] = useState('inicio')
   const [proyectos, setProyectos] = useState<Project[]>([])
   const [proyecto, setProyecto] = useState<Project | null>(null)
   const [seleccion, setSeleccion] = useState('')
@@ -48,14 +78,44 @@ export default function App() {
   const [generando, setGenerando] = useState(false)
   const [editando, setEditando] = useState(false)
   const [creando, setCreando] = useState(false)
+  const [creaciones, setCreaciones] = useState<Creacion[]>([])
+  const [creacion, setCreacion] = useState<Creacion | null>(null)
+  const [trabajandoCreacion, setTrabajandoCreacion] = useState(false)
+  const [estadoVoz, setEstadoVoz] = useState<Awaited<ReturnType<typeof window.recorte.vozEstado>>>({ tieneClave: false })
   const [renderizando, setRenderizando] = useState(false)
+  const [exportando, setExportando] = useState(false)
   const [lote, setLote] = useState<{ indice: number; total: number } | null>(null)
   const guardado = useRef('')
+  const agentes = useAgentes(setAviso)
+  const [carpetaVideos, setCarpetaVideos] = useState<string | undefined>()
+  useEffect(() => {
+    void window.recorte.carpetaEstado().then((e) => setCarpetaVideos(e.ruta)).catch(() => {})
+  }, [vista])
+  const preferencias = useRef<Preferencias>({ avisoNotificacion: true, avisoSonido: true })
+  useEffect(() => {
+    void window.recorte.preferenciasCargar().then((p) => (preferencias.current = p)).catch(() => {})
+  }, [vista])
+
+  /** Un trabajo largo terminó: si Recorte no está a la vista, avisa (según Ajustes → Avisos). */
+  function avisarFin(texto: string) {
+    if (document.hasFocus()) return
+    const p = preferencias.current
+    if (p.avisoNotificacion && 'Notification' in window) new Notification('Recorte', { body: texto, silent: true })
+    if (p.avisoSonido) campana()
+  }
+  // El editor comparte con el chat su timeline, el cabezal y su deshacer.
+  const puente = useRef<PuenteEditor | null>(null)
 
   const clip = proyecto?.clips.find((c) => c.id === seleccion) ?? proyecto?.clips[0]
   const progresoActual = progreso && proyecto && progreso.id === proyecto.id ? progreso : null
 
-  function abrir(p: Project) {
+  function abrir(original: Project) {
+    // Los proyectos viejos (y los recién importados) aún no tienen timeline: nace con
+    // todo el material en un clip. Se guarda en cuanto el usuario la toque.
+    const p =
+      original.timeline || original.demo
+        ? original
+        : { ...original, timeline: timelineInicial(original.source.duration) }
     setProyecto(p)
     setSeleccion(p.clips[0]?.id ?? '')
     setCola(colaDe(p))
@@ -75,12 +135,15 @@ export default function App() {
 
     void (async () => {
       try {
-        const lista = await window.recorte.listarProyectos()
+        // Como en cualquier editor de video, se empieza en la pantalla de inicio:
+        // el usuario elige qué proyecto abrir.
+        const [lista, hechas] = await Promise.all([
+          window.recorte.listarProyectos(),
+          window.recorte.creacionesListar().catch(() => [] as Creacion[])
+        ])
         if (!vivo) return
         setProyectos(lista)
-        const primero = lista[0] ? await window.recorte.abrirProyecto(lista[0].id) : null
-        if (!vivo) return
-        if (primero) abrir(primero)
+        setCreaciones(hechas)
       } catch (error) {
         if (!vivo) return
         setAviso(`No pude leer tus proyectos: ${mensajeDe(error)}`)
@@ -153,6 +216,16 @@ export default function App() {
     }
   }
 
+  // Volver a Inicio o a Ajustes puede cambiar los agentes: se releen.
+  useEffect(() => {
+    void agentes.refrescar().catch(() => {})
+    if (vista === 'inicio') {
+      void recargarProyectos()
+      void window.recorte.creacionesListar().then(setCreaciones).catch(() => {})
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vista])
+
   async function abrirDesdeLista(id: string) {
     if (id === proyecto?.id) {
       setVista('proyectos')
@@ -186,6 +259,7 @@ export default function App() {
         setAviso(
           `Transcripción lista: ${resultado.transcript?.length ?? 0} segmentos con tiempos por palabra.`
         )
+        avisarFin(`La transcripción de «${resultado.project.name}» está lista.`)
       } else {
         setProyecto((p) =>
           p && p.id === id
@@ -297,43 +371,142 @@ export default function App() {
     if (!ok) setAviso('Todavía no hay una edición renderizada.')
   }
 
-  // Fase 2: crear video desde cero con HyperFrames (motor puente).
-  async function crearVideo(peticion: string, opciones: { incluirMaterial: boolean; estilo: string }) {
-    if (!proyecto || creando) return
-    if (proyecto.demo) {
-      setAviso('Estás viendo un proyecto de ejemplo. Crea un proyecto para generar videos.')
-      return
-    }
+  // ===== Crear con IA =====
 
+  /** Corre un paso de la creación (guion o video) y deja la versión que devuelve. */
+  async function pasoCreacion(id: string, paso: () => Promise<Creacion>) {
+    setTrabajandoCreacion(true)
+    // Mientras trabaja, el mensaje del usuario ya se ve (el proceso principal lo guarda).
+    try {
+      const nueva = await paso()
+      setCreacion((c) => (c && c.id === id ? nueva : c))
+      const ultimo = nueva.mensajes[nueva.mensajes.length - 1]
+      avisarFin(ultimo?.error ? 'El agente no pudo terminar: mira el estudio.' : nueva.fase === 'listo' ? 'Tu video con IA está listo.' : (ultimo?.texto ?? 'Listo.'))
+    } catch (error) {
+      setAviso(mensajeDe(error))
+    } finally {
+      setTrabajandoCreacion(false)
+    }
+  }
+
+  async function crearConIA(p: PeticionCreacion) {
+    if (creando) return
     setCreando(true)
     try {
-      const resultado = await window.recorte.crearVideo(proyecto.id, peticion, opciones)
-      if (resultado.ok && resultado.project) {
-        abrir(resultado.project)
-        setAviso(
-          resultado.aviso ??
-            `Video creado${resultado.fuente === 'ia' ? ' con el agente' : ' con la plantilla local'}. Ábrelo para revisarlo.`
-        )
-      } else {
-        setAviso(resultado.aviso ?? resultado.error ?? 'No pude crear el video.')
-      }
+      const nueva = await window.recorte.creacionNueva(p)
+      setCreacion(nueva)
+      setVista('estudio')
+      setCreando(false)
+      await pasoCreacion(nueva.id, () => window.recorte.creacionGuion(nueva.id))
     } catch (error) {
-      setAviso(`No pude crear el video: ${mensajeDe(error)}`)
+      setAviso(`No pude empezar: ${mensajeDe(error)}`)
     } finally {
       setCreando(false)
     }
   }
 
-  async function abrirCreacion() {
-    if (!proyecto) return
-    const ok = await window.recorte.abrirCreacion(proyecto.id)
-    if (!ok) setAviso('Todavía no hay un video creado.')
+  useEffect(() => {
+    if (vista === 'estudio') void window.recorte.vozEstado().then(setEstadoVoz).catch(() => {})
+  }, [vista])
+
+  // Mientras el login de Google sigue abierto en Edge, preguntamos hasta que termine.
+  useEffect(() => {
+    if (!estadoVoz.google?.conectando) return
+    const reloj = setInterval(() => void window.recorte.vozEstado().then(setEstadoVoz).catch(() => {}), 2000)
+    return () => clearInterval(reloj)
+  }, [estadoVoz.google?.conectando])
+
+  function vozCreacion(paso: (id: string) => Promise<Creacion | null>) {
+    if (!creacion || trabajandoCreacion) return
+    const id = creacion.id
+    void pasoCreacion(id, async () => (await paso(id)) ?? creacion)
+  }
+
+  async function abrirCreacionIA(id: string) {
+    const c = await window.recorte.creacionAbrir(id)
+    if (!c) {
+      setAviso('No encontré esa creación.')
+      return
+    }
+    setCreacion(c)
+    setVista('estudio')
+  }
+
+  function conPedido(c: Creacion, pedido?: string): Creacion {
+    // El mensaje del usuario aparece al instante en el chat del estudio.
+    return pedido ? { ...c, mensajes: [...c.mensajes, { id: crypto.randomUUID(), rol: 'usuario', texto: pedido, fecha: Date.now() }] } : c
+  }
+
+  function guionCreacion(pedido?: string) {
+    if (!creacion || trabajandoCreacion) return
+    const id = creacion.id
+    setCreacion(conPedido(creacion, pedido))
+    void pasoCreacion(id, () => window.recorte.creacionGuion(id, pedido))
+  }
+
+  function videoCreacion(pedido?: string) {
+    if (!creacion || trabajandoCreacion) return
+    const id = creacion.id
+    setCreacion({ ...conPedido(creacion, pedido), fase: 'video' })
+    void pasoCreacion(id, () => window.recorte.creacionVideo(id, pedido))
+  }
+
+  async function creacionAlEditor() {
+    if (!creacion) return
+    try {
+      const p = await window.recorte.creacionAlEditor(creacion.id)
+      setCreacion((c) => (c ? { ...c, proyectoEditor: p.id } : c))
+      abrir(p)
+      setVista('proyectos')
+      await recargarProyectos()
+    } catch (error) {
+      setAviso(`No pude abrirlo en el editor: ${mensajeDe(error)}`)
+    }
   }
 
   function cambiarClip(cambio: Partial<ClipSuggestion>) {    if (!clip) return
     setProyecto((p) =>
       p ? { ...p, clips: p.clips.map((c) => (c.id === clip.id ? { ...c, ...cambio } : c)) } : p
     )
+  }
+
+  async function exportarTimeline(opciones: OpcionesExport) {
+    if (!proyecto?.timeline || exportando || renderizando || lote) return
+    if (proyecto.demo) {
+      setAviso('Estás viendo un proyecto de ejemplo. Importa un video para exportar de verdad.')
+      return
+    }
+    const id = proyecto.id
+    setExportando(true)
+    try {
+      const resultado = await window.recorte.exportarTimeline(id, proyecto.timeline, opciones)
+      if (resultado.ok && resultado.output) {
+        // Solo se toma la salida: la timeline pudo cambiar mientras se exportaba.
+        setProyecto((p) => (p && p.id === id ? { ...p, timelineSalida: resultado.output } : p))
+        setAviso(`Guardado en ${resultado.output}`)
+        avisarFin('Tu video exportado está listo.')
+      } else {
+        setAviso(resultado.error ?? 'No pude exportar la timeline.')
+      }
+    } catch (error) {
+      setAviso(`No pude exportar la timeline: ${mensajeDe(error)}`)
+    } finally {
+      setExportando(false)
+    }
+  }
+
+  async function abrirExportacion() {
+    if (!proyecto) return
+    const ok = await window.recorte.abrirExportacion(proyecto.id)
+    if (!ok) setAviso('No encontré el MP4 exportado. Puede que se haya movido o borrado.')
+  }
+
+  function cambiarChat(id: string, chat: MensajeChat[]) {
+    setProyecto((p) => (p && p.id === id ? { ...p, chat } : p))
+  }
+
+  function cambiarTimeline(timeline: Timeline) {
+    setProyecto((p) => (p ? { ...p, timeline } : p))
   }
 
   function cambiarMarca(cambio: Partial<BrandKit>) {
@@ -476,9 +649,6 @@ export default function App() {
     setAviso('Marca guardada en el proyecto.')
   }
 
-  function guardarAjustes() {
-    setAviso('Los ajustes de render se conectan junto con el motor de render.')
-  }
 
   if (cargando) {
     return (
@@ -490,17 +660,121 @@ export default function App() {
     )
   }
 
-  if (!proyecto) {
+  if (vista === 'ajustes' && !proyecto) {
     return (
-      <div className="cargando bienvenida">
-        <span className="brand-mark"><Icon name="scissors" size={22} /></span>
-        <strong>recorte</strong>
-        <p>Tu editor de video dirigido por agentes. Empieza importando una clase o cualquier material.</p>
-        <button className="btn primary" onClick={importar} disabled={importando}>
-          <Icon name="upload" size={16} /> {importando ? 'Importando…' : 'Nuevo proyecto'}
-        </button>
+      <>
+        <Opciones agentes={agentes} onAviso={setAviso} onVolver={() => setVista('inicio')} />
         {aviso && <Toast text={aviso} />}
-      </div>
+        <AvisoActualizacion />
+      </>
+    )
+  }
+
+  if (vista === 'crear') {
+    return (
+      <>
+        <CrearIA
+          agentes={agentes}
+          creando={creando}
+          onCrear={(p) => void crearConIA(p)}
+          onVolver={() => setVista('inicio')}
+          onConectar={() => setVista('inicio')}
+        />
+        {aviso && <Toast text={aviso} />}
+        <AvisoActualizacion />
+      </>
+    )
+  }
+
+  if (vista === 'estudio' && creacion) {
+    return (
+      <>
+        <EstudioCreacion
+          creacion={creacion}
+          trabajando={trabajandoCreacion}
+          progreso={progreso && progreso.fase === 'creacion' && progreso.id === creacion.id ? progreso : null}
+          onGuion={guionCreacion}
+          onVideo={videoCreacion}
+          onEditor={() => void creacionAlEditor()}
+          onMostrar={() => void window.recorte.creacionMostrar(creacion.id)}
+          onVolver={() => setVista('inicio')}
+          onParar={() => void window.recorte.creacionParar(creacion.id)}
+          voz={{
+            ...estadoVoz,
+            conectarGoogle: async () => {
+              // La cuenta se conecta en Edge: se mira cada 2 s hasta que aparece (o 5 min).
+              await window.recorte.vozGoogleConectar()
+              const desde = Date.now()
+              while (Date.now() - desde < 5 * 60_000) {
+                await new Promise((r) => setTimeout(r, 2000))
+                const e = await window.recorte.vozEstado().catch(() => null)
+                if (!e) continue
+                setEstadoVoz(e)
+                if (e.google?.correo || !e.google?.conectando) break
+              }
+            },
+            desconectarGoogle: async () => {
+              await window.recorte.vozGoogleDesconectar()
+              setEstadoVoz(await window.recorte.vozEstado())
+            },
+            guardarClave: async (clave) => {
+              try {
+                setEstadoVoz(await window.recorte.vozGuardar({ clave }))
+                setAviso('Clave de AI Studio guardada.')
+              } catch (error) {
+                setAviso(`No pude guardar la clave: ${mensajeDe(error)}`)
+              }
+            },
+            generar: (voz) => {
+              setEstadoVoz((e) => ({ ...e, vozGemini: voz }))
+              vozCreacion((id) => window.recorte.creacionVozGemini(id, voz))
+            },
+            usarGrabacion: (datos) => vozCreacion((id) => window.recorte.creacionVozPropia(id, datos)),
+            subir: () => vozCreacion((id) => window.recorte.creacionVozPropia(id)),
+            quitar: () => vozCreacion((id) => window.recorte.creacionQuitarVoz(id)),
+            montar: () => vozCreacion((id) => window.recorte.creacionMontarVoz(id))
+          }}
+        />
+        {aviso && <Toast text={aviso} />}
+        <AvisoActualizacion />
+      </>
+    )
+  }
+
+  if (!proyecto || vista === 'inicio' || vista === 'estudio') {
+    return (
+      <>
+        <Inicio
+          creaciones={creaciones}
+          onCrearIA={() => setVista('crear')}
+          onAjustes={() => setVista('ajustes')}
+          onBorrar={async (tipo, id) => {
+            try {
+              if (tipo === 'proyecto') {
+                await window.recorte.borrarProyecto(id)
+                if (proyecto?.id === id) setProyecto(null)
+                await recargarProyectos()
+              } else {
+                await window.recorte.borrarCreacion(id)
+                if (creacion?.id === id) setCreacion(null)
+                setCreaciones(await window.recorte.creacionesListar())
+              }
+              setAviso('Se fue a la Papelera. Si te equivocaste, lo recuperas desde ahí.')
+            } catch (error) {
+              setAviso(`No pude borrarlo: ${mensajeDe(error)}`)
+            }
+          }}
+          onAbrirCreacion={(id) => void abrirCreacionIA(id)}
+          proyectos={proyectos}
+          agentes={agentes}
+          onAbrir={abrirDesdeLista}
+          onNuevo={importar}
+          importando={importando}
+          abierto={proyecto?.id}
+        />
+        {aviso && <Toast text={aviso} />}
+        <AvisoActualizacion />
+      </>
     )
   }
 
@@ -537,6 +811,7 @@ export default function App() {
           puedeGenerar={proyecto.transcription === 'lista'}
           importando={importando}
           generando={generando}
+          onInicio={() => setVista('inicio')}
         />
 
         <div className={`content ${vista === 'proyectos' ? 'is-editor' : 'is-wide'}`}>
@@ -556,10 +831,15 @@ export default function App() {
                 onEditar={editarConAgente}
                 onRenderizarEdicion={renderizarEdicion}
                 onAbrirEdicion={abrirEdicion}
-                onCrear={crearVideo}
-                creando={creando}
-                onAbrirCreacion={abrirCreacion}
                 onTranscribir={transcribir}
+                onCambiarTimeline={cambiarTimeline}
+                exportando={exportando}
+                onExportar={exportarTimeline}
+                onAbrirExportacion={abrirExportacion}
+                puente={puente}
+                onAviso={setAviso}
+                carpetaVideos={carpetaVideos}
+                onMedios={(medios) => setProyecto((p) => (p ? { ...p, medios } : p))}
                 cola={cola}
                 pendientesLote={pendientesLote}
                 lote={lote}
@@ -569,6 +849,10 @@ export default function App() {
               />
               <AgentePanel
                 proyecto={proyecto}
+                agentes={agentes}
+                puente={puente}
+                onCambiarChat={cambiarChat}
+                onCambiarAgente={() => setVista('inicio')}
                 editando={editando}
                 generando={generando}
                 renderizando={renderizando}
@@ -576,7 +860,6 @@ export default function App() {
                 onGenerar={generarLote}
                 onRenderizarEdicion={renderizarEdicion}
                 onAbrirAjustes={() => setVista('ajustes')}
-                onAviso={setAviso}
               />
             </>
           ) : (
@@ -584,13 +867,14 @@ export default function App() {
               {vista === 'marca' && (
                 <BrandView project={proyecto} onChange={cambiarMarca} onSave={guardarMarca} />
               )}
-              {vista === 'ajustes' && <SettingsView onSave={guardarAjustes} onAviso={setAviso} />}
+              {vista === 'ajustes' && <Opciones agentes={agentes} onAviso={setAviso} />}
             </div>
           )}
         </div>
       </main>
 
       {aviso && <Toast text={aviso} />}
+        <AvisoActualizacion />
     </div>
   )
 }

@@ -1,14 +1,18 @@
-import { useRef, useState } from 'react'
-import type { Progreso } from '../../../shared/api'
-import type { ClipSuggestion, Project, RenderJob } from '../../../shared/types'
+import { useCallback, useMemo, useState } from 'react'
+import type { OpcionesExport, Progreso } from '../../../shared/api'
+import type { ClipSuggestion, MedioProyecto, Project, RenderJob } from '../../../shared/types'
 import { ClipList } from './ClipList'
-import { CrearPanel } from './CrearPanel'
 import { EdicionCard } from './EdicionCard'
 import { Inspector } from './Inspector'
 import { RenderQueue } from './RenderQueue'
 import { SourceCard } from './SourceCard'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
+import { ajustesDe, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, textosEn, ubicar, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, type Timeline } from '../../../shared/timeline'
+import { useHistorial, useMusica, useReproductor, type FuentesVista, type Reproductor } from '../hooks/timeline'
+import { MediosPanel } from './MediosPanel'
+import { TimelineEditor, type Elegido } from './TimelineEditor'
+import type { PuenteEditor } from './ChatAgente'
 
 /**
  * Cara de editor: monitor + línea de tiempo + herramientas.
@@ -16,151 +20,62 @@ import { mediaUrl } from '../media'
  * herramientas bajo la línea de tiempo; el video manda.
  */
 
-function mmss(segundos: number): string {
-  const total = Math.max(0, Math.floor(segundos))
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
-}
-
 function Monitor({
   proyecto,
-  videoRef,
-  onTiempo
+  timeline,
+  reproductor
 }: {
   proyecto: Project
-  videoRef: React.RefObject<HTMLVideoElement | null>
-  onTiempo: (t: number) => void
+  timeline: Timeline
+  reproductor: Reproductor
 }) {
-  const [sonando, setSonando] = useState(false)
   const src = proyecto.demo ? undefined : mediaUrl(proyecto.id, proyecto.proxy ?? 'fuente')
-
-  function alternar() {
-    const video = videoRef.current
-    if (!video) return
-    if (video.paused) void video.play()
-    else video.pause()
+  const enImagen = Boolean(reproductor.imagen)
+  const rotulos = textosEn(timeline, reproductor.tiempo)
+  const vacia = timeline.clips.length === 0
+  const musicaRef = useMusica(timeline, reproductor, proyecto.transcript)
+  // Zoom y color del clip bajo el cabezal; en el render son crop y eq de FFmpeg.
+  const a = ajustesDe(ubicar(timeline, reproductor.tiempo)?.clip)
+  const estiloImagen: React.CSSProperties = {
+    visibility: vacia ? 'hidden' : 'visible',
+    transform: a.zoom !== 1 ? `scale(${a.zoom})` : undefined,
+    filter:
+      a.brillo !== 0 || a.contraste !== 1 || a.saturacion !== 1
+        ? `brightness(${(1 + a.brillo * 1.5).toFixed(3)}) contrast(${a.contraste}) saturate(${a.saturacion})`
+        : undefined
   }
 
   return (
-    <div className="monitor" onClick={alternar}>
+    <div className="monitor" onClick={reproductor.alternar}>
       {src ? (
-        <video
-          ref={videoRef}
-          src={src}
-          onTimeUpdate={(e) => onTiempo(e.currentTarget.currentTime)}
-          onPlay={() => setSonando(true)}
-          onPause={() => setSonando(false)}
-        />
+        <>
+          <video
+            ref={reproductor.videoRef}
+            preload="auto"
+            style={{ ...estiloImagen, visibility: vacia || enImagen ? 'hidden' : 'visible' }}
+            {...reproductor.eventos}
+          />
+          {enImagen && <img className="monitor-imagen" src={reproductor.imagen!} alt="" style={estiloImagen} />}
+        </>
       ) : (
         <div className="monitor-vacio"><Icon name="play" size={28} /></div>
       )}
-      {!sonando && src && (
+      {timeline.musica && !proyecto.demo && (
+        <audio ref={musicaRef} src={mediaUrl(proyecto.id, timeline.musica.archivo)} preload="auto" loop />
+      )}
+      {rotulos.map((r) => (
+        <span key={r.id} className={`monitor-rotulo ${r.posicion}`}>
+          {r.texto}
+        </span>
+      ))}
+      {!reproductor.reproduciendo && src && !vacia && (
         <span className="monitor-play"><Icon name="play" size={26} /></span>
       )}
     </div>
   )
 }
 
-function Pista({
-  etiqueta,
-  duracion,
-  bloques,
-  tiempo,
-  onBuscar,
-  tono
-}: {
-  etiqueta: string
-  duracion: number
-  bloques: { id: string; start: number; end: number; titulo: string }[]
-  tiempo: number
-  onBuscar: (t: number) => void
-  tono: 'edicion' | 'clips' | 'subs'
-}) {
-  function buscar(e: React.MouseEvent<HTMLDivElement>) {
-    const caja = e.currentTarget.getBoundingClientRect()
-    onBuscar(((e.clientX - caja.left) / caja.width) * duracion)
-  }
-
-  return (
-    <div className="pista">
-      <span className="pista-nombre">{etiqueta}</span>
-      <div className="pista-carril" onClick={buscar}>
-        {bloques.map((b) => (
-          <span
-            key={b.id}
-            className={`pista-bloque ${tono}`}
-            title={`${b.titulo} · ${mmss(b.start)}–${mmss(b.end)}`}
-            style={{
-              left: `${(b.start / duracion) * 100}%`,
-              width: `${Math.max(0.8, ((b.end - b.start) / duracion) * 100)}%`
-            }}
-          />
-        ))}
-        <span className="playhead" style={{ left: `${(tiempo / duracion) * 100}%` }} />
-      </div>
-    </div>
-  )
-}
-
-function Timeline({
-  proyecto,
-  tiempo,
-  onBuscar
-}: {
-  proyecto: Project
-  tiempo: number
-  onBuscar: (t: number) => void
-}) {
-  const duracion = Math.max(1, proyecto.source.duration)
-  const paso = duracion > 240 ? 30 : duracion > 90 ? 10 : 5
-  const marcas: number[] = []
-  for (let t = 0; t <= duracion; t += paso) marcas.push(t)
-
-  const cortes = (proyecto.receta?.cortes ?? []).map((c, i) => ({
-    id: `corte-${i}`,
-    start: c.start,
-    end: c.end,
-    titulo: proyecto.receta?.titulo ?? 'Corte'
-  }))
-  const clips = proyecto.clips.map((c: ClipSuggestion) => ({
-    id: c.id,
-    start: c.start,
-    end: c.end,
-    titulo: c.title
-  }))
-  const subs = (proyecto.transcript ?? [])
-    .filter((s) => s.text.trim())
-    .map((s, i) => ({ id: `sub-${i}`, start: s.start, end: s.end, titulo: s.text.trim() }))
-
-  function buscarEnRegla(e: React.MouseEvent<HTMLDivElement>) {
-    const caja = e.currentTarget.getBoundingClientRect()
-    onBuscar(Math.min(duracion, Math.max(0, ((e.clientX - caja.left) / caja.width) * duracion)))
-  }
-
-  return (
-    <div className="timeline">
-      <div className="timeline-regla" onClick={buscarEnRegla}>
-        {marcas.map((t) => (
-          <span key={t} className="marca-tiempo" style={{ left: `${(t / duracion) * 100}%` }}>
-            {mmss(t)}
-          </span>
-        ))}
-        <span className="playhead regla" style={{ left: `${(tiempo / duracion) * 100}%` }} />
-      </div>
-      {cortes.length > 0 && (
-        <Pista etiqueta="Edición" duracion={duracion} bloques={cortes} tiempo={tiempo} onBuscar={onBuscar} tono="edicion" />
-      )}
-      <Pista etiqueta="Momentos" duracion={duracion} bloques={clips} tiempo={tiempo} onBuscar={onBuscar} tono="clips" />
-      {subs.length > 0 && (
-        <Pista etiqueta="Voz" duracion={duracion} bloques={subs} tiempo={tiempo} onBuscar={onBuscar} tono="subs" />
-      )}
-      <div className="timeline-pie">
-        <span>{mmss(tiempo)} / {mmss(duracion)}</span>
-      </div>
-    </div>
-  )
-}
-
-type Herramienta = 'crear' | 'edicion' | 'clips' | 'medios' | 'cola'
+type Herramienta = 'edicion' | 'clips' | 'medios' | 'cola'
 
 export function Editor({
   proyecto,
@@ -176,10 +91,15 @@ export function Editor({
   onEditar,
   onRenderizarEdicion,
   onAbrirEdicion,
-  onCrear,
-  creando,
-  onAbrirCreacion,
   onTranscribir,
+  onCambiarTimeline,
+  exportando,
+  onExportar,
+  onAbrirExportacion,
+  puente,
+  onAviso,
+  carpetaVideos,
+  onMedios,
   cola,
   pendientesLote,
   lote,
@@ -200,10 +120,16 @@ export function Editor({
   onEditar: () => void
   onRenderizarEdicion: () => void
   onAbrirEdicion: () => void
-  onCrear: (peticion: string, opciones: { incluirMaterial: boolean; estilo: string }) => void
-  creando: boolean
-  onAbrirCreacion: () => void
   onTranscribir: () => void
+  onCambiarTimeline: (timeline: Timeline) => void
+  exportando: boolean
+  onExportar: (opciones: OpcionesExport) => void
+  onAbrirExportacion: () => void
+  puente: React.RefObject<PuenteEditor | null>
+  onAviso: (texto: string) => void
+  carpetaVideos?: string
+  /** La biblioteca de medios cambió (el proceso principal la guarda). */
+  onMedios: (medios: MedioProyecto[]) => void
   cola: RenderJob[]
   pendientesLote: number
   lote: { indice: number; total: number } | null
@@ -211,27 +137,133 @@ export function Editor({
   onAbrirSalida: (job: RenderJob) => void
   textoVacio: string
 }) {
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-  const [tiempo, setTiempo] = useState(0)
-  const [herramienta, setHerramienta] = useState<Herramienta>('crear')
+  const [herramienta, setHerramienta] = useState<Herramienta>('clips')
+  const [elegido, setElegido] = useState<Elegido>(null)
+  const elegir = useCallback((e: Elegido) => setElegido(e), [])
+  const timeline = proyecto.timeline ?? timelineVacia()
+  const historial = useHistorial(timeline, onCambiarTimeline, proyecto.id)
+  const fuentes = useMemo<FuentesVista>(() => {
+    const lista: FuentesVista = { principal: { url: mediaUrl(proyecto.id, proyecto.proxy ?? 'fuente'), tipo: 'video' } }
+    for (const m of proyecto.medios ?? []) lista[m.id] = { url: mediaUrl(proyecto.id, `medio/${m.id}`), tipo: m.tipo }
+    return lista
+  }, [proyecto.id, proyecto.proxy, proyecto.medios])
+  const reproductor = useReproductor(timeline, proyecto.id, fuentes)
+  const [agregando, setAgregando] = useState(false)
 
-  function buscar(t: number) {
-    if (videoRef.current) videoRef.current.currentTime = t
-    setTiempo(t)
+  const duracionDe = (fuente: string) => {
+    if (fuente === 'principal') return proyecto.source.duration
+    const m = proyecto.medios?.find((x) => x.id === fuente)
+    return m ? (m.tipo === 'imagen' ? MAX_IMAGEN : m.duracion) : 0
+  }
+  const nombreDe = (fuente: string) => (fuente === 'principal' ? proyecto.source.name : (proyecto.medios?.find((x) => x.id === fuente)?.nombre ?? '?'))
+
+  /** Pone un medio en la timeline (entero; una imagen, 4 s). Se puede deshacer. */
+  function poner(fuente: string, donde: 'final' | 'cabezal', base = timeline) {
+    const m = proyecto.medios?.find((x) => x.id === fuente)
+    const salida = fuente === 'principal' ? proyecto.source.duration : m?.tipo === 'imagen' ? DURACION_IMAGEN : (m?.duracion ?? 0)
+    if (salida <= 0) return base
+    const r = insertarClip(base, { fuente, entrada: 0, salida }, donde === 'cabezal' ? reproductor.tiempo : undefined)
+    return r.timeline
+  }
+
+  /** Agrega varios archivos a la biblioteca y los pone al final de la timeline. */
+  async function agregarMedios() {
+    if (agregando || proyecto.demo) return
+    setAgregando(true)
+    try {
+      const r = await window.recorte.agregarMedios(proyecto.id)
+      if (!r) return
+      onMedios(r.project.medios ?? [])
+      let tl = timeline
+      for (const mid of r.agregados) {
+        const m = r.project.medios?.find((x) => x.id === mid)
+        if (!m) continue
+        tl = insertarClip(tl, { fuente: m.id, entrada: 0, salida: m.tipo === 'imagen' ? DURACION_IMAGEN : m.duracion }).timeline
+      }
+      if (tl !== timeline) historial.aplicar(tl)
+      onAviso(
+        `${r.agregados.length} ${r.agregados.length === 1 ? 'archivo agregado' : 'archivos agregados'} al final de la timeline.` +
+          (r.fallos.length ? ` No pude leer: ${r.fallos.join(', ')}.` : '')
+      )
+    } catch (error) {
+      onAviso(`No pude agregarlos: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setAgregando(false)
+    }
+  }
+
+  async function quitarMedio(m: MedioProyecto) {
+    try {
+      const p = await window.recorte.quitarMedio(proyecto.id, m.id)
+      onMedios(p.medios ?? [])
+      const tl = quitarFuente(timeline, m.id)
+      if (tl.clips.length !== timeline.clips.length) historial.aplicar(tl)
+      onAviso(`Quité «${m.nombre}» del proyecto${tl.clips.length !== timeline.clips.length ? ' y sus clips de la timeline' : ''}. El archivo sigue en tu equipo.`)
+    } catch (error) {
+      onAviso(`No pude quitarlo: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  puente.current = {
+    timeline,
+    tiempo: reproductor.tiempo,
+    elegido,
+    aplicar: historial.aplicar,
+    deshacer: historial.deshacer
+  }
+
+  /** Reemplaza la timeline entera (receta, momento): se puede deshacer. */
+  function llevarATimeline(nueva: Timeline) {
+    reproductor.pausar()
+    historial.aplicar(nueva)
+    setElegido(null)
+    reproductor.buscar(0)
   }
 
   const pestañas: { id: Herramienta; nombre: string }[] = [
-    { id: 'crear', nombre: 'Crear' },
     { id: 'edicion', nombre: 'Edición del agente' },
     { id: 'clips', nombre: `Clips (${proyecto.clips.length})` },
-    { id: 'medios', nombre: 'Medios' },
+    { id: 'medios', nombre: `Medios (${(proyecto.medios?.length ?? 0) + 1})` },
     { id: 'cola', nombre: `Cola (${cola.length})` }
   ]
 
   return (
     <div className="editor">
-      <Monitor proyecto={proyecto} videoRef={videoRef} onTiempo={setTiempo} />
-      <Timeline proyecto={proyecto} tiempo={tiempo} onBuscar={buscar} />
+      <Monitor proyecto={proyecto} timeline={timeline} reproductor={reproductor} />
+      <TimelineEditor
+        key={proyecto.id}
+        timeline={timeline}
+        duracionFuente={proyecto.source.duration}
+        duracionDe={duracionDe}
+        nombreDe={nombreDe}
+        onAgregarClips={() => void agregarMedios()}
+        agregandoClips={agregando}
+        transcript={proyecto.transcript}
+        tiempo={reproductor.tiempo}
+        reproduciendo={reproductor.reproduciendo}
+        onBuscar={reproductor.buscar}
+        onAlternar={reproductor.alternar}
+        historial={historial}
+        elegido={elegido}
+        onElegir={elegir}
+        importarMusica={async () => {
+          const r = await window.recorte.importarMusica(proyecto.id)
+          if (r && !r.ok) onAviso(r.error ?? 'No pude añadir la música.')
+          return r?.ok && r.musica ? r.musica : null
+        }}
+        exportar={{
+          activo: exportando,
+          pct: progreso?.fase === 'exportar' ? progreso.pct : 0,
+          hayTranscripcion: Boolean(proyecto.transcript?.length),
+          hayArchivo: Boolean(proyecto.timelineSalida),
+          vertical: proyecto.source.height > proyecto.source.width,
+          onExportar: (opciones) => {
+            reproductor.pausar()
+            onExportar(opciones)
+          },
+          onAbrir: onAbrirExportacion,
+          destino: carpetaVideos ? `${carpetaVideos}\\${proyecto.name.replace(/[<>:"/\\|?*]/g, ' ').trim()}` : undefined
+        }}
+      />
 
       <div className="herramientas">
         <div className="herramientas-tabs">
@@ -246,13 +278,13 @@ export function Editor({
           ))}
         </div>
 
-        {herramienta === 'crear' && (
-          <CrearPanel
-            proyecto={proyecto}
-            creando={creando}
-            onCrear={onCrear}
-            onAbrir={onAbrirCreacion}
-          />
+        {herramienta === 'edicion' && proyecto.receta && (
+          <div className="herramienta-accion">
+            <span>La edición del agente se puede seguir editando a mano.</span>
+            <button className="btn small" onClick={() => proyecto.receta && llevarATimeline(timelineDesdeReceta(proyecto.receta))}>
+              <Icon name="layers" size={14} /> Llevar a la timeline
+            </button>
+          </div>
         )}
         {herramienta === 'edicion' && (
           <EdicionCard
@@ -263,6 +295,17 @@ export function Editor({
             onRenderizar={onRenderizarEdicion}
             onAbrir={onAbrirEdicion}
           />
+        )}
+        {herramienta === 'clips' && clip && (
+          <div className="herramienta-accion">
+            <span>«{clip.title}» · {Math.round(clip.end - clip.start)} s</span>
+            <button
+              className="btn small"
+              onClick={() => llevarATimeline(timelineDesdeCortes([{ start: clip.start, end: clip.end }], clip.title))}
+            >
+              <Icon name="layers" size={14} /> Abrir en la timeline
+            </button>
+          </div>
         )}
         {herramienta === 'clips' && (
           <div className="herramienta-clips">
@@ -284,12 +327,32 @@ export function Editor({
             )}
           </div>
         )}
+        {herramienta === 'medios' && !proyecto.demo && (
+          <div className="herramienta-accion">
+            <span>La timeline parte del video completo; vuelve a él cuando quieras.</span>
+            <button className="btn small" onClick={() => llevarATimeline(timelineInicial(proyecto.source.duration))}>
+              <Icon name="film" size={14} /> Todo el material a la timeline
+            </button>
+          </div>
+        )}
+        {herramienta === 'medios' && (
+          <MediosPanel
+            proyecto={proyecto}
+            agregando={agregando}
+            onAgregar={() => void agregarMedios()}
+            onPoner={(fuente, donde) => {
+              const tl = poner(fuente, donde)
+              if (tl !== timeline) historial.aplicar(tl)
+            }}
+            onQuitar={(m) => void quitarMedio(m)}
+          />
+        )}
         {herramienta === 'medios' && (
           <SourceCard
             proyecto={proyecto}
             progreso={progreso}
             onTranscribir={onTranscribir}
-            onPlay={() => buscar(0)}
+            onPlay={() => reproductor.buscar(0)}
           />
         )}
         {herramienta === 'cola' && (

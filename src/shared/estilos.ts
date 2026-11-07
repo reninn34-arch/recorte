@@ -13,11 +13,23 @@ export interface EstiloVideo {
   descripcion: string
   /** La dirección editorial que recibe el agente. */
   guia: string
+  /** Para qué sirve: así se agrupan las tarjetas en «Crear con IA». */
+  grupo: GrupoEstilo
 }
+
+export type GrupoEstilo = 'libre' | 'ensenar' | 'vender' | 'contar' | 'inspirar'
+
+export const GRUPOS: { id: Exclude<GrupoEstilo, 'libre'>; nombre: string }[] = [
+  { id: 'ensenar', nombre: 'Enseñar' },
+  { id: 'vender', nombre: 'Vender' },
+  { id: 'contar', nombre: 'Contar' },
+  { id: 'inspirar', nombre: 'Inspirar' }
+]
 
 export const ESTILOS: EstiloVideo[] = [
   {
     id: 'libre',
+    grupo: 'libre',
     nombre: 'Libre',
     icono: 'sparkles',
     descripcion: 'El editor decide la estructura según lo que le pidas.',
@@ -25,6 +37,7 @@ export const ESTILOS: EstiloVideo[] = [
   },
   {
     id: 'leccion',
+    grupo: 'ensenar',
     nombre: 'Clase o tutorial',
     icono: 'film',
     descripcion: 'Enseñar algo: pasos, errores comunes, cómo se hace.',
@@ -36,6 +49,7 @@ export const ESTILOS: EstiloVideo[] = [
   },
   {
     id: 'lista',
+    grupo: 'ensenar',
     nombre: 'Lista o top',
     icono: 'layers',
     descripcion: '«3 errores», «5 tips», «top 7»: conteo con ritmo.',
@@ -47,6 +61,7 @@ export const ESTILOS: EstiloVideo[] = [
   },
   {
     id: 'promo',
+    grupo: 'vender',
     nombre: 'Promo o producto',
     icono: 'play',
     descripcion: 'Vender o anunciar: beneficio, prueba, llamada a la acción.',
@@ -58,6 +73,7 @@ export const ESTILOS: EstiloVideo[] = [
   },
   {
     id: 'historia',
+    grupo: 'contar',
     nombre: 'Historia',
     icono: 'clock',
     descripcion: 'Contar algo que pasó: conflicto, tensión, desenlace.',
@@ -69,6 +85,7 @@ export const ESTILOS: EstiloVideo[] = [
   },
   {
     id: 'noticia',
+    grupo: 'contar',
     nombre: 'Noticia o análisis',
     icono: 'search',
     descripcion: 'Qué pasó, por qué importa y qué sigue.',
@@ -80,6 +97,7 @@ export const ESTILOS: EstiloVideo[] = [
   },
   {
     id: 'receta',
+    grupo: 'vender',
     nombre: 'Comida o receta',
     icono: 'palette',
     descripcion: 'Ingredientes, proceso y un resultado que dé hambre.',
@@ -91,6 +109,7 @@ export const ESTILOS: EstiloVideo[] = [
   },
   {
     id: 'motivacion',
+    grupo: 'inspirar',
     nombre: 'Motivacional',
     icono: 'chevron',
     descripcion: 'Frases con peso, ritmo y un cierre que empuja.',

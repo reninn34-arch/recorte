@@ -2,7 +2,9 @@ import type { Project } from '../../../shared/types'
 import { Icon, type IconName } from '../Icons'
 
 const items: { id: string; label: string; icon: IconName }[] = [
-  { id: 'proyectos', label: 'Proyectos', icon: 'folder' },
+  { id: 'inicio', label: 'Inicio', icon: 'folder' },
+  { id: 'proyectos', label: 'Editor', icon: 'film' },
+  { id: 'crear', label: 'Crear con IA', icon: 'sparkles' },
   { id: 'marca', label: 'Marca', icon: 'palette' },
   { id: 'ajustes', label: 'Ajustes', icon: 'settings' }
 ]
@@ -24,7 +26,7 @@ export function Sidebar({
 }) {
   return (
     <aside className="sidebar">
-      <div className="brand">
+      <div className="brand" onClick={() => onChange('inicio')} role="button" title="Inicio">
         <span className="brand-mark"><Icon name="scissors" size={17} /></span>
         <span className="brand-name">recorte</span>
       </div>

@@ -6,7 +6,8 @@ export function TopBar({
   onBatch,
   puedeGenerar,
   importando,
-  generando
+  generando,
+  onInicio
 }: {
   name: string
   onImport: () => void
@@ -14,11 +15,12 @@ export function TopBar({
   puedeGenerar: boolean
   importando: boolean
   generando: boolean
+  onInicio: () => void
 }) {
   return (
     <header className="topbar">
       <div className="crumbs">
-        <span className="crumb-muted">Proyectos</span>
+        <button className="crumb-muted crumb-boton" onClick={onInicio}>Proyectos</button>
         <Icon name="chevron" size={14} />
         <strong>{name}</strong>
       </div>

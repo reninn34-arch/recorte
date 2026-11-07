@@ -1,0 +1,34 @@
+# Logos de terceros
+
+Los logos de esta carpeta identifican servicios con los que Recorte se conecta. Las marcas pertenecen
+a sus dueños (Anthropic, OpenAI, Google, DeepSeek, xAI, Moonshot AI, OpenCode, FFmpeg, Python Software
+Foundation, OpenJS Foundation); Recorte los usa solo para que reconozcas cada conexión.
+
+## Lobe Icons — MIT
+
+`claude.svg`, `openai.svg`, `gemini-color.svg`, `deepseek.svg`, `grok.svg`, `antigravity-color.svg`,
+`opencode.svg`, `kimi.svg` vienen de [@lobehub/icons-static-svg](https://github.com/lobehub/lobe-icons) 1.102.0.
+
+MIT License
+
+Copyright (c) 2023 LobeHub
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES
+OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+## Simple Icons — CC0 1.0
+
+`ffmpeg.svg`, `python.svg`, `nodedotjs.svg` vienen de [simple-icons](https://simpleicons.org) 16,
+dedicados al dominio público (CC0 1.0).

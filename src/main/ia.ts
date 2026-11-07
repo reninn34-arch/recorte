@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -45,7 +45,7 @@ function guionCompacto(transcript: TranscriptSegment[]): string {
   return texto.slice(0, LIMITE_CARACTERES)
 }
 
-function extraerJson(texto: string): unknown {
+export function extraerJson(texto: string): unknown {
   const inicio = texto.search(/[[{]/)
   if (inicio === -1) throw new Error('La respuesta no contiene JSON.')
 
@@ -88,13 +88,68 @@ function extraerJson(texto: string): unknown {
  * marca se sustituye por su ruta — para agentes como Kimi (`kimi -p "@{prompt}"`) que
  * toman el prompt como argumento en vez de por stdin.
  */
+/** Variables extra para el proceso de un agente (p. ej. ANTHROPIC_API_KEY si paga con llave). */
+let entornoAgentes: (orden: string) => Promise<Record<string, string>> = async () => ({})
+export function definirEntornoAgentes(fn: (orden: string) => Promise<Record<string, string>>): void {
+  entornoAgentes = fn
+}
+
+// ---------------------------------------------------------------------------
+// Parar al agente: cada trabajo largo tiene su clave («chat:<proyecto>»,
+// «creacion:<id>») y su señal. Parar corta el proceso del agente (con todo lo que
+// lanzó) o la petición a la API: deja de gastar en ese mismo instante.
+// ---------------------------------------------------------------------------
+
+export class Parado extends Error {
+  constructor() {
+    super('Lo paraste.')
+    this.name = 'Parado'
+  }
+}
+export const esParado = (e: unknown): boolean => e instanceof Error && e.name === 'Parado'
+
+const trabajos = new Map<string, AbortController>()
+
+export function empezarTrabajo(clave: string): AbortSignal {
+  trabajos.get(clave)?.abort()
+  const c = new AbortController()
+  trabajos.set(clave, c)
+  return c.signal
+}
+export function pararTrabajo(clave: string): boolean {
+  const c = trabajos.get(clave)
+  if (!c) return false
+  c.abort()
+  return true
+}
+export function terminarTrabajo(clave: string, senal: AbortSignal): void {
+  if (trabajos.get(clave)?.signal === senal) trabajos.delete(clave)
+}
+
+/** Mata un proceso y sus hijos (con `shell: true` en Windows, `kill` solo mata el cmd). */
+export function matarArbol(hijo: ChildProcess): void {
+  if (hijo.exitCode !== null || hijo.pid === undefined) return
+  if (process.platform === 'win32') {
+    spawn('taskkill', ['/pid', String(hijo.pid), '/T', '/F'], { windowsHide: true }).on('error', () => hijo.kill())
+  } else {
+    hijo.kill('SIGTERM')
+  }
+}
+
 export async function preguntarAgente(
   prompt: string,
   comando: string,
-  timeoutMs = 300_000
+  timeoutMs = 300_000,
+  senal?: AbortSignal
 ): Promise<string> {
+  if (senal?.aborted) throw new Parado()
   let orden = comando.trim()
   if (!orden) throw new Error('Falta el comando del agente. Revísalo en Ajustes.')
+  // Marca interna: Antigravity no es un CLI de texto; se habla ACP con su servidor.
+  if (orden === 'antigravity:acp') {
+    const { preguntarAntigravity } = await import('./antigravity')
+    return preguntarAntigravity(prompt, timeoutMs, senal)
+  }
 
   let archivoPrompt: string | null = null
   if (orden.includes('{prompt}')) {
@@ -103,6 +158,7 @@ export async function preguntarAgente(
     orden = orden.replaceAll('{prompt}', `"${archivoPrompt}"`)
   }
 
+  const extra = await entornoAgentes(orden).catch(() => ({}))
   return new Promise<string>((resolver, rechazar) => {
     const limpiar = () => {
       if (archivoPrompt) {
@@ -116,18 +172,27 @@ export async function preguntarAgente(
     const hijo = spawn(orden, {
       windowsHide: true,
       shell: true,
-      env: { ...process.env, PATH: pathAmpliado() }
+      env: { ...process.env, ...extra, PATH: pathAmpliado() }
     })
     let texto = ''
     let error = ''
     let cerrado = false
     const temporizador = setTimeout(() => {
       if (!cerrado) {
-        hijo.kill()
+        matarArbol(hijo)
         limpiar()
         rechazar(new Error(`El agente tardó demasiado (${Math.round(timeoutMs / 1000)} s): ${orden}`))
       }
     }, timeoutMs)
+    const alParar = () => {
+      if (cerrado) return
+      cerrado = true
+      clearTimeout(temporizador)
+      matarArbol(hijo)
+      limpiar()
+      rechazar(new Parado())
+    }
+    senal?.addEventListener('abort', alParar, { once: true })
 
     hijo.stdout.on('data', (b: Buffer) => (texto += b.toString('utf8')))
     hijo.stderr.on('data', (b: Buffer) => (error += b.toString('utf8')))
@@ -141,6 +206,8 @@ export async function preguntarAgente(
       )
     })
     hijo.on('close', (codigo) => {
+      senal?.removeEventListener('abort', alParar)
+      if (cerrado) return
       cerrado = true
       clearTimeout(temporizador)
       limpiar()
@@ -157,10 +224,18 @@ export async function preguntarAgente(
 }
 
 /** Pregunta a una API de chat compatible con OpenAI. Timeout de 120 s. */
-export async function preguntarApi(promptSistema: string, promptUsuario: string, config: ConfigIA): Promise<string> {
+export async function preguntarApi(
+  promptSistema: string,
+  promptUsuario: string,
+  config: ConfigIA,
+  senal?: AbortSignal
+): Promise<string> {
+  if (senal?.aborted) throw new Parado()
   const base = config.baseUrl.replace(/\/+$/, '')
   const controlador = new AbortController()
   const temporizador = setTimeout(() => controlador.abort(), 120_000)
+  const alParar = () => controlador.abort()
+  senal?.addEventListener('abort', alParar, { once: true })
 
   try {
     const respuesta = await fetch(`${base}/chat/completions`, {
@@ -194,12 +269,14 @@ export async function preguntarApi(promptSistema: string, promptUsuario: string,
     if (!contenido) throw new Error('La respuesta del modelo vino vacía.')
     return contenido
   } catch (error) {
+    if (senal?.aborted) throw new Parado()
     if (error instanceof Error && error.name === 'AbortError') {
       throw new Error('El modelo tardó demasiado (120 s). Prueba con un modelo más rápido.')
     }
     throw error
   } finally {
     clearTimeout(temporizador)
+    senal?.removeEventListener('abort', alParar)
   }
 }
 

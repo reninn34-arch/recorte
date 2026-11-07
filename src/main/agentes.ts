@@ -1,158 +1,367 @@
-import { execFile, spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { exec, spawn } from 'node:child_process'
+import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { pathAmpliado } from './binarios'
+import { app, shell } from 'electron'
+import type { ConexionResultado, EstadoAgente } from '../shared/api'
+import { anadirCarpetaBinarios, pathAmpliado, resolverBinario } from './binarios'
+import { conectadoAntigravity, exeAntigravity, instalarAntigravity, loginAntigravity } from './antigravity'
 
 /**
  * Detección y conexión de agentes CLI (los "planes" del usuario).
- * La idea: conectar un plan debe ser un botón, no escribir comandos.
- * Recorte detecta qué agentes están instalados y con sesión iniciada,
- * y lanza el login del agente (el navegador se abre solo).
+ *
+ * Conectar un plan es un botón, sin comandos ni terminales a mano:
+ * 1. Si el programa del agente no está, Recorte lo baja de npm a su propia carpeta
+ *    (`<userData>/agentes`), sin tocar las instalaciones globales del usuario.
+ * 2. Si ya hay sesión iniciada (su archivo de credenciales existe), está listo.
+ * 3. Si no, lanza el inicio de sesión del propio agente: Kimi y Codex abren el
+ *    navegador y terminan solos; Claude Code y Gemini CLI inician sesión en su
+ *    primera ejecución, así que se abre su ventana y la interfaz espera a que
+ *    aparezcan las credenciales.
  */
 
-export interface EstadoAgente {
-  id: 'kimi' | 'claude' | 'codex' | 'gemini'
-  nombre: string
-  instalado: boolean
-  /** null = no se puede saber sin llamar al agente. */
-  conectado: boolean | null
-  /** Comando listo para Ajustes (`comandoCli`). */
-  comando: string
-  /** Cómo instalarlo si falta. */
-  instalar: string
-}
+type Login = 'navegador' | 'ventana'
 
 interface DefAgente {
   id: EstadoAgente['id']
   nombre: string
   binario: string
   comando: string
-  /** Archivo que solo existe con sesión iniciada; null si no hay forma fiable. */
-  credenciales: string | null
-  instalar: string
+  paquete: string
+  /** Archivo o carpeta que solo existe con sesión iniciada. */
+  credenciales: string
+  login: Login
+  /** Argumentos del inicio de sesión en modo `navegador`. */
+  argsLogin?: string[]
+  /** Antigravity no es un CLI de texto: habla ACP y se descarga de Google. */
+  acp?: boolean
 }
 
 const AGENTES: DefAgente[] = [
-  {
-    id: 'kimi',
-    nombre: 'Kimi Code',
-    binario: 'kimi',
-    comando: 'kimi -p "@{prompt}"',
-    credenciales: join(homedir(), '.kimi-code', 'credentials'),
-    instalar: 'npm i -g @moonshot-ai/kimi-code'
-  },
   {
     id: 'claude',
     nombre: 'Claude Code',
     binario: 'claude',
     comando: 'claude -p',
+    paquete: '@anthropic-ai/claude-code',
     credenciales: join(homedir(), '.claude', '.credentials.json'),
-    instalar: 'npm i -g @anthropic-ai/claude-code'
+    login: 'ventana'
   },
   {
     id: 'codex',
     nombre: 'Codex',
     binario: 'codex',
     comando: 'codex exec',
+    paquete: '@openai/codex',
     credenciales: join(homedir(), '.codex', 'auth.json'),
-    instalar: 'npm i -g @openai/codex'
+    login: 'navegador',
+    argsLogin: ['login']
   },
   {
     id: 'gemini',
     nombre: 'Gemini CLI',
     binario: 'gemini',
     comando: 'gemini -p',
+    paquete: '@google/gemini-cli',
     credenciales: join(homedir(), '.gemini', 'oauth_creds.json'),
-    instalar: 'npm i -g @google/gemini-cli'
+    login: 'ventana'
+  },
+  {
+    id: 'kimi',
+    nombre: 'Kimi Code',
+    binario: 'kimi',
+    comando: 'kimi -p "@{prompt}"',
+    paquete: '@moonshot-ai/kimi-code',
+    credenciales: join(homedir(), '.kimi-code', 'credentials'),
+    login: 'navegador',
+    argsLogin: ['login']
+  },
+  {
+    id: 'opencode',
+    nombre: 'OpenCode',
+    binario: 'opencode',
+    comando: 'opencode run',
+    paquete: 'opencode-ai',
+    credenciales: join(homedir(), '.local', 'share', 'opencode', 'auth.json'),
+    login: 'ventana',
+    argsLogin: ['auth', 'login']
+  },
+  {
+    id: 'antigravity',
+    nombre: 'Antigravity · Google',
+    binario: 'agy_acp_server',
+    // Marca interna: `preguntarAgente` la reconoce y habla ACP con el servidor de Google.
+    comando: 'antigravity:acp',
+    paquete: '',
+    credenciales: '', // se calcula con `conectadoAntigravity`
+    login: 'navegador',
+    acp: true
   }
 ]
 
+/** Donde Recorte instala los agentes que baja él mismo. */
+function carpetaAgentes(): string {
+  return join(app.getPath('userData'), 'agentes')
+}
+
+/** Lo llama el arranque: los agentes que bajó Recorte se encuentran como los globales. */
+export function prepararAgentes(): void {
+  anadirCarpetaBinarios(join(carpetaAgentes(), 'node_modules', '.bin'))
+}
+
+const entorno = () => ({ ...process.env, PATH: pathAmpliado() })
+
 function versionResponde(binario: string): Promise<boolean> {
   return new Promise((resolver) => {
-    execFile(
-      binario,
-      ['--version'],
-      { timeout: 8000, windowsHide: true, shell: true, env: { ...process.env, PATH: pathAmpliado() } },
-      (error) => resolver(!error)
-    )
+    exec(`${binario} --version`, { timeout: 15000, windowsHide: true, env: entorno() }, (error) => resolver(!error))
   })
+}
+
+/** La versión instalada de cada agente (para Ajustes; corre `--version`, tarda unos segundos). */
+export async function versionesAgentes(): Promise<Record<string, string | null>> {
+  const pares = await Promise.all(
+    AGENTES.map(
+      (agente) =>
+        new Promise<[string, string | null]>((resolver) => {
+          if (agente.acp) return resolver([agente.id, exeAntigravity() ? 'instalado' : null])
+          if (!resolverBinario(agente.binario)) return resolver([agente.id, null])
+          exec(`${agente.binario} --version`, { timeout: 20000, windowsHide: true, env: entorno() }, (error, stdout, stderr) => {
+            const v = /\d+\.\d+(?:\.\d+)?/.exec(`${stdout} ${stderr}`)
+            resolver([agente.id, error && !v ? null : (v?.[0] ?? 'instalado')])
+          })
+        })
+    )
+  )
+  return Object.fromEntries(pares)
+}
+
+/** Los agentes que, además de la suscripción, aceptan pagar por uso con una llave de API. */
+export const VARIABLE_LLAVE: Partial<Record<EstadoAgente['id'], string>> = { claude: 'ANTHROPIC_API_KEY' }
+
+/** Qué agente corre una orden (por su binario o su comando). */
+export function agenteDeOrden(orden: string): EstadoAgente['id'] | null {
+  const limpia = orden.trim()
+  const a = AGENTES.find((x) => limpia === x.comando || limpia.startsWith(`${x.binario} `) || limpia === x.binario)
+  return a?.id ?? null
 }
 
 export async function estadoAgentes(): Promise<EstadoAgente[]> {
   return Promise.all(
-    AGENTES.map(async (agente) => {
-      const instalado = await versionResponde(agente.binario)
-      return {
-        id: agente.id,
-        nombre: agente.nombre,
-        instalado,
-        conectado: agente.credenciales ? existsSync(agente.credenciales) : null,
-        comando: agente.comando,
-        instalar: agente.instalar
-      }
-    })
+    AGENTES.map(async (agente) => ({
+      id: agente.id,
+      nombre: agente.nombre,
+      // Buscar el ejecutable es instantáneo; correr `--version` de cuatro agentes tardaba segundos.
+      instalado: agente.acp ? exeAntigravity() !== null : resolverBinario(agente.binario) !== null,
+      conectado: agente.acp ? conectadoAntigravity() : existsSync(agente.credenciales),
+      comando: agente.comando,
+      instalar: agente.acp ? 'Se descarga de Google (~230 MB)' : `npm i -g ${agente.paquete}`
+    }))
   )
 }
 
-export interface ConexionResultado {
-  ok: boolean
-  error?: string
-  aviso?: string
+/** Corre un comando con shell y devuelve el código y lo último que dijo. */
+function correr(orden: string, limite: number): Promise<{ codigo: number | null; salida: string }> {
+  return new Promise((resolver) => {
+    let salida = ''
+    let hecho = false
+    const hijo = spawn(orden, { shell: true, windowsHide: true, env: entorno() })
+    const reloj = setTimeout(() => {
+      if (hecho) return
+      hijo.kill()
+      resolver({ codigo: null, salida: 'Tardó demasiado.' })
+    }, limite)
+    hijo.stdout.on('data', (b: Buffer) => (salida = (salida + b.toString('utf8')).slice(-2000)))
+    hijo.stderr.on('data', (b: Buffer) => (salida = (salida + b.toString('utf8')).slice(-2000)))
+    hijo.on('error', (e) => {
+      hecho = true
+      clearTimeout(reloj)
+      resolver({ codigo: -1, salida: e.message })
+    })
+    hijo.on('close', (codigo) => {
+      hecho = true
+      clearTimeout(reloj)
+      resolver({ codigo, salida })
+    })
+  })
+}
+
+async function instalar(agente: DefAgente): Promise<ConexionResultado> {
+  if (!(await versionResponde('npm'))) {
+    return {
+      ok: false,
+      error: `Para instalar ${agente.nombre} hace falta Node.js (incluye npm). Instálalo desde nodejs.org y vuelve a intentarlo.`
+    }
+  }
+  const destino = carpetaAgentes()
+  mkdirSync(destino, { recursive: true })
+  const r = await correr(`npm install --no-audit --no-fund --prefix "${destino}" ${agente.paquete}@latest`, 10 * 60_000)
+  if (r.codigo !== 0 || !(await versionResponde(agente.binario))) {
+    return { ok: false, error: `No pude instalar ${agente.nombre}: ${r.salida.trim().slice(-300) || 'npm falló.'}` }
+  }
+  return { ok: true }
+}
+
+/** Abre una ventana de terminal con el agente para que el usuario inicie sesión. */
+function abrirVentana(agente: DefAgente): boolean {
+  const orden = `${agente.binario} ${(agente.argsLogin ?? []).join(' ')}`.trim()
+  try {
+    if (process.platform === 'win32') {
+      spawn(`start "Recorte - conectar ${agente.nombre}" cmd /k ${orden}`, {
+        shell: true,
+        detached: true,
+        windowsHide: false,
+        env: entorno(),
+        stdio: 'ignore'
+      }).unref()
+      return true
+    }
+    if (process.platform === 'darwin') {
+      spawn('osascript', ['-e', `tell application "Terminal" to do script "${agente.binario}"`, '-e', 'tell application "Terminal" to activate'], {
+        detached: true,
+        stdio: 'ignore'
+      }).unref()
+      return true
+    }
+    spawn('x-terminal-emulator', ['-e', agente.binario], { detached: true, stdio: 'ignore', env: entorno() }).unref()
+    return true
+  } catch {
+    return false
+  }
+}
+
+const enCurso = new Set<string>()
+
+/** Logins de navegador en marcha: el proceso sigue vivo hasta que aparecen las credenciales. */
+const loginesAbiertos = new Set<string>()
+
+/** La URL de autorización suele llevar auth, oauth, login o accounts en la dirección. */
+function urlDeAcceso(salida: string): string | null {
+  const urls = salida.match(/https?:\/\/[^\s"'<>)\]]+/g) ?? []
+  return urls.find((u) => /auth|oauth|login|accounts\.|device/i.test(u)) ?? null
 }
 
 /**
- * Conecta un agente con un clic. En Kimi el login abre el navegador solo
- * (flujo de código de dispositivo) y el proceso termina al autorizar.
- * Para el resto se indica el comando exacto: sus logins son interactivos
- * y necesitan una terminal a la vista.
+ * Inicia sesión con el navegador: lanza el login del agente y vigila lo que imprime.
+ * Con la salida canalizada (sin terminal) muchos agentes NO abren el navegador
+ * solos: en cuanto aparece la URL de autorización la abrimos nosotros y avisamos
+ * a la interfaz, que espera a que aparezcan las credenciales. El proceso del login
+ * queda vivo hasta completarse (máx. 10 min).
  */
-export function conectarAgente(id: unknown): Promise<ConexionResultado> {
-  const agente = AGENTES.find((a) => a.id === id)
-  if (!agente) return Promise.resolve({ ok: false, error: 'Agente desconocido.' })
-
-  if (agente.id !== 'kimi') {
-    return Promise.resolve({
-      ok: false,
-      aviso: `Instálalo con «${agente.instalar}» y entra con «${agente.binario}» una vez en una terminal; después Recorte lo detecta solo.`
-    })
-  }
-
+function loginNavegador(agente: DefAgente): Promise<ConexionResultado> {
   return new Promise((resolver) => {
-    let terminado = false
-    const hijo = spawn('kimi login', {
-      windowsHide: false,
+    if (loginesAbiertos.has(agente.id)) {
+      resolver({ ok: false, pendiente: true, aviso: `La autorización de ${agente.nombre} ya está en marcha.` })
+      return
+    }
+    loginesAbiertos.add(agente.id)
+    const hijo = spawn(`${agente.binario} ${(agente.argsLogin ?? []).join(' ')}`, {
       shell: true,
-      env: { ...process.env, PATH: pathAmpliado() }
+      windowsHide: true,
+      env: entorno()
     })
-    const temporizador = setTimeout(() => {
-      if (!terminado) {
-        hijo.kill()
-        resolver({ ok: false, error: 'El login tardó demasiado. Inténtalo de nuevo.' })
-      }
-    }, 10 * 60_000) // el código de dispositivo vive 30 min; margen de 10
 
     let salida = ''
-    hijo.stdout.on('data', (b: Buffer) => (salida += b.toString('utf8')))
-    hijo.stderr.on('data', (b: Buffer) => (salida += b.toString('utf8')))
-    hijo.on('error', (e) => {
-      clearTimeout(temporizador)
-      resolver({
+    let avisado = false
+    const anunciar = (r: ConexionResultado) => {
+      if (avisado) return
+      avisado = true
+      resolver(r)
+    }
+    const terminar = () => {
+      clearInterval(vigia)
+      clearTimeout(reloj)
+      clearTimeout(relojAviso)
+      if (!hijo.killed) hijo.kill()
+      loginesAbiertos.delete(agente.id)
+    }
+
+    // Si el agente no imprime URL es porque abrió el navegador él mismo: avisamos igual.
+    const relojAviso = setTimeout(
+      () => anunciar({ ok: false, pendiente: true, aviso: `Autoriza ${agente.nombre} en la página que se abrió en tu navegador.` }),
+      12_000
+    )
+    const reloj = setTimeout(terminar, 10 * 60_000)
+    const vigia = setInterval(() => {
+      if (existsSync(agente.credenciales)) {
+        terminar()
+        anunciar({ ok: true })
+      }
+    }, 1000)
+
+    const verSalida = (b: Buffer) => {
+      salida = (salida + b.toString('utf8')).slice(-4000)
+      const url = urlDeAcceso(salida)
+      if (!url) return
+      shell.openExternal(url).catch(() => {})
+      anunciar({
         ok: false,
-        error: `No pude lanzar el login: ${e.message}. Instálalo con «${agente.instalar}».`
+        pendiente: true,
+        aviso: `Se abrió tu navegador para autorizar ${agente.nombre}. Si no se abrió, pega esta dirección: ${url}`
       })
+    }
+    hijo.stdout.on('data', verSalida)
+    hijo.stderr.on('data', verSalida)
+    hijo.on('error', (e) => {
+      terminar()
+      anunciar({ ok: false, error: `No pude lanzar el login de ${agente.nombre}: ${e.message}` })
     })
-    hijo.on('close', (codigo) => {
-      terminado = true
-      clearTimeout(temporizador)
-      if (codigo === 0 && existsSync(agente.credenciales!)) {
-        resolver({ ok: true })
-      } else {
-        resolver({
-          ok: false,
-          error: salida.trim().slice(-300) || 'El login no se completó.'
-        })
+    hijo.on('close', () => {
+      if (existsSync(agente.credenciales)) {
+        terminar()
+        anunciar({ ok: true })
+      } else if (!avisado) {
+        terminar()
+        anunciar({ ok: false, error: salida.trim().slice(-300) || 'El inicio de sesión no se completó.' })
       }
     })
   })
+}
+
+export async function conectarAgente(id: unknown): Promise<ConexionResultado> {
+  const agente = AGENTES.find((a) => a.id === id)
+  if (!agente) return { ok: false, error: 'Agente desconocido.' }
+  if (enCurso.has(agente.id)) return { ok: false, pendiente: true, aviso: `Ya se está conectando ${agente.nombre}.` }
+
+  if (agente.acp) {
+    enCurso.add(agente.id)
+    try {
+      if (!exeAntigravity()) {
+        await instalarAntigravity()
+      }
+      if (conectadoAntigravity()) return { ok: true }
+      // La autorización sigue en el navegador; el token se detecta solo al volver.
+      let aviso = `Se abrió tu navegador para autorizar ${agente.nombre} con tu cuenta de Google.`
+      void loginAntigravity((url) => {
+        aviso = `Se abrió tu navegador para autorizar ${agente.nombre}. Si no se abrió, pega esta dirección: ${url}`
+      })
+        .catch(() => {})
+        .finally(() => enCurso.delete(agente.id))
+      return { ok: false, pendiente: true, aviso }
+    } catch (e) {
+      enCurso.delete(agente.id)
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
+  enCurso.add(agente.id)
+  try {
+    if (!(await versionResponde(agente.binario))) {
+      const instalado = await instalar(agente)
+      if (!instalado.ok) return instalado
+    }
+    if (existsSync(agente.credenciales)) return { ok: true }
+
+    if (agente.login === 'navegador') return loginNavegador(agente)
+
+    if (!abrirVentana(agente)) {
+      return { ok: false, error: `No pude abrir la ventana de ${agente.nombre}. Ábrelo una vez con «${agente.binario}» para iniciar sesión.` }
+    }
+    return {
+      ok: false,
+      pendiente: true,
+      aviso: `Se abrió ${agente.nombre}: inicia sesión con tu cuenta en esa ventana. Recorte lo detecta solo.`
+    }
+  } finally {
+    enCurso.delete(agente.id)
+  }
 }

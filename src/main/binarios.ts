@@ -7,10 +7,18 @@ import { delimiter, join } from 'node:path'
  * carpetas donde caen los instaladores globales habituales de Windows.
  */
 
+const extras: string[] = []
+
+/** Carpetas propias de Recorte (p. ej. los agentes que baja él mismo); van primero. */
+export function anadirCarpetaBinarios(dir: string): void {
+  if (!extras.includes(dir)) extras.unshift(dir)
+}
+
 function candidatos(): string[] {
   const appData = process.env.APPDATA ?? ''
   const localAppData = process.env.LOCALAPPDATA ?? ''
   const dirs = [
+    ...extras,
     join(appData, 'npm'),
     join(appData, 'kimi-desktop', 'daimon-share', 'daimon', 'npm-global'),
     join(localAppData, 'Microsoft', 'WinGet', 'Links')

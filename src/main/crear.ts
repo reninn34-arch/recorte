@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { Project } from '../shared/types'
 import { pathAmpliado, resolverBinario } from './binarios'
 import { estiloPorId } from '../shared/estilos'
-import { preguntarAgente, preguntarApi, type ConfigIA } from './ia'
+import { matarArbol, preguntarAgente, preguntarApi, type ConfigIA } from './ia'
 import type { ResultadoRender } from './render'
 
 /**
@@ -174,8 +174,14 @@ Reglas para incrustarlos (HyperFrames es estricto aquí):
 `
 }
 
-function ejecutar(args: string[], cwd: string, timeoutMs: number): Promise<{ codigo: number; salida: string }> {
+export function ejecutar(
+  args: string[],
+  cwd: string,
+  timeoutMs: number,
+  senal?: AbortSignal
+): Promise<{ codigo: number; salida: string }> {
   return new Promise((resolver) => {
+    if (senal?.aborted) return resolver({ codigo: -1, salida: 'Lo paraste.' })
     const hijo = spawn(args.join(' '), {
       cwd,
       windowsHide: true,
@@ -193,8 +199,11 @@ function ejecutar(args: string[], cwd: string, timeoutMs: number): Promise<{ cod
       clearTimeout(temporizador)
       resolver({ codigo: -1, salida: e.message })
     })
+    const alParar = () => matarArbol(hijo)
+    senal?.addEventListener('abort', alParar, { once: true })
     hijo.on('close', (codigo) => {
       clearTimeout(temporizador)
+      senal?.removeEventListener('abort', alParar)
       resolver({ codigo: codigo ?? -1, salida })
     })
   })

@@ -18,6 +18,14 @@ export type IconName =
   | 'plus'
   | 'search'
   | 'layers'
+  | 'pause'
+  | 'undo'
+  | 'redo'
+  | 'type'
+  | 'trash'
+  | 'copy'
+  | 'music'
+  | 'key'
 
 const paths: Record<IconName, ReactNode> = {
   scissors: (
@@ -84,6 +92,12 @@ const paths: Record<IconName, ReactNode> = {
     </>
   ),
   plus: <path d="M12 5v14M5 12h14" />,
+  key: (
+    <>
+      <circle cx="8" cy="15.5" r="4.5" />
+      <path d="m11.2 12.3 8.3-8.3M17 6l2.5 2.5M14.5 8.5 17 11" />
+    </>
+  ),
   search: (
     <>
       <circle cx="11" cy="11" r="7" />
@@ -94,6 +108,34 @@ const paths: Record<IconName, ReactNode> = {
     <>
       <path d="m12 3 9 5-9 5-9-5 9-5Z" />
       <path d="m3 12 9 5 9-5M3 16l9 5 9-5" />
+    </>
+  ),
+  pause: <path d="M8.5 5v14M15.5 5v14" />,
+  undo: (
+    <>
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+    </>
+  ),
+  redo: (
+    <>
+      <path d="m15 14 5-5-5-5" />
+      <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
+    </>
+  ),
+  type: <path d="M5 7V5h14v2M9.5 19h5M12 5v14" />,
+  trash: <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" />,
+  music: (
+    <>
+      <path d="M9 18V5l11-2v13" />
+      <circle cx="6.5" cy="18" r="2.5" />
+      <circle cx="17.5" cy="16" r="2.5" />
+    </>
+  ),
+  copy: (
+    <>
+      <rect x="8" y="8" width="12" height="12" rx="2" />
+      <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
     </>
   )
 }

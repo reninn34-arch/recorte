@@ -24,3 +24,11 @@ nsis:
   allowToChangeInstallationDirectory: true
   shortcutName: Recorte
   language: "1034"
+
+# Las versiones se publican en GitHub Releases; la app instalada las busca ahí
+# (electron-updater) y avisa al usuario. Ver docs/ARQUITECTURA.md → «Publicar una versión».
+publish:
+  provider: github
+  owner: reninn34-arch
+  repo: recorte
+  releaseType: release

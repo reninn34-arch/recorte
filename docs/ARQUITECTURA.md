@@ -257,3 +257,197 @@ PyAV 19.
    (siguiente: es el centro del producto, no un extra)
 7. **Empaquetado.** Instalador, primeros tres beta, medición de tiempos. (instalador NSIS
    generado con `npm run package`, sin firma de código; beta y medición pendientes)
+
+## Timeline (la pieza central del editor)
+
+`src/shared/timeline.ts` define el documento `Timeline` que comparten la interfaz, el reproductor y,
+en el siguiente paso, los agentes y el render. Se guarda en `proyecto.json` (`Project.timeline`) y el
+proceso principal lo valida con `normalizarTimeline` antes de escribirlo.
+
+- **Pista de video magnética** (`clips`): clips de la fuente uno tras otro, sin huecos. Borrar o
+  recortar cierra el hueco solo.
+- **Pista de textos** (`textos`): rótulos con posición absoluta en la timeline.
+- **Operaciones puras**: `dividir`, `borrarClip`, `recortarClip`, `moverClip`, `duplicarClip`,
+  `borrarTramo`, `anadirTexto`, `cambiarTexto`, `borrarTexto`. Cada una devuelve una timeline nueva:
+  eso da deshacer/rehacer gratis (`useHistorial`, `src/renderer/src/hooks/timeline.ts`).
+- **Reproductor sin render** (`useReproductor`): un `<video>` con el proxy que salta de corte en corte;
+  el reloj es la timeline. Los rótulos se dibujan encima del monitor.
+- **Puentes**: la receta del agente y cualquier momento se llevan a la timeline
+  (`timelineDesdeReceta`, `timelineDesdeCortes`) y ahí se siguen editando a mano.
+
+- **Exportar** (`src/main/exportar.ts`): cada clip entra como su propia entrada de FFmpeg
+  (`-ss`/`-t` antes de `-i`), se unen con `concat` y los rótulos y, si se pide, los subtítulos de la
+  voz se queman con ASS. Formato original o vertical 9:16. Sale a `salidas/timeline-*.mp4`.
+
+## Chat con el agente
+
+El agente edita la misma timeline que el usuario, conversando (`ChatAgente.tsx`):
+
+- **Contrato** (`src/shared/chat.ts`): el agente responde `{"mensaje", "operaciones"}`. Las operaciones
+  son las de la timeline (`borrar_tramo`, `quitar_pausas`, `dividir`, `mover_clip`, `recortar_clip`,
+  `anadir_texto`, `cambiar_texto`, `borrar_texto`, `reconstruir`). `validarOperaciones` descarta lo que
+  no encaja y `aplicarOperaciones` las ejecuta de forma pura.
+- **Lo que ve el agente** (`describirTimelineParaAgente`): clips con tiempos de timeline y de fuente,
+  rótulos, la voz dentro de la timeline y la que quedó fuera. Con el mensaje viaja dónde está el
+  usuario (cabezal, clip o texto elegido).
+- **Turno** (`src/main/chat.ts`, IPC `agente:chat`): funciona con cualquier agente CLI o API
+  (`preguntarAgente` / `preguntarApi`); sin MCP ni configuración por proveedor.
+- **Deshacer**: las operaciones de una respuesta se aplican en la interfaz como un solo paso del
+  historial; el botón «Deshacer» del mensaje o Ctrl+Z lo revierten.
+- `quitar_pausas` lo calcula Recorte con los tiempos por palabra: el agente decide, Recorte mide.
+- La conversación se guarda en el proyecto (`Project.chat`, últimos 60 mensajes).
+
+## Zoom, color y música
+
+- Cada clip puede llevar `ajustes` (zoom 1–2, brillo, contraste, saturación). El monitor los aplica
+  con CSS (`scale`, `filter`) y el export con `crop` centrado + `eq` de FFmpeg.
+- `Timeline.musica` es una pista bajo toda la edición. El archivo se copia a `media/` del proyecto
+  (`proyecto:importar-musica`) y `normalizarMusica` solo acepta rutas `media/<archivo>`. Se repite si
+  es corta y se funde al final.
+- **Ducking**: la música baja a un cuarto (−12 dB) en los tramos con voz de la transcripción, con
+  rampas de 0,15 s; el monitor (`useMusica`) y el export (`envolventeDucking`) usan los mismos tramos.
+  Sin transcripción, el export cae a `sidechaincompress`.
+- El grafo de filtros del export va en `filtro-timeline.txt` (`-/filter_complex`), así no choca con el
+  límite de la línea de órdenes de Windows.
+- El agente tiene `zoom`, `color`, `musica` y `quitar_musica`. No elige archivos de música: los pone
+  el usuario.
+
+Pendiente: biblioteca con varias fuentes, transiciones, velocidad, y que el agente pueda mirar fotogramas.
+
+## Inicio y agentes
+
+- La app arranca en **Inicio** (`Inicio.tsx`), como cualquier editor: proyectos recientes con
+  miniatura y «Nuevo proyecto». No abre el último proyecto sola.
+- En Inicio está el agente. Si no hay ninguno listo, el recuadro se resalta y pide conectarlo.
+- `src/main/agentes.ts` conecta con un clic: si falta el programa lo baja de npm a
+  `<userData>/agentes`; Kimi y Codex inician sesión en el navegador; Claude Code y Gemini CLI abren su
+  ventana y la interfaz espera sus credenciales (`useAgentes`). El comando del agente queda interno:
+  el usuario nunca lo escribe.
+
+## Crear con IA
+
+Inicio tiene dos puertas: **Editar un video** (importar → editor) y **Crear con IA** (sin material).
+
+- **Pantalla Crear** (`CrearIA.tsx`): la petición primero, como en un chat; adjuntos (fotos o clips),
+  formato (9:16 o 16:9) y duración. Los tipos de video (`src/shared/estilos.ts`) se agrupan por
+  objetivo: Enseñar, Vender, Contar, Inspirar. Sin elegir ninguno, decide el agente.
+- **Creación** (`src/shared/creacion.ts`, `src/main/creaciones.ts`): carpeta
+  `<userData>/creaciones/<id>/` con `creacion.json`, la composición en `composicion/` (adjuntos en
+  `composicion/media/`) y los MP4 en `salidas/`. El protocolo de medios la sirve como
+  `recorte-media://c-<id>/…`.
+- **Fases** (`EstudioCreacion.tsx`): Idea → Guion → Video → Editor.
+  - `creacion:guion`: el agente propone el guion por escenas (JSON validado con `validarGuion`);
+    cada mensaje del chat lo cambia.
+  - `creacion:video`: el agente compone el HTML de HyperFrames a partir del guion y Recorte lo
+    renderiza (`video-vN.mp4` + portada). Con el video hecho, cada mensaje edita esa composición y
+    se vuelve a renderizar.
+  - `creacion:editor`: el MP4 se importa como un proyecto normal (misma ingesta que «Nuevo
+    proyecto») y se sigue en la timeline: cortes, rótulos, música, zoom, chat. Si ya se abrió, se
+    vuelve al mismo proyecto.
+- El editor ya no tiene la pestaña «Crear»; el chat del panel es la IA sobre lo que ya hay.
+
+### Voz de las creaciones
+
+Fase **Voz** entre Guion y Video (`PasoVoz.tsx`, `src/main/voz.ts`):
+
+- Cada escena del guion trae `texto` (lo que se lee en pantalla) y `narracion` (lo que se dice).
+- **Voz de Gemini**: API oficial de AI Studio (`POST /v1beta/interactions`, modelo
+  `gemini-3.8-flash-tts` y, si falla o no hay cuota, `gemini-3.8-flash-lite-tts`) con la clave del
+  usuario, guardada cifrada (`Ajustes.guardarVoz`); la interfaz solo sabe si hay clave. Una petición
+  por voz.
+- **Mi voz**: se graba en la app (MediaRecorder, WebM) o se sube un audio; FFmpeg lo pasa a WAV.
+- Todas acaban en `composicion/media/voz.wav`. Whisper la transcribe en local y `alinearEscenas`
+  reparte las palabras por escena: la voz manda los tiempos del video.
+- El agente compone sin audio con esos tiempos; tras el render, FFmpeg mezcla la voz en el MP4.
+- Cambiar el guion quita la voz (ya no le corresponde) y lo avisa en el chat.
+
+## Ajustes
+
+`Opciones.tsx` reúne todo lo que conecta Recorte, en una columna:
+
+- **Agentes** (`ListaAgentes.tsx`, la misma lista que Inicio en versión compacta): logo oficial,
+  qué cuenta usa, versión instalada (`agentes:versiones`), botón «Conectar con…», el último error y,
+  para Claude Code, «Paga con: Tu suscripción | Llave de API». Con llave, el proceso del agente recibe
+  `ANTHROPIC_API_KEY` (`definirEntornoAgentes` en `ia.ts`); la llave se guarda cifrada.
+- **Voz**: la cuenta de Google (Edge) o la llave de AI Studio.
+- **Avisos**: notificación y sonido cuando termina un trabajo largo y Recorte no está a la vista.
+- **Tu equipo**, **Espacio en disco** y **Herramientas de video** (`src/main/sistema.ts`): procesador,
+  memoria, tarjeta gráfica, disco libre y lo que ocupa Recorte; FFmpeg, Python, sus paquetes,
+  HyperFrames, Node y Edge con su versión. Los paquetes de Python y HyperFrames se instalan con un botón.
+- **Avanzado · API propia**: cualquier servidor compatible con OpenAI.
+
+Los logos están en `src/renderer/src/assets/logos/` (Lobe Icons, MIT, y Simple Icons, CC0; ver
+`LICENCIAS.md`).
+
+## Google Flow
+
+Imágenes (Nano Banana, no gastan créditos) y videos (Veo, sí) con las cuentas de Google del usuario.
+Flow no tiene API: Recorte maneja su página como lo haría la persona.
+
+- `src/main/edgeperfil.ts`: un Edge por perfil. Para entrar con Google solo mira por CDP directo
+  (sin Playwright) y usa un puerto libre ya elegido, nunca 0. La voz y Flow comparten el perfil de la
+  cuenta de la voz y su turno, así no abren dos Edge sobre la misma sesión.
+- `src/main/flowpagina.ts`: entrar al proyecto de Recorte en Flow (o crearlo), elegir tipo, formato,
+  x1 y modelo, leer el costo, escribir la petición, esperar la tarjeta y bajarla. Los botones se
+  reconocen por su icono (no cambia con el idioma); la ventana es angosta para que Flow enseñe su
+  compositor directo, que dice el costo.
+- `src/main/flow.ts`: cuentas (la de la voz y las agregadas en `<userData>/flow/cuentas/<id>/`),
+  saldos, uso de hoy y del mes, y el reparto: hasta 3 a la vez; si Flow no empieza un pedido (no
+  gastó) la cuenta descansa y el pedido pasa a otra. Nunca pasa del tope de créditos del pedido.
+- «Ayudar a mejorar Flow» solo se toca si el usuario lo eligió en Ajustes; sin «Tengo los derechos»
+  no se mandan imágenes de referencia. Aceptar el aviso de Flow la primera vez lo hace la persona
+  («Abrir Flow»).
+- En **Crear con IA**, «Imágenes con Flow» y «Clips con Veo» hacen que el guion pida `imagen` o
+  `clip` por escena; antes de componer, Recorte los genera (`generarMedioFlow`), los guarda en
+  `media/flow-escena-N.*` y el diseñador los usa. Rehacer el video no vuelve a gastar.
+
+Pendiente: generar B-roll desde el editor (necesita varias fuentes en la timeline).
+
+## Voz montada, carpeta de videos, medios y borrar
+
+- **Poner la voz en un video hecho** (`src/main/montajevoz.ts`): sin agente ni tokens. La voz manda:
+  cada escena dura lo que su frase (hasta ×1,25 más lenta y luego quieta en su último cuadro), cada
+  frase entra con su escena, y la voz se limpia (paso alto, compresión, −16 LUFS). Cada escena y cada
+  frase entran como su propia entrada de FFmpeg: sacar varios trozos de una sola entrada lo bloquea.
+  Se hace solo al terminar una voz si ya hay video, con el botón «Poner la voz en el video» o si el
+  chat lo pide (`pideMontarVoz`). Una creación que quedó en «video» al cerrar la app se destraba sola.
+- **Carpeta de tus videos** (`src/main/carpetas.ts`): por defecto `Videos\Recorte`, se elige en
+  Inicio la primera vez o en Ajustes. Exportar escribe ahí (una subcarpeta por proyecto) y cada video
+  creado con IA se copia ahí.
+- **Medios** (`Project.medios`, `MediosPanel.tsx`): varios videos e imágenes por proyecto. Los clips
+  los nombran por `fuente`; el reproductor cambia de archivo al cambiar de fuente y lleva su propio
+  reloj en las imágenes; la exportación lee cada clip de su archivo, las imágenes como cuadro fijo y
+  con silencio donde no hay sonido. Quitar un medio quita sus clips; la × del clip elegido lo quita.
+- **Borrar** proyectos y creaciones desde Inicio: van a la Papelera (`shell.trashItem`).
+- **Caja de Crear con IA** (`CajaCrear.tsx`): quién lo hace (optimizado o agente y modelo por paso),
+  formato, duración, imágenes y clips de Flow con su modelo y costo, y confirmar derechos.
+- **Parar al agente** (`ia.ts`: `empezarTrabajo`/`pararTrabajo`): cada trabajo largo tiene su clave
+  (`chat:<proyecto>`, `creacion:<id>`) y una señal. Parar mata el proceso del agente con todo lo que
+  lanzó (`taskkill /T` en Windows), corta la petición a la API, saca de la fila de Flow lo que aún no
+  empezó y detiene el render. Lo que ya se genera en Flow termina (cortarlo no devuelve créditos).
+- **Editar, reenviar y volver** en el chat del editor: cada mensaje del usuario guarda la timeline de
+  antes (`MensajeChat.antes`). Volver a un mensaje borra lo que vino después y, si el agente cambió
+  algo, deja la timeline como estaba en un solo paso de deshacer.
+
+## Tu criterio: el agente propone y aprende
+
+- `shared/gustos.ts` + `main/gustos.ts` (`<userData>/gustos.json`): gustos «dichos» (Ajustes → Tu
+  criterio) y «aprendidos» (el agente los devuelve en `aprendido`), señales de lo que el usuario hace
+  con las propuestas (deshace, corrige y reenvía, elige, para) y cuántas veces usa cada formato,
+  duración y tipo en Crear con IA.
+- Cada prompt (chat del editor, guion y composición) lleva `bloqueGustos()`. El agente responde
+  también `propuestas` (botones con siguientes pasos) y `aprendido` (preferencias duraderas, no
+  pedidos puntuales). Las señales no son gustos: el agente las lee y, si ve un patrón, lo aprende.
+- Todo se ve, se borra y se apaga en Ajustes. La caja de Crear empieza con lo que más usa.
+
+## Publicar una versión (instalador y actualizaciones)
+
+- `electron-builder.yml` publica en GitHub Releases (`reninn34-arch/recorte`); la app instalada usa
+  `electron-updater` (`main/actualizar.ts`): revisa al abrir y cada 4 h, baja en segundo plano y
+  muestra «Recorte X está lista · Reiniciar y actualizar» (si no, se instala al cerrar).
+- Para sacar una versión: `npm version patch` (o `minor`) y `git push --follow-tags`. El workflow
+  `.github/workflows/release.yml` compila el instalador en Windows y lo sube con `latest.yml`.
+  A mano: `GH_TOKEN=… npm run publicar`.
+- El repositorio tiene que ser público para que la app lea los releases sin token.
+- El instalador no está firmado: Windows SmartScreen avisa la primera vez («Más información →
+  Ejecutar de todas formas»). Firmarlo requiere un certificado de firma de código.
