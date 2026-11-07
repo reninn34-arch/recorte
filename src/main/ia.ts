@@ -118,10 +118,24 @@ export function entornoParaAgente(orden: string): Promise<Record<string, string>
 // ---------------------------------------------------------------------------
 
 /** El fallo de un agente en palabras del usuario (sesión caducada, límite del plan…). */
+const SESION_CAIDA = /authenticat|oauth|session expired|not logged in|unauthori[sz]ed|\b401\b|credential|please run \/?login|invalid api key/i
+
+/** Quien quiera enterarse de que la sesión de un agente se cayó (index.ts: marca y refresca Inicio). */
+let alCaerSesion: ((orden: string) => void) | null = null
+export function avisarSesionCaida(cb: (orden: string) => void): void {
+  alCaerSesion = cb
+}
+
+/** Como explicarFallo, pero sabiendo qué agente falló: si fue la sesión, lo avisa para reconectar. */
+export function falloDeAgente(orden: string, texto: string): string {
+  if (!rechazoPorPolitica(texto) && SESION_CAIDA.test(texto)) alCaerSesion?.(orden)
+  return explicarFallo(texto)
+}
+
 export function explicarFallo(texto: string): string {
   const rechazo = rechazoPorPolitica(texto)
   if (rechazo) return rechazo
-  if (/authenticat|oauth|session expired|not logged in|unauthori[sz]ed|\b401\b|credential/i.test(texto)) {
+  if (SESION_CAIDA.test(texto)) {
     return 'La sesión de tu agente caducó o se cerró. Vuelve a conectarlo en Inicio (botón «Conectar») e inténtalo otra vez.'
   }
   if (/rate.?limit|usage limit|quota|\b429\b|too many requests|limit reached/i.test(texto)) {
@@ -259,7 +273,7 @@ export async function preguntarAgente(
         // Lo que dijo el agente al fallar (o lo último que imprimió), y qué se lanzó: sin eso
         // «terminó con código 1» no sirve para saber qué pasó.
         const dijo = (error.trim() || texto.trim()).slice(-300)
-        rechazar(new Error(dijo ? explicarFallo(dijo) : `El agente («${orden.slice(0, 80)}») terminó con código ${codigo} sin decir nada.`))
+        rechazar(new Error(dijo ? falloDeAgente(orden, dijo) : `El agente («${orden.slice(0, 80)}») terminó con código ${codigo} sin decir nada.`))
       }
     })
     if (archivoPrompt) {

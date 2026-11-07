@@ -72,6 +72,24 @@ export function useAgentes(onAviso: (texto: string) => void): Agentes {
     }
   }, [refrescar])
 
+  // Al volver a la ventana se mira otra vez (pudo cerrar o iniciar sesión fuera de Recorte).
+  useEffect(() => {
+    const alVolver = () => void refrescar().catch(() => {})
+    window.addEventListener('focus', alVolver)
+    return () => window.removeEventListener('focus', alVolver)
+  }, [refrescar])
+
+  // Si la sesión de un agente se cae mientras trabaja: Inicio muestra «Conectar» y se avisa.
+  useEffect(
+    () =>
+      window.recorte.onSesionCaida((id) => {
+        void refrescar().catch(() => {})
+        const nombre = lista.find((a) => a.id === id)?.nombre ?? 'tu agente'
+        fallo(id, `La sesión de ${nombre} se cerró. Pulsa «Conectar» en Inicio para volver a iniciarla.`)
+      }),
+    [refrescar, fallo, lista]
+  )
+
   const usar = useCallback(async (agente: EstadoAgente, base: AjustesIA) => {
     const guardados = await window.recorte.guardarAjustes({
       activa: true,

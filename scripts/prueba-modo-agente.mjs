@@ -210,10 +210,19 @@ try {
 
   // Si la sesión del agente caducó, el usuario lo lee en claro (no un trozo de JSON).
   writeFileSync(join(medios, 'fallar.txt'), '1')
+  await evaluar(cliente, `(window.__caidas = [], window.recorte.onSesionCaida((id) => window.__caidas.push(id)), true)`)
   const caducada = await evaluar(cliente, `window.recorte.agentePlan(${JSON.stringify(c.id)})`)
   const aviso = caducada.mensajes.at(-1)
   if (!aviso.error || !/sesión de tu agente caducó/.test(aviso.texto)) throw new Error(`Aviso de sesión caducada: ${aviso.texto}`)
   console.log('sesión caducada: se avisa en claro ✓')
+  // …y la interfaz se entera (Inicio vuelve a mostrar «Conectar») y Claude Code deja de contar como conectado.
+  const caidas = await evaluar(cliente, 'window.__caidas')
+  if (!caidas.includes('claude')) throw new Error(`La interfaz no recibió la sesión caída: ${JSON.stringify(caidas)}`)
+  const estado = await evaluar(cliente, 'window.recorte.agentesEstado()')
+  if (estado.find((a) => a.id === 'claude')?.conectado) throw new Error('Claude Code sigue contando como conectado tras caerse su sesión.')
+  const avisoInicio = await evaluar(cliente, `document.body.innerText.includes('Pulsa «Conectar» en Inicio')`)
+  if (!avisoInicio) throw new Error('No salió el aviso para reconectar.')
+  console.log('sesión caída: la interfaz lo sabe, avisa y pide reconectar ✓')
 
   // Si el filtro de contenido del proveedor rechaza el pedido, se explica (no «Unexpected token»).
   unlinkSync(join(medios, 'fallar.txt'))

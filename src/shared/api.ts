@@ -327,6 +327,8 @@ export interface RecorteApi {
   onActualizacion: (cb: (e: EstadoActualizacion) => void) => () => void
   /** Progreso de una herramienta que se baja o se instala desde Ajustes. */
   onHerramienta: (cb: (p: { id: string; pct: number; texto: string }) => void) => () => void
+  /** La sesión de un agente se cayó mientras trabajaba: hay que volver a conectarlo. */
+  onSesionCaida: (cb: (id: EstadoAgente['id']) => void) => () => void
   onProgreso: (cb: (p: Progreso) => void) => () => void
   platform: string
 }

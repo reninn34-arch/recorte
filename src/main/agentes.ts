@@ -1,11 +1,11 @@
 import { exec, spawn } from 'node:child_process'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { app, shell } from 'electron'
 import type { ConexionResultado, EstadoAgente } from '../shared/api'
 import { anadirCarpetaBinarios, pathAmpliado, resolverBinario } from './binarios'
-import { conectadoAntigravity, exeAntigravity, instalarAntigravity, loginAntigravity } from './antigravity'
+import { conectadoAntigravity, exeAntigravity, instalarAntigravity, loginAntigravity, rutaTokenAntigravity } from './antigravity'
 
 /**
  * Detección y conexión de agentes CLI (los "planes" del usuario).
@@ -145,6 +145,57 @@ export function agenteDeOrden(orden: string): EstadoAgente['id'] | null {
   return a?.id ?? null
 }
 
+/**
+ * Las sesiones que se cayeron mientras trabajaban (el agente respondió «no autenticado»), con
+ * cuándo: el agente cuenta como desconectado hasta que sus credenciales cambien (al reconectar).
+ */
+const caidas = new Map<EstadoAgente['id'], number>()
+
+function cambioDesde(ruta: string): number {
+  try {
+    return statSync(ruta).mtimeMs
+  } catch {
+    return 0
+  }
+}
+
+/** La sesión de un agente se cayó: deja de contar como conectado hasta que vuelva a iniciarla. */
+export function marcarSesionCaida(id: EstadoAgente['id']): void {
+  caidas.set(id, Date.now())
+}
+
+/** Tiene sesión de verdad: no basta con que exista el archivo (al cerrar sesión queda vacío). */
+function sesionIniciada(agente: DefAgente): boolean {
+  if (agente.acp) return conectadoAntigravity()
+  if (!existsSync(agente.credenciales)) return false
+  if (agente.id === 'claude') {
+    try {
+      const o = (JSON.parse(readFileSync(agente.credenciales, 'utf8')) as { claudeAiOauth?: Record<string, unknown> }).claudeAiOauth
+      const texto = (v: unknown) => typeof v === 'string' && v.length > 0
+      if (!o || !texto(o.accessToken)) return false
+      const vence = typeof o.expiresAt === 'number' ? o.expiresAt : 0
+      // Con refreshToken se renueva solo; sin él, vale mientras no venza.
+      if (!texto(o.refreshToken) && vence > 0 && vence < Date.now()) return false
+    } catch {
+      return false
+    }
+  }
+  return true
+}
+
+function conectadoAhora(agente: DefAgente): boolean {
+  if (!sesionIniciada(agente)) return false
+  const caida = caidas.get(agente.id)
+  if (caida === undefined) return true
+  // Si sus credenciales se reescribieron después del fallo, volvió a iniciar sesión.
+  const ruta = agente.acp ? rutaTokenAntigravity() : agente.credenciales
+  if (cambioDesde(ruta) > caida) {
+    caidas.delete(agente.id)
+    return true
+  }
+  return false
+}
+
 export async function estadoAgentes(): Promise<EstadoAgente[]> {
   return Promise.all(
     AGENTES.map(async (agente) => ({
@@ -152,7 +203,7 @@ export async function estadoAgentes(): Promise<EstadoAgente[]> {
       nombre: agente.nombre,
       // Buscar el ejecutable es instantáneo; correr `--version` de cuatro agentes tardaba segundos.
       instalado: agente.acp ? exeAntigravity() !== null : resolverBinario(agente.binario) !== null,
-      conectado: agente.acp ? conectadoAntigravity() : existsSync(agente.credenciales),
+      conectado: conectadoAhora(agente),
       comando: agente.comando,
       instalar: agente.acp ? 'Se descarga de Google (~230 MB)' : `npm i -g ${agente.paquete}`
     }))
@@ -282,7 +333,7 @@ function loginNavegador(agente: DefAgente): Promise<ConexionResultado> {
     )
     const reloj = setTimeout(terminar, 10 * 60_000)
     const vigia = setInterval(() => {
-      if (existsSync(agente.credenciales)) {
+      if (conectadoAhora(agente)) {
         terminar()
         anunciar({ ok: true })
       }
@@ -306,7 +357,7 @@ function loginNavegador(agente: DefAgente): Promise<ConexionResultado> {
       anunciar({ ok: false, error: `No pude lanzar el login de ${agente.nombre}: ${e.message}` })
     })
     hijo.on('close', () => {
-      if (existsSync(agente.credenciales)) {
+      if (conectadoAhora(agente)) {
         terminar()
         anunciar({ ok: true })
       } else if (!avisado) {
@@ -328,7 +379,7 @@ export async function conectarAgente(id: unknown): Promise<ConexionResultado> {
       if (!exeAntigravity()) {
         await instalarAntigravity()
       }
-      if (conectadoAntigravity()) return { ok: true }
+      if (conectadoAhora(agente)) return { ok: true }
       // La autorización sigue en el navegador; el token se detecta solo al volver.
       let aviso = `Se abrió tu navegador para autorizar ${agente.nombre} con tu cuenta de Google.`
       void loginAntigravity((url) => {
@@ -349,7 +400,7 @@ export async function conectarAgente(id: unknown): Promise<ConexionResultado> {
       const instalado = await instalar(agente)
       if (!instalado.ok) return instalado
     }
-    if (existsSync(agente.credenciales)) return { ok: true }
+    if (conectadoAhora(agente)) return { ok: true }
 
     if (agente.login === 'navegador') return loginNavegador(agente)
 

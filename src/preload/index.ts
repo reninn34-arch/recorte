@@ -89,6 +89,11 @@ const api: RecorteApi = {
     ipcRenderer.on('actualizacion', listener)
     return () => ipcRenderer.removeListener('actualizacion', listener)
   },
+  onSesionCaida: (cb) => {
+    const listener = (_evento: Electron.IpcRendererEvent, id: Parameters<Parameters<RecorteApi['onSesionCaida']>[0]>[0]) => cb(id)
+    ipcRenderer.on('agentes:sesion-caida', listener)
+    return () => ipcRenderer.removeListener('agentes:sesion-caida', listener)
+  },
   onHerramienta: (cb) => {
     const listener = (_evento: Electron.IpcRendererEvent, p: { id: string; pct: number; texto: string }) => cb(p)
     ipcRenderer.on('herramienta', listener)

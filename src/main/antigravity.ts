@@ -35,6 +35,7 @@ const ZIPS: Record<string, { url: string; sha256: string }> = {
 const carpeta = () => join(app.getPath('userData'), 'agentes', 'antigravity')
 const datos = () => join(app.getPath('userData'), 'antigravity')
 const rutaToken = () => join(datos(), 'antigravity-acp', 'acp_token.json')
+export const rutaTokenAntigravity = rutaToken
 
 export function exeAntigravity(): string | null {
   const exe = join(carpeta(), process.platform === 'win32' ? 'agy_acp_server.exe' : 'agy_acp_server.par')

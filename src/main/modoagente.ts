@@ -15,7 +15,7 @@ import { agenteDeOrden } from './agentes'
 import { pathAmpliado, resolverBinario } from './binarios'
 import { ejecutar } from './crear'
 import { probeVideo } from './ffmpeg'
-import { entornoParaAgente, explicarFallo, extraerJson, matarArbol, Parado, rechazoPorPolitica } from './ia'
+import { entornoParaAgente, extraerJson, falloDeAgente, matarArbol, Parado, rechazoPorPolitica } from './ia'
 import { buscarPython } from './transcribir'
 
 /**
@@ -253,7 +253,7 @@ async function lanzarAgente(
     const { trabajarAntigravity } = await import('./antigravity')
     return trabajarAntigravity(prompt, cwd, onLinea, senal, timeoutMs, imagenes).catch((e: unknown) => {
       if (e instanceof Parado) throw e
-      throw new Error(explicarFallo(e instanceof Error ? e.message : String(e)))
+      throw new Error(falloDeAgente(orden, e instanceof Error ? e.message : String(e)))
     })
   }
   let comando = orden
@@ -321,7 +321,7 @@ async function lanzarAgente(
         else if (d?.final !== undefined) final = d.final
       }
       const fallo = errorFinal ?? (codigo === 0 ? null : (error.trim() || todo.trim()).slice(-300) || `El agente terminó con código ${codigo} sin decir nada.`)
-      if (fallo) fin(new Error(explicarFallo(fallo)))
+      if (fallo) fin(new Error(falloDeAgente(orden, fallo)))
       else fin()
     })
     if (archivoPrompt) hijo.stdin.end()

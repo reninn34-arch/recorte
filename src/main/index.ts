@@ -14,14 +14,14 @@ import type {
 } from '../shared/api'
 import type { AjustesIA, Project } from '../shared/types'
 import { Ajustes } from './ajustes'
-import { conectarAgente, estadoAgentes, prepararAgentes, versionesAgentes, agenteDeOrden, VARIABLE_LLAVE } from './agentes'
+import { conectarAgente, estadoAgentes, prepararAgentes, versionesAgentes, agenteDeOrden, marcarSesionCaida, VARIABLE_LLAVE } from './agentes'
 import { estadoSistema, instalarHerramienta } from './sistema'
 import { activarHerramientas } from './herramientas'
 import { carpetaPorDefecto, copiarAVideos, carpetaDelProyecto } from './carpetas'
 import { abrirFlow, agregarCuentaFlow, ajustesFlow, estadoFlow, leerSaldosFlow, pedirFlow, quitarCuentaFlow } from './flow'
 import { MODELO_CHATGPT, MODELOS_IMAGEN, modelosVideoVigentes, type PedidoFlow } from '../shared/flow'
 import { estadoChatGPT } from './imagenchatgpt'
-import { definirEntornoAgentes, empezarTrabajo, esParado, pararTrabajo, terminarTrabajo } from './ia'
+import { avisarSesionCaida, definirEntornoAgentes, empezarTrabajo, esParado, pararTrabajo, terminarTrabajo } from './ia'
 import { comandoConNivel } from './modelos'
 import { crearMiniatura, crearProxy, probeVideo } from './ffmpeg'
 import { proponerClipsConAgente, proponerClipsConIA, proponerRecetaConAgente, proponerRecetaConIA } from './ia'
@@ -890,6 +890,14 @@ app.whenReady().then(() => {
     if (!id || !variable) return {}
     const llave = await ajustes.llaveSiPagaConLlave(id)
     return llave ? { [variable]: llave } : {}
+  })
+  // Si la sesión de un agente se cae mientras trabaja, deja de contar como conectado y la
+  // interfaz se entera al momento (Inicio muestra «Conectar» y sale un aviso).
+  avisarSesionCaida((orden) => {
+    const id = agenteDeOrden(orden)
+    if (!id) return
+    marcarSesionCaida(id)
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('agentes:sesion-caida', id)
   })
   ipcMain.handle('agentes:estado', () => agentesConPago())
   ipcMain.handle('agentes:versiones', () => versionesAgentes())

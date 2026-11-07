@@ -24,6 +24,19 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.12',
+    fecha: '2026-11-07',
+    resumen: 'Recorte sabe de verdad si tu agente tiene la sesión iniciada.',
+    novedades: [
+      {
+        icono: 'key',
+        titulo: 'Sesión al día',
+        texto:
+          'Si cerraste sesión o caducó, Inicio vuelve a mostrar «Conectar» (antes Claude Code podía seguir apareciendo como listo). Y si se cae mientras trabaja, te avisa al momento para que lo reconectes.'
+      }
+    ]
+  },
+  {
     version: '0.1.11',
     fecha: '2026-11-07',
     resumen: 'Si el agente no puede trabajar, te dice por qué en claro.',
