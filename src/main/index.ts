@@ -19,7 +19,7 @@ import { estadoSistema, instalarHerramienta } from './sistema'
 import { activarHerramientas } from './herramientas'
 import { carpetaPorDefecto, copiarAVideos, carpetaDelProyecto } from './carpetas'
 import { abrirFlow, agregarCuentaFlow, ajustesFlow, estadoFlow, leerSaldosFlow, pedirFlow, quitarCuentaFlow } from './flow'
-import { MODELO_CHATGPT, MODELOS_IMAGEN, MODELOS_VIDEO, type PedidoFlow } from '../shared/flow'
+import { MODELO_CHATGPT, MODELOS_IMAGEN, modelosVideoVigentes, type PedidoFlow } from '../shared/flow'
 import { estadoChatGPT } from './imagenchatgpt'
 import { definirEntornoAgentes, empezarTrabajo, esParado, pararTrabajo, terminarTrabajo } from './ia'
 import { comandoConNivel } from './modelos'
@@ -500,7 +500,7 @@ app.whenReady().then(() => {
                 ...(typeof f.modeloImagen === 'string' && (MODELOS_IMAGEN.includes(f.modeloImagen) || f.modeloImagen === MODELO_CHATGPT)
                   ? { modeloImagen: f.modeloImagen }
                   : {}),
-                ...(typeof f.modeloVideo === 'string' && MODELOS_VIDEO.includes(f.modeloVideo) ? { modeloVideo: f.modeloVideo } : {})
+                ...(typeof f.modeloVideo === 'string' && modelosVideoVigentes().includes(f.modeloVideo) ? { modeloVideo: f.modeloVideo } : {})
               }
             }
           })()

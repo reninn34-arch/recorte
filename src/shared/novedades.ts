@@ -24,6 +24,19 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.6',
+    fecha: '2026-11-07',
+    resumen: 'Al día con los modelos nuevos de Google Flow.',
+    novedades: [
+      {
+        icono: 'film',
+        titulo: 'Omni 1.2 Flash en los clips',
+        texto:
+          'El modelo nuevo de Flow ya se puede elegir en Crear con IA → Clips. Omni 1.1 Flash, Veo 3.1 Fast y Veo 3.1 Quality avisan que Flow los retira el 5 de diciembre, y desde ese día dejan de ofrecerse. Los costos ahora se muestran en puntos, como en Flow.'
+      }
+    ]
+  },
+  {
     version: '0.1.5',
     fecha: '2026-11-07',
     resumen: 'Modo agente: tu agente trabaja como un editor de verdad, con herramientas, y comprueba antes de entregarte.',

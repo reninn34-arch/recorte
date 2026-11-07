@@ -10,7 +10,29 @@ export type TipoFlow = 'imagen' | 'video'
 export const MODELOS_IMAGEN = ['Nano Banana 2.1', 'Nano Banana Pro', 'Nano Banana 2 Lite']
 /** Imágenes con la cuenta de ChatGPT del usuario, vía Codex (ver main/imagenchatgpt.ts). */
 export const MODELO_CHATGPT = 'ChatGPT Imágenes'
-export const MODELOS_VIDEO = ['Veo 3.1 - Lite', 'Veo 3.1 - Fast', 'Veo 3.1 - Quality', 'Omni 1.1 Flash']
+export const MODELOS_VIDEO = ['Veo 3.1 - Lite', 'Omni 1.2 Flash', 'Veo 3.1 - Fast', 'Veo 3.1 - Quality', 'Omni 1.1 Flash']
+
+/** Los modelos que Flow anunció que retira (día en que dejan de estar, visto en Flow el 7 nov 2026). */
+export const RETIRO_MODELO: Record<string, string> = {
+  'Omni 1.1 Flash': '2026-12-05',
+  'Veo 3.1 - Fast': '2026-12-05',
+  'Veo 3.1 - Quality': '2026-12-05'
+}
+
+/** Los modelos de video que Flow todavía tiene (desde su día de retiro, ya no se ofrecen). */
+export function modelosVideoVigentes(hoy: Date = new Date()): string[] {
+  const dia = hoy.toISOString().slice(0, 10)
+  return MODELOS_VIDEO.filter((m) => !RETIRO_MODELO[m] || dia < RETIRO_MODELO[m])
+}
+
+/** «se retira el 5 dic», si Flow anunció que lo quita. */
+export function avisoRetiro(modelo: string): string | null {
+  const f = RETIRO_MODELO[modelo]
+  if (!f) return null
+  const [, mes, dia] = f.split('-').map(Number)
+  const meses = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+  return `se retira el ${dia} ${meses[mes - 1]}`
+}
 
 /** El botón de cada proporción se reconoce por su icono: el texto cambia con el idioma de la cuenta. */
 export const ICONO_FORMATO: Record<string, string> = {

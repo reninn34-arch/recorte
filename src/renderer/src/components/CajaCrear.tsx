@@ -9,7 +9,7 @@ import {
   type NivelModelo,
   type PeticionCreacion
 } from '../../../shared/creacion'
-import { MODELO_CHATGPT, MODELOS_IMAGEN, MODELOS_VIDEO } from '../../../shared/flow'
+import { avisoRetiro, MODELO_CHATGPT, MODELOS_IMAGEN, modelosVideoVigentes } from '../../../shared/flow'
 import { favorito } from '../../../shared/gustos'
 import type { ModoCreacion } from '../../../shared/creacion'
 import type { Agentes } from '../hooks/agentes'
@@ -419,18 +419,23 @@ export function CajaCrear({
                 )}
               </Menu>
               {conFlow && (
-              <Menu activo={Boolean(modeloVideo)} etiqueta={<><Icon name="film" size={13} /> {modeloVideo ? modeloVideo.replace('Veo 3.1 - ', 'Veo ') : 'Sin clips'}</>} ancho={280}>
+              <Menu activo={Boolean(modeloVideo)} etiqueta={<><Icon name="film" size={13} /> {modeloVideo ? modeloVideo.replace('Veo 3.1 - ', 'Veo ').replace(' Flash', '') : 'Sin clips'}</>} ancho={280}>
                 {(cerrar) => (
                   <>
                     <Opcion elegida={!modeloVideo} onClick={() => (setModeloVideo(null), cerrar())} nota="no gasta créditos">
                       Sin clips
                     </Opcion>
-                    {MODELOS_VIDEO.map((m) => (
-                      <Opcion key={m} elegida={modeloVideo === m} onClick={() => (setModeloVideo(m), cerrar())} nota={`${COSTO_CLIP[m] ?? '?'} créditos por clip`}>
+                    {modelosVideoVigentes().map((m) => (
+                      <Opcion
+                        key={m}
+                        elegida={modeloVideo === m}
+                        onClick={() => (setModeloVideo(m), cerrar())}
+                        nota={`${COSTO_CLIP[m] ?? '?'} puntos por clip${avisoRetiro(m) ? ` · ${avisoRetiro(m)}` : ''}`}
+                      >
                         {m}
                       </Opcion>
                     ))}
-                    <p className="cc-nota">Hasta 3 clips de 8 s para las escenas clave. Gastan créditos de Flow.</p>
+                    <p className="cc-nota">Hasta 3 clips para las escenas clave. Gastan puntos de Flow (se lee el costo exacto antes de generar).</p>
                   </>
                 )}
               </Menu>

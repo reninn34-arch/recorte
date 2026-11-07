@@ -218,6 +218,8 @@ export const MODELOS_AGENTE: Record<AgenteId, Partial<Record<NivelModelo, string
 /** Lo que cuesta un clip de 8 s en cada modelo de video de Flow (créditos, visto en Flow). */
 export const COSTO_CLIP: Record<string, number> = {
   'Veo 3.1 - Lite': 10,
+  // 720p y 10 s, lo que Flow pone por defecto (visto en Flow: 60 puntos por dos clips).
+  'Omni 1.2 Flash': 30,
   'Veo 3.1 - Fast': 20,
   'Veo 3.1 - Quality': 100,
   'Omni 1.1 Flash': 6
