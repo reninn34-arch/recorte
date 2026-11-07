@@ -15,7 +15,7 @@ import { agenteDeOrden } from './agentes'
 import { pathAmpliado, resolverBinario } from './binarios'
 import { ejecutar } from './crear'
 import { probeVideo } from './ffmpeg'
-import { entornoParaAgente, explicarFallo, extraerJson, matarArbol, Parado } from './ia'
+import { entornoParaAgente, explicarFallo, extraerJson, matarArbol, Parado, rechazoPorPolitica } from './ia'
 import { buscarPython } from './transcribir'
 
 /**
@@ -232,6 +232,22 @@ export async function trabajarAgente(
   timeoutMs = 40 * 60_000,
   imagenes: string[] = []
 ): Promise<string> {
+  const respuesta = await lanzarAgente(orden, cwd, prompt, onLinea, senal, timeoutMs, imagenes)
+  // Un rechazo del filtro de contenido llega como respuesta «normal» y corta: dilo en claro.
+  const rechazo = respuesta.length < 1500 ? rechazoPorPolitica(respuesta) : null
+  if (rechazo) throw new Error(rechazo)
+  return respuesta
+}
+
+async function lanzarAgente(
+  orden: string,
+  cwd: string,
+  prompt: string,
+  onLinea: (texto: string) => void,
+  senal: AbortSignal | undefined,
+  timeoutMs: number,
+  imagenes: string[]
+): Promise<string> {
   if (senal?.aborted) throw new Parado()
   if (orden === 'antigravity:acp') {
     const { trabajarAntigravity } = await import('./antigravity')
@@ -442,8 +458,17 @@ ${contexto(c)}
 Responde SOLO con JSON, sin texto alrededor:
 {"entendi": "qué vas a hacer, en 1-2 frases, con los datos que mediste", "pasos": ["paso corto", "…"], "preguntas": ["solo si de verdad no puedes decidir algo importante"], "herramienta": "FFmpeg | Python + FFmpeg | HyperFrames | …"}`
   const respuesta = await trabajarAgente(cmd.orden, trabajo, prompt, onLinea, senal, 30 * 60_000, await imagenesDeEntrada(c, carpeta))
-  const plan = validarPlan(extraerJson(respuesta))
-  if (!plan) throw new Error('El agente no devolvió un plan.')
+  let datos: unknown = null
+  try {
+    datos = extraerJson(respuesta)
+  } catch {
+    // Sin JSON: que se vea lo que dijo el agente, no un error de formato.
+  }
+  const plan = validarPlan(datos)
+  if (!plan) {
+    const dijo = respuesta.replace(/\s+/g, ' ').trim().slice(0, 300)
+    throw new Error(dijo ? `El agente no devolvió el plan. Dijo: «${dijo}»` : 'El agente no devolvió un plan.')
+  }
   return plan
 }
 

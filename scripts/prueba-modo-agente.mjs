@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import electronPath from 'electron'
@@ -39,6 +39,11 @@ process.stdin.on('end', () => {
     JSON.stringify({ args: process.argv.slice(2), cwd, manual: existsSync(join(cwd, 'CLAUDE.md')), plan: prompt.includes('TODAVÍA NO HAGAS'), cambio: cambio ? cambio[1] : null }) + '\n'
   )
   const ev = (o) => console.log(JSON.stringify(o))
+  if (existsSync(join(process.env.REGISTRO_FALSO, '..', 'filtro.txt'))) {
+    // Como responde Antigravity cuando el filtro de Google rechaza el pedido (respuesta normal, sin JSON).
+    ev({ type: 'result', result: "The prompt could not be submitted. The prompt contains sensitive words that violate Google's [Generative AI Prohibited Use policy](https://policies.google.com/terms/generative-ai/use-policy). Try rephrasing the prompt." })
+    return
+  }
   if (existsSync(join(process.env.REGISTRO_FALSO, '..', 'fallar.txt'))) {
     ev({ type: 'result', is_error: true, result: 'Failed to authenticate: OAuth session expired and could not be refreshed' })
     return
@@ -209,6 +214,16 @@ try {
   const aviso = caducada.mensajes.at(-1)
   if (!aviso.error || !/sesión de tu agente caducó/.test(aviso.texto)) throw new Error(`Aviso de sesión caducada: ${aviso.texto}`)
   console.log('sesión caducada: se avisa en claro ✓')
+
+  // Si el filtro de contenido del proveedor rechaza el pedido, se explica (no «Unexpected token»).
+  unlinkSync(join(medios, 'fallar.txt'))
+  writeFileSync(join(medios, 'filtro.txt'), '1')
+  const filtrado = await evaluar(cliente, `window.recorte.agentePlan(${JSON.stringify(c.id)})`)
+  const avisoFiltro = filtrado.mensajes.at(-1)
+  if (!avisoFiltro.error || !/filtro de contenido/.test(avisoFiltro.texto) || /Unexpected token/.test(avisoFiltro.texto)) {
+    throw new Error(`Aviso del filtro de contenido: ${avisoFiltro.texto}`)
+  }
+  console.log('rechazo del filtro de contenido: se explica en claro ✓')
   console.log('prueba modo agente: ok')
 } catch (error) {
   console.error(`prueba modo agente: error · ${error instanceof Error ? error.message : String(error)}`)

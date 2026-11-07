@@ -46,9 +46,22 @@ function guionCompacto(transcript: TranscriptSegment[]): string {
 }
 
 export function extraerJson(texto: string): unknown {
-  const inicio = texto.search(/[[{]/)
-  if (inicio === -1) throw new Error('La respuesta no contiene JSON.')
+  // Prueba cada «{» o «[» en orden: el texto de alrededor puede traer corchetes que no son JSON
+  // (un enlace en Markdown, «[nota]»…) y no por eso hay que rendirse.
+  let primerError: unknown = null
+  for (let i = texto.search(/[[{]/); i !== -1; ) {
+    try {
+      return jsonDesde(texto, i)
+    } catch (e) {
+      primerError ??= e
+    }
+    const siguiente = texto.slice(i + 1).search(/[[{]/)
+    i = siguiente === -1 ? -1 : i + 1 + siguiente
+  }
+  throw primerError ?? new Error('La respuesta no contiene JSON.')
+}
 
+function jsonDesde(texto: string, inicio: number): unknown {
   // Recorre respetando cadenas para encontrar el cierre que empareja.
   const apertura = texto[inicio]
   const cierre = apertura === '{' ? '}' : ']'
@@ -106,6 +119,8 @@ export function entornoParaAgente(orden: string): Promise<Record<string, string>
 
 /** El fallo de un agente en palabras del usuario (sesión caducada, límite del plan…). */
 export function explicarFallo(texto: string): string {
+  const rechazo = rechazoPorPolitica(texto)
+  if (rechazo) return rechazo
   if (/authenticat|oauth|session expired|not logged in|unauthori[sz]ed|\b401\b|credential/i.test(texto)) {
     return 'La sesión de tu agente caducó o se cerró. Vuelve a conectarlo en Inicio (botón «Conectar») e inténtalo otra vez.'
   }
@@ -113,6 +128,19 @@ export function explicarFallo(texto: string): string {
     return 'Tu agente llegó al límite de uso de su plan por ahora. Espera un rato o usa otro agente.'
   }
   return texto
+}
+
+/**
+ * Si el proveedor no dejó ni empezar porque su filtro de contenido rechazó el pedido (p. ej.
+ * Antigravity/Google: «The prompt could not be submitted… Generative AI Prohibited Use policy»),
+ * lo dice en claro y qué probar. Si no, null.
+ */
+export function rechazoPorPolitica(texto: string): string | null {
+  if (!/prohibited use policy|could not be submitted|sensitive words|content (policy|filter)|safety (filter|policy|system)|usage polic(y|ies)|violat\w* .{0,40}polic/i.test(texto)) return null
+  return 'El filtro de contenido de tu agente rechazó el pedido antes de empezar (no llegó a mirar tus archivos). ' +
+    'Suele pasar con fotos de cuerpo o con palabras sobre la cara o la piel de una persona. ' +
+    'Prueba a describirlo de forma más neutra (por ejemplo «que no se reconozca a la persona» en vez de hablar de su cara o su cuerpo) ' +
+    'o usa otro agente (Claude Code, Codex o Kimi) para este video.'
 }
 
 export class Parado extends Error {

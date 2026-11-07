@@ -24,6 +24,19 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.11',
+    fecha: '2026-11-07',
+    resumen: 'Si el agente no puede trabajar, te dice por qué en claro.',
+    novedades: [
+      {
+        icono: 'check',
+        titulo: 'Avisos que se entienden',
+        texto:
+          'Cuando el filtro de contenido de tu agente (por ejemplo Antigravity) rechaza el pedido, Recorte te lo explica y te dice qué probar, en vez de mostrar un error técnico. Y si el agente responde sin plan, ves lo que dijo.'
+      }
+    ]
+  },
+  {
     version: '0.1.10',
     fecha: '2026-11-07',
     resumen: 'La licencia del instalador ya se lee bien.',
