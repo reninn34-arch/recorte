@@ -25,8 +25,38 @@ export type NivelModelo = 'rapido' | 'equilibrado' | 'maximo'
 /** Elección para una tarea: qué agente la hace y con qué nivel. */
 export interface EleccionTarea {
   agente: AgenteId
+  /** Lo de antes (rápido/equilibrado/máximo): se sigue entendiendo si no hay `modelo`. */
   nivel?: NivelModelo
+  /** El modelo concreto, del catálogo del agente (p. ej. «opus», «opencode/big-pickle»). */
+  modelo?: string
+  /** Cuánto piensa (low, medium, high, xhigh, max…), si el modelo lo admite. */
+  esfuerzo?: string
 }
+
+/** Un modelo que ofrece un agente, tal como lo dice el propio agente. */
+export interface ModeloAgente {
+  id: string
+  nombre: string
+  /** Los esfuerzos que admite (vacío: no se elige). */
+  esfuerzos: string[]
+  esfuerzoDefecto?: string
+  /** No gasta saldo (OpenCode). */
+  gratis?: boolean
+}
+
+/** Lo que el usuario lee de cada esfuerzo. */
+export const NOMBRE_ESFUERZO: Record<string, string> = {
+  none: 'Sin pensar',
+  minimal: 'Mínimo',
+  low: 'Bajo',
+  medium: 'Medio',
+  high: 'Alto',
+  xhigh: 'Muy alto',
+  max: 'Máximo'
+}
+
+/** Solo letras, números y . - _ / : (va en la línea de comandos del agente). */
+export const ID_SEGURO = /^[\w.\-/:]{1,120}$/
 /**
  * Quién hace cada paso de la creación. Vacío (optimizado): el agente activo
  * hace todo con su modelo por defecto.

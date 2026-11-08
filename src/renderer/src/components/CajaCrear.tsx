@@ -14,6 +14,7 @@ import { favorito } from '../../../shared/gustos'
 import type { ModoCreacion } from '../../../shared/creacion'
 import type { Agentes } from '../hooks/agentes'
 import { Icon } from '../Icons'
+import { ElegirModelo, nombreModelo } from './ElegirModelo'
 import { LogoAgente, LogoProveedor } from './Logos'
 
 /**
@@ -193,52 +194,24 @@ export function CajaCrear({
   const nombreEleccion = (e: EleccionTarea | null): string => {
     if (!e) return activo ? `${activo.nombre}` : (agentes.apiActivo?.nombre ?? 'Tu agente')
     const a = agentes.lista.find((x) => x.id === e.agente)
-    const modelo = e.nivel ? MODELOS_AGENTE[e.agente]?.[e.nivel] : undefined
+    const modelo = nombreModelo(e) ?? (e.nivel ? MODELOS_AGENTE[e.agente]?.[e.nivel] : undefined)
     return `${a?.nombre ?? e.agente}${modelo ? ` · ${modelo}` : ''}`
   }
 
-  function elegirAgente(tarea: 'guion' | 'video', agente: AgenteId, nivel?: NivelModelo) {
-    const e: EleccionTarea = { agente, ...(nivel ? { nivel } : {}) }
-    if (tarea === 'guion') setTGuion(e)
-    else setTVideo(e)
-  }
-
-  /** La lista de agentes y modelos para una tarea. */
+  /** La lista de agentes y modelos (con su esfuerzo) para una tarea. */
   function opcionesTarea(tarea: 'guion' | 'video', valor: EleccionTarea | null, cerrar: () => void) {
+    const poner = tarea === 'guion' ? setTGuion : setTVideo
     return (
       <>
-        <Opcion elegida={!valor} onClick={() => ((tarea === 'guion' ? setTGuion : setTVideo)(null), cerrar())} nota="su modelo de siempre">
+        <Opcion elegida={!valor} onClick={() => (poner(null), cerrar())} nota="su modelo de siempre">
           {activo ? <LogoAgente id={activo.id} size={18} /> : agentes.apiActivo ? <LogoProveedor id={agentes.apiActivo.id} size={18} /> : null}
           {activo?.nombre ?? agentes.apiActivo?.nombre ?? 'Tu agente activo'}
         </Opcion>
-        {conectados.map((a) => {
-          const modelos = NIVELES.filter((n) => MODELOS_AGENTE[a.id]?.[n.id])
-          if (!modelos.length) {
-            return (
-              <Opcion key={a.id} elegida={valor?.agente === a.id} onClick={() => (elegirAgente(tarea, a.id), cerrar())} nota="elige su modelo solo">
-                <LogoAgente id={a.id} size={18} /> {a.nombre}
-              </Opcion>
-            )
-          }
-          return (
-            <div key={a.id} className="cc-grupo">
-              <span className="cc-grupo-nombre">
-                <LogoAgente id={a.id} size={16} /> {a.nombre}
-              </span>
-              {modelos.map((n) => (
-                <Opcion
-                  key={n.id}
-                  elegida={valor?.agente === a.id && valor.nivel === n.id}
-                  onClick={() => (elegirAgente(tarea, a.id, n.id), cerrar())}
-                  nota={n.nota}
-                >
-                  {MODELOS_AGENTE[a.id][n.id]}
-                </Opcion>
-              ))}
-            </div>
-          )
-        })}
-        {!conectados.length && <p className="cc-nota">Conecta agentes en Ajustes para elegir aquí su modelo.</p>}
+        {conectados.length ? (
+          <ElegirModelo agentes={conectados} valor={valor} onElegir={poner} cerrar={cerrar} />
+        ) : (
+          <p className="cc-nota">Conecta agentes en Ajustes para elegir aquí su modelo.</p>
+        )}
       </>
     )
   }
@@ -246,7 +219,7 @@ export function CajaCrear({
   /** Lo corto de una tarea para la pastilla: el modelo, o el agente si no tiene modelo elegido. */
   const corto = (e: EleccionTarea | null): string => {
     if (!e) return (activo?.nombre ?? agentes.apiActivo?.nombre ?? 'tu agente').replace(/ Code| CLI| · Google/g, '')
-    return (e.nivel ? MODELOS_AGENTE[e.agente]?.[e.nivel] : undefined) ?? (agentes.lista.find((x) => x.id === e.agente)?.nombre ?? e.agente).replace(/ Code| CLI| · Google/g, '')
+    return nombreModelo(e) ?? (e.nivel ? MODELOS_AGENTE[e.agente]?.[e.nivel] : undefined) ?? (agentes.lista.find((x) => x.id === e.agente)?.nombre ?? e.agente).replace(/ Code| CLI| · Google/g, '')
   }
 
   const logoQuien = (e: EleccionTarea | null) =>
@@ -327,7 +300,7 @@ export function CajaCrear({
 
           {!enAgente && (
           <Menu
-            ancho={300}
+            ancho={360}
             etiqueta={
               porPaso && (tGuion || tVideo) ? (
                 <>
@@ -351,9 +324,9 @@ export function CajaCrear({
                 {porPaso && (
                   <div className="cc-pasos">
                     <span className="cc-grupo-nombre">Guion</span>
-                    <Menu ancho={280} etiqueta={<>{logoQuien(tGuion)} {nombreEleccion(tGuion)}</>}>{(c2) => opcionesTarea('guion', tGuion, c2)}</Menu>
+                    <Menu ancho={340} etiqueta={<>{logoQuien(tGuion)} {nombreEleccion(tGuion)}</>}>{(c2) => opcionesTarea('guion', tGuion, c2)}</Menu>
                     <span className="cc-grupo-nombre">Video</span>
-                    <Menu ancho={280} etiqueta={<>{logoQuien(tVideo)} {nombreEleccion(tVideo)}</>}>{(c2) => opcionesTarea('video', tVideo, c2)}</Menu>
+                    <Menu ancho={340} etiqueta={<>{logoQuien(tVideo)} {nombreEleccion(tVideo)}</>}>{(c2) => opcionesTarea('video', tVideo, c2)}</Menu>
                     <p className="cc-nota">Un modelo rápido para el guion y uno potente para el diseño suele dar buen video gastando menos.</p>
                   </div>
                 )}

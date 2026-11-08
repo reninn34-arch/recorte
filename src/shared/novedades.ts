@@ -24,6 +24,37 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.13',
+    fecha: '2026-11-08',
+    resumen: 'Eliges el modelo y el esfuerzo de cada agente, el modo agente hace los videos con un kit más rápido y ya no se queda atascado.',
+    novedades: [
+      {
+        icono: 'sliders',
+        titulo: 'Modelo y esfuerzo de cada agente',
+        texto:
+          'En «Por paso» ves los modelos que tiene de verdad cada agente conectado (Claude Code, OpenCode, Antigravity…) y eliges cuánto piensa: bajo, medio, alto, muy alto o máximo, si el modelo lo admite. Cuando sale un modelo nuevo, aparece solo.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'El kit del modo agente',
+        texto:
+          'El agente ya no programa el video desde cero: escribe una receta corta (qué foto, cuándo, con qué rótulo y efecto) y el kit de Recorte la hace en una sola pasada, con la música en su golpe. Fotos a pantalla completa, antes y después, collage, frases con brillo y más.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Pasa solo al siguiente paso',
+        texto:
+          'Si el agente dejaba algo corriendo de fondo (un render, por ejemplo), Recorte seguía esperando aunque ya hubiera terminado, y la barra se ponía en amarillo. Ahora en cuanto el agente responde, pasa al siguiente paso.'
+      },
+      {
+        icono: 'clock',
+        titulo: 'El progreso sigue donde iba',
+        texto:
+          'Si sales del estudio y vuelves mientras el agente trabaja, el reloj y la barra siguen donde iban, y la lista de lo que hace se actualiza en vivo. Cada video lleva su propio progreso.'
+      }
+    ]
+  },
+  {
     version: '0.1.12',
     fecha: '2026-11-07',
     resumen: 'Recorte sabe de verdad si tu agente tiene la sesión iniciada.',

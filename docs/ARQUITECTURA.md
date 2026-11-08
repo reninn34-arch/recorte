@@ -544,7 +544,29 @@ HyperFrames). En **Agente**, el agente conectado trabaja como un editor con herr
   pide mirar eso antes que los originales; el plan es solo un vistazo (sin medir a fondo ni
   renderizar, límite 30 min) y deja apuntes en `notas.md` que «hacer» reutiliza.
 - La barra del panel es de **tiempo**: lo que lleva frente a lo habitual (plan ~5 min, hacer
-  ~15 min), en ámbar y con aviso si se pasa; el avance real es la lista de lo último que hizo.
+  ~15 min), en ámbar y con aviso si se pasa; el avance real es la lista de lo último que hizo. La
+  hora de inicio la guarda el proceso principal (`inicioCreacion`, va en cada `Progreso` como
+  `desde`, y `creacion:en-curso`), así que salir y volver no reinicia el reloj; el registro va en vivo
+  (`Progreso.registro`). Cada creación lleva su «trabajando» y su progreso en App.
+- El agente se da por terminado al **salir** su proceso (+1,5 s), no al cerrarse su salida: un
+  proceso que dejó de fondo (un render) mantenía `close` abierto hasta el límite.
+- **Kit** (`python/kit/kit.py` + `RECETA.md`, se copia a `trabajo/kit/` con `rutas.json` de
+  FFmpeg): el agente escribe `receta.json` (momentos `foto`, `video`, `comparar`, `collage`,
+  `texto`, con rótulos, encuadre, brillo, desenfoques y la música) y `kit.py armar` lo hace en una
+  pasada (NumPy + Pillow → FFmpeg) y deja `revision/hoja-final.jpg`; `--prueba` saca fotogramas
+  sueltos en segundos; `golpes` mide los golpes de la música. Prueba: `npm run prueba:kit`.
+
+## Modelos y esfuerzo por agente
+
+`main/catalogo.ts` pregunta a cada agente qué modelos tiene (se recuerda un día en
+`catalogo-modelos.json`): Claude Code con la petición de control `initialize` por stream-json
+(`supportedEffortLevels`, sin mandar nada al modelo), OpenCode con `opencode models --verbose`
+(precio 0 = gratis, `variants` = esfuerzos) y Antigravity con las `configOptions` de una sesión ACP
+(`model` y `thought_level`; se aplican con `session/set_config_option`). Kimi y Gemini CLI llevan
+los conocidos. `EleccionTarea` guarda `modelo` y `esfuerzo` (solo ids seguros, `ID_SEGURO`) y
+`comandoConEleccion` (modelos.ts) los pone en el comando: `--model/--effort` (Claude), `-m/--variant`
+(OpenCode), `-m` (Kimi, Gemini, Codex); Antigravity los lleva en su marca
+(`antigravity:acp --model x --effort y`). En la interfaz: `ElegirModelo.tsx` dentro de «Por paso».
 - Pasos (IPC `agente:plan`, `agente:hacer`): primero un **plan corto** (JSON `entendi/pasos/
   preguntas/herramienta`, sin producir nada) con el botón «Hazlo»; luego **hacer**. Recorte revisa la
   entrega por su cuenta (`revisarYPublicar`: que abra, cuánto dura y mide, 5 fotogramas) y, si falla,

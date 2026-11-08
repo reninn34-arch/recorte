@@ -31,7 +31,7 @@ import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 let prompt = ''
 process.stdin.on('data', (d) => (prompt += d))
-process.stdin.on('end', () => {
+process.stdin.on('end', async () => {
   const cwd = process.cwd()
   const cambio = /LO QUE PIDE AHORA EL USUARIO: (.*)/.exec(prompt)
   appendFileSync(
@@ -39,6 +39,11 @@ process.stdin.on('end', () => {
     JSON.stringify({ args: process.argv.slice(2), cwd, manual: existsSync(join(cwd, 'CLAUDE.md')), plan: prompt.includes('TODAVÍA NO HAGAS'), cambio: cambio ? cambio[1] : null }) + '\n'
   )
   const ev = (o) => console.log(JSON.stringify(o))
+  if (existsSync(join(process.env.REGISTRO_FALSO, '..', 'fondo.txt'))) {
+    // Deja un proceso de fondo con su salida abierta 30 s (un render que se queda corriendo).
+    const { spawn } = await import('node:child_process')
+    spawn(process.execPath, ['-e', 'setTimeout(()=>{},30000)'], { stdio: 'inherit', detached: true }).unref()
+  }
   if (existsSync(join(process.env.REGISTRO_FALSO, '..', 'filtro.txt'))) {
     // Como responde Antigravity cuando el filtro de Google rechaza el pedido (respuesta normal, sin JSON).
     ev({ type: 'result', result: "The prompt could not be submitted. The prompt contains sensitive words that violate Google's [Generative AI Prohibited Use policy](https://policies.google.com/terms/generative-ai/use-policy). Try rephrasing the prompt." })
@@ -183,6 +188,10 @@ try {
   }
   if (!readFileSync(join(carpeta, 'trabajo', 'vistazo', 'LEEME.txt'), 'utf8').includes('fotos.jpg')) throw new Error('El LEEME del vistazo no describe las fotos.')
   if (!readFileSync(join(carpeta, 'trabajo', 'AGENTS.md'), 'utf8').includes('Trabaja rápido')) throw new Error('El manual no explica cómo trabajar rápido.')
+  // El kit: copiado a la carpeta de trabajo, con las rutas de FFmpeg, y el manual dice que se use primero.
+  for (const n of ['kit.py', 'RECETA.md', 'rutas.json']) if (!existsSync(join(carpeta, 'trabajo', 'kit', n))) throw new Error(`Falta kit/${n} en la carpeta de trabajo.`)
+  if (!readFileSync(join(carpeta, 'trabajo', 'AGENTS.md'), 'utf8').includes('El kit: úsalo primero')) throw new Error('El manual no presenta el kit.')
+  console.log('kit: copiado a trabajo/kit y presentado en el manual ✓')
   console.log('vistazo preparado (miniaturas y LEEME) y manual con el método rápido ✓')
 
   const hecha = await evaluar(cliente, `window.recorte.agenteHacer(${JSON.stringify(c.id)})`, 5 * 60_000)
@@ -207,6 +216,24 @@ try {
   }
   if (!llamadas[0].plan || llamadas[1].plan || llamadas[2].cambio !== 'Haz el brillo más fino') throw new Error('El plan, el hacer y el cambio no llegaron como debían.')
   console.log('el agente corrió en su carpeta, con el manual y sus opciones, y recibió el cambio ✓')
+
+  // El modelo y el esfuerzo elegidos llegan al comando del agente; lo que no es un id seguro se descarta.
+  const conModelo = await evaluar(
+    cliente,
+    `window.recorte.creacionNueva(${JSON.stringify({ peticion: 'Con modelo elegido', estilo: 'libre', formato: 'vertical', duracion: 15, adjuntos: [foto], modo: 'agente', tareas: { video: { agente: 'claude', modelo: 'sonnet', esfuerzo: 'low' }, guion: { agente: 'claude', modelo: 'opus; rm -rf x' } } })})`
+  )
+  if (conModelo.tareas?.video?.modelo !== 'sonnet' || conModelo.tareas?.video?.esfuerzo !== 'low') throw new Error(`No se guardó el modelo elegido: ${JSON.stringify(conModelo.tareas)}`)
+  if (conModelo.tareas?.guion?.modelo !== undefined) throw new Error('Un modelo con caracteres raros debió descartarse.')
+  const claudeConectado = (await evaluar(cliente, 'window.recorte.agentesEstado()')).find((a) => a.id === 'claude')?.conectado
+  if (claudeConectado) {
+    await evaluar(cliente, `window.recorte.agentePlan(${JSON.stringify(conModelo.id)})`)
+    const ultima = readFileSync(registroFalso, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).at(-1)
+    const args = ultima.args.join(' ')
+    if (!/--model sonnet/.test(args) || !/--effort low/.test(args)) throw new Error(`El agente no recibió el modelo y el esfuerzo: ${args}`)
+    console.log('modelo y esfuerzo elegidos: llegan al agente (--model sonnet --effort low) ✓')
+  } else {
+    console.log('modelo y esfuerzo: se guardan y se limpian ✓ (Claude Code sin sesión en esta PC: no se comprueba el comando)')
+  }
 
   // Si la sesión del agente caducó, el usuario lo lee en claro (no un trozo de JSON).
   writeFileSync(join(medios, 'fallar.txt'), '1')
@@ -233,6 +260,16 @@ try {
     throw new Error(`Aviso del filtro de contenido: ${avisoFiltro.texto}`)
   }
   console.log('rechazo del filtro de contenido: se explica en claro ✓')
+
+  // Si el agente deja algo corriendo de fondo, su respuesta llega igual (antes se esperaba a que acabara).
+  unlinkSync(join(medios, 'filtro.txt'))
+  writeFileSync(join(medios, 'fondo.txt'), '1')
+  const t0 = Date.now()
+  const conFondo = await evaluar(cliente, `window.recorte.agentePlan(${JSON.stringify(c.id)})`)
+  const tardo = (Date.now() - t0) / 1000
+  if (!conFondo.agente?.plan || conFondo.mensajes.at(-1)?.error) throw new Error(`Con un proceso de fondo, el plan no llegó: ${conFondo.mensajes.at(-1)?.texto}`)
+  if (tardo > 15) throw new Error(`Con un proceso de fondo, el plan tardó ${tardo.toFixed(1)} s (esperó al proceso de fondo).`)
+  console.log(`con un proceso de fondo abierto, el plan llega en ${tardo.toFixed(1)} s ✓`)
   console.log('prueba modo agente: ok')
 } catch (error) {
   console.error(`prueba modo agente: error · ${error instanceof Error ? error.message : String(error)}`)

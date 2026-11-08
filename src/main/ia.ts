@@ -203,9 +203,9 @@ export async function preguntarAgente(
   let orden = comando.trim()
   if (!orden) throw new Error('Falta el comando del agente. Revísalo en Ajustes.')
   // Marca interna: Antigravity no es un CLI de texto; se habla ACP con su servidor.
-  if (orden === 'antigravity:acp') {
-    const { preguntarAntigravity } = await import('./antigravity')
-    return preguntarAntigravity(prompt, timeoutMs, senal)
+  if (orden.startsWith('antigravity:acp')) {
+    const [{ preguntarAntigravity }, { opcionesAntigravity }] = await Promise.all([import('./antigravity'), import('./modelos')])
+    return preguntarAntigravity(prompt, timeoutMs, senal, opcionesAntigravity(orden))
   }
 
   let archivoPrompt: string | null = null
@@ -262,7 +262,11 @@ export async function preguntarAgente(
         )
       )
     })
-    hijo.on('close', (codigo) => {
+    // Si el agente deja un proceso de fondo con su salida abierta, 'close' no llega hasta que
+    // ese proceso acaba: al salir el agente se espera un respiro y se da por terminado.
+    hijo.on('exit', (codigo) => setTimeout(() => terminar(codigo), 1500))
+    hijo.on('close', (codigo) => terminar(codigo))
+    const terminar = (codigo: number | null) => {
       senal?.removeEventListener('abort', alParar)
       if (cerrado) return
       cerrado = true
@@ -275,7 +279,7 @@ export async function preguntarAgente(
         const dijo = (error.trim() || texto.trim()).slice(-300)
         rechazar(new Error(dijo ? falloDeAgente(orden, dijo) : `El agente («${orden.slice(0, 80)}») terminó con código ${codigo} sin decir nada.`))
       }
-    })
+    }
     if (archivoPrompt) {
       hijo.stdin.end()
     } else {

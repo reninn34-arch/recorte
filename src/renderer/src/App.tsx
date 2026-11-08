@@ -82,7 +82,11 @@ export default function App() {
   const [creando, setCreando] = useState(false)
   const [creaciones, setCreaciones] = useState<Creacion[]>([])
   const [creacion, setCreacion] = useState<Creacion | null>(null)
-  const [trabajandoCreacion, setTrabajandoCreacion] = useState(false)
+  /** Las creaciones en las que trabaja el agente, con cuándo empezó cada una (puede haber varias a la vez). */
+  const [enCurso, setEnCurso] = useState<Record<string, number>>({})
+  /** El último aviso de progreso de cada creación (uno por creación: no se pisan entre ellas). */
+  const [progresoCreacion, setProgresoCreacion] = useState<Record<string, Progreso>>({})
+  const trabajandoCreacion = Boolean(creacion && enCurso[creacion.id])
   const [estadoVoz, setEstadoVoz] = useState<Awaited<ReturnType<typeof window.recorte.vozEstado>>>({ tieneClave: false })
   const [renderizando, setRenderizando] = useState(false)
   const [exportando, setExportando] = useState(false)
@@ -163,6 +167,12 @@ export default function App() {
     () =>
       window.recorte.onProgreso((evento) => {
         setProgreso(evento)
+        if (evento.fase === 'creacion') {
+          setProgresoCreacion((p) => ({ ...p, [evento.id]: evento }))
+          // La hora real de inicio la sabe el proceso principal.
+          const desde = evento.desde
+          if (desde !== undefined) setEnCurso((e) => (e[evento.id] !== undefined && e[evento.id] !== desde ? { ...e, [evento.id]: desde } : e))
+        }
         if (evento.fase === 'render' && evento.lote) setLote(evento.lote)
         if (evento.fase === 'render' && evento.clipId) {
           setCola((previa) =>
@@ -377,7 +387,8 @@ export default function App() {
 
   /** Corre un paso de la creación (guion o video) y deja la versión que devuelve. */
   async function pasoCreacion(id: string, paso: () => Promise<Creacion>) {
-    setTrabajandoCreacion(true)
+    setEnCurso((e) => ({ ...e, [id]: e[id] ?? Date.now() }))
+    setProgresoCreacion(({ [id]: _, ...resto }) => resto)
     // Mientras trabaja, el mensaje del usuario ya se ve (el proceso principal lo guarda).
     try {
       const nueva = await paso()
@@ -387,7 +398,7 @@ export default function App() {
     } catch (error) {
       setAviso(mensajeDe(error))
     } finally {
-      setTrabajandoCreacion(false)
+      setEnCurso(({ [id]: _, ...resto }) => resto)
     }
   }
 
@@ -428,7 +439,9 @@ export default function App() {
   }
 
   async function abrirCreacionIA(id: string) {
-    const c = await window.recorte.creacionAbrir(id)
+    const [c, trabajos] = await Promise.all([window.recorte.creacionAbrir(id), window.recorte.creacionEnCurso().catch((): Record<string, number> => ({}))])
+    // Si el agente sigue con ella (aunque se empezó en otra visita), se ve trabajando y con su hora real.
+    if (trabajos[id] !== undefined) setEnCurso((e) => ({ ...e, [id]: trabajos[id] }))
     if (!c) {
       setAviso('No encontré esa creación.')
       return
@@ -699,7 +712,8 @@ export default function App() {
         <EstudioCreacion
           creacion={creacion}
           trabajando={trabajandoCreacion}
-          progreso={progreso && progreso.fase === 'creacion' && progreso.id === creacion.id ? progreso : null}
+          desde={enCurso[creacion.id]}
+          progreso={progresoCreacion[creacion.id] ?? null}
           onGuion={guionCreacion}
           onVideo={videoCreacion}
           onEditor={() => void creacionAlEditor()}

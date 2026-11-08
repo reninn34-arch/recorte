@@ -2613,3 +2613,16 @@ button { cursor: pointer; }
 .cc-segmento button:disabled { opacity: 0.4; cursor: not-allowed; }
 .tl-progreso.is-pasado span { background: #f2c14e; }
 .pa-pasado { font-size: 12px; line-height: 1.5; color: #f2c14e; }
+
+/* Elegir modelo y esfuerzo de cada agente (ElegirModelo.tsx) */
+.cc-modelo { display: flex; flex-direction: column; border-radius: 9px; }
+.cc-modelo.is-elegida { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.cc-esfuerzos { display: flex; flex-wrap: wrap; gap: 3px; padding: 0 8px 8px 14px; }
+.cc-esfuerzo { padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--muted); font-size: 11px; }
+.cc-esfuerzo:hover { color: var(--text); border-color: var(--muted); }
+.cc-esfuerzo.is-elegido { color: var(--accent-ink, #10140c); background: var(--accent); border-color: var(--accent); }
+.cc-refrescar { margin-left: auto; padding: 2px 4px; border: none; background: none; color: var(--dim); line-height: 0; }
+.cc-refrescar:hover { color: var(--text); }
+.cc-mas .cc-opcion-texto { color: var(--muted); }
+.cc-panel { max-height: min(70vh, 560px); overflow-y: auto; }
+.cc-panel .cc-panel { max-height: none; overflow: visible; }

@@ -16,7 +16,7 @@ import { pathAmpliado, resolverBinario } from './binarios'
 import { ejecutar } from './crear'
 import { probeVideo } from './ffmpeg'
 import { entornoParaAgente, extraerJson, falloDeAgente, matarArbol, Parado, rechazoPorPolitica } from './ia'
-import { buscarPython } from './transcribir'
+import { buscarPython, rutaScriptPython } from './transcribir'
 
 /**
  * El modo agente (ver shared/modoagente.ts). Cada creación en este modo tiene su carpeta
@@ -72,6 +72,21 @@ export function copiarEntrada(rutas: string[], carpeta: string): { archivo: stri
 // El manual de trabajo
 // ---------------------------------------------------------------------------
 
+/**
+ * Copia el kit (python/kit: kit.py y RECETA.md) a la carpeta de trabajo, con las rutas de FFmpeg
+ * que debe usar. Devuelve si quedó (sin Python no sirve y no se ofrece).
+ */
+function copiarKit(trabajo: string): boolean {
+  const origen = rutaScriptPython('kit')
+  if (!existsSync(join(origen, 'kit.py'))) return false
+  const destino = join(trabajo, 'kit')
+  mkdirSync(destino, { recursive: true })
+  for (const n of ['kit.py', 'RECETA.md']) copyFileSync(join(origen, n), join(destino, n))
+  // El FFmpeg de Recorte, aunque no esté en el PATH del agente.
+  writeFileSync(join(destino, 'rutas.json'), JSON.stringify({ ffmpeg: resolverBinario('ffmpeg'), ffprobe: resolverBinario('ffprobe') }))
+  return true
+}
+
 async function herramientasDisponibles(): Promise<string[]> {
   const ffmpeg = resolverBinario('ffmpeg')
   const ffprobe = resolverBinario('ffprobe')
@@ -93,6 +108,7 @@ export async function escribirManual(carpeta: string, c: Creacion): Promise<void
   const trabajo = carpetaTrabajo(carpeta)
   mkdirSync(join(trabajo, 'salida'), { recursive: true })
   mkdirSync(join(trabajo, 'revision'), { recursive: true })
+  const conKit = copiarKit(trabajo)
   const { ancho, alto } = c.formato === 'horizontal' ? { ancho: 1920, alto: 1080 } : { ancho: 1080, alto: 1920 }
   const manual = `# Manual de trabajo de Recorte
 
@@ -104,7 +120,7 @@ Eres el editor de video de Recorte. Trabajas en ESTA carpeta y en ninguna otra. 
 - \`revision/\`: donde sacas fotogramas de tu resultado para comprobarlo.
 - \`vistazo/\`: lo que preparó Recorte para mirar rápido (miniaturas, fotogramas, audio y LEEME.txt).
 - \`notas.md\`: tus apuntes del plan (lo que ya viste y mediste).
-- Cualquier otro archivo de trabajo (scripts, composiciones, temporales) va aquí mismo, en esta carpeta.
+${conKit ? '- `kit/`: piezas probadas de Recorte para hacer el video sin programarlo (lee `kit/RECETA.md`).\n' : ''}- Cualquier otro archivo de trabajo (scripts, composiciones, temporales) va aquí mismo, en esta carpeta.
 
 Herramientas:
 ${(await herramientasDisponibles()).join('\n')}
@@ -118,7 +134,21 @@ ${(await herramientasDisponibles()).join('\n')}
 - Antes del render completo, genera unos pocos fotogramas clave, míralos y corrige. Renderiza entero solo al final.
 - Si hay \`notas.md\`, léelo: es lo que ya miraste en el plan. Apunta ahí lo que midas (tiempos, colores, zonas).
 
-## El método (síguelo siempre)
+${
+    conKit
+      ? `## El kit: úsalo primero
+Con \`kit/\` no programas el video: escribes \`receta.json\` (qué foto o video, cuándo, con qué rótulo y efecto) y
+\`python kit/kit.py armar receta.json\` lo hace en UNA pasada, con la música, y deja \`revision/hoja-final.jpg\`.
+Trae fotos a pantalla completa con encuadre y acercamiento, video, antes/después (deslizar, lado, arriba), collage,
+frases con brillo, rótulos, desenfocar zonas, fundidos y la música recortada. Lee \`kit/RECETA.md\` (es corto).
+- \`python kit/kit.py golpes <audio-o-video>\`: los golpes de la música y el tempo, para poner cada momento en su golpe.
+- \`python kit/kit.py encuadre <foto> --zoom 1.3 --cx .5 --cy .5\`: cómo queda una foto a pantalla completa.
+- \`python kit/kit.py armar receta.json --prueba 0.5,3,8\`: solo esos fotogramas, en segundos, para corregir antes.
+Escribe código propio solo para lo que el kit no tenga, y aun así usa el kit para el resto.
+
+`
+      : ''
+  }## El método (síguelo siempre)
 1. **Entiende el pedido.** ¿Es un video para redes, un recurso para otro editor (sin textos, con croma…),
    una pieza corta? No impongas un formato: haz lo que se pide.
 2. **Mira los archivos de verdad.** Abre cada imagen de \`entrada/\` y míralas. De los videos, usa ffprobe y
@@ -179,7 +209,7 @@ export function comandoAgentico(base: string, cwd: string): { orden: string; age
       return { agente, orden: `${b} --yolo` }
     case 'antigravity':
       // Por ACP: Recorte le hace de «manos» (archivos y terminal) solo dentro de su carpeta.
-      return { agente, orden: 'antigravity:acp' }
+      return { agente, orden: b }
     default:
       return null
   }
@@ -249,9 +279,9 @@ async function lanzarAgente(
   imagenes: string[]
 ): Promise<string> {
   if (senal?.aborted) throw new Parado()
-  if (orden === 'antigravity:acp') {
-    const { trabajarAntigravity } = await import('./antigravity')
-    return trabajarAntigravity(prompt, cwd, onLinea, senal, timeoutMs, imagenes).catch((e: unknown) => {
+  if (orden.startsWith('antigravity:acp')) {
+    const [{ trabajarAntigravity }, { opcionesAntigravity }] = await Promise.all([import('./antigravity'), import('./modelos')])
+    return trabajarAntigravity(prompt, cwd, onLinea, senal, timeoutMs, imagenes, opcionesAntigravity(orden)).catch((e: unknown) => {
       if (e instanceof Parado) throw e
       throw new Error(falloDeAgente(orden, e instanceof Error ? e.message : String(e)))
     })
@@ -314,16 +344,23 @@ async function lanzarAgente(
     })
     hijo.stderr.on('data', (b: Buffer) => (error = (error + b.toString('utf8')).slice(-2000)))
     hijo.on('error', () => fin(new Error(`No pude lanzar el agente («${comando.slice(0, 60)}»).`)))
-    hijo.on('close', (codigo) => {
+    const terminar = (codigo: number | null) => {
+      if (cerrado) return
       if (resto.trim()) {
         const d = describirEvento(resto)
+        resto = ''
         if (d?.error) errorFinal = d.error
         else if (d?.final !== undefined) final = d.final
       }
       const fallo = errorFinal ?? (codigo === 0 ? null : (error.trim() || todo.trim()).slice(-300) || `El agente terminó con código ${codigo} sin decir nada.`)
       if (fallo) fin(new Error(falloDeAgente(orden, fallo)))
       else fin()
-    })
+    }
+    hijo.on('close', terminar)
+    // 'close' espera a que se cierre su salida, y un proceso que el agente dejó de fondo (un
+    // render, un servidor) la mantiene abierta: el agente ya terminó pero Recorte seguía
+    // esperando hasta el límite. Al salir el agente, se da un respiro para lo último y se cierra.
+    hijo.on('exit', (codigo) => setTimeout(() => terminar(codigo), 1500))
     if (archivoPrompt) hijo.stdin.end()
     else hijo.stdin.end(prompt, 'utf8')
   })
@@ -456,7 +493,7 @@ Escribe en notas.md, en pocas líneas, lo que viste (qué es cada archivo y lo i
 ${contexto(c)}
 
 Responde SOLO con JSON, sin texto alrededor:
-{"entendi": "qué vas a hacer, en 1-2 frases, con los datos que mediste", "pasos": ["paso corto", "…"], "preguntas": ["solo si de verdad no puedes decidir algo importante"], "herramienta": "FFmpeg | Python + FFmpeg | HyperFrames | …"}`
+{"entendi": "qué vas a hacer, en 1-2 frases, con los datos que mediste", "pasos": ["paso corto", "…"], "preguntas": ["solo si de verdad no puedes decidir algo importante"], "herramienta": "Kit de Recorte | FFmpeg | Python + FFmpeg | HyperFrames | …"}`
   const respuesta = await trabajarAgente(cmd.orden, trabajo, prompt, onLinea, senal, 30 * 60_000, await imagenesDeEntrada(c, carpeta))
   let datos: unknown = null
   try {

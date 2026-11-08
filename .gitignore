@@ -6,3 +6,4 @@ release
 .DS_Store
 .tmp-*
 build/licencia-instalador.txt
+__pycache__/

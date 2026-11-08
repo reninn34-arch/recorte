@@ -11,6 +11,7 @@ import { mediaUrl } from '../media'
 export function PanelAgente({
   creacion,
   trabajando,
+  desde: desdeTrabajo,
   progreso,
   onPlan,
   onHacer,
@@ -18,7 +19,9 @@ export function PanelAgente({
 }: {
   creacion: Creacion
   trabajando: boolean
-  progreso: { pct: number; texto?: string } | null
+  /** Cuándo empezó el agente (ms), lo dice el proceso principal: salir y volver no reinicia el reloj. */
+  desde?: number
+  progreso: { pct: number; texto?: string; registro?: string[] } | null
   onPlan: () => void
   onHacer: () => void
   onParar: () => void
@@ -27,19 +30,22 @@ export function PanelAgente({
   const a = c.agente
   const plan = a?.plan
   const res = a?.resultado
-  // Cuánto lleva trabajando (se cuenta aquí: el proceso principal solo manda lo que hace).
-  const desde = useRef<number | null>(null)
+  // Cuánto lleva trabajando, desde la hora real de inicio (si no llegó aún, desde que se ve).
+  const visto = useRef<number | null>(null)
   const [, latido] = useState(0)
   useEffect(() => {
     if (!trabajando) {
-      desde.current = null
+      visto.current = null
       return
     }
-    desde.current = Date.now()
+    visto.current = Date.now()
     const reloj = setInterval(() => latido((x) => x + 1), 1000)
     return () => clearInterval(reloj)
   }, [trabajando])
-  const lleva = desde.current ? Math.floor((Date.now() - desde.current) / 1000) : 0
+  const inicio = desdeTrabajo ?? visto.current
+  const lleva = trabajando && inicio ? Math.max(0, Math.floor((Date.now() - inicio) / 1000)) : 0
+  // Lo que va haciendo llega en vivo con el progreso; la creación guardada solo se refresca al final.
+  const registro = progreso?.registro ?? a?.registro ?? []
   const mm = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
   // La barra es de TIEMPO, no un porcentaje inventado: se llena hasta lo que suele tardar
   // este paso y, si se pasa, lo dice. El avance real es la lista de lo que va haciendo.
@@ -62,9 +68,9 @@ export function PanelAgente({
             mismo, puedes pararlo.
           </span>
         )}
-        {a?.registro.length ? (
+        {registro.length ? (
           <ol className="pa-registro">
-            {a.registro.slice(-10).map((l, i) => (
+            {registro.slice(-10).map((l, i) => (
               <li key={i}>{l}</li>
             ))}
           </ol>

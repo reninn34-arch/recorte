@@ -16,6 +16,7 @@ import { mediaUrl } from '../media'
 export function EstudioCreacion({
   creacion,
   trabajando,
+  desde: desdeTrabajo,
   progreso,
   onGuion,
   onVideo,
@@ -33,7 +34,9 @@ export function EstudioCreacion({
   agente?: { plan: (pedido?: string) => void; hacer: (pedido?: string) => void }
   creacion: Creacion
   trabajando: boolean
-  progreso: { pct: number; texto?: string } | null
+  /** Cuándo empezó a trabajar el agente (ms): el reloj sigue aunque salgas y vuelvas. */
+  desde?: number
+  progreso: { pct: number; texto?: string; registro?: string[] } | null
   onGuion: (pedido?: string) => void
   onVideo: (pedido?: string) => void
   onEditor: () => void
@@ -51,11 +54,13 @@ export function EstudioCreacion({
   const estiloEditorial = estiloPorId(c.estilo)
 
   useEffect(() => {
-    setDesde(trabajando ? Date.now() : null)
-  }, [trabajando])
+    setDesde(trabajando ? (desdeTrabajo ?? Date.now()) : null)
+  }, [trabajando, desdeTrabajo])
   useEffect(() => {
     if (desde === null) return
-    const reloj = setInterval(() => setSegundos(Math.round((Date.now() - desde) / 1000)), 500)
+    const contar = () => setSegundos(Math.max(0, Math.round((Date.now() - desde) / 1000)))
+    contar()
+    const reloj = setInterval(contar, 500)
     return () => clearInterval(reloj)
   }, [desde])
   useEffect(() => {
@@ -227,7 +232,7 @@ export function EstudioCreacion({
           )}
 
           {modoAgente && trabajando && (
-            <PanelAgente creacion={c} trabajando progreso={progreso} onPlan={() => agente.plan()} onHacer={() => agente.hacer()} onParar={onParar} />
+            <PanelAgente creacion={c} trabajando desde={desdeTrabajo} progreso={progreso} onPlan={() => agente.plan()} onHacer={() => agente.hacer()} onParar={onParar} />
           )}
 
           {!modoAgente && c.fase === 'video' && trabajando && (

@@ -22,7 +22,8 @@ import { abrirFlow, agregarCuentaFlow, ajustesFlow, estadoFlow, leerSaldosFlow, 
 import { MODELO_CHATGPT, MODELOS_IMAGEN, modelosVideoVigentes, type PedidoFlow } from '../shared/flow'
 import { estadoChatGPT } from './imagenchatgpt'
 import { avisarSesionCaida, definirEntornoAgentes, empezarTrabajo, esParado, pararTrabajo, terminarTrabajo } from './ia'
-import { comandoConNivel } from './modelos'
+import { comandoConEleccion } from './modelos'
+import { catalogoAgente } from './catalogo'
 import { crearMiniatura, crearProxy, probeVideo } from './ffmpeg'
 import { proponerClipsConAgente, proponerClipsConIA, proponerRecetaConAgente, proponerRecetaConIA } from './ia'
 import { registrarMedia } from './media'
@@ -43,8 +44,8 @@ import { medirReferencia } from './estilo/referencia'
 import { analizarConGeminiVideo, interpretarEstilo } from './estilo/ficha'
 import { viabilidadDe } from './estilo/viabilidad'
 import { guardar } from './disco'
-import { pideMontarVoz, textoNarracion, VOCES_GEMINI } from '../shared/creacion'
-import type { Creacion, EleccionTarea, MensajeCreacion, NivelModelo, PeticionCreacion, TareasCreacion } from '../shared/creacion'
+import { ID_SEGURO, pideMontarVoz, textoNarracion, VOCES_GEMINI } from '../shared/creacion'
+import type { AgenteId, Creacion, EleccionTarea, MensajeCreacion, NivelModelo, PeticionCreacion, TareasCreacion } from '../shared/creacion'
 import { turnoAgente } from './chat'
 import { buscarActualizacion, estadoActualizacion, instalarActualizacion, prepararActualizaciones } from './actualizar'
 import { activarGustos, agregarGustos, bloqueGustos, cargarGustos, olvidarGustos, quitarGusto, senalGusto, usoCreacion } from './gustos'
@@ -101,9 +102,13 @@ app.whenReady().then(() => {
   const creaciones = new Creaciones()
   registrarMedia(proyectos, creaciones)
 
+  /** Cuándo empezó a trabajar el agente en cada creación: la pantalla cuenta desde ahí, no desde que la abres. */
+  const inicioCreacion = new Map<string, number>()
   const enviarProgreso = (progreso: Progreso) => {
+    const desde = progreso.fase === 'creacion' ? inicioCreacion.get(progreso.id) : undefined
+    const evento = desde !== undefined && progreso.desde === undefined ? { ...progreso, desde } : progreso
     for (const ventana of BrowserWindow.getAllWindows()) {
-      ventana.webContents.send('progreso', progreso)
+      ventana.webContents.send('progreso', evento)
     }
   }
 
@@ -218,7 +223,7 @@ app.whenReady().then(() => {
     if (eleccion) {
       const agente = (await estadoAgentes()).find((a) => a.id === eleccion.agente)
       if (agente?.conectado && agente.instalado) {
-        return { activa: true, proveedor: 'cli', comandoCli: comandoConNivel(agente.comando, eleccion.agente, eleccion.nivel) }
+        return { activa: true, proveedor: 'cli', comandoCli: comandoConEleccion(agente.comando, eleccion.agente, eleccion) }
       }
     }
     return configAgente()
@@ -231,10 +236,12 @@ app.whenReady().then(() => {
     if (!x || typeof x !== 'object') return undefined
     const limpiar = (e: unknown): EleccionTarea | undefined => {
       if (!e || typeof e !== 'object') return undefined
-      const { agente, nivel } = e as Record<string, unknown>
+      const { agente, nivel, modelo, esfuerzo } = e as Record<string, unknown>
       if (typeof agente !== 'string' || !(AGENTE_IDS as readonly string[]).includes(agente)) return undefined
       return {
         agente: agente as EleccionTarea['agente'],
+        ...(typeof modelo === 'string' && ID_SEGURO.test(modelo) ? { modelo } : {}),
+        ...(typeof esfuerzo === 'string' && ID_SEGURO.test(esfuerzo) ? { esfuerzo } : {}),
         ...(typeof nivel === 'string' && (NIVELES_MODELO as readonly string[]).includes(nivel)
           ? { nivel: nivel as NivelModelo }
           : {})
@@ -266,12 +273,14 @@ app.whenReady().then(() => {
     if (!c) throw new Error('Esa creación ya no existe.')
     if (creandoAhora.has(id)) throw new Error('El agente ya está trabajando en este video.')
     creandoAhora.add(id)
+    inicioCreacion.set(id, Date.now())
     const senal = empezarTrabajo(`creacion:${id}`)
     try {
       return await trabajo(c, senal)
     } finally {
       terminarTrabajo(`creacion:${id}`, senal)
       creandoAhora.delete(id)
+      inicioCreacion.delete(id)
     }
   }
   ipcMain.handle('creacion:parar', (_evento, id: unknown) => typeof id === 'string' && pararTrabajo(`creacion:${id}`))
@@ -335,7 +344,7 @@ app.whenReady().then(() => {
   const avisarAgente = (c: Creacion, linea: string, pct: number) => {
     if (!c.agente) c.agente = { registro: [], rondas: 0 }
     anotar(c.agente, linea)
-    enviarProgreso({ id: c.id, fase: 'creacion', pct, texto: linea.slice(0, 140) })
+    enviarProgreso({ id: c.id, fase: 'creacion', pct, texto: linea.slice(0, 140), registro: c.agente.registro.slice(-10) })
   }
   ipcMain.handle('agente:plan', (_evento, id: unknown, pedido: unknown) =>
     conCreacion(id, async (c, senal) => {
@@ -477,6 +486,7 @@ app.whenReady().then(() => {
     await shell.trashItem(creaciones.carpeta(id))
     return true
   })
+  ipcMain.handle('creacion:en-curso', () => Object.fromEntries(inicioCreacion))
   ipcMain.handle('creacion:abrir', (_evento, id: unknown) => {
     const c = typeof id === 'string' ? creaciones.get(id) : null
     return c ? destrabar(c) : null
@@ -900,6 +910,10 @@ app.whenReady().then(() => {
     for (const w of BrowserWindow.getAllWindows()) w.webContents.send('agentes:sesion-caida', id)
   })
   ipcMain.handle('agentes:estado', () => agentesConPago())
+  // Los modelos de un agente con sus esfuerzos, preguntados al propio agente (ver catalogo.ts).
+  ipcMain.handle('agentes:modelos', (_evento, id: unknown, forzar: unknown) =>
+    typeof id === 'string' && (AGENTE_IDS as readonly string[]).includes(id) ? catalogoAgente(id as AgenteId, forzar === true) : []
+  )
   ipcMain.handle('agentes:versiones', () => versionesAgentes())
   ipcMain.handle('agentes:pago', async (_evento, id: unknown, cambio: unknown) => {
     if (typeof id !== 'string') return agentesConPago()

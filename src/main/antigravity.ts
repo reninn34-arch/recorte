@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, extname, join, resolve } from 'node:path'
 import { app, shell } from 'electron'
 import { pathAmpliado } from './binarios'
+import type { ModeloAgente } from '../shared/creacion'
 import { matarArbol, Parado } from './ia'
 
 /**
@@ -347,7 +348,9 @@ async function abrirSesion(
     alAvisar: (metodo: string, params: Record<string, unknown>) => void
   },
   /** Modo agente: trabaja en esta carpeta, con permiso para escribir y terminal (solo ahí). */
-  manos?: { cwd: string; manos: Manos }
+  manos?: { cwd: string; manos: Manos },
+  /** El modelo y el nivel de pensamiento elegidos (si no, los de la cuenta). */
+  opciones: { modelo?: string; esfuerzo?: string } = {}
 ): Promise<SesionAcp> {
   const hijo = lanzar()
   let cerrado: Error | null = null
@@ -375,9 +378,63 @@ async function abrirSesion(
   )
   // Con el token guardado esto vuelve al instante; sin él, abre el navegador y espera.
   await rpc.pedir('authenticate', { methodId: 'oauth-personal' }, 10 * 60_000)
-  const s = await rpc.pedir<{ sessionId: string }>('session/new', { cwd: manos?.cwd ?? tmpdir(), mcpServers: [] }, 180_000)
+  const s = await rpc.pedir<{ sessionId: string; configOptions?: OpcionAcp[] }>('session/new', { cwd: manos?.cwd ?? tmpdir(), mcpServers: [] }, 180_000)
   if (cerrado) throw cerrado
+  guardarCatalogo(s.configOptions)
+  // El modelo y el nivel de pensamiento elegidos, con las opciones que dio la sesión (ACP).
+  const elegir = async (categoria: string, valor?: string) => {
+    const o = s.configOptions?.find((x) => x.category === categoria || x.id === categoria)
+    if (!valor || !o || !o.options?.some((v) => v.value === valor) || o.currentValue === valor) return
+    await rpc.pedir('session/set_config_option', { sessionId: s.sessionId, configId: o.id, value: valor }, 30_000).catch(() => {})
+  }
+  await elegir('model', opciones.modelo)
+  await elegir('thought_level', opciones.esfuerzo)
   return { rpc, hijo, sessionId: s.sessionId, imagenes: Boolean(ini?.agentCapabilities?.promptCapabilities?.image) }
+}
+
+/** Una opción de la sesión ACP (modelo, nivel de pensamiento, modo…). */
+interface OpcionAcp {
+  id: string
+  category?: string
+  currentValue?: string
+  options?: { value: string; name?: string }[]
+}
+
+let catalogo: ModeloAgente[] | null = null
+const rutaCatalogo = () => join(datos(), 'recorte-modelos.json')
+
+/** Lo que la sesión dijo de sus modelos y niveles, guardado para el selector. */
+function guardarCatalogo(opciones?: OpcionAcp[]) {
+  const modelo = opciones?.find((o) => o.category === 'model' || o.id === 'model')
+  const nivel = opciones?.find((o) => o.category === 'thought_level')
+  if (!modelo?.options?.length) return
+  const esfuerzos = (nivel?.options ?? []).map((n) => n.value)
+  catalogo = modelo.options.map((v) => ({ id: v.value, nombre: v.name ?? v.value, esfuerzos, esfuerzoDefecto: nivel?.currentValue }))
+  try {
+    writeFileSync(rutaCatalogo(), JSON.stringify(catalogo))
+  } catch {
+    // Solo es una caché.
+  }
+}
+
+/**
+ * Los modelos de Antigravity con sus niveles de pensamiento. Dependen de la cuenta, así que se
+ * preguntan abriendo una sesión (sin mandar nada: no gasta cuota) y se recuerdan.
+ */
+export async function catalogoAntigravity(forzar = false): Promise<ModeloAgente[]> {
+  if (!forzar && catalogo) return catalogo
+  if (!forzar && existsSync(rutaCatalogo())) {
+    try {
+      catalogo = JSON.parse(readFileSync(rutaCatalogo(), 'utf8')) as ModeloAgente[]
+      return catalogo
+    } catch {
+      // Se vuelve a preguntar.
+    }
+  }
+  if (!exeAntigravity() || !conectadoAntigravity()) return []
+  const sesion = await abrirSesion({ alTexto: () => {}, alAvisar: () => {} })
+  sesion.hijo.kill()
+  return catalogo ?? []
 }
 
 const MIME: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' }
@@ -393,7 +450,8 @@ export async function trabajarAntigravity(
   onLinea: (t: string) => void,
   senal?: AbortSignal,
   timeoutMs = 40 * 60_000,
-  imagenes: string[] = []
+  imagenes: string[] = [],
+  opciones: { modelo?: string; esfuerzo?: string } = {}
 ): Promise<string> {
   if (senal?.aborted) throw new Parado()
   onLinea('Arrancando Antigravity (tarda unos segundos)')
@@ -409,7 +467,8 @@ export async function trabajarAntigravity(
         else if (u?.sessionUpdate === 'tool_call' && typeof u.title === 'string') onLinea(u.title.slice(0, 160))
       }
     },
-    { cwd, manos }
+    { cwd, manos },
+    opciones
   )
   const partes: unknown[] = [{ type: 'text', text: prompt }]
   if (sesion.imagenes) {
@@ -444,7 +503,12 @@ export async function trabajarAntigravity(
  * Una pregunta de ida y vuelta: abre el servidor, pregunta y cierra.
  * Arrancar Antigravity desempaca mucho y tarda (~40 s); se paga en cada llamada.
  */
-export async function preguntarAntigravity(prompt: string, timeoutMs = 10 * 60_000, senal?: AbortSignal): Promise<string> {
+export async function preguntarAntigravity(
+  prompt: string,
+  timeoutMs = 10 * 60_000,
+  senal?: AbortSignal,
+  opciones: { modelo?: string; esfuerzo?: string } = {}
+): Promise<string> {
   if (senal?.aborted) throw new Parado()
   let texto = ''
   const sesion = await abrirSesion({
@@ -454,7 +518,7 @@ export async function preguntarAntigravity(prompt: string, timeoutMs = 10 * 60_0
       const u = params.update as { sessionUpdate?: string; content?: { type?: string; text?: string } } | undefined
       if (u?.sessionUpdate === 'agent_message_chunk' && u.content?.type === 'text') texto += u.content.text ?? ''
     }
-  })
+  }, undefined, opciones)
   let alParar = () => {}
   const parado = new Promise<never>((_, mal) => {
     alParar = () => {

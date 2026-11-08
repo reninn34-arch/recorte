@@ -1,7 +1,7 @@
 import type { MensajeChat, OperacionTL } from './chat'
 import type { Gustos, SenalGusto } from './gustos'
 import type { MusicaTL, Timeline } from './timeline'
-import type { Creacion, PeticionCreacion } from './creacion'
+import type { Creacion, ModeloAgente, PeticionCreacion } from './creacion'
 import type { EstadoFlow, PedidoFlow, ResultadoFlow } from './flow'
 import type { AjustesIA, Project, TranscriptSegment } from './types'
 
@@ -139,6 +139,10 @@ export interface Progreso {
   clipId?: string
   /** Posición dentro de un render por lote: clip actual y total. */
   lote?: { indice: number; total: number }
+  /** Creaciones: cuándo empezó este paso (ms), para que el reloj no vuelva a cero al salir y entrar. */
+  desde?: number
+  /** Modo agente: lo último que hizo el agente, en vivo. */
+  registro?: string[]
 }
 
 export interface IngestaResultado {
@@ -212,6 +216,8 @@ export interface RecorteApi {
   /** `clave` undefined conserva la actual; '' la borra. */
   guardarAjustes: (ajustes: Omit<AjustesIA, 'tieneClave' | 'claveCifrada'>, clave?: string) => Promise<AjustesIA>
   agentesEstado: () => Promise<EstadoAgente[]>
+  /** Los modelos del agente con sus esfuerzos, tal como los dice el agente (se recuerdan un día). */
+  agentesModelos: (id: string, forzar?: boolean) => Promise<ModeloAgente[]>
   agentesConectar: (id: string) => Promise<ConexionResultado>
   /** La versión instalada de cada agente (corre `--version`: tarda unos segundos). */
   agentesVersiones: () => Promise<Record<string, string | null>>
@@ -262,6 +268,8 @@ export interface RecorteApi {
   elegirReferencia: () => Promise<string | null>
   creacionesListar: () => Promise<Creacion[]>
   creacionAbrir: (id: string) => Promise<Creacion | null>
+  /** Las creaciones en las que el agente trabaja ahora, con cuándo empezó (ms). */
+  creacionEnCurso: () => Promise<Record<string, number>>
   creacionNueva: (peticion: PeticionCreacion) => Promise<Creacion>
   /** Copiar un estilo: analiza el material y la referencia, y saca la ficha (modo 'gemini': Gemini ve el video completo). */
   /** Modo agente: el agente mira los archivos y propone un plan (o pregunta). */

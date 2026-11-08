@@ -141,7 +141,7 @@ export const VARIABLE_LLAVE: Partial<Record<EstadoAgente['id'], string>> = { cla
 /** Qué agente corre una orden (por su binario o su comando). */
 export function agenteDeOrden(orden: string): EstadoAgente['id'] | null {
   const limpia = orden.trim()
-  const a = AGENTES.find((x) => limpia === x.comando || limpia.startsWith(`${x.binario} `) || limpia === x.binario)
+  const a = AGENTES.find((x) => limpia === x.comando || limpia.startsWith(`${x.comando} `) || limpia.startsWith(`${x.binario} `) || limpia === x.binario)
   return a?.id ?? null
 }
 

@@ -1,4 +1,4 @@
-import type { AgenteId, NivelModelo } from '../shared/creacion'
+import { ID_SEGURO, type AgenteId, type NivelModelo } from '../shared/creacion'
 
 /**
  * Qué modelo usa cada agente cuando el usuario elige el nivel de una tarea
@@ -38,6 +38,55 @@ export function comandoConNivel(comandoBase: string, agente: AgenteId, nivel?: N
   const extra = nivel ? NIVELES[agente]?.[nivel] : undefined
   return extra ? `${comandoBase.trim()} ${extra}` : comandoBase
 }
+
+/**
+ * El comando con el modelo y el esfuerzo elegidos del catálogo del agente (si no hay modelo,
+ * el nivel de antes). Los flags, verificados con la ayuda de cada CLI:
+ * - Claude Code: `--model <alias>` y `--effort <low|medium|high|xhigh|max>`.
+ * - OpenCode: `-m proveedor/modelo` y `--variant <esfuerzo>`.
+ * - Kimi, Gemini CLI y Codex: `-m <modelo>` (sin esfuerzo).
+ * - Antigravity (ACP): la marca lleva `--model` y `--effort`; se aplican en su sesión.
+ */
+export function comandoConEleccion(
+  comandoBase: string,
+  agente: AgenteId,
+  e: { nivel?: NivelModelo; modelo?: string; esfuerzo?: string }
+): string {
+  const seguro = (x?: string) => (x && ID_SEGURO.test(x) ? x : undefined)
+  const modelo = seguro(e.modelo)
+  const esfuerzo = seguro(e.esfuerzo)
+  if (!modelo && !esfuerzo) return comandoConNivel(comandoBase, agente, e.nivel)
+  const base = modelo ? comandoBase.trim() : comandoConNivel(comandoBase, agente, e.nivel).trim()
+  const extra: string[] = []
+  switch (agente) {
+    case 'claude':
+      if (modelo) extra.push(`--model ${modelo}`)
+      if (esfuerzo) extra.push(`--effort ${esfuerzo}`)
+      break
+    case 'opencode':
+      if (modelo) extra.push(`-m ${modelo}`)
+      if (esfuerzo) extra.push(`--variant ${esfuerzo}`)
+      break
+    case 'antigravity':
+      if (modelo) extra.push(`--model ${modelo}`)
+      if (esfuerzo) extra.push(`--effort ${esfuerzo}`)
+      break
+    default:
+      if (modelo) extra.push(`-m ${modelo}`)
+  }
+  return extra.length ? `${base} ${extra.join(' ')}` : base
+}
+
+/** Antigravity: el modelo y el esfuerzo que lleva su marca (`antigravity:acp --model x --effort y`). */
+export function opcionesAntigravity(orden: string): { modelo?: string; esfuerzo?: string } {
+  const de = (flag: string) => {
+    const v = new RegExp(`--${flag}\\s+(\\S+)`).exec(orden)?.[1]
+    return v && ID_SEGURO.test(v) ? v : undefined
+  }
+  return { modelo: de('model'), esfuerzo: de('effort') }
+}
+
+export const esAntigravity = (orden: string): boolean => orden.trim().startsWith('antigravity:acp')
 
 /** Si el agente admite elegir nivel (Codex no, por ahora). */
 export function admiteNiveles(agente: AgenteId): boolean {
