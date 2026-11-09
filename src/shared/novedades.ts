@@ -24,7 +24,7 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
-    version: '0.1.14',
+    version: '0.1.15',
     fecha: '2026-11-09',
     resumen: 'Desconexión voluntaria de agentes y corrección de bloqueos al entregar o editar videos.',
     novedades: [

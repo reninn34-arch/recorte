@@ -10,6 +10,7 @@ import {
   Image,
   KeyRound,
   Layers,
+  LogOut,
   Music,
   Palette,
   Paperclip,
@@ -66,12 +67,13 @@ const ICONOS = {
   paperclip: Paperclip,
   image: Image,
   gift: Gift,
-  alerta: TriangleAlert
+  alerta: TriangleAlert,
+  'log-out': LogOut
 } satisfies Record<string, LucideIcon>
 
 export type IconName = keyof typeof ICONOS
 
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
-  const Dibujo = ICONOS[name]
+  const Dibujo = ICONOS[name] ?? Sparkles
   return <Dibujo size={size} strokeWidth={size <= 14 ? 2 : 1.75} absoluteStrokeWidth={false} aria-hidden="true" focusable={false} />
 }
