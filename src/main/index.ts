@@ -38,13 +38,13 @@ import { convertirAVoz, generarVozGemini, prepararVoz } from './voz'
 import { montarVozEnVideo } from './montajevoz'
 import { conectarVozGoogle, desconectarVozGoogle, estadoVozGoogle, generarVozGoogle } from './vozgoogle'
 import { analizarMaterialCreacion } from './estilo/material'
-import { anotar, pasoHacer, pasoPlan, revisarYPublicar } from './modoagente'
+import { anotar, archivoEntregado, pasoHacer, pasoPlan, revisarYPublicar } from './modoagente'
 import { esAprobacion } from '../shared/modoagente'
 import { medirReferencia } from './estilo/referencia'
 import { analizarConGeminiVideo, interpretarEstilo } from './estilo/ficha'
 import { viabilidadDe } from './estilo/viabilidad'
 import { guardar } from './disco'
-import { ID_SEGURO, pideMontarVoz, textoNarracion, VOCES_GEMINI, vozDesactualizada, vozVigente } from '../shared/creacion'
+import { cambiaElGuion, ID_SEGURO, mismaNarracion, pideMontarVoz, textoNarracion, VOCES_GEMINI, vozDesactualizada, vozVigente } from '../shared/creacion'
 import type { AgenteId, Creacion, EleccionTarea, MensajeCreacion, NivelModelo, PeticionCreacion, TareasCreacion } from '../shared/creacion'
 import { turnoAgente } from './chat'
 import { buscarActualizacion, estadoActualizacion, instalarActualizacion, prepararActualizaciones } from './actualizar'
@@ -303,7 +303,7 @@ app.whenReady().then(() => {
     const voz = c.voz
     if (!voz || !c.guion) return ''
     const despues = textoNarracion(c.guion)
-    if (despues !== antes.texto) {
+    if (!mismaNarracion(despues, antes.texto)) {
       if (voz.origen === 'propia') {
         voz.desactualizada = true
         return 'La narración cambió y tu voz grabada ya no dice el guion nuevo: grábala o súbela otra vez en Voz. Mientras tanto, el video va sin voz.'
@@ -442,13 +442,22 @@ app.whenReady().then(() => {
         // Si pide un cambio sobre lo hecho, va como pedido; si solo aprobó el plan, sin pedido.
         const cambio = texto && !esAprobacion(texto) ? texto : undefined
         const desde = Date.now()
-        await pasoHacer(c, carpeta, config, cambio, (l) => avisarAgente(c, l, pctPorTiempo(desde, 480)), senal)
-        let revisado = await revisarYPublicar(c, carpeta, c.version + 1)
+        try {
+          await pasoHacer(c, carpeta, config, cambio, (l) => avisarAgente(c, l, pctPorTiempo(desde, 480)), senal)
+        } catch (e) {
+          // Si el agente falló al salir pero ya dejó un video nuevo, se revisa igual: no se
+          // tira el trabajo (ni los créditos) por un error al cerrar.
+          if (esParado(e) || !archivoEntregado(carpeta, desde)) throw e
+          avisarAgente(c, `El agente terminó con un aviso (${textoError(e).slice(0, 120)}), pero dejó su entrega`, 0.93)
+        }
+        avisarAgente(c, 'Recorte revisa la entrega', 0.95)
+        // Solo vale lo que el agente escribió en esta ronda (nunca el video anterior).
+        let revisado = await revisarYPublicar(c, carpeta, c.version + 1, desde)
         if (revisado.problemas.length) {
           // Recorte encontró algo mal: el agente lo corrige una vez.
           avisarAgente(c, `Recorte revisó y encontró: ${revisado.problemas.join(' ')}`, 0.85)
           await pasoHacer(c, carpeta, config, `La revisión de Recorte encontró problemas en tu entrega: ${revisado.problemas.join(' ')} Corrígelo y vuelve a entregar.`, (l) => avisarAgente(c, l, 0.9), senal)
-          revisado = await revisarYPublicar(c, carpeta, c.version + 1)
+          revisado = await revisarYPublicar(c, carpeta, c.version + 1, desde)
         }
         if (!revisado.resultado) throw new Error(revisado.problemas.join(' '))
         c.version += 1
@@ -644,9 +653,12 @@ app.whenReady().then(() => {
       c.fase = 'video'
       creaciones.guardar(c)
       try {
-        // Con el video hecho, el guion manda: primero se actualiza (y la voz si cambió lo
-        // que se dice); después el compositor cambia las escenas para que todo cuente lo mismo.
-        if (texto && c.salida && c.guion) {
+        // Un retoque de aspecto (color, letra, animación) va directo al compositor: una sola
+        // llamada al agente, sin reescribir el guion, rehacer la voz ni pedir medios a Flow.
+        // Si el cambio toca lo que se dice o las escenas, primero se actualiza el guion (y la
+        // voz si cambió la narración) y después el compositor cambia las escenas.
+        const tocaGuion = Boolean(texto && c.salida && c.guion && cambiaElGuion(texto))
+        if (tocaGuion && texto) {
           const antes = fotoGuion(c)
           enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.05, texto: 'Revisando el guion con tu cambio' })
           const g = await pasoGuion(c, creaciones.carpeta(c.id), await configParaTarea(c.tareas?.guion), texto, senal, bloqueGustos())
@@ -659,7 +671,7 @@ app.whenReady().then(() => {
         }
         const r = await pasoVideo(c, creaciones.carpeta(c.id), await configParaTarea(c.tareas?.video), (pct, t) =>
           enviarProgreso({ id: c.id, fase: 'creacion', pct, texto: t })
-        , texto && c.salida ? texto : undefined, senal, bloqueGustos())
+        , texto && c.salida ? texto : undefined, senal, bloqueGustos(), !c.salida || tocaGuion)
         c.salida = r.salida
         c.portada = r.portada
         c.version += 1
@@ -1085,8 +1097,9 @@ app.whenReady().then(() => {
   ipcMain.handle('agentes:conectar', (_evento, id: unknown) => conectarAgente(id))
   ipcMain.handle('agentes:desconectar', async (_evento, id: unknown) => {
     const res = await desconectarAgente(id)
+    // Solo deja de usar el agente que se desconecta, no el que esté editando ahora.
     const conf = await ajustes.cargar()
-    if (conf.activa) {
+    if (res.ok && conf.activa && conf.proveedor === 'cli' && agenteDeOrden(conf.comandoCli) === id) {
       await ajustes.guardar({ ...conf, activa: false })
     }
     return res

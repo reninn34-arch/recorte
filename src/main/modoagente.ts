@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, extname, isAbsolute, join, resolve } from 'node:path'
+import { basename, extname, isAbsolute, join, resolve, sep } from 'node:path'
 import type { Creacion } from '../shared/creacion'
 import {
   MAX_REGISTRO,
@@ -204,9 +204,12 @@ export function comandoAgentico(base: string, cwd: string): { orden: string; age
       return { agente, orden: `${b} --skip-git-repo-check -s workspace-write -C "${cwd}" -` }
     case 'opencode':
       return { agente, orden: `${b} --auto --dir "${cwd}"` }
-    case 'gemini':
-      // Sin probar: Gemini CLI no estaba instalado al escribir esto.
-      return { agente, orden: `${b} --yolo` }
+    case 'gemini': {
+      // `-p` lleva valor: sin él, el siguiente flag (`-m`, `--yolo`) se toma como el prompt.
+      // El pedido llega por stdin y `-p` se le suma al final (así lo documenta `gemini --help`).
+      const sinP = b.replace(/\s-p(?=\s|$)/, '')
+      return { agente, orden: `${sinP} --yolo -p "Sigue al pie de la letra las instrucciones de arriba."` }
+    }
     case 'antigravity':
       // Por ACP: Recorte le hace de «manos» (archivos y terminal) solo dentro de su carpeta.
       return { agente, orden: b }
@@ -260,9 +263,10 @@ export async function trabajarAgente(
   onLinea: (texto: string) => void,
   senal?: AbortSignal,
   timeoutMs = 40 * 60_000,
-  imagenes: string[] = []
+  imagenes: string[] = [],
+  entregaLista?: () => boolean
 ): Promise<string> {
-  const respuesta = await lanzarAgente(orden, cwd, prompt, onLinea, senal, timeoutMs, imagenes)
+  const respuesta = await lanzarAgente(orden, cwd, prompt, onLinea, senal, timeoutMs, imagenes, entregaLista)
   // Un rechazo del filtro de contenido llega como respuesta «normal» y corta: dilo en claro.
   const rechazo = respuesta.length < 1500 ? rechazoPorPolitica(respuesta) : null
   if (rechazo) throw new Error(rechazo)
@@ -276,7 +280,8 @@ async function lanzarAgente(
   onLinea: (texto: string) => void,
   senal: AbortSignal | undefined,
   timeoutMs: number,
-  imagenes: string[]
+  imagenes: string[],
+  entregaLista?: () => boolean
 ): Promise<string> {
   if (senal?.aborted) throw new Parado()
   if (orden.startsWith('antigravity:acp')) {
@@ -311,10 +316,14 @@ async function lanzarAgente(
         }
       }
     }
+    let ultimaSalida = Date.now()
+    let graciaFinal: ReturnType<typeof setTimeout> | null = null
     const fin = (e?: Error) => {
       if (cerrado) return
       cerrado = true
       clearTimeout(reloj)
+      clearInterval(vigia)
+      if (graciaFinal) clearTimeout(graciaFinal)
       senal?.removeEventListener('abort', alParar)
       limpiar()
       if (e) rechazar(e)
@@ -329,7 +338,28 @@ async function lanzarAgente(
       fin(new Parado())
     }
     senal?.addEventListener('abort', alParar, { once: true })
+    // El agente ya dio su respuesta final (Claude: evento «result») pero no sale porque dejó
+    // algo de fondo (un servidor, un render, un shell): se le da un respiro y se cierra.
+    const alDarFinal = () => {
+      if (graciaFinal || cerrado) return
+      graciaFinal = setTimeout(() => {
+        if (cerrado) return
+        matarArbol(hijo)
+        terminar(0)
+      }, 10_000)
+    }
+    // Los agentes sin evento final (Codex, Kimi, Gemini, OpenCode): si ya escribió
+    // resultado.json con un archivo nuevo y lleva un rato callado, terminó aunque no salga.
+    const vigia = setInterval(() => {
+      if (cerrado || !entregaLista) return
+      if (Date.now() - ultimaSalida > 90_000 && entregaLista()) {
+        onLinea('El agente entregó y quedó esperando: Recorte cierra su sesión')
+        matarArbol(hijo)
+        terminar(0)
+      }
+    }, 5000)
     hijo.stdout.on('data', (b: Buffer) => {
+      ultimaSalida = Date.now()
       const t = b.toString('utf8')
       todo += t
       resto += t
@@ -338,11 +368,27 @@ async function lanzarAgente(
       for (const l of lineas) {
         const d = describirEvento(l)
         if (d?.error) errorFinal = d.error
-        else if (d?.final !== undefined) final = d.final
-        else if (d?.texto) onLinea(d.texto)
+        else if (d?.final !== undefined) {
+          final = d.final
+          alDarFinal()
+        } else if (d?.texto) onLinea(d.texto)
       }
     })
-    hijo.stderr.on('data', (b: Buffer) => (error = (error + b.toString('utf8')).slice(-2000)))
+    let restoErr = ''
+    hijo.stderr.on('data', (b: Buffer) => {
+      ultimaSalida = Date.now()
+      const t = b.toString('utf8')
+      error = (error + t).slice(-2000)
+      // Codex, Kimi y Gemini cuentan lo que hacen por stderr: que se vea el avance igual
+      // que con Claude (si no, la barra parece colgada durante minutos).
+      restoErr += t
+      const lineas = restoErr.split(/\r?\n/)
+      restoErr = lineas.pop() ?? ''
+      for (const l of lineas) {
+        const limpia = l.replace(/\x1b\[[0-9;]*m/g, '').trim()
+        if (limpia.length > 3 && !/^(\[?\d{4}-\d\d-\d\d|debug|trace)/i.test(limpia)) onLinea(limpia.slice(0, 160))
+      }
+    })
     hijo.on('error', () => fin(new Error(`No pude lanzar el agente («${comando.slice(0, 60)}»).`)))
     const terminar = (codigo: number | null) => {
       if (cerrado) return
@@ -352,7 +398,10 @@ async function lanzarAgente(
         if (d?.error) errorFinal = d.error
         else if (d?.final !== undefined) final = d.final
       }
-      const fallo = errorFinal ?? (codigo === 0 ? null : (error.trim() || todo.trim()).slice(-300) || `El agente terminó con código ${codigo} sin decir nada.`)
+      // Si ya respondió (evento final) o dejó su entrega, el código de salida no importa:
+      // pudo cerrarlo Recorte o morir al cerrar lo que dejó de fondo.
+      const yaEntrego = final !== null || Boolean(entregaLista?.())
+      const fallo = errorFinal ?? (codigo === 0 || yaEntrego ? null : (error.trim() || todo.trim()).slice(-300) || `El agente terminó con código ${codigo} sin decir nada.`)
       if (fallo) fin(new Error(falloDeAgente(orden, fallo)))
       else fin()
     }
@@ -527,21 +576,73 @@ export async function pasoHacer(
   const plan = c.agente?.plan
   const hay = c.agente?.resultado
   await prepararVistazo(c, carpeta)
-  const prompt = `Lee AGENTS.md (tu manual) y sigue el método completo, del paso 1 al 7. Empieza por notas.md y vistazo/: no repitas lo que ya viste.
+  const desde = Date.now()
+  // Un cambio sobre un video ya hecho no repite el método entero: toca solo lo pedido
+  // (menos tiempo y menos créditos del plan del usuario).
+  const prompt =
+    hay && pedido
+      ? `ESTO ES UN CAMBIO sobre un video que ya hiciste, no un video nuevo. Tu manual sigue en AGENTS.md por si lo necesitas.
+
+${contexto(c)}
+
+YA HICISTE ESTA VERSIÓN: ${hay.archivo.replace(/^salidas\//, '')} (lo que dijiste: ${hay.resumen}). Tus archivos de trabajo (receta.json, scripts, composiciones) siguen en esta carpeta.
+
+LO QUE PIDE AHORA EL USUARIO: ${pedido}
+
+Cómo trabajar para no gastar de más:
+- No vuelvas a mirar vistazo/ ni entrada/ ni a medir lo que ya mediste (está en notas.md), y no rehagas el plan.
+- Abre el archivo de trabajo que produjo la versión anterior, cambia SOLO lo que se pide y conserva todo lo demás tal cual.
+- Renderiza a un archivo NUEVO en salida/ (otro nombre, p. ej. con -v2), mira 2 o 3 fotogramas de lo que cambiaste y entrega.
+Al terminar escribe resultado.json como dice el manual y termina (no dejes servidores ni procesos abiertos).`
+      : `Lee AGENTS.md (tu manual) y sigue el método completo, del paso 1 al 7. Empieza por notas.md y vistazo/: no repitas lo que ya viste.
 
 ${contexto(c)}
 ${plan ? `\nEL PLAN QUE EL USUARIO APROBÓ:\n${plan.entendi}\n${plan.pasos.map((p) => `- ${p}`).join('\n')}\n` : ''}${hay ? `\nYA HICISTE UNA VERSIÓN: ${hay.archivo.replace(/^salidas\//, '')} (lo que dijiste: ${hay.resumen}). Tus archivos de trabajo siguen en esta carpeta: parte de ellos y cambia solo lo que se pide, conservando lo que al usuario le gustó.\n` : ''}${pedido ? `\nLO QUE PIDE AHORA EL USUARIO: ${pedido}\n` : ''}
-Cuando termines y lo hayas comprobado mirando los fotogramas, escribe resultado.json como dice el manual.`
-  return trabajarAgente(cmd.orden, trabajo, prompt, onLinea, senal, 40 * 60_000, await imagenesDeEntrada(c, carpeta))
+Cuando termines y lo hayas comprobado mirando los fotogramas, escribe resultado.json como dice el manual y termina (no dejes servidores ni previsualizaciones abiertas).`
+  const entregaLista = () => fecha(resultadoJson) >= desde && archivoEntregado(carpeta, desde) !== null
+  return trabajarAgente(cmd.orden, trabajo, prompt, onLinea, senal, 40 * 60_000, await imagenesDeEntrada(c, carpeta), entregaLista)
 }
 
 // ---------------------------------------------------------------------------
 // La revisión de Recorte (independiente del agente)
 // ---------------------------------------------------------------------------
 
-/** El archivo que entregó el agente: el de resultado.json o, si no, el más nuevo de salida/. */
-export function archivoEntregado(carpeta: string): { ruta: string; entrega: ReturnType<typeof validarEntrega> } | null {
+/** Dentro de la carpeta de trabajo (el agente no puede entregar archivos de fuera). */
+const dentroDe = (base: string, ruta: string): boolean => {
+  const r = resolve(ruta).toLowerCase()
+  const b = resolve(base).toLowerCase()
+  return r === b || r.startsWith(b.endsWith(sep) ? b : b + sep)
+}
+
+const esArchivo = (ruta: string): boolean => {
+  try {
+    return statSync(ruta).isFile()
+  } catch {
+    return false
+  }
+}
+
+const fecha = (ruta: string): number => {
+  try {
+    return statSync(ruta).mtimeMs
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * El archivo que entregó el agente en ESTA ronda: el de resultado.json o, si no, el más
+ * nuevo de salida/. Con `desde`, solo vale lo que se escribió después de empezar: así una
+ * edición fallida nunca «entrega» el video anterior ni un fotograma de revisión.
+ */
+export function archivoEntregado(
+  carpeta: string,
+  desde = 0
+): { ruta: string; entrega: ReturnType<typeof validarEntrega> } | null {
   const trabajo = carpetaTrabajo(carpeta)
+  const fresco = (ruta: string) => !desde || fecha(ruta) >= desde - 2000
+  const valido = (ruta: string) =>
+    dentroDe(trabajo, ruta) && esArchivo(ruta) && [...EXT_VIDEO, ...EXT_IMAGEN].includes(extname(ruta).toLowerCase())
   let entrega = validarEntrega({})
   try {
     entrega = validarEntrega(JSON.parse(readFileSync(join(trabajo, 'resultado.json'), 'utf8')))
@@ -549,34 +650,25 @@ export function archivoEntregado(carpeta: string): { ruta: string; entrega: Retu
     // Sin resultado.json: se busca en salida/.
   }
   if (entrega.archivo) {
-    const raw = entrega.archivo.trim().replace(/^['"]|['"]$/g, '')
+    // Los agentes escriben la ruta de muchas formas: «salida/x.mp4», «./salida/x.mp4»,
+    // «trabajo/salida/x.mp4», con comillas o absoluta. Todas valen si quedan dentro de trabajo/.
+    const raw = entrega.archivo.trim().replace(/^['"`]|['"`]$/g, '').replace(/\\/g, '/')
+    const relativa = raw.replace(/^(\.\/)+/, '').replace(/^\/+/, '').replace(/^trabajo\//i, '')
     const candidatas = [
-      isAbsolute(raw) ? resolve(raw) : null,
-      join(trabajo, raw.replace(/^[.\\/]+/, '')),
-      join(trabajo, raw.replace(/^trabajo[\\/]/i, '').replace(/^[.\\/]+/, '')),
-      join(trabajo, 'salida', basename(raw)),
-      join(carpeta, 'salidas', basename(raw))
+      isAbsolute(entrega.archivo.trim()) ? resolve(entrega.archivo.trim()) : null,
+      join(trabajo, relativa),
+      join(trabajo, 'salida', basename(raw))
     ].filter(Boolean) as string[]
-
-    for (const r of candidatas) {
-      if (existsSync(r) && statSync(r).isFile()) return { ruta: r, entrega }
-    }
+    for (const r of candidatas) if (valido(r) && fresco(r)) return { ruta: r, entrega }
   }
-
-  const carpetasBusqueda = [join(trabajo, 'salida'), trabajo, join(carpeta, 'salidas')]
-  for (const dir of carpetasBusqueda) {
-    if (!existsSync(dir)) continue
-    try {
-      const candidatos = readdirSync(dir)
-        .filter((n) => [...EXT_VIDEO, ...EXT_IMAGEN].includes(extname(n).toLowerCase()))
-        .map((n) => ({ ruta: join(dir, n), fecha: statSync(join(dir, n)).mtimeMs }))
-        .sort((a, b) => b.fecha - a.fecha)
-      if (candidatos[0]) return { ruta: candidatos[0].ruta, entrega }
-    } catch {
-      // Sigue con la siguiente carpeta
-    }
-  }
-  return null
+  const salida = join(trabajo, 'salida')
+  if (!existsSync(salida)) return null
+  const candidatos = readdirSync(salida)
+    .map((n) => join(salida, n))
+    .filter((r) => valido(r) && fresco(r))
+    .map((ruta) => ({ ruta, fecha: fecha(ruta) }))
+    .sort((a, b) => b.fecha - a.fecha)
+  return candidatos[0] ? { ruta: candidatos[0].ruta, entrega } : null
 }
 
 /**
@@ -586,10 +678,19 @@ export function archivoEntregado(carpeta: string): { ruta: string; entrega: Retu
 export async function revisarYPublicar(
   c: Creacion,
   carpeta: string,
-  version: number
+  version: number,
+  desde = 0
 ): Promise<{ resultado?: ResultadoAgente; problemas: string[] }> {
-  const hallado = archivoEntregado(carpeta)
-  if (!hallado) return { problemas: ['No dejaste ningún archivo final en salida/ ni en resultado.json.'] }
+  const hallado = archivoEntregado(carpeta, desde)
+  if (!hallado) {
+    return {
+      problemas: [
+        desde
+          ? 'No dejaste un archivo nuevo en salida/ en esta ronda (resultado.json no apunta a nada nuevo).'
+          : 'No dejaste ningún archivo final en salida/ ni en resultado.json.'
+      ]
+    }
+  }
   const ext = extname(hallado.ruta).toLowerCase()
   const tipo: ResultadoAgente['tipo'] = EXT_IMAGEN.includes(ext) ? 'imagen' : 'video'
   const problemas: string[] = []

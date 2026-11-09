@@ -240,7 +240,7 @@ export async function generarMedioFlow(
         const tope = esClip ? Math.max(TOPE_CLIP_VEO, COSTO_CLIP[modelo ?? ''] ?? 0) : undefined
         if (!esClip && modelo === MODELO_CHATGPT) {
           // Con la cuenta de ChatGPT del usuario (Codex), no con Flow.
-          const archivo = await generarImagenChatGPT({ prompt, formato }, destino, `chatgpt-escena-${i + 1}`, senal)
+          const archivo = await generarImagenChatGPT({ prompt, formato }, destino, `chatgpt-escena-${i + 1}-${Date.now().toString(36)}`, senal)
           e.medio = { archivo: `media/${basename(archivo)}`, tipo: 'imagen' }
           return
         }
@@ -249,7 +249,8 @@ export async function generarMedioFlow(
           destino,
           senal
         )
-        const nombre = `flow-escena-${i + 1}${extname(r.archivo)}`
+        // Nombre único: al reordenar escenas, una nueva no pisa la imagen que ya usa otra.
+        const nombre = `flow-escena-${i + 1}-${Date.now().toString(36)}${extname(r.archivo)}`
         renameSync(r.archivo, join(destino, nombre))
         e.medio = { archivo: `media/${nombre}`, tipo: esClip ? 'video' : 'imagen' }
       } catch (x) {
@@ -336,7 +337,7 @@ ${bloqueEstilo(c, carpeta)}${bloqueMaterial(carpeta)}Formato: ${c.formato === 'v
 ${listaAdjuntos(c)}
 ${c.guion ? `\nGuion actual:\n${guionTexto(c.guion)}\n` : ''}${voz}${c.mensajes.length ? `\nConversación:\n${conversacion(c.mensajes)}\n` : ''}${pedido ? `\nCAMBIO QUE PIDE AHORA EL USUARIO: ${pedido}\n` : ''}
 ${gustos ? `\n${gustos}\n` : ''}${bloqueFlowGuion(c)}Reglas: el primer segundo engancha; una idea por escena; "texto" es lo que se lee en pantalla y es corto (máximo ~12 palabras); "narracion" es lo que dice la voz en esa escena, natural y hablado (unas 2,5 palabras por segundo de la escena), y no repite el texto palabra por palabra; la suma de duraciones se acerca a la duración objetivo; en "visual" di qué se ve, y si usas material del usuario nombra su archivo (media/…).
-Si el cambio que pide el usuario es solo visual (color, tipografía, animación, imagen, orden o ritmo), conserva "narracion" palabra por palabra en todas las escenas: la voz ya grabada tiene que seguir sirviendo. Si cambia lo que se lee en pantalla pero no lo que se dice, cambia "texto" y deja "narracion" igual. Solo cambia la narración si el usuario pide cambiar lo que se dice.
+Si el cambio que pide el usuario es solo visual (color, tipografía, animación, imagen, orden o ritmo), conserva "narracion" palabra por palabra en todas las escenas: la voz ya grabada tiene que seguir sirviendo. Si cambia lo que se lee en pantalla pero no lo que se dice, cambia "texto" y deja "narracion" igual. Solo cambia la narración si el usuario pide cambiar lo que se dice. Copia "imagen" y "clip" de cada escena que sigue igual palabra por palabra (cada descripción nueva es una imagen nueva que cuesta créditos de Flow); cámbialos solo si el usuario pide otra imagen o la escena es nueva.
 ${INSTRUCCIONES_CRITERIO}
 Responde SOLO con JSON:
 {"mensaje": "una o dos frases para el usuario sobre lo que hiciste", "propuestas": ["…"], "aprendido": [], "guion": {"titulo": "…", "escenas": [{"texto": "…", "narracion": "…", "visual": "…", ${c.flow?.imagenes ? '"imagen": "…", ' : ''}${c.flow?.videos ? '"clip": "…", ' : ''}"duracion": 3}]}}`
@@ -436,6 +437,18 @@ export async function pasoGuion(
         usados.add(i)
       }
     }
+    // Si el guionista solo retocó la descripción de la imagen, la escena en la misma
+    // posición conserva la suya: no se le pide otra a Flow salvo que el usuario la pida.
+    const pideMedios = /\b(imagen|imagenes|imágenes|foto|fotos|clip|clips|visual)\b/i.test(pedido ?? '')
+    if (!pideMedios) {
+      guion.escenas.forEach((escena, k) => {
+        const a = anteriores[k]
+        if (escena.medio || !(escena.imagen || escena.clip) || !a?.medio || usados.has(k)) return
+        if (Boolean(escena.clip) !== Boolean(a.clip)) return
+        escena.medio = a.medio
+        usados.add(k)
+      })
+    }
   }
   const mensaje = typeof datos.mensaje === 'string' && datos.mensaje.trim() ? datos.mensaje.trim() : `Guion listo: ${guion.escenas.length} escenas.`
   return { guion, mensaje, ...leerCriterio(datos) }
@@ -452,7 +465,9 @@ export async function pasoVideo(
   onProgreso: (pct: number, texto: string) => void,
   pedido?: string,
   senal?: AbortSignal,
-  gustos = ''
+  gustos = '',
+  /** Pedir a Flow lo que falte. En un retoque de aspecto no: no se gasta en medios. */
+  generarMedios = true
 ): Promise<{ salida: string; portada?: string; mensaje: string }> {
   const hf = resolverBinario('hyperframes')
   if (!hf) throw new Error('Falta HyperFrames para renderizar. Instálalo con: npm i -g hyperframes')
@@ -462,7 +477,7 @@ export async function pasoVideo(
   const previo = pedido && existsSync(archivoHtml) ? readFileSync(archivoHtml, 'utf8') : null
 
   // Lo que el guion pide a Google Flow: solo lo que falte, también al cambiar el video.
-  const fallosFlow = await generarMedioFlow(c, carpeta, onProgreso, senal)
+  const fallosFlow = generarMedios ? await generarMedioFlow(c, carpeta, onProgreso, senal) : []
   onProgreso(0.25, previo ? 'El agente está aplicando tu cambio' : 'El agente está diseñando las escenas')
   const respuesta = await preguntar(
     promptComposicion(c, carpeta, previo, pedido, gustos),

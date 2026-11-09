@@ -174,7 +174,16 @@ export function textoNarracion(g: GuionCreacion): string {
 export function vozDesactualizada(c: Creacion): boolean {
   if (!c.voz) return false
   if (c.voz.desactualizada) return true
-  return Boolean(c.voz.texto && c.guion && c.voz.texto !== textoNarracion(c.guion))
+  return Boolean(c.voz.texto && c.guion && !mismaNarracion(c.voz.texto, textoNarracion(c.guion)))
+}
+
+/**
+ * Dos narraciones dicen lo mismo en voz (sin contar mayúsculas, puntuación ni saltos de
+ * línea): una coma de más no obliga a rehacer ni a volver a grabar la voz.
+ */
+export function mismaNarracion(a: string, b: string): boolean {
+  const n = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  return n(a) === n(b)
 }
 
 /** La voz que se puede usar con el guion actual (nada si quedó vieja). */
@@ -307,6 +316,28 @@ export function pideMontarVoz(texto: string): boolean {
   return /\b(voz|narraci[oó]n|audio|locuci[oó]n)\b|int[eé]gra(lo|la)|j[uú]nta(lo|la)/.test(t) &&
     /(pon|integr|agreg|a[nñ]ad|mete|coloc|sincroniz|junt|mezcl|incluy|usa)/.test(t) &&
     !/(cambia|otra voz|m[aá]s r[aá]pid|m[aá]s lent|rehaz|redise)/.test(t)
+}
+
+/**
+ * El cambio que pide el usuario sobre un video hecho toca el guion (lo que se dice o se
+ * lee, las escenas, la duración) o es solo de aspecto (color, letra, animación, ritmo).
+ * Ante la duda se trata como visual: así un retoque no reescribe el guion, ni rehace la
+ * voz, ni vuelve a pedir imágenes a Flow (que es lo que gasta créditos).
+ */
+export function cambiaElGuion(texto: string): boolean {
+  // Sin tildes y con espacios alrededor: los límites de palabra de JS no entienden «ó».
+  const t = ` ${texto.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ')} `
+  const hay = (re: RegExp) => re.test(t)
+  return (
+    // Lo que se dice o se lee.
+    hay(/ (guion|narracion|narra|narrador|locucion|frase|frases|palabra|palabras|titulo|subtitulo|mensaje|cta|idioma|traduce|traducelo|traduccion|ingles|ortografia|errata|typo|texto|textos|dice|diga|digan|decir|escriba) /) ||
+    // Escenas que entran o salen.
+    hay(/ (agrega|agregale|anade|anadele|pon|ponle|mete|quita|quitale|elimina|borra|saca|une|junta|divide|separa|cambia|cambiale) ([a-z0-9]+ ){0,2}(escena|escenas|parte|partes|seccion|final|inicio|intro|cierre) /) ||
+    // La duración.
+    hay(/ (mas|menos) (corto|corta|largo|larga|breve|segundos) | \d+ (s|seg|segundos) | duracion | dure /) ||
+    // Imágenes o clips nuevos (eso sí hay que pedirlo a Flow).
+    hay(/ (otra|otras|nueva|nuevas|cambia|cambiale) ([a-z0-9]+ ){0,2}(imagen|imagenes|foto|fotos|clip|clips) /)
+  )
 }
 
 export const DURACIONES = [15, 30, 60, 90]

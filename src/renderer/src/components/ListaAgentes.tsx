@@ -231,7 +231,7 @@ export function ListaAgentes({ agentes, compacta = false }: { agentes: Agentes; 
                   className="ag-enlace"
                   disabled={ocupado}
                   onClick={() => void agentes.desconectar(a)}
-                  title={`Cerrar sesión de ${a.nombre}`}
+                  title={`Dejar de mostrar ${a.nombre} como conectado en Recorte (tu sesión del agente no se cierra)`}
                 >
                   Desconectar
                 </button>

@@ -1,5 +1,5 @@
 import { exec, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { app, shell } from 'electron'
@@ -164,35 +164,21 @@ export function marcarSesionCaida(id: EstadoAgente['id']): void {
   caidas.set(id, Date.now())
 }
 
-/** Cierra sesión y desconecta el agente para que vuelva a pedir conexión. */
+/**
+ * Desconecta el agente de Recorte: deja de contar como conectado (hasta que se vuelva a
+ * conectar desde Inicio) sin tocar sus archivos de sesión. Esas credenciales son del
+ * usuario y las usa fuera de Recorte (su terminal, su editor): borrarlas le cerraría la
+ * sesión de Claude Code, Codex o Gemini en todo el equipo.
+ */
 export async function desconectarAgente(id: unknown): Promise<ConexionResultado> {
   const agente = AGENTES.find((a) => a.id === id)
   if (!agente) return { ok: false, error: 'Agente desconocido.' }
-
-  caidas.set(agente.id, Date.now())
-
-  try {
-    if (agente.acp) {
-      const token = rutaTokenAntigravity()
-      if (existsSync(token)) {
-        try {
-          rmSync(token, { force: true })
-        } catch {
-          // Si está en uso, se ignora
-        }
-      }
-    } else if (agente.credenciales && existsSync(agente.credenciales)) {
-      try {
-        rmSync(agente.credenciales, { force: true })
-      } catch {
-        // Si no se puede borrar, se ignora
-      }
-    }
-    return { ok: true }
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
-  }
+  desconectados.add(agente.id)
+  return { ok: true }
 }
+
+/** Los que el usuario desconectó a mano en esta sesión de Recorte (vuelven al «Conectar»). */
+const desconectados = new Set<EstadoAgente['id']>()
 
 /** Tiene sesión de verdad: no basta con que exista el archivo (al cerrar sesión queda vacío). */
 function sesionIniciada(agente: DefAgente): boolean {
@@ -214,6 +200,7 @@ function sesionIniciada(agente: DefAgente): boolean {
 }
 
 function conectadoAhora(agente: DefAgente): boolean {
+  if (desconectados.has(agente.id)) return false
   if (!sesionIniciada(agente)) return false
   const caida = caidas.get(agente.id)
   if (caida === undefined) return true
@@ -402,6 +389,8 @@ export async function conectarAgente(id: unknown): Promise<ConexionResultado> {
   const agente = AGENTES.find((a) => a.id === id)
   if (!agente) return { ok: false, error: 'Agente desconocido.' }
   if (enCurso.has(agente.id)) return { ok: false, pendiente: true, aviso: `Ya se está conectando ${agente.nombre}.` }
+  // Volver a conectar lo que se desconectó a mano: si su sesión sigue viva, queda listo al instante.
+  desconectados.delete(agente.id)
 
   if (agente.acp) {
     enCurso.add(agente.id)
