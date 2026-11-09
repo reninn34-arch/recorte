@@ -24,6 +24,25 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.14',
+    fecha: '2026-11-09',
+    resumen: 'Desconexión voluntaria de agentes y corrección de bloqueos al entregar o editar videos.',
+    novedades: [
+      {
+        icono: 'log-out',
+        titulo: 'Desconectar agentes',
+        texto:
+          'Ahora puedes desconectar tu cuenta o dejar de usar un agente activo en cualquier momento desde Inicio, sin necesidad de reiniciar la app ni borrar archivos a mano.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Entrega de video sin bloqueos',
+        texto:
+          'Se solucionó el problema donde la entrega del video se quedaba atascada en amarillo. Ahora el render y las comprobaciones entregan el video de inmediato al terminar.'
+      }
+    ]
+  },
+  {
     version: '0.1.13',
     fecha: '2026-11-08',
     resumen: 'Eliges el modelo y el esfuerzo de cada agente, el modo agente hace los videos con un kit más rápido y ya no se queda atascado.',
