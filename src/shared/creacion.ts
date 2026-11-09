@@ -117,27 +117,69 @@ export interface VozCreacion {
   duracion: number
   /** En qué segundo de la voz empieza cada escena (alineado con la transcripción). */
   inicios: number[]
+  /** La narración exacta que se grabó o generó. Si el guion cambia, esta voz queda vieja. */
+  texto?: string
+  /** El guion cambió después de crear la voz: hay que rehacerla antes de usarla. */
+  desactualizada?: boolean
 }
 
-/** Voces de Gemini que suenan bien narrando en español (hay 30; estas son las más útiles). */
+/** Las 30 voces de Gemini TTS; las descripciones son nuestras, para elegir de un vistazo. */
 export const VOCES_GEMINI: { id: string; descripcion: string }[] = [
-  { id: 'Kore', descripcion: 'Firme' },
+  { id: 'Zephyr', descripcion: 'Brillante' },
   { id: 'Puck', descripcion: 'Animada' },
   { id: 'Charon', descripcion: 'Informativa' },
-  { id: 'Aoede', descripcion: 'Ligera' },
-  { id: 'Leda', descripcion: 'Juvenil' },
+  { id: 'Kore', descripcion: 'Firme' },
   { id: 'Fenrir', descripcion: 'Entusiasta' },
-  { id: 'Sulafat', descripcion: 'Cálida' },
-  { id: 'Achird', descripcion: 'Amigable' },
-  { id: 'Gacrux', descripcion: 'Madura' },
+  { id: 'Leda', descripcion: 'Juvenil' },
+  { id: 'Orus', descripcion: 'Segura' },
+  { id: 'Aoede', descripcion: 'Ligera' },
+  { id: 'Callirrhoe', descripcion: 'Serena' },
+  { id: 'Autonoe', descripcion: 'Natural' },
+  { id: 'Enceladus', descripcion: 'Grave' },
   { id: 'Iapetus', descripcion: 'Clara' },
+  { id: 'Umbriel', descripcion: 'Profunda' },
+  { id: 'Algieba', descripcion: 'Cálida' },
+  { id: 'Despina', descripcion: 'Dulce' },
+  { id: 'Erinome', descripcion: 'Suave' },
+  { id: 'Algenib', descripcion: 'Directa' },
+  { id: 'Rasalgethi', descripcion: 'Expresiva' },
+  { id: 'Laomedeia', descripcion: 'Fresca' },
+  { id: 'Achernar', descripcion: 'Amable' },
+  { id: 'Alnilam', descripcion: 'Rotunda' },
+  { id: 'Schedar', descripcion: 'Pausada' },
+  { id: 'Gacrux', descripcion: 'Madura' },
+  { id: 'Pulcherrima', descripcion: 'Elegante' },
+  { id: 'Achird', descripcion: 'Amigable' },
+  { id: 'Zubenelgenubi', descripcion: 'Relajada' },
+  { id: 'Vindemiatrix', descripcion: 'Reflexiva' },
+  { id: 'Sadachbia', descripcion: 'Viva' },
   { id: 'Sadaltager', descripcion: 'Sabia' },
-  { id: 'Zephyr', descripcion: 'Brillante' }
+  { id: 'Sulafat', descripcion: 'Cercana' }
 ]
+
+/** El nombre visible de una voz de Gemini. */
+export function nombreVozGemini(id: string | undefined): string {
+  return id?.trim() || 'Kore'
+}
 
 /** El guion como se dice en voz: la narración de cada escena, una por línea. */
 export function textoNarracion(g: GuionCreacion): string {
   return g.escenas.map((e) => (e.narracion || e.texto).trim()).filter(Boolean).join('\n')
+}
+
+/**
+ * La voz ya no corresponde al guion actual. Las voces creadas antes de guardar
+ * `texto` no se pueden comprobar: se dan por buenas.
+ */
+export function vozDesactualizada(c: Creacion): boolean {
+  if (!c.voz) return false
+  if (c.voz.desactualizada) return true
+  return Boolean(c.voz.texto && c.guion && c.voz.texto !== textoNarracion(c.guion))
+}
+
+/** La voz que se puede usar con el guion actual (nada si quedó vieja). */
+export function vozVigente(c: Creacion): VozCreacion | undefined {
+  return c.voz && !vozDesactualizada(c) ? c.voz : undefined
 }
 
 const palabras = (t: string): string[] => t.split(/\s+/).map((p) => p.replace(/[^\p{L}\p{N}]/gu, '')).filter(Boolean)

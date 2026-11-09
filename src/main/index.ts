@@ -14,7 +14,7 @@ import type {
 } from '../shared/api'
 import type { AjustesIA, Project } from '../shared/types'
 import { Ajustes } from './ajustes'
-import { conectarAgente, estadoAgentes, prepararAgentes, versionesAgentes, agenteDeOrden, marcarSesionCaida, VARIABLE_LLAVE } from './agentes'
+import { conectarAgente, desconectarAgente, estadoAgentes, prepararAgentes, versionesAgentes, agenteDeOrden, marcarSesionCaida, VARIABLE_LLAVE } from './agentes'
 import { estadoSistema, instalarHerramienta } from './sistema'
 import { activarHerramientas } from './herramientas'
 import { carpetaPorDefecto, copiarAVideos, carpetaDelProyecto } from './carpetas'
@@ -44,7 +44,7 @@ import { medirReferencia } from './estilo/referencia'
 import { analizarConGeminiVideo, interpretarEstilo } from './estilo/ficha'
 import { viabilidadDe } from './estilo/viabilidad'
 import { guardar } from './disco'
-import { ID_SEGURO, pideMontarVoz, textoNarracion, VOCES_GEMINI } from '../shared/creacion'
+import { ID_SEGURO, pideMontarVoz, textoNarracion, VOCES_GEMINI, vozDesactualizada, vozVigente } from '../shared/creacion'
 import type { AgenteId, Creacion, EleccionTarea, MensajeCreacion, NivelModelo, PeticionCreacion, TareasCreacion } from '../shared/creacion'
 import { turnoAgente } from './chat'
 import { buscarActualizacion, estadoActualizacion, instalarActualizacion, prepararActualizaciones } from './actualizar'
@@ -285,6 +285,61 @@ app.whenReady().then(() => {
   }
   ipcMain.handle('creacion:parar', (_evento, id: unknown) => typeof id === 'string' && pararTrabajo(`creacion:${id}`))
   const textoError = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+  /** La narración antes de tocar el guion: sirve para saber si la voz sigue sirviendo. */
+  const fotoGuion = (c: Creacion): { texto: string; escenas: number } =>
+    c.guion ? { texto: textoNarracion(c.guion), escenas: c.guion.escenas.length } : { texto: '', escenas: 0 }
+
+  /**
+   * Después de cambiar el guion: si cambió lo que se dice, rehace la voz de Gemini sola
+   * (con el mismo timbre) o marca la voz propia como vieja; si solo cambiaron las
+   * escenas, reajusta los tiempos sin volver a generar audio.
+   */
+  const refrescarVoz = async (
+    c: Creacion,
+    antes: { texto: string; escenas: number },
+    onProgreso: (pct: number, texto: string) => void
+  ): Promise<string> => {
+    const voz = c.voz
+    if (!voz || !c.guion) return ''
+    const despues = textoNarracion(c.guion)
+    if (despues !== antes.texto) {
+      if (voz.origen === 'propia') {
+        voz.desactualizada = true
+        return 'La narración cambió y tu voz grabada ya no dice el guion nuevo: grábala o súbela otra vez en Voz. Mientras tanto, el video va sin voz.'
+      }
+      const nombre = voz.vozGemini ?? 'Kore'
+      try {
+        const clave = await ajustes.claveVoz()
+        const cuentaGoogle = estadoVozGoogle().correo
+        if (!clave && !cuentaGoogle) throw new Error('no hay una cuenta de Google ni una clave de AI Studio conectada')
+        onProgreso(0.1, `La narración cambió: rehago la voz (${nombre})`)
+        const salida = join(creaciones.carpeta(c.id), 'composicion', 'media', 'voz.wav')
+        if (clave) await generarVozGemini(despues, nombre, clave, salida)
+        else await generarVozGoogle(despues, nombre, salida)
+        c.voz = await prepararVoz(c, creaciones.carpeta(c.id), 'gemini', nombre, (pct, t) =>
+          onProgreso(0.1 + pct * 0.9, t)
+        )
+        return `Volví a generar la voz (${nombre}) para que diga la narración nueva.`
+      } catch (e) {
+        voz.desactualizada = true
+        return `La narración cambió, pero no pude rehacer la voz (${textoError(e)}). Quedó marcada como vieja: rehazla en el paso Voz y el video la usará.`
+      }
+    }
+    if (c.guion.escenas.length !== antes.escenas) {
+      try {
+        onProgreso(0.4, 'Ajustando la voz a las escenas nuevas')
+        c.voz = await prepararVoz(c, creaciones.carpeta(c.id), voz.origen, voz.vozGemini, (pct, t) =>
+          onProgreso(0.4 + pct * 0.6, t)
+        )
+        return 'Ajusté los tiempos de la voz a las escenas nuevas.'
+      } catch (e) {
+        voz.desactualizada = true
+        return `Cambió el número de escenas y no pude reajustar la voz (${textoError(e)}). Revísala en el paso Voz.`
+      }
+    }
+    return ''
+  }
 
   // ===== Copiar un estilo: análisis del material y de la referencia =====
   ipcMain.handle('estilo:analizar', (_evento, id: unknown, modo: unknown) =>
@@ -543,6 +598,7 @@ app.whenReady().then(() => {
       }
       enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.1, texto: c.guion ? 'Cambiando el guion' : 'Escribiendo el guion' })
       try {
+        const antes = fotoGuion(c)
         const r = await pasoGuion(c, creaciones.carpeta(c.id), await configParaTarea(c.tareas?.guion), texto, senal, bloqueGustos())
         c.guion = r.guion
         const aprendidos = agregarGustos(r.aprendido, 'aprendido').map((g) => g.texto)
@@ -551,11 +607,10 @@ app.whenReady().then(() => {
           ...(r.propuestas.length ? { propuestas: r.propuestas } : {}),
           ...(aprendidos.length ? { aprendido: aprendidos } : {})
         })
-        if (c.voz) {
-          // La narración cambió: la voz grabada ya no le corresponde.
-          delete c.voz
-          c.mensajes.push(mensaje('agente', 'Como cambió el guion, quité la voz anterior: vuelve a generarla o grabarla en el paso Voz.'))
-        }
+        const notaVoz = await refrescarVoz(c, antes, (pct, t) =>
+          enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.15 + pct * 0.8, texto: t })
+        )
+        if (notaVoz) c.mensajes.push(mensaje('agente', notaVoz))
       } catch (e) {
         if (esParado(e)) c.mensajes.push(mensaje('agente', c.guion ? 'Lo paraste. El guion sigue como estaba.' : 'Lo paraste antes de que terminara el guion.'))
         else c.mensajes.push(mensaje('agente', `No pude escribir el guion: ${textoError(e)}`, true))
@@ -570,6 +625,13 @@ app.whenReady().then(() => {
       if (texto) c.mensajes.push(mensaje('usuario', texto))
       if (texto && c.salida && c.voz && pideMontarVoz(texto)) {
         // «Pon la voz»: lo hace el montaje, no el agente.
+        if (vozDesactualizada(c)) {
+          c.mensajes.push(
+            mensaje('agente', 'La voz que tengo no coincide con el guion actual. Regénerala o graba otra en el paso Voz; después la pongo en el video.', true)
+          )
+          enviarProgreso({ id: c.id, fase: 'creacion', pct: 1, texto: 'Listo' })
+          return creaciones.guardar(c)
+        }
         try {
           await montarVoz(c)
         } catch (e) {
@@ -582,13 +644,27 @@ app.whenReady().then(() => {
       c.fase = 'video'
       creaciones.guardar(c)
       try {
+        // Con el video hecho, el guion manda: primero se actualiza (y la voz si cambió lo
+        // que se dice); después el compositor cambia las escenas para que todo cuente lo mismo.
+        if (texto && c.salida && c.guion) {
+          const antes = fotoGuion(c)
+          enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.05, texto: 'Revisando el guion con tu cambio' })
+          const g = await pasoGuion(c, creaciones.carpeta(c.id), await configParaTarea(c.tareas?.guion), texto, senal, bloqueGustos())
+          c.guion = g.guion
+          creaciones.guardar(c)
+          const notaVoz = await refrescarVoz(c, antes, (pct, t) =>
+            enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.08 + pct * 0.17, texto: t })
+          )
+          if (notaVoz) c.mensajes.push(mensaje('agente', notaVoz))
+        }
         const r = await pasoVideo(c, creaciones.carpeta(c.id), await configParaTarea(c.tareas?.video), (pct, t) =>
           enviarProgreso({ id: c.id, fase: 'creacion', pct, texto: t })
         , texto && c.salida ? texto : undefined, senal, bloqueGustos())
         c.salida = r.salida
         c.portada = r.portada
         c.version += 1
-        if (c.voz) c.vozMontada = c.version
+        if (vozVigente(c)) c.vozMontada = c.version
+        else delete c.vozMontada
         c.fase = 'listo'
         const copia = await copiarCreacion(c)
         c.mensajes.push(mensaje('agente', `${r.mensaje}${copia ? ` Guardado en ${copia}.` : ''}`))
@@ -729,6 +805,7 @@ app.whenReady().then(() => {
   ipcMain.handle('creacion:quitar-voz', (_evento, id: unknown) =>
     conCreacion(id, async (c) => {
       delete c.voz
+      delete c.vozMontada
       rmSync(join(creaciones.carpeta(c.id), 'composicion', 'media', 'voz.wav'), { force: true })
       return creaciones.guardar(c)
     })
@@ -1006,6 +1083,18 @@ app.whenReady().then(() => {
   ipcMain.handle('preferencias:cargar', () => ajustes.preferencias())
   ipcMain.handle('preferencias:guardar', (_evento, cambio: unknown) => ajustes.guardarPreferencias((cambio ?? {}) as object))
   ipcMain.handle('agentes:conectar', (_evento, id: unknown) => conectarAgente(id))
+  ipcMain.handle('agentes:desconectar', async (_evento, id: unknown) => {
+    const res = await desconectarAgente(id)
+    const conf = await ajustes.cargar()
+    if (conf.activa) {
+      await ajustes.guardar({ ...conf, activa: false })
+    }
+    return res
+  })
+  ipcMain.handle('agentes:desactivar', async () => {
+    const conf = await ajustes.cargar()
+    return ajustes.guardar({ ...conf, activa: false })
+  })
 
   ipcMain.handle(
     'ajustes:guardar',

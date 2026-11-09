@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { textoNarracion, VOCES_GEMINI, type Creacion } from '../../../shared/creacion'
+import { nombreVozGemini, textoNarracion, VOCES_GEMINI, vozDesactualizada, type Creacion } from '../../../shared/creacion'
 import type { EstadoVozGoogle } from '../../../shared/api'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
@@ -120,29 +120,67 @@ export function PasoVoz({ creacion, ocupado, control }: { creacion: Creacion; oc
   const [guardando, setGuardando] = useState(false)
   if (!c.guion) return null
 
-  if (c.voz && !cambiando) {
+  function cambiar(modoInicial: Modo, nombre?: string) {
+    setModo(modoInicial)
+    if (nombre) setVoz(nombre)
+    setCambiando(true)
+  }
+
+  const vozActual = c.voz
+  if (vozActual && !cambiando) {
+    const vieja = vozDesactualizada(c)
+    const nombre = nombreVozGemini(vozActual.vozGemini ?? control.vozGemini)
     return (
       <div className="estudio-voz">
         <div className="estudio-guion-cabeza">
           <h2>Voz</h2>
           <span className="tl-dim">
-            {c.voz.origen === 'gemini' ? `Gemini · ${c.voz.vozGemini}` : 'Tu voz'} · {c.voz.duracion.toFixed(1)} s
+            {vozActual.origen === 'gemini' ? `Gemini · ${nombre}` : 'Tu voz'} · {vozActual.duracion.toFixed(1)} s
+            {vieja ? ' · no coincide con el guion' : ''}
           </span>
           <span className="tl-flex" />
-          {c.salida && c.vozMontada !== c.version && (
-            <button className="btn small primary" onClick={control.montar} disabled={ocupado} title="Sin rediseñar ni gastar tokens: cada frase entra con su escena">
-              <Icon name="sparkles" size={13} /> Poner la voz en el video
-            </button>
+          {vieja ? (
+            <>
+              {vozActual.origen === 'gemini' && (
+                <button
+                  className="btn small primary"
+                  onClick={() => control.generar(nombre)}
+                  disabled={ocupado}
+                  title="Vuelve a generar la voz con la narración nueva"
+                >
+                  <Icon name="sparkles" size={13} /> Regenerar con {nombre}
+                </button>
+              )}
+              <button className="btn small ghost" onClick={() => cambiar(vozActual.origen, nombre)} disabled={ocupado}>
+                {vozActual.origen === 'gemini' ? 'Elegir otra voz' : 'Grabar otra vez'}
+              </button>
+            </>
+          ) : (
+            <>
+              {c.salida && c.vozMontada !== c.version && (
+                <button className="btn small primary" onClick={control.montar} disabled={ocupado} title="Sin rediseñar ni gastar tokens: cada frase entra con su escena">
+                  <Icon name="sparkles" size={13} /> Poner la voz en el video
+                </button>
+              )}
+              {c.salida && c.vozMontada === c.version && <span className="ag-uso">Ya está en el video</span>}
+              <button className="btn small ghost" onClick={() => cambiar(vozActual.origen, nombre)} disabled={ocupado}>
+                Cambiar voz
+              </button>
+              <button className="btn small ghost" onClick={control.quitar} disabled={ocupado}>
+                <Icon name="trash" size={13} /> Quitar
+              </button>
+            </>
           )}
-          {c.salida && c.vozMontada === c.version && <span className="ag-uso">Ya está en el video</span>}
-          <button className="btn small ghost" onClick={() => setCambiando(true)} disabled={ocupado}>
-            Cambiar voz
-          </button>
-          <button className="btn small ghost" onClick={control.quitar} disabled={ocupado}>
-            <Icon name="trash" size={13} /> Quitar
-          </button>
         </div>
-        <audio key={c.voz.duracion} src={mediaUrl(`c-${c.id}`, `composicion/${c.voz.archivo}`)} controls className="voz-audio" />
+        {vieja && (
+          <p className="voz-aviso">
+            <Icon name="alerta" size={14} />
+            {vozActual.origen === 'gemini'
+              ? 'El guion cambió después de generar esta voz. Regénerala para que diga la narración nueva.'
+              : 'El guion cambió después de grabar esta voz. Grábala otra vez para que diga la narración nueva.'}
+          </p>
+        )}
+        <audio key={vozActual.duracion} src={mediaUrl(`c-${c.id}`, `composicion/${vozActual.archivo}`)} controls className="voz-audio" />
       </div>
     )
   }

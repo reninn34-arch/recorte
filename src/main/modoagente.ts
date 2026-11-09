@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, extname, join } from 'node:path'
+import { basename, extname, isAbsolute, join, resolve } from 'node:path'
 import type { Creacion } from '../shared/creacion'
 import {
   MAX_REGISTRO,
@@ -549,16 +549,34 @@ export function archivoEntregado(carpeta: string): { ruta: string; entrega: Retu
     // Sin resultado.json: se busca en salida/.
   }
   if (entrega.archivo) {
-    const ruta = join(trabajo, entrega.archivo.replace(/^\.?[\\/]/, ''))
-    if (existsSync(ruta) && statSync(ruta).isFile()) return { ruta, entrega }
+    const raw = entrega.archivo.trim().replace(/^['"]|['"]$/g, '')
+    const candidatas = [
+      isAbsolute(raw) ? resolve(raw) : null,
+      join(trabajo, raw.replace(/^[.\\/]+/, '')),
+      join(trabajo, raw.replace(/^trabajo[\\/]/i, '').replace(/^[.\\/]+/, '')),
+      join(trabajo, 'salida', basename(raw)),
+      join(carpeta, 'salidas', basename(raw))
+    ].filter(Boolean) as string[]
+
+    for (const r of candidatas) {
+      if (existsSync(r) && statSync(r).isFile()) return { ruta: r, entrega }
+    }
   }
-  const salida = join(trabajo, 'salida')
-  if (!existsSync(salida)) return null
-  const candidatos = readdirSync(salida)
-    .filter((n) => [...EXT_VIDEO, ...EXT_IMAGEN].includes(extname(n).toLowerCase()))
-    .map((n) => ({ ruta: join(salida, n), fecha: statSync(join(salida, n)).mtimeMs }))
-    .sort((a, b) => b.fecha - a.fecha)
-  return candidatos[0] ? { ruta: candidatos[0].ruta, entrega } : null
+
+  const carpetasBusqueda = [join(trabajo, 'salida'), trabajo, join(carpeta, 'salidas')]
+  for (const dir of carpetasBusqueda) {
+    if (!existsSync(dir)) continue
+    try {
+      const candidatos = readdirSync(dir)
+        .filter((n) => [...EXT_VIDEO, ...EXT_IMAGEN].includes(extname(n).toLowerCase()))
+        .map((n) => ({ ruta: join(dir, n), fecha: statSync(join(dir, n)).mtimeMs }))
+        .sort((a, b) => b.fecha - a.fecha)
+      if (candidatos[0]) return { ruta: candidatos[0].ruta, entrega }
+    } catch {
+      // Sigue con la siguiente carpeta
+    }
+  }
+  return null
 }
 
 /**
@@ -603,7 +621,16 @@ export async function revisarYPublicar(
         )
         if (r.codigo === 0 && existsSync(join(salidas, archivo))) revision.push(`salidas/${archivo}`)
       }
-      if (!revision.length) problemas.push('No pude sacar ni un fotograma del video.')
+      if (!revision.length) {
+        // Intento de fotograma al inicio como respaldo
+        const archivo0 = `agente-v${version}-r0.jpg`
+        const r0 = await ejecutar(
+          [`"${ffmpeg}"`, '-y', '-v', 'error', '-ss', '0', '-i', `"${hallado.ruta}"`, '-frames:v', '1', '-vf', `scale='min(540,iw)':-2`, '-q:v', '4', `"${join(salidas, archivo0)}"`],
+          carpeta,
+          30_000
+        )
+        if (r0.codigo === 0 && existsSync(join(salidas, archivo0))) revision.push(`salidas/${archivo0}`)
+      }
     }
   } else {
     revision.push(`salidas/${nombre}`)

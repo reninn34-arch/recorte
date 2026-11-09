@@ -1,5 +1,5 @@
 import { exec, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { app, shell } from 'electron'
@@ -162,6 +162,36 @@ function cambioDesde(ruta: string): number {
 /** La sesión de un agente se cayó: deja de contar como conectado hasta que vuelva a iniciarla. */
 export function marcarSesionCaida(id: EstadoAgente['id']): void {
   caidas.set(id, Date.now())
+}
+
+/** Cierra sesión y desconecta el agente para que vuelva a pedir conexión. */
+export async function desconectarAgente(id: unknown): Promise<ConexionResultado> {
+  const agente = AGENTES.find((a) => a.id === id)
+  if (!agente) return { ok: false, error: 'Agente desconocido.' }
+
+  caidas.set(agente.id, Date.now())
+
+  try {
+    if (agente.acp) {
+      const token = rutaTokenAntigravity()
+      if (existsSync(token)) {
+        try {
+          rmSync(token, { force: true })
+        } catch {
+          // Si está en uso, se ignora
+        }
+      }
+    } else if (agente.credenciales && existsSync(agente.credenciales)) {
+      try {
+        rmSync(agente.credenciales, { force: true })
+      } catch {
+        // Si no se puede borrar, se ignora
+      }
+    }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 /** Tiene sesión de verdad: no basta con que exista el archivo (al cerrar sesión queda vacío). */

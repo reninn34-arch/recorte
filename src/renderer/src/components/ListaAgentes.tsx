@@ -205,16 +205,37 @@ export function ListaAgentes({ agentes, compacta = false }: { agentes: Agentes; 
             </div>
             <div className="ag-lado">
               {!compacta && <Estado agente={a} version={versiones?.[a.id]} />}
-              <button
-                className={`btn small ${enUso ? 'ghost' : a.conectado && a.instalado ? '' : 'primary'}`}
-                disabled={enUso || ocupado}
-                onClick={() => {
-                  if (faltaLlave && a.instalado) setPidiendo(a.id)
-                  else void agentes.conectar(a)
-                }}
-              >
-                {textoBoton(a, agentes, enUso)}
-              </button>
+              {enUso ? (
+                <button
+                  className="btn small ghost"
+                  disabled={ocupado}
+                  onClick={() => void agentes.desactivar()}
+                  title="Dejar de usar este agente para editar"
+                >
+                  Dejar de usar
+                </button>
+              ) : (
+                <button
+                  className={`btn small ${a.conectado && a.instalado ? '' : 'primary'}`}
+                  disabled={ocupado}
+                  onClick={() => {
+                    if (faltaLlave && a.instalado) setPidiendo(a.id)
+                    else void agentes.conectar(a)
+                  }}
+                >
+                  {textoBoton(a, agentes, enUso)}
+                </button>
+              )}
+              {!compacta && a.conectado && (
+                <button
+                  className="ag-enlace"
+                  disabled={ocupado}
+                  onClick={() => void agentes.desconectar(a)}
+                  title={`Cerrar sesión de ${a.nombre}`}
+                >
+                  Desconectar
+                </button>
+              )}
             </div>
           </div>
         )
@@ -262,10 +283,13 @@ export function ListaAgentes({ agentes, compacta = false }: { agentes: Agentes; 
               )}
               <button
                 className={`btn small ${enUso ? 'ghost' : 'primary'}`}
-                disabled={enUso || agentes.ocupado !== null}
-                onClick={() => setPidiendo((v) => (v === p.id ? null : p.id))}
+                disabled={agentes.ocupado !== null}
+                onClick={() => {
+                  if (enUso) void agentes.desactivar()
+                  else setPidiendo((v) => (v === p.id ? null : p.id))
+                }}
               >
-                {enUso ? 'En uso' : 'Añadir llave'}
+                {enUso ? 'Dejar de usar' : 'Añadir llave'}
               </button>
             </div>
           </div>

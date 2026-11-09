@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Creacion } from '../shared/creacion'
+import { vozVigente } from '../shared/creacion'
 import { resolverBinario } from './binarios'
 import { ejecutar } from './crear'
 import { duracionMedio, rutaFfprobe } from './ffmpeg'
@@ -74,15 +75,15 @@ export async function montarVozEnVideo(
   carpeta: string,
   onProgreso: (pct: number, texto: string) => void
 ): Promise<ResultadoMontaje> {
-  if (!c.salida || !c.voz || !c.guion) throw new Error('Hacen falta el video y la voz.')
+  const v = vozVigente(c)
+  if (!c.salida || !v || !c.guion) throw new Error('Hacen falta el video y una voz que coincida con el guion.')
   const video = join(carpeta, c.salida)
-  const voz = join(carpeta, 'composicion', c.voz.archivo)
+  const voz = join(carpeta, 'composicion', v.archivo)
   if (!existsSync(video) || !existsSync(voz)) throw new Error('No encuentro el video o la voz en la carpeta de la creación.')
   onProgreso(0.1, 'Poniendo la voz en el video')
 
   const duracionVideo = await duracionMedio(video)
   const escenas = escenasDelVideo(c, carpeta, duracionVideo)
-  const v = c.voz
   // Cuánto dura cada frase en la voz (de un inicio al siguiente).
   const frases = v.inicios.map((ini, i) => ({ inicio: ini, fin: i + 1 < v.inicios.length ? v.inicios[i + 1] : v.duracion }))
 

@@ -1,6 +1,6 @@
 import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { alinearEscenas, type Creacion, type VozCreacion } from '../shared/creacion'
+import { alinearEscenas, textoNarracion, type Creacion, type VozCreacion } from '../shared/creacion'
 import { resolverBinario } from './binarios'
 import { ejecutar } from './crear'
 import { duracionMedio } from './ffmpeg'
@@ -149,6 +149,8 @@ export async function prepararVoz(
     ...(vozGemini ? { vozGemini } : {}),
     duracion: Math.round(duracion * 100) / 100,
     // Sin transcripción (sin Python), se reparte el tiempo a partes iguales.
-    inicios: alinearEscenas(c.guion, inicioPalabras, duracion)
+    inicios: alinearEscenas(c.guion, inicioPalabras, duracion),
+    // La narración que dice esta voz: si el guion cambia, se sabe que quedó vieja.
+    texto: textoNarracion(c.guion)
   }
 }

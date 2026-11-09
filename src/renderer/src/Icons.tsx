@@ -23,6 +23,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Trash2,
+  TriangleAlert,
   Type,
   Undo2,
   Upload,
@@ -64,7 +65,8 @@ const ICONOS = {
   key: KeyRound,
   paperclip: Paperclip,
   image: Image,
-  gift: Gift
+  gift: Gift,
+  alerta: TriangleAlert
 } satisfies Record<string, LucideIcon>
 
 export type IconName = keyof typeof ICONOS

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { duracionEnVoz, duracionGuion, type Creacion } from '../../../shared/creacion'
+import { duracionEnVoz, duracionGuion, vozDesactualizada, type Creacion } from '../../../shared/creacion'
 import { PasoVoz, type ControlVoz } from './PasoVoz'
 import { PasoEstilo, type ControlEstilo } from './PasoEstilo'
 import { PanelAgente } from './PanelAgente'
@@ -10,8 +10,9 @@ import { mediaUrl } from '../media'
 
 /**
  * El estudio de una creación con IA. Arriba las fases; a la izquierda la conversación
- * (cada mensaje cambia el guion o, si el video ya está hecho, el video); al centro lo
- * que hay ahora: el guion por escenas o el video. Al final, el video entra al editor.
+ * (cada mensaje actualiza el guion y, si ya hay video, también la voz y las escenas);
+ * al centro lo que hay ahora: el guion por escenas o el video. Al final, el video entra
+ * al editor.
  */
 export function EstudioCreacion({
   creacion,
@@ -52,6 +53,8 @@ export function EstudioCreacion({
   const c = creacion
   const hecho = Boolean(c.salida)
   const estiloEditorial = estiloPorId(c.estilo)
+  const mediosGenerados = c.guion?.escenas.filter((e) => e.medio).length ?? 0
+  const mediosPendientes = c.guion?.escenas.filter((e) => !e.medio && (e.imagen || e.clip)).length ?? 0
 
   useEffect(() => {
     setDesde(trabajando ? (desdeTrabajo ?? Date.now()) : null)
@@ -103,7 +106,7 @@ export function EstudioCreacion({
       ? [{ nombre: 'Estilo', hecha: Boolean(c.ficha) && c.fase !== 'estilo', actual: c.fase === 'estilo' }]
       : []),
     { nombre: 'Guion', hecha: Boolean(c.guion), actual: c.fase === 'guion' },
-    { nombre: 'Voz', hecha: Boolean(c.voz), actual: c.fase === 'voz' },
+    { nombre: 'Voz', hecha: Boolean(c.voz) && !vozDesactualizada(c), actual: c.fase === 'voz' },
     { nombre: 'Video', hecha: hecho && c.fase !== 'video', actual: c.fase === 'video' },
     { nombre: 'Editor', hecha: Boolean(c.proyectoEditor), actual: false }
   ]
@@ -186,7 +189,7 @@ export function EstudioCreacion({
                   ? 'Tu mensaje cambia el video: el agente toca solo eso y vuelve a comprobar.'
                   : 'Contesta sus preguntas o dile qué cambiar del plan; «Hazlo» para empezar.'
                 : hecho
-                  ? 'Tu mensaje cambia el video (se vuelve a renderizar).'
+                  ? 'Tu mensaje actualiza el guion y, si hace falta, la voz; después se vuelve a renderizar.'
                   : 'Tu mensaje cambia el guion.'}
             </span>
             <div className="chat-caja">
@@ -293,6 +296,28 @@ export function EstudioCreacion({
                   <button className="btn small ghost" onClick={() => onVideo()} disabled={trabajando} title="Vuelve a componer el video desde este guion">
                     Rehacer desde el guion
                   </button>
+                )}
+              </div>
+              <div className="estudio-recursos" title="Lo que usa este video ahora mismo">
+                <span>
+                  <Icon name="music" size={11} />
+                  {c.voz ? (c.voz.origen === 'gemini' ? `Voz ${c.voz.vozGemini ?? 'Gemini'}` : 'Tu voz') : 'Sin voz'}
+                  {vozDesactualizada(c) ? ' · no coincide' : ''}
+                </span>
+                {mediosGenerados > 0 && (
+                  <span>
+                    <Icon name="image" size={11} /> {mediosGenerados} {mediosGenerados === 1 ? 'imagen' : 'imágenes'} de Flow
+                  </span>
+                )}
+                {mediosPendientes > 0 && (
+                  <span>
+                    <Icon name="sparkles" size={11} /> Flow hará {mediosPendientes} {mediosPendientes === 1 ? 'medio' : 'medios'}
+                  </span>
+                )}
+                {c.adjuntos.length > 0 && (
+                  <span>
+                    <Icon name="paperclip" size={11} /> {c.adjuntos.length} {c.adjuntos.length === 1 ? 'adjunto' : 'adjuntos'}
+                  </span>
                 )}
               </div>
               <ol className="estudio-escenas">

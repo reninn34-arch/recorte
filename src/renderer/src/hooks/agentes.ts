@@ -15,6 +15,10 @@ export interface Agentes {
   ocupado: { id: string; fase: FaseConexion } | null
   /** Instala si falta, inicia sesión si hace falta y lo deja como el agente que edita. */
   conectar: (agente: EstadoAgente) => Promise<boolean>
+  /** Desconecta la cuenta/sesión del agente y deja de usarlo. */
+  desconectar: (agente: EstadoAgente) => Promise<boolean>
+  /** Deja de usar el agente activo sin borrar su sesión. */
+  desactivar: () => Promise<boolean>
   /** Guarda la llave de un proveedor (Gemini, DeepSeek, Grok) y lo deja como el que edita. */
   usarProveedorApi: (proveedor: ProveedorApi, clave: string) => Promise<boolean>
   /** El proveedor de API que edita ahora, si el modo activo es una llave. */
@@ -170,6 +174,34 @@ export function useAgentes(onAviso: (texto: string) => void): Agentes {
     [ocupado, ajustes, usar, refrescar, cancelarEspera, fallo, sinFallo]
   )
 
+  const desconectar = useCallback(
+    async (agente: EstadoAgente): Promise<boolean> => {
+      cancelarEspera()
+      try {
+        await window.recorte.agentesDesconectar(agente.id)
+        await refrescar()
+        avisoRef.current(`Desconectaste ${agente.nombre}.`)
+        return true
+      } catch {
+        fallo(agente.id, `No pude desconectar ${agente.nombre}.`)
+        return false
+      }
+    },
+    [cancelarEspera, refrescar, fallo]
+  )
+
+  const desactivar = useCallback(async (): Promise<boolean> => {
+    try {
+      const guardados = await window.recorte.agentesDesactivar()
+      setAjustes(guardados)
+      avisoRef.current('Dejaste de usar el agente.')
+      return true
+    } catch {
+      avisoRef.current('No pude desactivar el agente.')
+      return false
+    }
+  }, [])
+
   const activo = lista.find(
     (a) => ajustes?.activa && ajustes.proveedor === 'cli' && ajustes.comandoCli === a.comando && a.conectado && a.instalado
   )
@@ -244,6 +276,8 @@ export function useAgentes(onAviso: (texto: string) => void): Agentes {
     listo,
     ocupado,
     conectar,
+    desconectar,
+    desactivar,
     usarProveedorApi,
     apiActivo,
     cancelarEspera,

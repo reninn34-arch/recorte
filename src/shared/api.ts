@@ -219,6 +219,8 @@ export interface RecorteApi {
   /** Los modelos del agente con sus esfuerzos, tal como los dice el agente (se recuerdan un día). */
   agentesModelos: (id: string, forzar?: boolean) => Promise<ModeloAgente[]>
   agentesConectar: (id: string) => Promise<ConexionResultado>
+  agentesDesconectar: (id: string) => Promise<ConexionResultado>
+  agentesDesactivar: () => Promise<AjustesIA>
   /** La versión instalada de cada agente (corre `--version`: tarda unos segundos). */
   agentesVersiones: () => Promise<Record<string, string | null>>
   /** Pagar con la suscripción o con una llave de API (`llave` vacía la borra). */

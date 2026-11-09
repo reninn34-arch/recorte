@@ -196,6 +196,7 @@ export class Manos {
           anadir(Buffer.from(String(e.message)))
           cerrar(1, null)
         })
+        hijo.on('exit', (c, s) => setTimeout(() => cerrar(c, s), 1000))
         hijo.on('close', (c, s) => cerrar(c, s))
         this.terminales.set(id, t)
         this.onLinea(`Terminal: ${linea.slice(0, 160)}`)

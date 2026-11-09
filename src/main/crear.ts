@@ -189,23 +189,35 @@ export function ejecutar(
       env: { ...process.env, PATH: pathAmpliado() }
     })
     let salida = ''
+    let cerrado = false
+    const terminar = (codigo: number | null) => {
+      if (cerrado) return
+      cerrado = true
+      clearTimeout(temporizador)
+      senal?.removeEventListener('abort', alParar)
+      resolver({ codigo: codigo ?? -1, salida })
+    }
     const temporizador = setTimeout(() => {
-      hijo.kill()
-      resolver({ codigo: -1, salida: `${salida}\nTiempo agotado.` })
+      matarArbol(hijo)
+      if (!cerrado) {
+        cerrado = true
+        senal?.removeEventListener('abort', alParar)
+        resolver({ codigo: -1, salida: `${salida}\nTiempo agotado.` })
+      }
     }, timeoutMs)
     hijo.stdout.on('data', (b: Buffer) => (salida += b.toString('utf8')))
     hijo.stderr.on('data', (b: Buffer) => (salida += b.toString('utf8')))
     hijo.on('error', (e) => {
-      clearTimeout(temporizador)
-      resolver({ codigo: -1, salida: e.message })
+      salida += `\n${e.message}`
+      terminar(-1)
     })
-    const alParar = () => matarArbol(hijo)
+    const alParar = () => {
+      matarArbol(hijo)
+      terminar(-1)
+    }
     senal?.addEventListener('abort', alParar, { once: true })
-    hijo.on('close', (codigo) => {
-      clearTimeout(temporizador)
-      senal?.removeEventListener('abort', alParar)
-      resolver({ codigo: codigo ?? -1, salida })
-    })
+    hijo.on('exit', (codigo) => setTimeout(() => terminar(codigo), 1000))
+    hijo.on('close', (codigo) => terminar(codigo))
   })
 }
 

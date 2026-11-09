@@ -4,7 +4,9 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameS
 import { basename, extname, join } from 'node:path'
 import {
   duracionEnVoz,
+  textoNarracion,
   validarGuion,
+  vozVigente,
   type AdjuntoCreacion,
   type Creacion,
   type GuionCreacion,
@@ -317,6 +319,9 @@ function bloqueMaterial(carpeta: string): string {
 
 function promptGuion(c: Creacion, carpeta: string, pedido?: string, gustos = ''): string {
   const estilo = estiloPorId(c.estilo)
+  const voz = c.voz
+    ? `\nVoz actual: ${c.voz.origen === 'gemini' ? `Gemini «${c.voz.vozGemini}»` : 'grabada por el usuario'}. Dice esta narración:\n«${c.voz.texto ?? (c.guion ? textoNarracion(c.guion) : '')}»\n`
+    : ''
   return `Eres el guionista y director de un video corto. Diseñas el guion por escenas antes de que se produzca.
 
 Petición original del usuario:
@@ -329,8 +334,9 @@ ${estilo.guia}
 
 ${bloqueEstilo(c, carpeta)}${bloqueMaterial(carpeta)}Formato: ${c.formato === 'vertical' ? 'vertical 9:16 (TikTok, Reels, Shorts)' : 'horizontal 16:9 (YouTube)'}. Duración objetivo: unos ${c.duracion} segundos.
 ${listaAdjuntos(c)}
-${c.guion ? `\nGuion actual:\n${guionTexto(c.guion)}\n` : ''}${c.mensajes.length ? `\nConversación:\n${conversacion(c.mensajes)}\n` : ''}${pedido ? `\nCAMBIO QUE PIDE AHORA EL USUARIO: ${pedido}\n` : ''}
+${c.guion ? `\nGuion actual:\n${guionTexto(c.guion)}\n` : ''}${voz}${c.mensajes.length ? `\nConversación:\n${conversacion(c.mensajes)}\n` : ''}${pedido ? `\nCAMBIO QUE PIDE AHORA EL USUARIO: ${pedido}\n` : ''}
 ${gustos ? `\n${gustos}\n` : ''}${bloqueFlowGuion(c)}Reglas: el primer segundo engancha; una idea por escena; "texto" es lo que se lee en pantalla y es corto (máximo ~12 palabras); "narracion" es lo que dice la voz en esa escena, natural y hablado (unas 2,5 palabras por segundo de la escena), y no repite el texto palabra por palabra; la suma de duraciones se acerca a la duración objetivo; en "visual" di qué se ve, y si usas material del usuario nombra su archivo (media/…).
+Si el cambio que pide el usuario es solo visual (color, tipografía, animación, imagen, orden o ritmo), conserva "narracion" palabra por palabra en todas las escenas: la voz ya grabada tiene que seguir sirviendo. Si cambia lo que se lee en pantalla pero no lo que se dice, cambia "texto" y deja "narracion" igual. Solo cambia la narración si el usuario pide cambiar lo que se dice.
 ${INSTRUCCIONES_CRITERIO}
 Responde SOLO con JSON:
 {"mensaje": "una o dos frases para el usuario sobre lo que hiciste", "propuestas": ["…"], "aprendido": [], "guion": {"titulo": "…", "escenas": [{"texto": "…", "narracion": "…", "visual": "…", ${c.flow?.imagenes ? '"imagen": "…", ' : ''}${c.flow?.videos ? '"clip": "…", ' : ''}"duracion": 3}]}}`
@@ -350,12 +356,13 @@ function promptComposicion(c: Creacion, carpeta: string, htmlPrevio: string | nu
 - Clips de video del usuario: cada <video> es su propia escena a nivel raíz: <video class="clip" src="media/…" playsinline data-has-audio="true" data-start="X" data-duration="D" data-media-start="S" data-track-index="0"></video>. data-media-start es el segundo DEL ARCHIVO donde empieza el trozo (el material puede durar minutos: usa solo los trozos que sirven, con los tiempos de lo que se dice). Nunca envuelvas un <video> en un elemento con data-start; nunca llames play/pause/seek.
 - Texto en español, grande y legible (mínimo ${c.formato === 'vertical' ? 56 : 48} px).`
 
-  const voz = c.voz
+  const vozActual = vozVigente(c)
+  const voz = vozActual
     ? `
 La narración ya está grabada y Recorte la mezcla después del render: NO pongas <audio> ni sonido en la composición.
 Los tiempos los manda la voz; respeta estos inicios y duraciones por escena:
 ${guionConVoz(c)}
-La composición dura exactamente ${(c.voz.duracion + 0.4).toFixed(2)} s (data-duration de la raíz).`
+La composición dura exactamente ${(vozActual.duracion + 0.4).toFixed(2)} s (data-duration de la raíz).`
     : ''
 
   if (htmlPrevio && pedido) {
@@ -364,8 +371,8 @@ La composición dura exactamente ${(c.voz.duracion + 0.4).toFixed(2)} s (data-du
 ${htmlPrevio}
 
 El usuario pide este cambio: ${pedido}
-${c.mensajes.length ? `\nConversación previa:\n${conversacion(c.mensajes)}\n` : ''}
-Aplica el cambio y conserva todo lo demás.${voz}${gustos ? `\n${gustos}\n` : ''} ${reglas}
+${c.guion ? `\nGuion aprobado después de este cambio (los textos, la narración y las escenas deben coincidir):\n${guionTexto(c.guion)}\n` : ''}${c.mensajes.length ? `\nConversación previa:\n${conversacion(c.mensajes)}\n` : ''}
+Aplica el cambio y conserva todo lo demás. Si el guion quitó escenas, elimina sus secciones; si agregó escenas, créalas; si cambió el texto, la narración o la duración de una escena, actualiza su sección y sus data-start/data-duration para que coincidan con la voz.${voz}${gustos ? `\n${gustos}\n` : ''} ${reglas}
 
 Responde SOLO con el HTML completo, de <!doctype html> a </html>.`
   }
@@ -410,6 +417,26 @@ export async function pasoGuion(
   const datos = extraerJson(texto) as { mensaje?: unknown; guion?: unknown }
   const guion = validarGuion(datos.guion ?? datos)
   if (!guion) throw new Error('El agente no devolvió un guion válido.')
+  // El guionista no devuelve los medios ya generados: si una escena conserva su
+  // descripción de imagen o clip, se reutiliza lo que Flow ya hizo (no se vuelve a gastar).
+  const anteriores = c.guion?.escenas ?? []
+  if (anteriores.length) {
+    const usados = new Set<number>()
+    for (const escena of guion.escenas) {
+      if (escena.medio || !(escena.imagen || escena.clip)) continue
+      const i = anteriores.findIndex(
+        (a, k) =>
+          !usados.has(k) &&
+          Boolean(a.medio) &&
+          (a.imagen ?? '') === (escena.imagen ?? '') &&
+          (a.clip ?? '') === (escena.clip ?? '')
+      )
+      if (i >= 0) {
+        escena.medio = anteriores[i].medio
+        usados.add(i)
+      }
+    }
+  }
   const mensaje = typeof datos.mensaje === 'string' && datos.mensaje.trim() ? datos.mensaje.trim() : `Guion listo: ${guion.escenas.length} escenas.`
   return { guion, mensaje, ...leerCriterio(datos) }
 }
@@ -434,8 +461,8 @@ export async function pasoVideo(
   const archivoHtml = join(composicion, 'index.html')
   const previo = pedido && existsSync(archivoHtml) ? readFileSync(archivoHtml, 'utf8') : null
 
-  // Primero lo que el guion pide a Google Flow (solo al componer de nuevo, no en un cambio).
-  const fallosFlow = previo ? [] : await generarMedioFlow(c, carpeta, onProgreso, senal)
+  // Lo que el guion pide a Google Flow: solo lo que falte, también al cambiar el video.
+  const fallosFlow = await generarMedioFlow(c, carpeta, onProgreso, senal)
   onProgreso(0.25, previo ? 'El agente está aplicando tu cambio' : 'El agente está diseñando las escenas')
   const respuesta = await preguntar(
     promptComposicion(c, carpeta, previo, pedido, gustos),
@@ -455,13 +482,14 @@ export async function pasoVideo(
   if (r.codigo !== 0 || !existsSync(salidaAbs)) {
     throw new Error(`HyperFrames no pudo renderizar: ${r.salida.trim().slice(-400)}`)
   }
-  if (c.voz) {
+  const vozParaMezclar = vozVigente(c)
+  if (vozParaMezclar) {
     // La voz entra al final: el video manda en la duración y la voz se rellena con silencio.
     onProgreso(0.9, 'Mezclando la voz')
     const ffmpeg = resolverBinario('ffmpeg') ?? 'ffmpeg'
     const conVoz = join(carpeta, 'salidas', `video-v${version}-voz.mp4`)
     const m = await ejecutar(
-      [`"${ffmpeg}"`, '-y', '-v', 'error', '-i', `"${salidaAbs}"`, '-i', `"${join(composicion, c.voz.archivo)}"`,
+      [`"${ffmpeg}"`, '-y', '-v', 'error', '-i', `"${salidaAbs}"`, '-i', `"${join(composicion, vozParaMezclar.archivo)}"`,
         '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-af', 'apad', '-c:a', 'aac', '-b:a', '192k', '-shortest',
         '-movflags', '+faststart', `"${conVoz}"`],
       carpeta,
