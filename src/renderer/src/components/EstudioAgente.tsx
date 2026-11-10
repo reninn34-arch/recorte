@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Creacion } from '../../../shared/creacion'
+import { estiloPorId } from '../../../shared/estilos'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
 
@@ -40,7 +41,7 @@ export function EstudioAgente({
         <div className="estudio-titulo">
           <strong>{c.nombre}</strong>
           <span>
-            {c.formato === 'vertical' ? 'Vertical 9:16' : 'Horizontal 16:9'} · {c.vozElegida ? `Voz ${c.vozElegida}` : 'Sin voz'} ·{' '}
+            {estiloPorId(c.estilo).nombre} · {c.formato === 'vertical' ? 'Vertical 9:16' : 'Horizontal 16:9'} · {c.vozElegida ? `Voz ${c.vozElegida}` : 'Sin voz'} ·{' '}
             {c.directo ? 'Hazlo directo' : 'Pregúntame antes'}
           </span>
         </div>

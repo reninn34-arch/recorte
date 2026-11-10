@@ -2,6 +2,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { createServer } from 'node:net'
 import electronPath from 'electron'
 
 /**
@@ -16,7 +17,21 @@ import electronPath from 'electron'
  */
 
 const raiz = resolve(import.meta.dirname, '..')
-const puerto = 9339
+// Un puerto libre para depurar la app (uno fijo puede quedar tomado por una prueba anterior y colgarla).
+const puerto = await new Promise((listo, fallo) => {
+  const srv = createServer()
+  srv.once('error', fallo)
+  srv.listen(0, '127.0.0.1', () => {
+    const { port } = srv.address()
+    srv.close(() => listo(port))
+  })
+})
+// Si algo se queda esperando, la prueba falla con un mensaje en vez de colgarse.
+const vigia = setTimeout(() => {
+  console.error('prueba modo agente: error · se quedó esperando más de 12 min')
+  process.exit(1)
+}, 12 * 60_000)
+vigia.unref()
 const datos = mkdtempSync(join(tmpdir(), 'recorte-modoagente-'))
 const medios = mkdtempSync(join(tmpdir(), 'recorte-modoagente-medios-'))
 writeFileSync(join(datos, 'ajustes.json'), JSON.stringify({ carpetaVideos: join(datos, 'videos') }))
@@ -36,7 +51,7 @@ process.stdin.on('end', async () => {
   const cambio = /LO QUE PIDE AHORA EL USUARIO: (.*)/.exec(prompt)
   appendFileSync(
     process.env.REGISTRO_FALSO,
-    JSON.stringify({ args: process.argv.slice(2), cwd, manual: existsSync(join(cwd, 'CLAUDE.md')), plan: prompt.includes('TODAVÍA NO HAGAS'), seguir: prompt.includes('SIGUE EXACTAMENTE'), cambio: cambio ? cambio[1] : null }) + '\n'
+    JSON.stringify({ args: process.argv.slice(2), cwd, manual: existsSync(join(cwd, 'CLAUDE.md')), plan: prompt.includes('TODAVÍA NO HAGAS'), seguir: prompt.includes('SIGUE EXACTAMENTE'), tipo: (/TIPO DE VIDEO QUE ELIGIÓ: «([^»]+)»/.exec(prompt) || [])[1] || null, cambio: cambio ? cambio[1] : null }) + '\n'
   )
   const ev = (o) => console.log(JSON.stringify(o))
   if (existsSync(join(process.env.REGISTRO_FALSO, '..', 'fondo.txt'))) {
@@ -112,7 +127,7 @@ electron.stderr.on('data', (d) => (registros += d.toString()))
 async function esperarPagina() {
   for (let intento = 0; intento < 160; intento += 1) {
     try {
-      const respuesta = await fetch(`http://127.0.0.1:${puerto}/json/list`)
+      const respuesta = await fetch(`http://127.0.0.1:${puerto}/json/list`, { signal: AbortSignal.timeout(2000) })
       const lista = await respuesta.json()
       const pagina = lista.find((tab) => tab.type === 'page' && !tab.url.startsWith('devtools://'))
       if (pagina?.webSocketDebuggerUrl) return pagina
@@ -278,8 +293,15 @@ try {
   if (tardo > 15) throw new Error(`Con un proceso de fondo, el plan tardó ${tardo.toFixed(1)} s (esperó al proceso de fondo).`)
   console.log(`con un proceso de fondo abierto, el plan llega en ${tardo.toFixed(1)} s ✓`)
 
-  // Sin uso del plan a mitad del video: queda en pausa (nada se pierde) y sigue solo al renovarse.
+  // La tarjeta de tipo de video (Crear con IA) llega al agente como dirección editorial.
   unlinkSync(join(medios, 'fondo.txt'))
+  const conTipo = await evaluar(cliente, `window.recorte.creacionNueva(${JSON.stringify({ peticion: '5 tips para fotos de comida', estilo: 'lista', formato: 'vertical', duracion: 30, adjuntos: [foto], modo: 'agente' })})`)
+  await evaluar(cliente, `window.recorte.agentePlan(${JSON.stringify(conTipo.id)})`)
+  const llamadaTipo = readFileSync(registroFalso, 'utf8').trim().split(String.fromCharCode(10)).map((l) => JSON.parse(l)).filter((l) => l.plan).at(-1)
+  if (llamadaTipo?.tipo !== 'Lista o top') throw new Error(`La tarjeta «Lista o top» no llegó al agente (llegó: ${llamadaTipo?.tipo})`)
+  console.log('tarjeta de tipo de video: su guía llega al agente ✓')
+
+  // Sin uso del plan a mitad del video: queda en pausa (nada se pierde) y sigue solo al renovarse.
   writeFileSync(join(medios, 'limite.txt'), '1')
   const pausada = await evaluar(cliente, `window.recorte.agenteHacer(${JSON.stringify(c.id)}, 'Haz el título más grande')`, 5 * 60_000)
   const pausa = pausada.agente?.pausa

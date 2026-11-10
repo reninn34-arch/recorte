@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, isAbsolute, join, resolve, sep } from 'node:path'
 import { COSTO_CLIP, MAX_CLIPS_VEO, type Creacion } from '../shared/creacion'
+import { estiloPorId } from '../shared/estilos'
 import {
   MAX_REGISTRO,
   clipsDelPlan,
@@ -493,13 +494,21 @@ async function imagenesDeEntrada(c: Creacion, carpeta: string): Promise<string[]
 
 function contexto(c: Creacion): string {
   const archivos = c.adjuntos.length
-    ? c.adjuntos.map((a) => `- ${a.archivo.replace(/^trabajo\//, '')} (${a.tipo === 'imagen' ? 'imagen' : 'video'}, «${a.nombre}»)`).join('\n')
+    ? c.adjuntos
+        .map((a) => `- ${a.archivo.replace(/^trabajo\//, '')} (${a.tipo === 'imagen' ? 'imagen' : a.tipo === 'audio' ? 'audio: su narración grabada' : 'video'}, «${a.nombre}»)`)
+        .join('\n')
     : '- (ninguno: el usuario no subió archivos)'
   const charla = c.mensajes
     .slice(-12)
     .map((m) => `${m.rol === 'usuario' ? 'Usuario' : 'Tú'}: ${m.texto}`)
     .join('\n')
-  return `PEDIDO ORIGINAL DEL USUARIO:\n"""\n${c.peticion}\n"""\n\nArchivos en entrada/:\n${archivos}\n\nFormato elegido en la app: ${c.formato === 'horizontal' ? 'horizontal 16:9' : 'vertical 9:16'}, duración: la que pida el usuario; si no la dice, la decides tú según el material y lo que se cuenta (lee «La duración la decide el material» en AGENTS.md), sin recortar a una cifra fija.${charla ? `\n\nConversación hasta ahora:\n${charla}` : ''}`
+  // La tarjeta de tipo de video que eligió en «Crear con IA»: su dirección editorial.
+  const estilo = estiloPorId(c.estilo)
+  const tipo =
+    estilo.id !== 'libre'
+      ? `\n\nTIPO DE VIDEO QUE ELIGIÓ: «${estilo.nombre}» (${estilo.descripcion}). Síguelo como dirección editorial, salvo que su pedido o la charla digan otra cosa (si usas el kit, «fragmento» = un video suyo; «tarjeta» o «titular» = un rótulo):\n${estilo.guia}`
+      : ''
+  return `PEDIDO ORIGINAL DEL USUARIO:\n"""\n${c.peticion}\n"""\n\nArchivos en entrada/:\n${archivos}${tipo}\n\nFormato elegido en la app: ${c.formato === 'horizontal' ? 'horizontal 16:9' : 'vertical 9:16'}, duración: la que pida el usuario; si no la dice, la decides tú según el material y lo que se cuenta (lee «La duración la decide el material» en AGENTS.md), sin recortar a una cifra fija.${charla ? `\n\nConversación hasta ahora:\n${charla}` : ''}`
 }
 
 /** Lo último que dijo el usuario en la conversación (para el turno que retoma la sesión). */
