@@ -53,6 +53,8 @@ export interface Preferencias {
   avisoNotificacion: boolean
   avisoSonido: boolean
   novedadesVistas?: string
+  /** Crear con IA: tras el plan, empezar sin esperar el «Hazlo» si el agente no tiene preguntas. */
+  crearDirecto?: boolean
 }
 
 /** Un proveedor que trabaja solo con su llave de API (endpoint compatible con OpenAI). */
@@ -143,6 +145,10 @@ export interface Progreso {
   desde?: number
   /** Modo agente: lo último que hizo el agente, en vivo. */
   registro?: string[]
+  /** Modo agente: en qué paso del plan va (1 = el primero). */
+  paso?: number
+  /** Modo agente: los pasos del plan mientras se hace (llegan antes de que la creación se refresque). */
+  pasos?: string[]
 }
 
 export interface IngestaResultado {
@@ -263,6 +269,8 @@ export interface RecorteApi {
   exportarTimeline: (id: string, timeline: Timeline, opciones: OpcionesExport) => Promise<RenderResultado>
   abrirExportacion: (id: string) => Promise<boolean>
   /** Elige un audio, lo copia a `media/` del proyecto y devuelve la pista lista para la timeline. */
+  /** Genera una frase de narración con una voz de Gemini y la deja en el proyecto (sin agente). */
+  vozFrase: (id: string, pedido: { texto: string; voz?: string }) => Promise<{ archivo: string; duracion: number; texto: string; voz: string }>
   importarMusica: (id: string) => Promise<{ ok: boolean; musica?: MusicaTL; error?: string } | null>
   /** Crear con IA: videos desde cero, sin material importado. */
   elegirAdjuntos: () => Promise<string[]>

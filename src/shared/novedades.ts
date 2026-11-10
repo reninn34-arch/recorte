@@ -24,6 +24,49 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.17',
+    fecha: '2026-11-10',
+    resumen: 'Crear es un solo agente con voz desde el principio, y el video que hace se abre en el editor con cada cosa suelta para retocarla a mano.',
+    novedades: [
+      {
+        icono: 'sparkles',
+        titulo: 'Un solo modo para crear',
+        texto:
+          'La caja de crear ya no tiene «Agente» y «Guiado»: eliges quién lo hace, el formato, la duración y la voz, y ves sus pasos marcándose en el chat. Con «Hazlo directo» empieza solo si no tiene dudas.'
+      },
+      {
+        icono: 'music',
+        titulo: 'Voz elegida desde el principio',
+        texto:
+          'Elige una de las 30 voces de Gemini en la caja. El agente escribe lo que dice y Recorte lo narra frase a frase; en el editor cambias el texto de una frase y la regeneras, o pasas toda la narración a otra voz.'
+      },
+      {
+        icono: 'layers',
+        titulo: 'El video del agente, editable',
+        texto:
+          'Al terminar se abre el editor con cada foto, clip, rótulo, frase de voz y la música en su pista. Cambia una imagen, el tamaño, color o letra de un rótulo, el encuadre, el acercamiento o los fundidos sin pedirle nada al agente.'
+      },
+      {
+        icono: 'type',
+        titulo: 'El chat del editor hace más',
+        texto:
+          'Pídele «cambia lo que dice la frase 2», «pon el título en amarillo y más grande» o «quítale el sonido al clip 3»: lo hace en el mismo proyecto y se deshace con Ctrl+Z.'
+      },
+      {
+        icono: 'log-out',
+        titulo: 'Cambiar de cuenta del agente',
+        texto:
+          'Después de «Desconectar», «Conectar» abre siempre la autorización del agente: puedes entrar con otra cuenta. Tu sesión fuera de Recorte no se toca.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Agentes más fiables',
+        texto:
+          'Claude y Codex recuerdan la conversación entre el plan y cada cambio (gastan menos), Recorte sabe cuándo terminaron aunque dejen algo abierto, y un retoque pequeño ya no rehace el guion ni la voz.'
+      }
+    ]
+  },
+  {
     version: '0.1.15',
     fecha: '2026-11-09',
     resumen: 'Desconexión voluntaria de agentes y corrección de bloqueos al entregar o editar videos.',

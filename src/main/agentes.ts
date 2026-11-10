@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { app, shell } from 'electron'
 import type { ConexionResultado, EstadoAgente } from '../shared/api'
 import { anadirCarpetaBinarios, pathAmpliado, resolverBinario } from './binarios'
+import { guardar } from './disco'
 import { conectadoAntigravity, exeAntigravity, instalarAntigravity, loginAntigravity, rutaTokenAntigravity } from './antigravity'
 
 /**
@@ -45,7 +46,9 @@ const AGENTES: DefAgente[] = [
     comando: 'claude -p',
     paquete: '@anthropic-ai/claude-code',
     credenciales: join(homedir(), '.claude', '.credentials.json'),
-    login: 'ventana'
+    login: 'ventana',
+    // El inicio de sesión oficial con la suscripción: abre la página de autorización.
+    argsLogin: ['auth', 'login', '--claudeai']
   },
   {
     id: 'codex',
@@ -173,12 +176,36 @@ export function marcarSesionCaida(id: EstadoAgente['id']): void {
 export async function desconectarAgente(id: unknown): Promise<ConexionResultado> {
   const agente = AGENTES.find((a) => a.id === id)
   if (!agente) return { ok: false, error: 'Agente desconocido.' }
-  desconectados.add(agente.id)
+  const lista = leerDesconectados()
+  lista[agente.id] = Date.now()
+  guardarDesconectados(lista)
   return { ok: true }
 }
 
-/** Los que el usuario desconectó a mano en esta sesión de Recorte (vuelven al «Conectar»). */
-const desconectados = new Set<EstadoAgente['id']>()
+/**
+ * Los que el usuario desconectó a mano, con cuándo. Se guarda en disco: sigue desconectado
+ * aunque se cierre Recorte, hasta que vuelva a autorizarlo (sus credenciales se reescriben
+ * después de esa hora). Volver a «Conectar» abre siempre la autorización del agente.
+ */
+const rutaDesconectados = () => join(app.getPath('userData'), 'desconectados.json')
+let desconectadosCache: Record<string, number> | null = null
+function leerDesconectados(): Record<string, number> {
+  if (desconectadosCache) return desconectadosCache
+  try {
+    desconectadosCache = JSON.parse(readFileSync(rutaDesconectados(), 'utf8')) as Record<string, number>
+  } catch {
+    desconectadosCache = {}
+  }
+  return desconectadosCache
+}
+function guardarDesconectados(lista: Record<string, number>): void {
+  desconectadosCache = lista
+  try {
+    guardar(rutaDesconectados(), JSON.stringify(lista, null, 2))
+  } catch {
+    // Si no se puede guardar, vale hasta cerrar la app.
+  }
+}
 
 /** Tiene sesión de verdad: no basta con que exista el archivo (al cerrar sesión queda vacío). */
 function sesionIniciada(agente: DefAgente): boolean {
@@ -200,12 +227,18 @@ function sesionIniciada(agente: DefAgente): boolean {
 }
 
 function conectadoAhora(agente: DefAgente): boolean {
-  if (desconectados.has(agente.id)) return false
   if (!sesionIniciada(agente)) return false
+  const ruta = agente.acp ? rutaTokenAntigravity() : agente.credenciales
+  const desconectado = leerDesconectados()[agente.id]
+  if (desconectado !== undefined) {
+    // Lo desconectó a mano: vuelve a contar cuando lo autoriza de nuevo (sus credenciales cambian).
+    if (cambioDesde(ruta) <= desconectado) return false
+    const { [agente.id]: _fuera, ...resto } = leerDesconectados()
+    guardarDesconectados(resto)
+  }
   const caida = caidas.get(agente.id)
   if (caida === undefined) return true
   // Si sus credenciales se reescribieron después del fallo, volvió a iniciar sesión.
-  const ruta = agente.acp ? rutaTokenAntigravity() : agente.credenciales
   if (cambioDesde(ruta) > caida) {
     caidas.delete(agente.id)
     return true
@@ -284,13 +317,13 @@ function abrirVentana(agente: DefAgente): boolean {
       return true
     }
     if (process.platform === 'darwin') {
-      spawn('osascript', ['-e', `tell application "Terminal" to do script "${agente.binario}"`, '-e', 'tell application "Terminal" to activate'], {
+      spawn('osascript', ['-e', `tell application "Terminal" to do script "${orden}"`, '-e', 'tell application "Terminal" to activate'], {
         detached: true,
         stdio: 'ignore'
       }).unref()
       return true
     }
-    spawn('x-terminal-emulator', ['-e', agente.binario], { detached: true, stdio: 'ignore', env: entorno() }).unref()
+    spawn('x-terminal-emulator', ['-e', ...orden.split(' ')], { detached: true, stdio: 'ignore', env: entorno() }).unref()
     return true
   } catch {
     return false
@@ -389,8 +422,9 @@ export async function conectarAgente(id: unknown): Promise<ConexionResultado> {
   const agente = AGENTES.find((a) => a.id === id)
   if (!agente) return { ok: false, error: 'Agente desconocido.' }
   if (enCurso.has(agente.id)) return { ok: false, pendiente: true, aviso: `Ya se está conectando ${agente.nombre}.` }
-  // Volver a conectar lo que se desconectó a mano: si su sesión sigue viva, queda listo al instante.
-  desconectados.delete(agente.id)
+  // Lo desconectó a mano (o se le cayó la sesión): se abre su autorización aunque haya un
+  // archivo de sesión. Solo cuenta como conectado cuando autoriza otra vez.
+  const reautorizar = leerDesconectados()[agente.id] !== undefined || caidas.has(agente.id)
 
   if (agente.acp) {
     enCurso.add(agente.id)
@@ -398,7 +432,7 @@ export async function conectarAgente(id: unknown): Promise<ConexionResultado> {
       if (!exeAntigravity()) {
         await instalarAntigravity()
       }
-      if (conectadoAhora(agente)) return { ok: true }
+      if (!reautorizar && conectadoAhora(agente)) return { ok: true }
       // La autorización sigue en el navegador; el token se detecta solo al volver.
       let aviso = `Se abrió tu navegador para autorizar ${agente.nombre} con tu cuenta de Google.`
       void loginAntigravity((url) => {
@@ -419,7 +453,7 @@ export async function conectarAgente(id: unknown): Promise<ConexionResultado> {
       const instalado = await instalar(agente)
       if (!instalado.ok) return instalado
     }
-    if (conectadoAhora(agente)) return { ok: true }
+    if (!reautorizar && conectadoAhora(agente)) return { ok: true }
 
     if (agente.login === 'navegador') return loginNavegador(agente)
 
@@ -429,7 +463,7 @@ export async function conectarAgente(id: unknown): Promise<ConexionResultado> {
     return {
       ok: false,
       pendiente: true,
-      aviso: `Se abrió ${agente.nombre}: inicia sesión con tu cuenta en esa ventana. Recorte lo detecta solo.`
+      aviso: `Se abrió una ventana para autorizar ${agente.nombre} con tu plan: sigue los pasos en tu navegador. Recorte lo detecta solo.`
     }
   } finally {
     enCurso.delete(agente.id)

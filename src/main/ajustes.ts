@@ -43,6 +43,8 @@ export interface Preferencias {
   avisoSonido: boolean
   /** La última versión cuyas novedades vio (para mostrarlas una sola vez). */
   novedadesVistas?: string
+  /** Crear con IA: tras el plan, empezar sin esperar el «Hazlo» si el agente no tiene preguntas. */
+  crearDirecto?: boolean
 }
 
 const PREFERENCIAS: Preferencias = { avisoNotificacion: true, avisoSonido: true }
@@ -238,6 +240,7 @@ export class Ajustes {
     if (typeof cambio.avisoNotificacion === 'boolean') limpio.avisoNotificacion = cambio.avisoNotificacion
     if (typeof cambio.avisoSonido === 'boolean') limpio.avisoSonido = cambio.avisoSonido
     if (typeof cambio.novedadesVistas === 'string') limpio.novedadesVistas = cambio.novedadesVistas.slice(0, 20)
+    if (typeof cambio.crearDirecto === 'boolean') limpio.crearDirecto = cambio.crearDirecto
     const siguiente: AjustesEnDisco = { ...actual, preferencias: { ...PREFERENCIAS, ...actual.preferencias, ...limpio } }
     this.cache = siguiente
     guardar(rutaAjustes(), JSON.stringify(siguiente, null, 2))

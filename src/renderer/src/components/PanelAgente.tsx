@@ -21,7 +21,7 @@ export function PanelAgente({
   trabajando: boolean
   /** Cuándo empezó el agente (ms), lo dice el proceso principal: salir y volver no reinicia el reloj. */
   desde?: number
-  progreso: { pct: number; texto?: string; registro?: string[] } | null
+  progreso: { pct: number; texto?: string; registro?: string[]; paso?: number; pasos?: string[] } | null
   onPlan: () => void
   onHacer: () => void
   onParar: () => void
@@ -49,14 +49,16 @@ export function PanelAgente({
   const mm = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
   // La barra es de TIEMPO, no un porcentaje inventado: se llena hasta lo que suele tardar
   // este paso y, si se pasa, lo dice. El avance real es la lista de lo que va haciendo.
-  const habitual = c.fase === 'plan' ? 5 * 60 : 15 * 60
+  // Con «hazlo directo», el plan y el video van en la misma llamada: los pasos dicen que ya está haciendo.
+  const enPlan = c.fase === 'plan' && !progreso?.pasos?.length
+  const habitual = enPlan ? 5 * 60 : 15 * 60
   const pasado = lleva > habitual
 
   if (trabajando) {
     return (
       <div className="estudio-progreso panel-agente">
         <span>
-          {c.fase === 'plan' ? 'El agente está mirando tus archivos' : 'El agente está trabajando'} · lleva {mm(lleva)}
+          {enPlan ? 'El agente está mirando tus archivos' : 'El agente está trabajando'} · lleva {mm(lleva)}
           <span className="tl-dim"> de ~{habitual / 60} min habituales</span>
         </span>
         <span className={`tl-progreso ${pasado ? 'is-pasado' : ''}`} title="Tiempo transcurrido frente a lo que suele tardar este paso">
@@ -78,7 +80,7 @@ export function PanelAgente({
           <span className="tl-dim">{progreso?.texto ?? 'Empezando…'}</span>
         )}
         <span className="tl-dim">
-          {c.fase === 'plan'
+          {enPlan
             ? 'En el plan solo mira un vistazo de tus archivos y te propone cómo hacerlo.'
             : 'Hace el video, saca fotogramas para comprobarlo y corrige antes de entregarte.'}
         </span>

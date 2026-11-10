@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from 'electron'
-import { duracionesDeMedios, normalizarTimeline, quitarFuente } from '../shared/timeline'
+import { duracionesDeMedios, normalizarTimeline, quitarFuente, type Timeline } from '../shared/timeline'
 import { randomUUID } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, join, resolve, sep } from 'node:path'
@@ -24,7 +24,7 @@ import { estadoChatGPT } from './imagenchatgpt'
 import { avisarSesionCaida, definirEntornoAgentes, empezarTrabajo, esParado, pararTrabajo, terminarTrabajo } from './ia'
 import { comandoConEleccion } from './modelos'
 import { catalogoAgente } from './catalogo'
-import { crearMiniatura, crearProxy, probeVideo } from './ffmpeg'
+import { crearMiniatura, crearProxy, duracionMedio, probeVideo } from './ffmpeg'
 import { proponerClipsConAgente, proponerClipsConIA, proponerRecetaConAgente, proponerRecetaConIA } from './ia'
 import { registrarMedia } from './media'
 import { proponerClips } from './momentos'
@@ -39,7 +39,9 @@ import { montarVozEnVideo } from './montajevoz'
 import { conectarVozGoogle, desconectarVozGoogle, estadoVozGoogle, generarVozGoogle } from './vozgoogle'
 import { analizarMaterialCreacion } from './estilo/material'
 import { anotar, archivoEntregado, pasoHacer, pasoPlan, revisarYPublicar } from './modoagente'
-import { esAprobacion } from '../shared/modoagente'
+import { esAprobacion, pasoAnunciado } from '../shared/modoagente'
+import { atenderVoz } from './vozagente'
+import { proyectoDesdeReceta } from './recetaeditor'
 import { medirReferencia } from './estilo/referencia'
 import { analizarConGeminiVideo, interpretarEstilo } from './estilo/ficha'
 import { viabilidadDe } from './estilo/viabilidad'
@@ -49,7 +51,7 @@ import type { AgenteId, Creacion, EleccionTarea, MensajeCreacion, NivelModelo, P
 import { turnoAgente } from './chat'
 import { buscarActualizacion, estadoActualizacion, instalarActualizacion, prepararActualizaciones } from './actualizar'
 import { activarGustos, agregarGustos, bloqueGustos, cargarGustos, olvidarGustos, quitarGusto, senalGusto, usoCreacion } from './gustos'
-import type { MensajeChat } from '../shared/chat'
+import type { MensajeChat, OperacionTL } from '../shared/chat'
 import { transcribir } from './transcribir'
 
 // El esquema tiene que declararse antes de que Electron esté listo.
@@ -399,7 +401,25 @@ app.whenReady().then(() => {
   const avisarAgente = (c: Creacion, linea: string, pct: number) => {
     if (!c.agente) c.agente = { registro: [], rondas: 0 }
     anotar(c.agente, linea)
-    enviarProgreso({ id: c.id, fase: 'creacion', pct, texto: linea.slice(0, 140), registro: c.agente.registro.slice(-10) })
+    // «PASO 3: …»: el agente anuncia cada paso del plan y el chat lo marca (nunca hacia atrás).
+    const paso = c.fase === 'video' && c.agente.plan ? pasoAnunciado(linea, c.agente.plan.pasos.length) : null
+    if (paso && paso > (c.agente.paso ?? 0)) c.agente.paso = paso
+    enviarProgreso({
+      id: c.id,
+      fase: 'creacion',
+      pct,
+      texto: linea.slice(0, 140),
+      registro: c.agente.registro.slice(-10),
+      ...(c.agente.paso ? { paso: c.agente.paso } : {}),
+      ...(c.fase === 'video' && c.agente.plan?.pasos.length ? { pasos: c.agente.plan.pasos } : {})
+    })
+  }
+  /** Una frase con la voz de Gemini del usuario (su clave de AI Studio o su cuenta de Google). */
+  const generarFraseVoz = async (texto: string, voz: string, salida: string): Promise<void> => {
+    const clave = await ajustes.claveVoz()
+    if (clave) return generarVozGemini(texto, voz, clave, salida)
+    if (!estadoVozGoogle().correo) throw new Error('no hay una cuenta de Google ni una clave de AI Studio conectada (Ajustes → Voz)')
+    return generarVozGoogle(texto, voz, salida)
   }
   ipcMain.handle('agente:plan', (_evento, id: unknown, pedido: unknown) =>
     conCreacion(id, async (c, senal) => {
@@ -410,14 +430,21 @@ app.whenReady().then(() => {
       enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.1, texto: 'El agente está mirando tus archivos' })
       try {
         const desde = Date.now()
-        const plan = await pasoPlan(c, creaciones.carpeta(c.id), await configParaTarea(c.tareas?.video), (l) => avisarAgente(c, l, pctPorTiempo(desde, 180)), senal)
-        c.agente = { ...(c.agente ?? { registro: [], rondas: 0 }), plan }
+        const { plan, sesion } = await pasoPlan(c, creaciones.carpeta(c.id), await configParaTarea(c.tareas?.video), (l) => avisarAgente(c, l, pctPorTiempo(desde, 180)), senal)
+        // La conversación queda viva: «Hazlo» y cada cambio la retoman (no se vuelve a mirar todo).
+        c.agente = { ...(c.agente ?? { registro: [], rondas: 0 }), plan, ...(sesion ? { sesion } : {}) }
         const partes = [plan.entendi, ...plan.pasos.map((p, i) => `${i + 1}. ${p}`)]
         if (plan.preguntas.length) partes.push(`Antes de hacerlo: ${plan.preguntas.join(' ')}`)
+        // «Hazlo directo»: sin preguntas pendientes, empieza sin esperar la aprobación.
+        const directo = c.directo === true && !plan.preguntas.length && !c.agente.resultado
         c.mensajes.push({
           ...mensaje('agente', partes.join('\n')),
-          propuestas: plan.preguntas.length ? [] : ['Hazlo']
+          propuestas: plan.preguntas.length || directo ? [] : ['Hazlo']
         })
+        if (directo) {
+          creaciones.guardar(c)
+          await hacerConAgente(c, senal)
+        }
       } catch (e) {
         if (esParado(e)) c.mensajes.push(mensaje('agente', 'Lo paraste. Cuando quieras, escríbeme qué hacemos.'))
         else c.mensajes.push(mensaje('agente', `No pude preparar el plan: ${textoError(e)}`, true))
@@ -430,20 +457,32 @@ app.whenReady().then(() => {
     conCreacion(id, async (c, senal) => {
       const texto = typeof pedido === 'string' && pedido.trim() ? pedido.trim().slice(0, 2000) : undefined
       if (texto) c.mensajes.push(mensaje('usuario', texto))
+      await hacerConAgente(c, senal, texto)
+      enviarProgreso({ id: c.id, fase: 'creacion', pct: 1, texto: 'Listo' })
+      return creaciones.guardar(c)
+    })
+  )
+  /** El agente hace (o cambia) el video, Recorte lo revisa y lo deja publicado en la creación. */
+  async function hacerConAgente(c: Creacion, senal: AbortSignal, texto?: string): Promise<void> {
       const faseAntes = c.fase
       c.fase = 'video'
       if (!c.agente) c.agente = { registro: [], rondas: 0 }
       c.agente.registro = []
+      delete c.agente.paso
       creaciones.guardar(c)
       const carpeta = creaciones.carpeta(c.id)
       const config = await configParaTarea(c.tareas?.video)
+      // Mientras trabaja, Recorte atiende sus pedidos de voz con la voz elegida en la caja.
+      const pararVoz = atenderVoz(join(carpeta, 'trabajo'), c.vozElegida, generarFraseVoz, (l) => avisarAgente(c, l, 0.5))
       try {
         enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.05, texto: 'El agente está trabajando' })
         // Si pide un cambio sobre lo hecho, va como pedido; si solo aprobó el plan, sin pedido.
         const cambio = texto && !esAprobacion(texto) ? texto : undefined
         const desde = Date.now()
         try {
-          await pasoHacer(c, carpeta, config, cambio, (l) => avisarAgente(c, l, pctPorTiempo(desde, 480)), senal)
+          const turno = await pasoHacer(c, carpeta, config, cambio, (l) => avisarAgente(c, l, pctPorTiempo(desde, 480)), senal)
+          if (turno.sesion) c.agente.sesion = turno.sesion
+          creaciones.guardar(c)
         } catch (e) {
           // Si el agente falló al salir pero ya dejó un video nuevo, se revisa igual: no se
           // tira el trabajo (ni los créditos) por un error al cerrar.
@@ -456,7 +495,8 @@ app.whenReady().then(() => {
         if (revisado.problemas.length) {
           // Recorte encontró algo mal: el agente lo corrige una vez.
           avisarAgente(c, `Recorte revisó y encontró: ${revisado.problemas.join(' ')}`, 0.85)
-          await pasoHacer(c, carpeta, config, `La revisión de Recorte encontró problemas en tu entrega: ${revisado.problemas.join(' ')} Corrígelo y vuelve a entregar.`, (l) => avisarAgente(c, l, 0.9), senal)
+          const turno = await pasoHacer(c, carpeta, config, `La revisión de Recorte encontró problemas en tu entrega: ${revisado.problemas.join(' ')} Corrígelo y vuelve a entregar.`, (l) => avisarAgente(c, l, 0.9), senal, true)
+          if (turno.sesion) c.agente.sesion = turno.sesion
           revisado = await revisarYPublicar(c, carpeta, c.version + 1, desde)
         }
         if (!revisado.resultado) throw new Error(revisado.problemas.join(' '))
@@ -478,11 +518,10 @@ app.whenReady().then(() => {
         c.fase = c.agente?.resultado ? 'listo' : faseAntes === 'video' ? 'plan' : faseAntes
         if (esParado(e)) c.mensajes.push(mensaje('agente', c.agente?.resultado ? 'Lo paraste. La versión anterior sigue intacta.' : 'Lo paraste. El plan sigue aquí.'))
         else c.mensajes.push(mensaje('agente', `No pude terminarlo: ${textoError(e)}`, true))
+      } finally {
+        pararVoz()
       }
-      enviarProgreso({ id: c.id, fase: 'creacion', pct: 1, texto: 'Listo' })
-      return creaciones.guardar(c)
-    })
-  )
+  }
 
   ipcMain.handle('estilo:continuar', (_evento, id: unknown) =>
     conCreacion(id, async (c) => {
@@ -703,7 +742,24 @@ app.whenReady().then(() => {
     c.proyectoEditor = ingesta.project.id
     c.editorSalida = c.salida
     creaciones.guardar(c)
-    return ingesta.project
+    // Si el agente lo hizo con el kit, su receta se abre como timeline: cada foto, rótulo,
+    // frase de voz y la música quedan sueltos en su pista. Si no, entra el video entero.
+    const receta = c.modo === 'agente' ? c.agente?.resultado?.receta : undefined
+    if (receta) {
+      try {
+        const carpeta = creaciones.carpeta(id)
+        const p = ingesta.project
+        const armado = await proyectoDesdeReceta(join(carpeta, receta), join(carpeta, 'trabajo'), proyectos.carpeta(p.id), p.source.duration)
+        if (armado) {
+          p.medios = armado.medios
+          p.timeline = armado.timeline
+          proyectos.save(p)
+        }
+      } catch {
+        // Con una receta que no se puede leer, el editor abre el video entero, como antes.
+      }
+    }
+    return proyectos.abrir(ingesta.project.id) ?? ingesta.project
   })
   // ===== Voz de las creaciones =====
   ipcMain.handle('voz:estado', async () => ({ ...(await ajustes.estadoVoz()), google: estadoVozGoogle() }))
@@ -880,6 +936,27 @@ app.whenReady().then(() => {
     actual.medios = [...(actual.medios ?? []), ...nuevos]
     proyectos.save(actual)
     return { project: actual, agregados: nuevos.map((m) => m.id), fallos }
+  })
+  // Una frase de narración hecha a mano en el editor: con el texto y la voz que diga el usuario,
+  // sin pasar por el agente (no gasta sus créditos). El audio queda en la carpeta del proyecto.
+  ipcMain.handle('proyecto:voz-frase', async (_evento, id: unknown, pedido: unknown) => {
+    if (typeof id !== 'string' || !proyectos.get(id)) throw new Error('El proyecto ya no existe.')
+    const x = (pedido ?? {}) as { texto?: unknown; voz?: unknown }
+    const texto = typeof x.texto === 'string' ? x.texto.replace(/\s+/g, ' ').trim().slice(0, 600) : ''
+    if (!texto) throw new Error('Escribe lo que tiene que decir.')
+    const voz = typeof x.voz === 'string' && VOCES_GEMINI.some((v) => v.id === x.voz) ? x.voz : ((await ajustes.estadoVoz()).vozGemini ?? 'Kore')
+    const media = join(proyectos.carpeta(id), 'media')
+    mkdirSync(media, { recursive: true })
+    const nombre = `voz-${randomUUID().slice(0, 8)}.wav`
+    try {
+      await generarFraseVoz(texto, voz, join(media, nombre))
+    } catch (e) {
+      throw new Error(`No pude generar la voz: ${textoError(e)}`)
+    }
+    const duracion = Math.round((await duracionMedio(join(media, nombre))) * 100) / 100
+    if (!(duracion > 0)) throw new Error('La voz salió vacía. Inténtalo otra vez.')
+    await ajustes.guardarVoz({ vozGemini: voz })
+    return { archivo: `media/${nombre}`, duracion, texto, voz }
   })
   ipcMain.handle('proyecto:quitar-medio', (_evento, id: unknown, medio: unknown) => {
     if (typeof id !== 'string' || typeof medio !== 'string') throw new Error('Datos inválidos.')
@@ -1647,6 +1724,12 @@ app.whenReady().then(() => {
           senal,
           bloqueGustos()
         )
+        // La voz que pidió cambiar o añadir se genera aquí, antes de aplicar nada: así la
+        // interfaz recibe las frases con su audio listo y todo entra en un solo paso de deshacer.
+        if (turno.ok && turno.operaciones.some((o) => o.op === 'cambiar_voz' || o.op === 'anadir_voz')) {
+          const fallosVoz = await generarVocesDelChat(id, normalizarTimeline(timeline, proyecto.source.duration, duracionesDeMedios(proyecto.medios)), turno.operaciones)
+          if (fallosVoz.length) turno.mensaje = `${turno.mensaje}\n\nNo pude generar la voz: ${fallosVoz.join(' ')}`
+        }
         // Solo se guarda lo nuevo; lo que ya sabía se confirma (suma una vez más).
         if (turno.aprendido?.length) turno.aprendido = agregarGustos(turno.aprendido, 'aprendido').map((g) => g.texto)
         return turno
@@ -1655,6 +1738,43 @@ app.whenReady().then(() => {
       }
     }
   )
+  /**
+   * Genera el audio de las frases que el agente del chat quiere cambiar o añadir y se lo pone
+   * a cada operación (`audio`). Con la voz que pidió, la que ya tenía la frase o la del resto
+   * de la narración. Devuelve lo que no se pudo generar.
+   */
+  async function generarVocesDelChat(id: string, tl: Timeline, ops: OperacionTL[]): Promise<string[]> {
+    const fallos: string[] = []
+    const media = join(proyectos.carpeta(id), 'media')
+    mkdirSync(media, { recursive: true })
+    const valida = (v?: string) => (v && VOCES_GEMINI.some((x) => x.id === v) ? v : undefined)
+    // La voz de la narración: la más usada en sus frases; si no hay, la última que eligió el usuario.
+    const cuenta = new Map<string, number>()
+    for (const v of tl.voces ?? []) if (v.voz) cuenta.set(v.voz, (cuenta.get(v.voz) ?? 0) + 1)
+    const deLaNarracion = [...cuenta.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? (await ajustes.estadoVoz()).vozGemini ?? 'Kore'
+    for (const o of ops) {
+      if (o.op !== 'cambiar_voz' && o.op !== 'anadir_voz') continue
+      const frase = o.op === 'cambiar_voz' ? tl.voces?.[Math.round(o.voz_n) - 1] : undefined
+      if (o.op === 'cambiar_voz' && (!frase || (o.texto === undefined && o.voz === undefined))) continue
+      const texto = o.texto ?? frase?.texto ?? ''
+      const voz = valida(o.voz) ?? valida(frase?.voz) ?? deLaNarracion
+      if (!texto.trim()) {
+        fallos.push(`la frase ${o.op === 'cambiar_voz' ? o.voz_n : 'nueva'} no dice nada.`)
+        continue
+      }
+      const nombre = `voz-${randomUUID().slice(0, 8)}.wav`
+      try {
+        await generarFraseVoz(texto, voz, join(media, nombre))
+        const duracion = Math.round((await duracionMedio(join(media, nombre))) * 100) / 100
+        if (!(duracion > 0)) throw new Error('salió vacía')
+        o.audio = { archivo: `media/${nombre}`, duracion, voz, texto }
+      } catch (e) {
+        fallos.push(`«${texto.slice(0, 60)}» (${textoError(e)}).`)
+      }
+    }
+    return fallos
+  }
+
   // Parar al agente del chat: corta su proceso (o la petición a la API) al instante.
   ipcMain.handle('agente:parar', (_evento, id: unknown) => typeof id === 'string' && pararTrabajo(`chat:${id}`))
 

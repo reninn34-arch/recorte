@@ -1,0 +1,264 @@
+import { randomUUID } from 'node:crypto'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import { basename, extname, join, resolve, sep } from 'node:path'
+import {
+  duracionesDeMedios,
+  FUENTE_PRINCIPAL,
+  normalizarTimeline,
+  nuevoId,
+  type ClipTL,
+  type TextoTL,
+  type Timeline,
+  type VozTL
+} from '../shared/timeline'
+import type { MedioProyecto } from '../shared/types'
+import { resolverBinario } from './binarios'
+import { ejecutar } from './crear'
+import { duracionMedio, probeVideo } from './ffmpeg'
+
+/**
+ * De la receta del agente al editor. El agente hace el video con el kit a partir de una
+ * receta (qué foto o video, cuándo, con qué rótulo, la voz frase a frase, la música). Aquí esa
+ * receta se vuelve una timeline: cada recurso queda en su pista y se toca a mano, sin volver
+ * a pedirle nada al agente.
+ *
+ * Lo que la timeline todavía no sabe hacer (un antes/después, un collage, una frase sobre
+ * fondo liso, o cualquier cosa que el agente programó aparte) entra como un tramo del video
+ * ya renderizado: no se pierde, solo es menos editable. Ese video es el «principal» del proyecto.
+ */
+
+const EXT_IMAGEN = ['.png', '.jpg', '.jpeg', '.webp']
+const EXT_VIDEO = ['.mp4', '.mov', '.webm', '.mkv', '.m4v']
+const MIN = 0.1
+
+type Momento = Record<string, unknown> & { tipo: string; desde: number; hasta: number }
+
+const num = (x: unknown, defecto: number): number => (typeof x === 'number' && Number.isFinite(x) ? x : defecto)
+const pinza = (v: number, min: number, max: number): number => Math.min(max, Math.max(min, v))
+
+export interface ProyectoDeReceta {
+  medios: MedioProyecto[]
+  timeline: Timeline
+  /** Cuántos tramos quedaron sueltos y cuántos como video ya hecho (para decírselo al usuario). */
+  editables: number
+  fijos: number
+}
+
+/** La ruta de un archivo de la receta, solo si existe y está dentro de la carpeta de trabajo. */
+function dentro(trabajo: string, relativa: unknown): string | null {
+  if (typeof relativa !== 'string' || !relativa.trim()) return null
+  const ruta = resolve(trabajo, relativa)
+  const base = resolve(trabajo)
+  if (!ruta.toLowerCase().startsWith((base.endsWith(sep) ? base : base + sep).toLowerCase())) return null
+  return existsSync(ruta) ? ruta : null
+}
+
+/** Lo que dice cada audio de voz, según las respuestas que Recorte dejó en `voz/`. */
+function textosDeVoz(trabajo: string): Map<string, { texto: string; voz?: string }> {
+  const mapa = new Map<string, { texto: string; voz?: string }>()
+  const dir = join(trabajo, 'voz')
+  if (!existsSync(dir)) return mapa
+  for (const n of readdirSync(dir)) {
+    if (!/^respuesta-[\w-]+\.json$/.test(n)) continue
+    try {
+      const r = JSON.parse(readFileSync(join(dir, n), 'utf8')) as { voz?: string; frases?: { texto?: string; archivo?: string }[] }
+      for (const f of r.frases ?? []) {
+        if (typeof f.archivo === 'string' && typeof f.texto === 'string') mapa.set(f.archivo.replace(/\\/g, '/'), { texto: f.texto, ...(r.voz ? { voz: r.voz } : {}) })
+      }
+    } catch {
+      // Una respuesta rota solo deja esa frase sin su texto.
+    }
+  }
+  return mapa
+}
+
+/**
+ * Convierte la receta en medios y timeline. `duracionFinal` es lo que dura el video que
+ * entregó el agente (el principal). Devuelve null si la receta no se puede leer o no trae
+ * nada que montar: entonces el video entra entero, como siempre.
+ */
+export async function proyectoDesdeReceta(
+  rutaReceta: string,
+  trabajo: string,
+  carpetaProyecto: string,
+  duracionFinal: number
+): Promise<ProyectoDeReceta | null> {
+  let receta: Record<string, unknown>
+  try {
+    receta = JSON.parse(readFileSync(rutaReceta, 'utf8')) as Record<string, unknown>
+  } catch {
+    return null
+  }
+  const total = Math.min(num(receta.duracion, duracionFinal), duracionFinal)
+  if (!(total > MIN)) return null
+  const momentos: Momento[] = (Array.isArray(receta.momentos) ? receta.momentos : [])
+    .filter((m): m is Record<string, unknown> => Boolean(m) && typeof m === 'object')
+    .map((m) => ({ ...m, tipo: String(m.tipo ?? ''), desde: pinza(num(m.desde, 0), 0, total), hasta: pinza(num(m.hasta, total), 0, total) }))
+    .filter((m) => m.hasta - m.desde >= MIN)
+    .sort((a, b) => a.desde - b.desde)
+  // Las frases que oscurecen lo de debajo van encima de otra cosa: son rótulos. Lo demás llena la pantalla.
+  const encima = momentos.filter((m) => m.tipo === 'texto' && num(m.oscurecer, 0) > 0)
+  const base = momentos.filter((m) => !encima.includes(m))
+  if (!base.length) return null
+
+  const frases = (Array.isArray(receta.voz) ? receta.voz : []).filter((v): v is Record<string, unknown> => Boolean(v) && typeof v === 'object')
+  const hayPistasDeAudio = frases.length > 0 || Boolean(receta.musica)
+  const medios: MedioProyecto[] = []
+  const porRuta = new Map<string, MedioProyecto>()
+  const medioDe = async (ruta: string): Promise<MedioProyecto | null> => {
+    const ya = porRuta.get(ruta)
+    if (ya) return ya
+    const ext = extname(ruta).toLowerCase()
+    const tipo = EXT_IMAGEN.includes(ext) ? 'imagen' : EXT_VIDEO.includes(ext) ? 'video' : null
+    if (!tipo) return null
+    try {
+      const info = await probeVideo(ruta)
+      const m: MedioProyecto = {
+        id: `m-${randomUUID().slice(0, 8)}`,
+        ruta,
+        nombre: basename(ruta),
+        tipo,
+        duracion: tipo === 'imagen' ? 0 : info.duration,
+        ancho: info.width,
+        alto: info.height,
+        conAudio: tipo === 'video' && info.hasAudio
+      }
+      porRuta.set(ruta, m)
+      medios.push(m)
+      return m
+    } catch {
+      return null
+    }
+  }
+
+  const clips: ClipTL[] = []
+  const textos: TextoTL[] = []
+  // Cómo se ve el kit: cada momento entra fundiéndose sobre el anterior (`transicion`), las fotos
+  // crecen despacio (un 6 %) y los rótulos van sin caja, con su letra y su color.
+  const transicion = pinza(num(receta.transicion, 0.22), 0, 1.5)
+  const colorTexto = typeof receta.color_texto === 'string' && /^#[0-9a-f]{6}$/i.test(receta.color_texto) ? receta.color_texto.toLowerCase() : undefined
+  const fuenteTexto = ({ fina: 'fina', normal: 'normal', negrita: 'normal', gruesa: 'gruesa' } as Record<string, string>)[String(receta.fuente ?? 'fina')] ?? 'fina'
+  const estiloRotulo = { sinCaja: true, ...(colorTexto ? { color: colorTexto } : {}), ...(fuenteTexto !== 'normal' ? { fuente: fuenteTexto } : {}) }
+  let editables = 0
+  let fijos = 0
+  /** Un tramo del video ya hecho (lo que no se puede dejar suelto). */
+  const fijo = (a: number, b: number) => {
+    if (b - a < MIN) return
+    clips.push({ id: nuevoId('clip'), fuente: FUENTE_PRINCIPAL, entrada: a, salida: b, ...(hayPistasDeAudio ? { mudo: true } : {}) })
+    fijos += 1
+  }
+
+  // Cada momento dura hasta que entra el siguiente (en el kit se funden; aquí van uno tras otro).
+  if (base[0].desde > MIN) fijo(0, base[0].desde)
+  for (const [i, m] of base.entries()) {
+    const a = m.desde
+    const b = i + 1 < base.length ? Math.max(a, base[i + 1].desde) : total
+    const largo = b - a
+    if (largo < MIN) continue
+    const ruta = m.tipo === 'foto' || m.tipo === 'video' ? dentro(trabajo, m.archivo) : null
+    const medio = ruta ? await medioDe(ruta) : null
+    const e = (m.encuadre ?? {}) as { zoom?: unknown; cx?: unknown; cy?: unknown }
+    const encuadre = {
+      zoom: pinza(num(e.zoom, 1), 1, 2),
+      cx: pinza(num(e.cx, 0.5), 0, 1),
+      cy: pinza(num(e.cy, 0.5), 0, 1)
+    }
+    const fundido = clips.length > 0 && transicion >= 0.1 ? { fundido: transicion } : {}
+    if (medio && m.tipo === 'foto' && medio.tipo === 'imagen') {
+      clips.push({
+        id: nuevoId('clip'),
+        fuente: medio.id,
+        entrada: 0,
+        salida: largo,
+        ajustes: { ...encuadre, ...(m.acercar === false ? {} : { acercar: 0.06 }) },
+        ...fundido
+      })
+      editables += 1
+    } else if (medio && m.tipo === 'video' && medio.tipo === 'video' && num(m.inicio, 0) + largo <= medio.duracion + 0.05) {
+      const inicio = Math.max(0, num(m.inicio, 0))
+      // En el kit los clips van sin su sonido; si el usuario lo quiere, lo activa en el editor.
+      clips.push({ id: nuevoId('clip'), fuente: medio.id, entrada: inicio, salida: Math.min(medio.duracion, inicio + largo), mudo: true, ajustes: encuadre, ...fundido })
+      editables += 1
+    } else {
+      fijo(a, b)
+      continue
+    }
+    if (typeof m.rotulo === 'string' && m.rotulo.trim()) {
+      textos.push({ id: nuevoId('texto'), inicio: a, duracion: largo, texto: m.rotulo.trim(), posicion: m.rotulo_pos === 'abajo' ? 'abajo' : 'arriba', ...estiloRotulo })
+    }
+  }
+  for (const m of encima) {
+    const lineas = (Array.isArray(m.lineas) ? m.lineas : []).filter((l): l is string => typeof l === 'string' && Boolean(l.trim()))
+    if (!lineas.length) continue
+    // La línea que el kit destaca va más grande: aquí, todo el rótulo un poco más grande.
+    textos.push({
+      id: nuevoId('texto'),
+      inicio: m.desde,
+      duracion: m.hasta - m.desde,
+      texto: lineas.join('\n'),
+      posicion: 'centro',
+      ...estiloRotulo,
+      ...(typeof m.destacar === 'number' ? { tamano: 1.3 } : {})
+    })
+  }
+  if (!editables) return null
+
+  const media = join(carpetaProyecto, 'media')
+  mkdirSync(media, { recursive: true })
+
+  // La narración: cada frase, con su audio copiado al proyecto (así el proyecto no depende de la carpeta del agente).
+  const dichos = textosDeVoz(trabajo)
+  const voces: VozTL[] = []
+  for (const [i, f] of frases.entries()) {
+    const ruta = dentro(trabajo, f.archivo)
+    if (!ruta) continue
+    const nombre = `voz-${String(i + 1).padStart(2, '0')}-${randomUUID().slice(0, 6)}${extname(ruta).toLowerCase() || '.wav'}`
+    try {
+      copyFileSync(ruta, join(media, nombre))
+      const duracion = await duracionMedio(ruta)
+      if (!(duracion > 0)) continue
+      const dicho = dichos.get(String(f.archivo).replace(/\\/g, '/'))
+      voces.push({
+        id: nuevoId('voz'),
+        inicio: Math.max(0, num(f.en, 0)),
+        duracion: Math.round(duracion * 100) / 100,
+        archivo: `media/${nombre}`,
+        texto: dicho?.texto ?? '',
+        ...(typeof f.volumen === 'number' ? { volumen: f.volumen } : {}),
+        ...(dicho?.voz ? { voz: dicho.voz } : {})
+      })
+    } catch {
+      // Una frase que no se pudo copiar se queda fuera; las demás siguen.
+    }
+  }
+
+  // La música: el trozo que usó el agente, ya recortado, como pista del editor.
+  let musica: Timeline['musica']
+  const m = receta.musica as Record<string, unknown> | undefined
+  const rutaMusica = m ? dentro(trabajo, m.archivo) : null
+  if (m && rutaMusica) {
+    const desde = Math.max(0, num(m.desde, 0))
+    const hasta = typeof m.hasta === 'number' ? m.hasta : undefined
+    const nombre = `musica-${randomUUID().slice(0, 6)}.m4a`
+    const ffmpeg = resolverBinario('ffmpeg') ?? 'ffmpeg'
+    const r = await ejecutar(
+      [`"${ffmpeg}"`, '-y', '-v', 'error', '-ss', desde.toFixed(3), ...(hasta !== undefined && hasta > desde ? ['-t', (hasta - desde).toFixed(3)] : []),
+        '-i', `"${rutaMusica}"`, '-vn', '-c:a', 'aac', '-b:a', '192k', `"${join(media, nombre)}"`],
+      carpetaProyecto,
+      120_000
+    )
+    if (r.codigo === 0 && existsSync(join(media, nombre))) {
+      musica = {
+        archivo: `media/${nombre}`,
+        nombre: basename(rutaMusica),
+        // El kit baja la música a 0.25 cuando hay voz, fija; aquí queda igual, sin subir y bajar.
+        volumen: pinza(num(m.volumen, frases.length ? 0.25 : 1), 0, 1),
+        ducking: false
+      }
+    }
+  }
+
+  const timeline = normalizarTimeline({ version: 1, clips, textos, voces, ...(musica ? { musica } : {}) }, duracionFinal, duracionesDeMedios(medios))
+  if (!timeline.clips.length) return null
+  return { medios, timeline, editables, fijos }
+}

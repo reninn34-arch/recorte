@@ -9,6 +9,30 @@ import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
 
 /**
+ * Los pasos del plan dentro del chat, marcándose mientras el agente trabaja: los que ya pasó,
+ * con su marca; el que hace ahora, resaltado; los demás, pendientes. El agente anuncia cada
+ * paso («PASO 3: …») y así se sabe por dónde va sin cambiar de pantalla.
+ */
+function PasosPlan({ pasos, actual }: { pasos: string[]; actual: number }) {
+  return (
+    <div className="chat-msg agente chat-pasos">
+      <ol>
+        {pasos.map((p, i) => {
+          const n = i + 1
+          const estado = n < actual ? 'is-hecho' : n === actual ? 'is-actual' : ''
+          return (
+            <li key={i} className={estado}>
+              <span className="chat-paso-marca">{n < actual ? <Icon name="check" size={11} /> : null}</span>
+              <span>{p}</span>
+            </li>
+          )
+        })}
+      </ol>
+    </div>
+  )
+}
+
+/**
  * El estudio de una creación con IA. Arriba las fases; a la izquierda la conversación
  * (cada mensaje actualiza el guion y, si ya hay video, también la voz y las escenas);
  * al centro lo que hay ahora: el guion por escenas o el video. Al final, el video entra
@@ -37,7 +61,7 @@ export function EstudioCreacion({
   trabajando: boolean
   /** Cuándo empezó a trabajar el agente (ms): el reloj sigue aunque salgas y vuelvas. */
   desde?: number
-  progreso: { pct: number; texto?: string; registro?: string[] } | null
+  progreso: { pct: number; texto?: string; registro?: string[]; paso?: number; pasos?: string[] } | null
   onGuion: (pedido?: string) => void
   onVideo: (pedido?: string) => void
   onEditor: () => void
@@ -121,6 +145,7 @@ export function EstudioCreacion({
           <strong>{c.guion?.titulo ?? c.nombre}</strong>
           <span>
             {estiloEditorial.nombre} · {c.formato === 'vertical' ? 'Vertical 9:16' : 'Horizontal 16:9'} · {c.duracion} s
+            {c.modo === 'agente' ? ` · ${c.vozElegida ? `Voz ${c.vozElegida}` : 'Sin voz'}` : ''}
           </span>
         </div>
         <div className="estudio-fases">
@@ -166,6 +191,9 @@ export function EstudioCreacion({
                 ) : null}
               </div>
             ))}
+            {modoAgente && trabajando && progreso?.pasos?.length ? (
+              <PasosPlan pasos={progreso.pasos} actual={progreso.paso ?? 0} />
+            ) : null}
             {trabajando && (
               <div className="chat-msg agente pensando">
                 <span className="chat-puntos">

@@ -54,7 +54,7 @@ export function CrearIA({
         <p className="crear-sub">
           {elegido && elegido.id !== 'libre'
             ? elegido.descripcion
-            : 'Cuéntaselo como a un editor. Primero te propone el guion; el video se hace cuando lo apruebes.'}
+            : 'Cuéntaselo como a un editor. Elige quién lo hace y con qué voz; lo ves avanzar paso a paso en el chat.'}
         </p>
 
         <CajaCrear agentes={agentes} creando={creando} estilo={estilo} onCrear={onCrear} onConectar={onConectar} />

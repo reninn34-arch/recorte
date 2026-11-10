@@ -56,7 +56,13 @@ export function armarPrompt(
     gustos,
     '',
     'ESTADO ACTUAL DE LA TIMELINE',
-    describirTimelineParaAgente(timeline, proyecto.transcript, proyecto.source.duration),
+    describirTimelineParaAgente(
+      timeline,
+      proyecto.transcript,
+      proyecto.source.duration,
+      30_000,
+      Object.fromEntries((proyecto.medios ?? []).map((m) => [m.id, `${m.tipo === 'imagen' ? 'imagen' : 'video'} «${m.nombre}»`]))
+    ),
     '',
     'CONVERSACIÓN HASTA AHORA',
     conversacion(historial),

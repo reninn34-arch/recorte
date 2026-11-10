@@ -1,6 +1,4 @@
-import { spawn } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, isAbsolute, join, resolve, sep } from 'node:path'
 import type { Creacion } from '../shared/creacion'
 import {
@@ -9,13 +7,14 @@ import {
   validarPlan,
   type EstadoModoAgente,
   type PlanAgente,
-  type ResultadoAgente
+  type ResultadoAgente,
+  type SesionAgente
 } from '../shared/modoagente'
-import { agenteDeOrden } from './agentes'
-import { pathAmpliado, resolverBinario } from './binarios'
+import { resolverBinario } from './binarios'
 import { ejecutar } from './crear'
 import { probeVideo } from './ffmpeg'
-import { entornoParaAgente, extraerJson, falloDeAgente, matarArbol, Parado, rechazoPorPolitica } from './ia'
+import { extraerJson, falloDeAgente, Parado, rechazoPorPolitica } from './ia'
+import { agenteConHerramientas, SesionPerdida, turnoAgente } from './turnoagente'
 import { buscarPython, rutaScriptPython } from './transcribir'
 
 /**
@@ -163,11 +162,22 @@ Escribe código propio solo para lo que el kit no tenga, y aun así usa el kit p
    \`revision/\`, MÍRALOS y mide lo que se pueda (duración, tamaño, que nada se recorte, que el croma siga
    uniforme si lo hay). Si algo falla, corrígelo y vuelve a comprobar. No entregues sin mirar.
 7. **Entrega** escribiendo \`resultado.json\` en esta carpeta:
-   \`{"archivo": "salida/<nombre>", "resumen": "qué hiciste, en 1-3 frases", "comprobaciones": ["qué comprobaste y cómo salió", "…"]}\`
+   \`{"archivo": "salida/<nombre>", "receta": "receta.json", "resumen": "qué hiciste, en 1-3 frases", "comprobaciones": ["qué comprobaste y cómo salió", "…"]}\`
+   (\`receta\` solo si lo hiciste con el kit: con ella el usuario abre cada foto, rótulo y frase de voz suelta en su editor para retocarla a mano. Por eso, si el kit alcanza, úsalo.)
 
 ## Formato por defecto (salvo que el pedido diga otra cosa)
 Video ${ancho}×${alto} (${c.formato === 'horizontal' ? '16:9' : '9:16 vertical'}), 30 fps, H.264 (libx264, yuv420p, \`-movflags +faststart\`), audio AAC si hay audio.
 Con croma en H.264 4:2:0, alinea los bordes del croma a píxeles pares (el color se guarda en bloques de 2×2).
+
+## La voz
+${
+    c.vozElegida && conKit
+      ? `El usuario eligió la voz «${c.vozElegida}». Si el video lleva narración (casi siempre que explica o cuenta algo), la
+genera Recorte con esa voz: escribe \`voz/narracion.txt\` (una frase por línea) y corre \`python kit/kit.py voz voz/narracion.txt\`.
+Te devuelve cada frase con su archivo y su duración: ajusta cada momento a su frase y ponlas en \`"voz"\` de la receta
+(lee «La voz» en \`kit/RECETA.md\`). No uses otra voz ni otro programa de voz. Si el video es solo música e imagen, no hace falta.`
+      : 'El usuario eligió hacer este video SIN voz: no pongas narración ni generes voz por tu cuenta.'
+  }
 
 ## Reglas
 - No salgas de esta carpeta, no borres nada de \`entrada/\` y no toques archivos del sistema.
@@ -184,78 +194,25 @@ Con croma en H.264 4:2:0, alinea los bordes del croma a píxeles pares (el color
 // ---------------------------------------------------------------------------
 
 /**
- * El comando para que el agente trabaje solo dentro de `cwd`, con herramientas y sin
- * preguntar. Null si ese agente no puede trabajar así (Antigravity por ACP, o una API).
+ * El agente que trabajará con herramientas en la carpeta, o null si ese no puede (una API).
+ * Antigravity va por ACP (Recorte le hace de «manos» solo dentro de su carpeta); los demás,
+ * por su CLI con su adaptador (`turnoagente.ts`).
  */
-export function comandoAgentico(base: string, cwd: string): { orden: string; agente: string } | null {
-  const agente = agenteDeOrden(base)
-  const b = base.trim()
-  switch (agente) {
-    case 'claude':
-      // acceptEdits: escribe solo dentro de su directorio de trabajo; stream-json para ver qué hace.
-      return {
-        agente,
-        orden: `${b} --permission-mode acceptEdits --allowedTools "Bash Read Write Edit Glob Grep" --output-format stream-json --verbose`
-      }
-    case 'kimi':
-      return { agente, orden: b.replace(/^kimi\b/, 'kimi --auto') }
-    case 'codex':
-      // workspace-write: el sandbox de Codex solo deja escribir en su carpeta. Lee el prompt de stdin (-).
-      return { agente, orden: `${b} --skip-git-repo-check -s workspace-write -C "${cwd}" -` }
-    case 'opencode':
-      return { agente, orden: `${b} --auto --dir "${cwd}"` }
-    case 'gemini': {
-      // `-p` lleva valor: sin él, el siguiente flag (`-m`, `--yolo`) se toma como el prompt.
-      // El pedido llega por stdin y `-p` se le suma al final (así lo documenta `gemini --help`).
-      const sinP = b.replace(/\s-p(?=\s|$)/, '')
-      return { agente, orden: `${sinP} --yolo -p "Sigue al pie de la letra las instrucciones de arriba."` }
-    }
-    case 'antigravity':
-      // Por ACP: Recorte le hace de «manos» (archivos y terminal) solo dentro de su carpeta.
-      return { agente, orden: b }
-    default:
-      return null
-  }
+export function comandoAgentico(base: string): { orden: string; agente: string; conSesion: boolean } | null {
+  const a = agenteConHerramientas(base)
+  return a ? { orden: base.trim(), ...a } : null
 }
 
-/** Una línea legible de un evento de stream-json de Claude Code (o null si no aporta). */
-export function describirEvento(linea: string): { texto?: string; final?: string; error?: string } | null {
-  let ev: Record<string, unknown>
-  try {
-    ev = JSON.parse(linea) as Record<string, unknown>
-  } catch {
-    const t = linea.trim()
-    return t ? { texto: t.slice(0, 200) } : null
-  }
-  if (ev.type === 'result') {
-    const res = typeof ev.result === 'string' ? ev.result : ''
-    // Claude marca los fallos (sesión caducada, límite del plan…) con is_error en el evento final.
-    if (ev.is_error === true) return { error: res || 'El agente terminó con un error.' }
-    return { final: res }
-  }
-  if (ev.type !== 'assistant') return null
-  const contenido = ((ev.message as { content?: unknown[] } | undefined)?.content ?? []) as Record<string, unknown>[]
-  for (const parte of contenido) {
-    if (parte.type === 'tool_use') {
-      const entrada = (parte.input ?? {}) as Record<string, unknown>
-      const detalle =
-        typeof entrada.description === 'string'
-          ? entrada.description
-          : typeof entrada.command === 'string'
-            ? entrada.command
-            : typeof entrada.file_path === 'string'
-              ? basename(entrada.file_path)
-              : ''
-      return { texto: `${parte.name}: ${String(detalle).replace(/\s+/g, ' ').slice(0, 160)}` }
-    }
-    if (parte.type === 'text' && typeof parte.text === 'string' && parte.text.trim()) {
-      return { texto: parte.text.replace(/\s+/g, ' ').trim().slice(0, 200) }
-    }
-  }
-  return null
+/** Lo que devuelve un turno del modo agente: la respuesta y la conversación para retomarla. */
+export interface TurnoModoAgente {
+  respuesta: string
+  sesion?: SesionAgente
 }
 
-/** Lanza al agente en su carpeta y devuelve lo que respondió al final. Se puede parar. */
+/**
+ * Lanza al agente en su carpeta. Con `sesion` (del mismo agente) retoma esa conversación;
+ * si ya no existe, empieza otra con `promptCompleto` (el pedido con todo el contexto).
+ */
 export async function trabajarAgente(
   orden: string,
   cwd: string,
@@ -264,155 +221,51 @@ export async function trabajarAgente(
   senal?: AbortSignal,
   timeoutMs = 40 * 60_000,
   imagenes: string[] = [],
-  entregaLista?: () => boolean
-): Promise<string> {
-  const respuesta = await lanzarAgente(orden, cwd, prompt, onLinea, senal, timeoutMs, imagenes, entregaLista)
-  // Un rechazo del filtro de contenido llega como respuesta «normal» y corta: dilo en claro.
-  const rechazo = respuesta.length < 1500 ? rechazoPorPolitica(respuesta) : null
-  if (rechazo) throw new Error(rechazo)
-  return respuesta
-}
-
-async function lanzarAgente(
-  orden: string,
-  cwd: string,
-  prompt: string,
-  onLinea: (texto: string) => void,
-  senal: AbortSignal | undefined,
-  timeoutMs: number,
-  imagenes: string[],
-  entregaLista?: () => boolean
-): Promise<string> {
-  if (senal?.aborted) throw new Parado()
-  if (orden.startsWith('antigravity:acp')) {
+  entregaLista?: () => boolean,
+  sesion?: SesionAgente,
+  promptCompleto = prompt
+): Promise<TurnoModoAgente> {
+  const cmd = comandoAgentico(orden)
+  if (!cmd) throw new Error('Este agente no sabe trabajar con herramientas en una carpeta.')
+  let turno: TurnoModoAgente
+  if (cmd.orden.startsWith('antigravity:acp')) {
     const [{ trabajarAntigravity }, { opcionesAntigravity }] = await Promise.all([import('./antigravity'), import('./modelos')])
-    return trabajarAntigravity(prompt, cwd, onLinea, senal, timeoutMs, imagenes, opcionesAntigravity(orden)).catch((e: unknown) => {
+    const respuesta = await trabajarAntigravity(promptCompleto, cwd, onLinea, senal, timeoutMs, imagenes, opcionesAntigravity(cmd.orden)).catch((e: unknown) => {
       if (e instanceof Parado) throw e
-      throw new Error(falloDeAgente(orden, e instanceof Error ? e.message : String(e)))
+      throw new Error(falloDeAgente(cmd.orden, e instanceof Error ? e.message : String(e)))
     })
+    turno = { respuesta }
+  } else {
+    const retomar = cmd.conSesion && sesion?.agente === cmd.agente ? sesion.id : undefined
+    const lanzar = (conSesion?: string) =>
+      turnoAgente({ base: cmd.orden, cwd, prompt: conSesion ? prompt : promptCompleto, sesion: conSesion, onLinea, senal, timeoutMs, entregaLista })
+    let r
+    try {
+      r = await lanzar(retomar)
+    } catch (e) {
+      // La conversación ya no está (otra cuenta, se borró): se empieza otra con todo el contexto.
+      if (!(e instanceof SesionPerdida)) throw e
+      onLinea('La conversación anterior del agente ya no está: empiezo una nueva con todo el contexto')
+      r = await lanzar(undefined)
+    }
+    const id = r.sesion ?? retomar
+    turno = {
+      respuesta: r.respuesta,
+      ...(id
+        ? {
+            sesion: {
+              agente: cmd.agente,
+              id,
+              ...(r.costoUsd !== undefined ? { costoUsd: r.costoUsd } : sesion?.costoUsd !== undefined ? { costoUsd: sesion.costoUsd } : {})
+            }
+          }
+        : {})
+    }
   }
-  let comando = orden
-  let archivoPrompt: string | null = null
-  if (comando.includes('{prompt}')) {
-    archivoPrompt = join(tmpdir(), `recorte-agente-${Date.now()}.txt`)
-    writeFileSync(archivoPrompt, prompt, 'utf8')
-    comando = comando.replaceAll('{prompt}', archivoPrompt)
-  }
-  const extra = await entornoParaAgente(comando)
-  return new Promise<string>((resolver, rechazar) => {
-    const hijo = spawn(comando, { cwd, shell: true, windowsHide: true, env: { ...process.env, ...extra, PATH: pathAmpliado() } })
-    let resto = ''
-    let todo = ''
-    let final: string | null = null
-    let errorFinal: string | null = null
-    let error = ''
-    let cerrado = false
-    const limpiar = () => {
-      if (archivoPrompt) {
-        try {
-          unlinkSync(archivoPrompt)
-        } catch {
-          // Se borra solo con el tiempo.
-        }
-      }
-    }
-    let ultimaSalida = Date.now()
-    let graciaFinal: ReturnType<typeof setTimeout> | null = null
-    const fin = (e?: Error) => {
-      if (cerrado) return
-      cerrado = true
-      clearTimeout(reloj)
-      clearInterval(vigia)
-      if (graciaFinal) clearTimeout(graciaFinal)
-      senal?.removeEventListener('abort', alParar)
-      limpiar()
-      if (e) rechazar(e)
-      else resolver(final ?? todo)
-    }
-    const reloj = setTimeout(() => {
-      matarArbol(hijo)
-      fin(new Error(`El agente tardó demasiado (${Math.round(timeoutMs / 60_000)} min).`))
-    }, timeoutMs)
-    const alParar = () => {
-      matarArbol(hijo)
-      fin(new Parado())
-    }
-    senal?.addEventListener('abort', alParar, { once: true })
-    // El agente ya dio su respuesta final (Claude: evento «result») pero no sale porque dejó
-    // algo de fondo (un servidor, un render, un shell): se le da un respiro y se cierra.
-    const alDarFinal = () => {
-      if (graciaFinal || cerrado) return
-      graciaFinal = setTimeout(() => {
-        if (cerrado) return
-        matarArbol(hijo)
-        terminar(0)
-      }, 10_000)
-    }
-    // Los agentes sin evento final (Codex, Kimi, Gemini, OpenCode): si ya escribió
-    // resultado.json con un archivo nuevo y lleva un rato callado, terminó aunque no salga.
-    const vigia = setInterval(() => {
-      if (cerrado || !entregaLista) return
-      if (Date.now() - ultimaSalida > 90_000 && entregaLista()) {
-        onLinea('El agente entregó y quedó esperando: Recorte cierra su sesión')
-        matarArbol(hijo)
-        terminar(0)
-      }
-    }, 5000)
-    hijo.stdout.on('data', (b: Buffer) => {
-      ultimaSalida = Date.now()
-      const t = b.toString('utf8')
-      todo += t
-      resto += t
-      const lineas = resto.split(/\r?\n/)
-      resto = lineas.pop() ?? ''
-      for (const l of lineas) {
-        const d = describirEvento(l)
-        if (d?.error) errorFinal = d.error
-        else if (d?.final !== undefined) {
-          final = d.final
-          alDarFinal()
-        } else if (d?.texto) onLinea(d.texto)
-      }
-    })
-    let restoErr = ''
-    hijo.stderr.on('data', (b: Buffer) => {
-      ultimaSalida = Date.now()
-      const t = b.toString('utf8')
-      error = (error + t).slice(-2000)
-      // Codex, Kimi y Gemini cuentan lo que hacen por stderr: que se vea el avance igual
-      // que con Claude (si no, la barra parece colgada durante minutos).
-      restoErr += t
-      const lineas = restoErr.split(/\r?\n/)
-      restoErr = lineas.pop() ?? ''
-      for (const l of lineas) {
-        const limpia = l.replace(/\x1b\[[0-9;]*m/g, '').trim()
-        if (limpia.length > 3 && !/^(\[?\d{4}-\d\d-\d\d|debug|trace)/i.test(limpia)) onLinea(limpia.slice(0, 160))
-      }
-    })
-    hijo.on('error', () => fin(new Error(`No pude lanzar el agente («${comando.slice(0, 60)}»).`)))
-    const terminar = (codigo: number | null) => {
-      if (cerrado) return
-      if (resto.trim()) {
-        const d = describirEvento(resto)
-        resto = ''
-        if (d?.error) errorFinal = d.error
-        else if (d?.final !== undefined) final = d.final
-      }
-      // Si ya respondió (evento final) o dejó su entrega, el código de salida no importa:
-      // pudo cerrarlo Recorte o morir al cerrar lo que dejó de fondo.
-      const yaEntrego = final !== null || Boolean(entregaLista?.())
-      const fallo = errorFinal ?? (codigo === 0 || yaEntrego ? null : (error.trim() || todo.trim()).slice(-300) || `El agente terminó con código ${codigo} sin decir nada.`)
-      if (fallo) fin(new Error(falloDeAgente(orden, fallo)))
-      else fin()
-    }
-    hijo.on('close', terminar)
-    // 'close' espera a que se cierre su salida, y un proceso que el agente dejó de fondo (un
-    // render, un servidor) la mantiene abierta: el agente ya terminó pero Recorte seguía
-    // esperando hasta el límite. Al salir el agente, se da un respiro para lo último y se cierra.
-    hijo.on('exit', (codigo) => setTimeout(() => terminar(codigo), 1500))
-    if (archivoPrompt) hijo.stdin.end()
-    else hijo.stdin.end(prompt, 'utf8')
-  })
+  // Un rechazo del filtro de contenido llega como respuesta «normal» y corta: dilo en claro.
+  const rechazo = turno.respuesta.length < 1500 ? rechazoPorPolitica(turno.respuesta) : null
+  if (rechazo) throw new Error(rechazo)
+  return turno
 }
 
 // ---------------------------------------------------------------------------
@@ -520,6 +373,13 @@ function contexto(c: Creacion): string {
   return `PEDIDO ORIGINAL DEL USUARIO:\n"""\n${c.peticion}\n"""\n\nArchivos en entrada/:\n${archivos}\n\nFormato elegido en la app: ${c.formato === 'horizontal' ? 'horizontal 16:9' : 'vertical 9:16'}, unos ${c.duracion} s (orientativo: manda lo que pida el usuario).${charla ? `\n\nConversación hasta ahora:\n${charla}` : ''}`
 }
 
+/** Lo último que dijo el usuario en la conversación (para el turno que retoma la sesión). */
+function ultimoDelUsuario(c: Creacion): string {
+  return [...c.mensajes].reverse().find((m) => m.rol === 'usuario')?.texto ?? ''
+}
+
+const FORMATO_PLAN = `{"entendi": "qué vas a hacer, en 1-2 frases, con los datos que mediste", "pasos": ["paso corto", "…"], "preguntas": ["solo si de verdad no puedes decidir algo importante"], "herramienta": "Kit de Recorte | FFmpeg | Python + FFmpeg | HyperFrames | …"}`
+
 /** Paso 1: el agente mira los archivos y propone un plan corto (o pregunta). No produce nada. */
 export async function pasoPlan(
   c: Creacion,
@@ -527,14 +387,14 @@ export async function pasoPlan(
   config: ConfigModoAgente,
   onLinea: (t: string) => void,
   senal?: AbortSignal
-): Promise<PlanAgente> {
+): Promise<{ plan: PlanAgente; sesion?: SesionAgente }> {
   const trabajo = carpetaTrabajo(carpeta)
-  const cmd = config.activa && config.proveedor === 'cli' ? comandoAgentico(config.comandoCli, trabajo) : null
+  const cmd = config.activa && config.proveedor === 'cli' ? comandoAgentico(config.comandoCli) : null
   if (!cmd) throw new Error('El modo agente necesita un agente que trabaje con herramientas (Claude Code, Antigravity, Kimi, Codex u OpenCode). Conéctalo en Inicio.')
   await escribirManual(carpeta, c)
   onLinea('Recorte prepara un vistazo de tus archivos')
   await prepararVistazo(c, carpeta)
-  const prompt = `Lee AGENTS.md (tu manual). Esto es SOLO EL PLAN: un vistazo rápido, de pocos minutos.
+  const completo = `Lee AGENTS.md (tu manual). Esto es SOLO EL PLAN: un vistazo rápido, de pocos minutos.
 Mira vistazo/LEEME.txt y las hojas de vistazo/ (miniaturas y fotogramas), entiende el pedido y propón cómo lo harás.
 TODAVÍA NO HAGAS EL VIDEO: no midas el audio a fondo, no hagas pruebas ni renders y no crees nada en salida/.
 Escribe en notas.md, en pocas líneas, lo que viste (qué es cada archivo y lo importante de cada uno) para usarlo después.
@@ -542,20 +402,24 @@ Escribe en notas.md, en pocas líneas, lo que viste (qué es cada archivo y lo i
 ${contexto(c)}
 
 Responde SOLO con JSON, sin texto alrededor:
-{"entendi": "qué vas a hacer, en 1-2 frases, con los datos que mediste", "pasos": ["paso corto", "…"], "preguntas": ["solo si de verdad no puedes decidir algo importante"], "herramienta": "Kit de Recorte | FFmpeg | Python + FFmpeg | HyperFrames | …"}`
-  const respuesta = await trabajarAgente(cmd.orden, trabajo, prompt, onLinea, senal, 30 * 60_000, await imagenesDeEntrada(c, carpeta))
+${FORMATO_PLAN}`
+  // Con la conversación viva (el usuario contestó a las preguntas del plan), basta con lo nuevo.
+  const corto = `El usuario contestó: «${ultimoDelUsuario(c)}». Ajusta el plan con eso (sigue SIN hacer el video: ya miraste los archivos, no lo repitas).
+Responde SOLO con JSON, sin texto alrededor:
+${FORMATO_PLAN}`
+  const turno = await trabajarAgente(cmd.orden, trabajo, corto, onLinea, senal, 30 * 60_000, await imagenesDeEntrada(c, carpeta), undefined, c.agente?.sesion, completo)
   let datos: unknown = null
   try {
-    datos = extraerJson(respuesta)
+    datos = extraerJson(turno.respuesta)
   } catch {
     // Sin JSON: que se vea lo que dijo el agente, no un error de formato.
   }
   const plan = validarPlan(datos)
   if (!plan) {
-    const dijo = respuesta.replace(/\s+/g, ' ').trim().slice(0, 300)
+    const dijo = turno.respuesta.replace(/\s+/g, ' ').trim().slice(0, 300)
     throw new Error(dijo ? `El agente no devolvió el plan. Dijo: «${dijo}»` : 'El agente no devolvió un plan.')
   }
-  return plan
+  return { plan, ...(turno.sesion ? { sesion: turno.sesion } : {}) }
 }
 
 /** Paso 2: el agente hace (o cambia) el video siguiendo el plan, se comprueba y entrega. */
@@ -565,10 +429,12 @@ export async function pasoHacer(
   config: ConfigModoAgente,
   pedido: string | undefined,
   onLinea: (t: string) => void,
-  senal?: AbortSignal
-): Promise<string> {
+  senal?: AbortSignal,
+  /** Lo pide la revisión de Recorte, no el usuario: corregir la entrega de esta ronda. */
+  esCorreccion = false
+): Promise<TurnoModoAgente> {
   const trabajo = carpetaTrabajo(carpeta)
-  const cmd = config.activa && config.proveedor === 'cli' ? comandoAgentico(config.comandoCli, trabajo) : null
+  const cmd = config.activa && config.proveedor === 'cli' ? comandoAgentico(config.comandoCli) : null
   if (!cmd) throw new Error('El modo agente necesita un agente que trabaje con herramientas (Claude Code, Antigravity, Kimi, Codex u OpenCode). Conéctalo en Inicio.')
   await escribirManual(carpeta, c)
   const resultadoJson = join(trabajo, 'resultado.json')
@@ -577,15 +443,20 @@ export async function pasoHacer(
   const hay = c.agente?.resultado
   await prepararVistazo(c, carpeta)
   const desde = Date.now()
+  const versionAnterior = hay ? hay.archivo.replace(/^salidas\//, '') : ''
+  // El chat marca los pasos del plan según estas líneas (`pasoAnunciado`).
+  const anunciar = plan?.pasos.length
+    ? `\nPara que el usuario vea cómo vas: al EMPEZAR cada paso del plan escribe una línea suelta «PASO n: lo que haces» (n del 1 al ${plan.pasos.length}, el número del paso).\n`
+    : ''
   // Un cambio sobre un video ya hecho no repite el método entero: toca solo lo pedido
   // (menos tiempo y menos créditos del plan del usuario).
-  const prompt =
+  const completo =
     hay && pedido
       ? `ESTO ES UN CAMBIO sobre un video que ya hiciste, no un video nuevo. Tu manual sigue en AGENTS.md por si lo necesitas.
 
 ${contexto(c)}
 
-YA HICISTE ESTA VERSIÓN: ${hay.archivo.replace(/^salidas\//, '')} (lo que dijiste: ${hay.resumen}). Tus archivos de trabajo (receta.json, scripts, composiciones) siguen en esta carpeta.
+YA HICISTE ESTA VERSIÓN: ${versionAnterior} (lo que dijiste: ${hay.resumen}). Tus archivos de trabajo (receta.json, scripts, composiciones) siguen en esta carpeta.
 
 LO QUE PIDE AHORA EL USUARIO: ${pedido}
 
@@ -597,10 +468,20 @@ Al terminar escribe resultado.json como dice el manual y termina (no dejes servi
       : `Lee AGENTS.md (tu manual) y sigue el método completo, del paso 1 al 7. Empieza por notas.md y vistazo/: no repitas lo que ya viste.
 
 ${contexto(c)}
-${plan ? `\nEL PLAN QUE EL USUARIO APROBÓ:\n${plan.entendi}\n${plan.pasos.map((p) => `- ${p}`).join('\n')}\n` : ''}${hay ? `\nYA HICISTE UNA VERSIÓN: ${hay.archivo.replace(/^salidas\//, '')} (lo que dijiste: ${hay.resumen}). Tus archivos de trabajo siguen en esta carpeta: parte de ellos y cambia solo lo que se pide, conservando lo que al usuario le gustó.\n` : ''}${pedido ? `\nLO QUE PIDE AHORA EL USUARIO: ${pedido}\n` : ''}
+${plan ? `\nEL PLAN QUE EL USUARIO APROBÓ:\n${plan.entendi}\n${plan.pasos.map((p, i) => `${i + 1}. ${p}`).join('\n')}\n${anunciar}` : ''}${hay ? `\nYA HICISTE UNA VERSIÓN: ${versionAnterior} (lo que dijiste: ${hay.resumen}). Tus archivos de trabajo siguen en esta carpeta: parte de ellos y cambia solo lo que se pide, conservando lo que al usuario le gustó.\n` : ''}${pedido ? `\nLO QUE PIDE AHORA EL USUARIO: ${pedido}\n` : ''}
 Cuando termines y lo hayas comprobado mirando los fotogramas, escribe resultado.json como dice el manual y termina (no dejes servidores ni previsualizaciones abiertas).`
+  // Retomando la conversación, el agente ya sabe qué vio, qué planeó y qué hizo: solo lo nuevo.
+  const corto = esCorreccion && pedido
+    ? `${pedido}
+Corrige solo eso partiendo de lo que acabas de hacer, vuelve a comprobarlo y vuelve a escribir resultado.json como dice el manual. Termina sin dejar procesos abiertos.`
+    : hay && pedido
+      ? `Cambio sobre la versión que entregaste (${versionAnterior}): ${pedido}
+Cambia SOLO eso, partiendo de tus archivos de trabajo, y conserva todo lo demás tal cual. No vuelvas a mirar ni a medir lo que ya conoces.
+Renderiza a un archivo NUEVO en salida/, mira 2 o 3 fotogramas de lo que cambiaste y vuelve a escribir resultado.json como dice el manual. Termina sin dejar procesos abiertos.`
+      : `El usuario aprobó el plan${pedido ? ` con esto: ${pedido}` : ''}. Ahora hazlo: sigue el método de AGENTS.md del paso 2 al 7 (ya miraste los archivos y apuntaste en notas.md: no lo repitas).${anunciar}
+Cuando lo hayas comprobado mirando los fotogramas, escribe resultado.json como dice el manual y termina (no dejes servidores ni previsualizaciones abiertas).`
   const entregaLista = () => fecha(resultadoJson) >= desde && archivoEntregado(carpeta, desde) !== null
-  return trabajarAgente(cmd.orden, trabajo, prompt, onLinea, senal, 40 * 60_000, await imagenesDeEntrada(c, carpeta), entregaLista)
+  return trabajarAgente(cmd.orden, trabajo, corto, onLinea, senal, 40 * 60_000, await imagenesDeEntrada(c, carpeta), entregaLista, c.agente?.sesion, completo)
 }
 
 // ---------------------------------------------------------------------------
@@ -671,6 +552,23 @@ export function archivoEntregado(
   return candidatos[0] ? { ruta: candidatos[0].ruta, entrega } : null
 }
 
+/** La receta del kit que dice la entrega (o `receta.json`), si está dentro de trabajo/ y trae momentos. */
+function recetaEntregada(carpeta: string, dicha?: string): string | null {
+  const trabajo = carpetaTrabajo(carpeta)
+  for (const candidata of [dicha, 'receta.json']) {
+    if (!candidata) continue
+    const ruta = resolve(trabajo, candidata.replace(/\\/g, '/').replace(/^trabajo\//i, ''))
+    if (!dentroDe(trabajo, ruta) || !esArchivo(ruta) || extname(ruta).toLowerCase() !== '.json') continue
+    try {
+      const r = JSON.parse(readFileSync(ruta, 'utf8')) as { momentos?: unknown }
+      if (Array.isArray(r.momentos) && r.momentos.length) return ruta
+    } catch {
+      // No es una receta: se prueba la siguiente.
+    }
+  }
+  return null
+}
+
 /**
  * Revisa el resultado por su cuenta: que exista y se abra, cuánto dura y mide, y saca
  * fotogramas para que el usuario lo vea. Copia el final a `salidas/` con su versión.
@@ -737,9 +635,21 @@ export async function revisarYPublicar(
     revision.push(`salidas/${nombre}`)
   }
   if (problemas.length) return { problemas }
+  // La receta de esta versión se guarda con ella: la siguiente ronda puede cambiar la de trabajo.
+  let receta: string | undefined
+  const rutaReceta = tipo === 'video' ? recetaEntregada(carpeta, hallado.entrega.receta) : null
+  if (rutaReceta) {
+    try {
+      copyFileSync(rutaReceta, join(salidas, `agente-v${version}.receta.json`))
+      receta = `salidas/agente-v${version}.receta.json`
+    } catch {
+      // Sin receta, el editor abre el video entero.
+    }
+  }
   return {
     problemas,
     resultado: {
+      ...(receta ? { receta } : {}),
       archivo: `salidas/${nombre}`,
       tipo,
       resumen: hallado.entrega.resumen || 'Listo.',

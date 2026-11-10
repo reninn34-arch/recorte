@@ -385,6 +385,10 @@ export default function App() {
 
   // ===== Crear con IA =====
 
+  // Lo que se está viendo ahora, para decidir al terminar un paso largo (el cierre ya es viejo).
+  const viendo = useRef<{ vista: string; creacion: string | null }>({ vista: 'inicio', creacion: null })
+  viendo.current = { vista, creacion: creacion?.id ?? null }
+
   /** Corre un paso de la creación (guion o video) y deja la versión que devuelve. */
   async function pasoCreacion(id: string, paso: () => Promise<Creacion>) {
     setEnCurso((e) => ({ ...e, [id]: e[id] ?? Date.now() }))
@@ -395,6 +399,10 @@ export default function App() {
       setCreacion((c) => (c && c.id === id ? nueva : c))
       const ultimo = nueva.mensajes[nueva.mensajes.length - 1]
       avisarFin(ultimo?.error ? 'El agente no pudo terminar: mira el estudio.' : nueva.fase === 'listo' ? 'Tu video con IA está listo.' : (ultimo?.texto ?? 'Listo.'))
+      // El agente entregó una versión nueva y el usuario sigue en su estudio: directo al editor,
+      // con cada recurso en su pista para retocarlo a mano. Si se fue a otra cosa, no se le mueve.
+      const versionNueva = nueva.modo === 'agente' && nueva.fase === 'listo' && nueva.agente?.resultado?.tipo === 'video' && nueva.editorSalida !== nueva.salida
+      if (versionNueva && !ultimo?.error && viendo.current.vista === 'estudio' && viendo.current.creacion === id) await abrirEnEditor(id)
     } catch (error) {
       setAviso(mensajeDe(error))
     } finally {
@@ -470,10 +478,13 @@ export default function App() {
   }
 
   async function creacionAlEditor() {
-    if (!creacion) return
+    if (creacion) await abrirEnEditor(creacion.id)
+  }
+
+  async function abrirEnEditor(id: string) {
     try {
-      const p = await window.recorte.creacionAlEditor(creacion.id)
-      setCreacion((c) => (c ? { ...c, proyectoEditor: p.id } : c))
+      const p = await window.recorte.creacionAlEditor(id)
+      setCreacion((c) => (c && c.id === id ? { ...c, proyectoEditor: p.id, editorSalida: c.salida } : c))
       abrir(p)
       setVista('proyectos')
       await recargarProyectos()

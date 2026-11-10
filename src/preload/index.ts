@@ -49,6 +49,7 @@ const api: RecorteApi = {
   abrirSalida: (id, clipId) => ipcRenderer.invoke('proyecto:abrir-salida', id, clipId),
   exportarTimeline: (id, timeline, opciones) => ipcRenderer.invoke('proyecto:exportar-timeline', id, timeline, opciones),
   abrirExportacion: (id) => ipcRenderer.invoke('proyecto:abrir-exportacion', id),
+  vozFrase: (id, pedido) => ipcRenderer.invoke('proyecto:voz-frase', id, pedido),
   importarMusica: (id) => ipcRenderer.invoke('proyecto:importar-musica', id),
   elegirAdjuntos: () => ipcRenderer.invoke('dialog:open-adjuntos'),
   elegirReferencia: () => ipcRenderer.invoke('dialog:open-referencia'),

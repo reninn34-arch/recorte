@@ -7,11 +7,11 @@ import {
   type EleccionTarea,
   type FormatoCreacion,
   type NivelModelo,
-  type PeticionCreacion
+  type PeticionCreacion,
+  VOCES_GEMINI
 } from '../../../shared/creacion'
 import { avisoRetiro, MODELO_CHATGPT, MODELOS_IMAGEN, modelosVideoVigentes } from '../../../shared/flow'
 import { favorito } from '../../../shared/gustos'
-import type { ModoCreacion } from '../../../shared/creacion'
 import type { Agentes } from '../hooks/agentes'
 import { Icon } from '../Icons'
 import { ElegirModelo, nombreModelo } from './ElegirModelo'
@@ -90,13 +90,29 @@ export function CajaCrear({
   const [referencia, setReferencia] = useState<string | null>(null)
   // Agente: trabaja con herramientas (plan → hacer → comprobar). Guiado: guion → voz → video.
   const puedeAgente = Boolean(agentes.activo && ['claude', 'antigravity', 'kimi', 'codex', 'opencode', 'gemini'].includes(agentes.activo.id))
-  const [modo, setModo] = useState<ModoCreacion>(puedeAgente ? 'agente' : 'guiado')
-  const enAgente = modo === 'agente'
-  const modoTocado = useRef(false)
-  // Los agentes se cargan un momento después: si el usuario no eligió, pasa a «Agente» cuando se pueda.
+  // Un solo modo: el agente. El paso a paso solo queda de respaldo para quien edita con una
+  // llave de API (Gemini, DeepSeek, Grok), que no puede trabajar con herramientas.
+  const enAgente = puedeAgente
+  // La voz que narra (una de Gemini) o null = sin voz. Empieza con la última que usó, si tiene la voz conectada.
+  const [voz, setVoz] = useState<string | null>(null)
+  const [vozConectada, setVozConectada] = useState(false)
+  const vozTocada = useRef(false)
+  // Tras el plan: esperar el «Hazlo» (pregúntame antes) o empezar solo si no hay preguntas.
+  const [directo, setDirecto] = useState(false)
   useEffect(() => {
-    if (!modoTocado.current) setModo(puedeAgente ? 'agente' : 'guiado')
-  }, [puedeAgente])
+    void window.recorte
+      .vozEstado()
+      .then((e) => {
+        const hay = e.tieneClave || Boolean(e.google?.correo)
+        setVozConectada(hay)
+        if (hay && !vozTocada.current && e.vozGemini && VOCES_GEMINI.some((v) => v.id === e.vozGemini)) setVoz(e.vozGemini)
+      })
+      .catch(() => {})
+    void window.recorte
+      .preferenciasCargar()
+      .then((p) => setDirecto(Boolean(p.crearDirecto)))
+      .catch(() => {})
+  }, [])
   const [falta, setFalta] = useState(false)
   // Quién lo hace: null = optimizado (el agente activo hace todo con su modelo de siempre).
   const [porPaso, setPorPaso] = useState(false)
@@ -166,7 +182,18 @@ export function CajaCrear({
     const imagenes = Boolean(modeloImagen) && (modeloImagen === MODELO_CHATGPT ? conChatGPT : conFlow)
     const videos = conFlow && Boolean(modeloVideo)
     if (enAgente) {
-      onCrear({ peticion: peticion.trim(), estilo, formato, duracion, adjuntos, modo: 'agente', tareas })
+      onCrear({
+        peticion: peticion.trim(),
+        estilo,
+        formato,
+        duracion,
+        adjuntos,
+        modo: 'agente',
+        // En el agente solo hay una tarea: quien hace el video.
+        ...(tVideo ? { tareas: { video: tVideo } } : {}),
+        ...(voz && vozConectada ? { vozElegida: voz } : {}),
+        ...(directo ? { directo: true } : {})
+      })
       return
     }
     onCrear({
@@ -272,20 +299,16 @@ export function CajaCrear({
           <button type="button" className="cc-redondo" onClick={() => void adjuntar()} title="Tus fotos o clips para el video" aria-label="Adjuntar">
             <Icon name="paperclip" size={15} />
           </button>
-          <div className="cc-segmento" role="radiogroup" aria-label="Cómo se hace">
-            <button
-              type="button"
-              className={enAgente ? 'is-on' : ''}
-              disabled={!puedeAgente}
-              onClick={() => ((modoTocado.current = true), setModo('agente'))}
-              title={puedeAgente ? 'El agente mira tus archivos, te propone un plan y lo hace con herramientas, comprobando antes de entregar' : 'Necesita un agente que trabaje con herramientas (Claude Code, Antigravity, Kimi, Codex u OpenCode)'}
-            >
-              Agente
-            </button>
-            <button type="button" className={!enAgente ? 'is-on' : ''} onClick={() => ((modoTocado.current = true), setModo('guiado'))} title="Paso a paso: guion → voz → video">
-              Guiado
-            </button>
-          </div>
+          {enAgente && (
+            <Menu ancho={340} activo={Boolean(tVideo)} etiqueta={<>{logoQuien(tVideo)} {corto(tVideo)}</>}>
+              {(cerrar) => (
+                <>
+                  <span className="cc-grupo-nombre">Quién hace el video</span>
+                  {opcionesTarea('video', tVideo, cerrar)}
+                </>
+              )}
+            </Menu>
+          )}
           {!enAgente && (
           <button
             type="button"
@@ -433,6 +456,50 @@ export function CajaCrear({
             </span>
           )}
 
+          {enAgente && (
+            <Menu ancho={300} activo={Boolean(voz && vozConectada)} etiqueta={<><Icon name="music" size={13} /> {voz && vozConectada ? `Voz ${voz}` : 'Sin voz'}</>}>
+              {(cerrar) => (
+                <>
+                  <Opcion elegida={!voz || !vozConectada} onClick={() => ((vozTocada.current = true), setVoz(null), cerrar())} nota="solo música e imagen">
+                    Sin voz
+                  </Opcion>
+                  {vozConectada ? (
+                    <>
+                      <span className="cc-grupo-nombre">Voces de Gemini</span>
+                      <div className="cc-voces">
+                        {VOCES_GEMINI.map((v) => (
+                          <Opcion key={v.id} elegida={voz === v.id} onClick={() => ((vozTocada.current = true), setVoz(v.id), void window.recorte.vozGuardar({ vozGemini: v.id }), cerrar())} nota={v.descripcion}>
+                            {v.id}
+                          </Opcion>
+                        ))}
+                      </div>
+                      <p className="cc-nota">El agente escribe lo que dice y Recorte lo narra con esta voz, frase por frase.</p>
+                    </>
+                  ) : (
+                    <p className="cc-nota">
+                      Para narrar con voz, conecta tu cuenta de Google o tu clave de AI Studio en Ajustes → Voz. Después eliges aquí la voz.
+                    </p>
+                  )}
+                </>
+              )}
+            </Menu>
+          )}
+          {enAgente && (
+            <Menu ancho={300} etiqueta={<><Icon name={directo ? 'play' : 'check'} size={13} /> {directo ? 'Hazlo directo' : 'Pregúntame antes'}</>}>
+              {(cerrar) => (
+                <>
+                  <Opcion elegida={!directo} onClick={() => (setDirecto(false), void window.recorte.preferenciasGuardar({ crearDirecto: false }), cerrar())} nota="ves el plan y dices «Hazlo»">
+                    Pregúntame antes
+                  </Opcion>
+                  <Opcion elegida={directo} onClick={() => (setDirecto(true), void window.recorte.preferenciasGuardar({ crearDirecto: true }), cerrar())} nota="empieza si no tiene dudas">
+                    Hazlo directo
+                  </Opcion>
+                  <p className="cc-nota">En los dos casos ves sus pasos en el chat y puedes pararlo cuando quieras.</p>
+                </>
+              )}
+            </Menu>
+          )}
+
           <span className="tl-flex" />
           <button
             type="button"
@@ -449,8 +516,8 @@ export function CajaCrear({
       {falta && <p className="crear-error">Escribe qué video quieres para empezar.</p>}
       {enAgente && (
         <p className="cc-nota-modo">
-          <Icon name="sparkles" size={12} /> Modo agente: mira tus archivos de verdad, te propone un plan corto y, cuando le digas «Hazlo», lo hace con
-          FFmpeg, Python o HyperFrames y comprueba el resultado antes de entregarlo. Usa más mensajes de tu plan del agente.
+          <Icon name="sparkles" size={12} /> Tu agente mira tus archivos, te propone un plan corto y lo hace paso a paso: lo ves avanzar en el chat y
+          comprueba el resultado antes de entregarlo.
         </p>
       )}
       {!agentes.listo && agentes.cargado && (

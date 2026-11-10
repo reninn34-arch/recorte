@@ -46,3 +46,14 @@ y deja `revision/hoja-final.jpg`. Con `--prueba 0.5,3,8` saca solo esos fotogram
 - Para elegir el encuadre de una foto: `python kit/kit.py encuadre entrada/x.jpg --zoom 1.3 --cx .45 --cy .5`.
 - `fuente`: `fina`, `normal`, `negrita`, `gruesa` o la ruta de un .ttf.
 - Si algo no está en el kit, escríbelo tú (Python + FFmpeg) y usa el kit para lo demás.
+
+## La voz (narración)
+Recorte genera la narración con la voz que eligió el usuario; tú solo escribes qué dice.
+1. Escribe `voz/narracion.txt` con UNA frase por línea (una por momento, natural y hablada, ~2,5 palabras por segundo).
+2. `python kit/kit.py voz voz/narracion.txt` → devuelve cada frase con su `archivo` y su `duracion` (tarda unos segundos por frase).
+3. Haz que cada momento dure lo que su frase (más un respiro de 0,2–0,4 s) y ponlas en la receta:
+   `"voz": [{ "archivo": "voz/ab12cd34-01.wav", "en": 0.3 }, { "archivo": "voz/ab12cd34-02.wav", "en": 3.9 }]`
+   (`en` = el segundo del video donde empieza; `volumen` opcional). Con voz, la música baja sola a 0.25 salvo que pongas su `volumen`.
+- Para cambiar lo que dice UNA frase: un archivo con solo esa línea, `kit.py voz` otra vez, y reemplaza su entrada en `"voz"`.
+  No vuelvas a pedir las que no cambian.
+- Si `kit.py voz` responde que el usuario eligió sin voz, o falla, sigue sin narración y dilo en el resumen. No uses otra voz ni otro TTS.

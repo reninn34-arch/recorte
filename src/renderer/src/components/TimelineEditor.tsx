@@ -5,6 +5,10 @@ import {
   anadirTexto,
   cambiarMusica,
   ponerMusica,
+  LIMITES_TAMANO,
+  FUENTES_TEXTO,
+  MAX_FUNDIDO,
+  fundirClip,
   type AjustesClip,
   type MusicaTL,
   borrarClip,
@@ -20,12 +24,16 @@ import {
   tramos,
   vozEnTimeline,
   type PosicionTexto,
-  type Timeline
+  type Timeline,
+  borrarVoz,
+  cambiarVoz,
+  silenciarClip
 } from '../../../shared/timeline'
 import type { OpcionesExport } from '../../../shared/api'
 import type { TranscriptSegment } from '../../../shared/types'
 import type { Historial } from '../hooks/timeline'
 import { Icon } from '../Icons'
+import { InspectorVoz, type GenerarVoz } from './InspectorVoz'
 
 /**
  * La timeline editable: regla, pista de video magnética, pista de textos y la voz
@@ -46,7 +54,7 @@ export interface ControlExportar {
   destino?: string
 }
 
-export type Elegido = { tipo: 'clip' | 'texto' | 'musica'; id: string } | null
+export type Elegido = { tipo: 'clip' | 'texto' | 'musica' | 'voz'; id: string } | null
 
 const IMAN_PX = 8
 const PASOS_REGLA = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1200]
@@ -83,7 +91,9 @@ export function TimelineEditor({
   elegido,
   onElegir,
   exportar,
-  importarMusica
+  importarMusica,
+  generarVoz,
+  onCambiarArchivo
 }: {
   timeline: Timeline
   duracionFuente: number
@@ -104,7 +114,12 @@ export function TimelineEditor({
   exportar: ControlExportar
   /** Abre el selector de audio; devuelve la pista copiada al proyecto o null. */
   importarMusica: () => Promise<MusicaTL | null>
+  /** Genera una frase de narración con una voz (sin agente); sin esto, la voz no se edita a mano. */
+  generarVoz?: GenerarVoz
+  /** Cambia el archivo del clip por otro que elija el usuario (otra foto, otro video). */
+  onCambiarArchivo?: (clipId: string) => void
 }) {
+  const [nuevaVoz, setNuevaVoz] = useState(false)
   const [panelExportar, setPanelExportar] = useState(false)
   const [formato, setFormato] = useState<OpcionesExport['formato']>('original')
   const [subtitulos, setSubtitulos] = useState(false)
@@ -115,7 +130,7 @@ export function TimelineEditor({
   const [anchoVisible, setAnchoVisible] = useState(800)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const lienzoRef = useRef<HTMLDivElement | null>(null)
-  const textoRef = useRef<HTMLInputElement | null>(null)
+  const textoRef = useRef<HTMLTextAreaElement | null>(null)
   const escribiendo = useRef(false)
   const anclaZoom = useRef<{ t: number; x: number } | null>(null)
 
@@ -140,11 +155,16 @@ export function TimelineEditor({
   const clipElegido = elegido?.tipo === 'clip' ? lista.find((t) => t.clip.id === elegido.id) : undefined
   const textoElegido = elegido?.tipo === 'texto' ? tl.textos.find((x) => x.id === elegido.id) : undefined
   const musicaElegida = elegido?.tipo === 'musica' ? tl.musica : undefined
+  const fraseElegida = elegido?.tipo === 'voz' ? tl.voces?.find((v) => v.id === elegido.id) : undefined
+  // Elegir cualquier otra cosa cierra el «añadir voz».
+  useEffect(() => {
+    if (elegido) setNuevaVoz(false)
+  }, [elegido])
 
   // Si lo elegido desaparece (deshacer, borrar), se suelta.
   useEffect(() => {
-    if (elegido && !clipElegido && !textoElegido && !musicaElegida && !borrador) onElegir(null)
-  }, [elegido, clipElegido, textoElegido, musicaElegida, borrador, onElegir])
+    if (elegido && !clipElegido && !textoElegido && !musicaElegida && !fraseElegida && !borrador) onElegir(null)
+  }, [elegido, clipElegido, textoElegido, musicaElegida, fraseElegida, borrador, onElegir])
 
   useLayoutEffect(() => {
     const el = scrollRef.current
@@ -309,6 +329,17 @@ export function TimelineEditor({
     )
   }
 
+  // ===== Narración: cada frase se mueve suelta =====
+
+  function arrastrarFrase(e: React.PointerEvent, id: string) {
+    onElegir({ tipo: 'voz', id })
+    const base = timeline
+    const v = base.voces?.find((x) => x.id === id)
+    if (!v) return
+    const puntos = puntosIman(base)
+    arrastrar(e, (dx) => cambiarVoz(base, id, { inicio: iman(v.inicio + dx, puntos) }))
+  }
+
   // ===== Acciones =====
 
   function accionDividir() {
@@ -319,6 +350,7 @@ export function TimelineEditor({
     if (!elegido) return
     if (elegido.tipo === 'clip') historial.aplicar(borrarClip(timeline, elegido.id))
     else if (elegido.tipo === 'musica') historial.aplicar(ponerMusica(timeline, undefined))
+    else if (elegido.tipo === 'voz') historial.aplicar(borrarVoz(timeline, elegido.id))
     else historial.aplicar(borrarTexto(timeline, elegido.id))
     onElegir(null)
   }
@@ -430,6 +462,16 @@ export function TimelineEditor({
         {onAgregarClips && (
           <button className="tl-boton" onClick={onAgregarClips} disabled={agregandoClips} title="Agrega varios videos o imágenes al final de la timeline">
             <Icon name="plus" size={16} /> {agregandoClips ? 'Agregando…' : 'Clips'}
+          </button>
+        )}
+        {generarVoz && (
+          <button
+            className="tl-boton"
+            onClick={() => (onElegir(null), setNuevaVoz(true))}
+            title="Añadir una frase de narración en el cabezal, con la voz que elijas"
+            disabled={total <= 0}
+          >
+            <Icon name="sparkles" size={16} /> Voz
           </button>
         )}
         <button className="tl-boton" onClick={() => void accionMusica()} title="Poner música bajo la edición">
@@ -603,7 +645,21 @@ export function TimelineEditor({
             </div>
 
             <div className="tl-carril voz" onPointerDown={arrastrarCabezal}>
-              {voz.length === 0 && (
+              {(tl.voces ?? []).map((v) => {
+                const anchoFrase = v.duracion * pps
+                return (
+                  <div
+                    key={v.id}
+                    className={`tl-voz tl-frase ${elegido?.tipo === 'voz' && elegido.id === v.id ? 'is-elegido' : ''}`}
+                    style={{ left: v.inicio * pps, width: Math.max(4, anchoFrase - 1) }}
+                    title={v.texto || 'Narración'}
+                    onPointerDown={(e) => arrastrarFrase(e, v.id)}
+                  >
+                    {anchoFrase > 30 && <span className="tl-clip-texto">{v.texto || 'Narración'}</span>}
+                  </div>
+                )
+              })}
+              {voz.length === 0 && !tl.voces?.length && (
                 <span className="tl-vacio">{transcript?.length ? 'Sin voz en la edición.' : 'Transcribe el video para ver aquí lo que se dice.'}</span>
               )}
               {voz.map((v) => {
@@ -662,6 +718,19 @@ export function TimelineEditor({
               {(clipElegido.fin - clipElegido.inicio).toFixed(1)} s
             </span>
             <span className="tl-flex" />
+            <label className="tl-check" title="Sin su sonido: solo aporta imagen">
+              <input
+                type="checkbox"
+                checked={Boolean(clipElegido.clip.mudo)}
+                onChange={(e) => historial.aplicar(silenciarClip(timeline, clipElegido.clip.id, e.target.checked))}
+              />
+              Sin sonido
+            </label>
+            {onCambiarArchivo && (
+              <button className="btn small ghost" onClick={() => onCambiarArchivo(clipElegido.clip.id)} title="Pone otra foto u otro video en este mismo lugar">
+                <Icon name="image" size={14} /> Cambiar archivo
+              </button>
+            )}
             <button className="btn small ghost" onClick={accionDuplicar}>
               <Icon name="copy" size={14} /> Duplicar
             </button>
@@ -674,7 +743,10 @@ export function TimelineEditor({
                   ['zoom', 'Zoom', 1, 2, 0.01, (v: number) => `${Math.round(v * 100)} %`],
                   ['brillo', 'Brillo', -0.3, 0.3, 0.01, (v: number) => `${v > 0 ? '+' : ''}${Math.round(v * 100)}`],
                   ['contraste', 'Contraste', 0.5, 1.8, 0.01, (v: number) => `${Math.round(v * 100)} %`],
-                  ['saturacion', 'Saturación', 0, 2, 0.01, (v: number) => `${Math.round(v * 100)} %`]
+                  ['saturacion', 'Saturación', 0, 2, 0.01, (v: number) => `${Math.round(v * 100)} %`],
+                  ['cx', 'Centro ↔', 0, 1, 0.01, (v: number) => `${Math.round(v * 100)} %`],
+                  ['cy', 'Centro ↕', 0, 1, 0.01, (v: number) => `${Math.round(v * 100)} %`],
+                  ['acercar', 'Acercar despacio', 0, 0.3, 0.01, (v: number) => (v ? `+${Math.round(v * 100)} %` : 'no')]
                 ] as const
               ).map(([clave, nombre, min, max, paso, formato]) => {
                 const valor = ajustesDe(clipElegido.clip)[clave]
@@ -706,11 +778,28 @@ export function TimelineEditor({
                 className="btn small ghost"
                 disabled={!clipElegido.clip.ajustes}
                 onClick={() =>
-                  historial.aplicar(ajustarClip(timeline, clipElegido.clip.id, { zoom: 1, brillo: 0, contraste: 1, saturacion: 1 }))
+                  historial.aplicar(ajustarClip(timeline, clipElegido.clip.id, { zoom: 1, brillo: 0, contraste: 1, saturacion: 1, cx: 0.5, cy: 0.5, acercar: 0 }))
                 }
               >
                 Restablecer
               </button>
+              {clipElegido.indice > 0 && (
+                <label className="tl-ajuste" title="Entra fundiéndose sobre el clip anterior">
+                  <span>
+                    Fundido <b>{clipElegido.clip.fundido ? `${clipElegido.clip.fundido.toFixed(1)} s` : 'corte'}</b>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={MAX_FUNDIDO}
+                    step={0.05}
+                    value={clipElegido.clip.fundido ?? 0}
+                    onPointerDown={empezarAjuste}
+                    onFocus={empezarAjuste}
+                    onChange={(e) => deslizar(fundirClip(timeline, clipElegido.clip.id, Number(e.target.value)))}
+                  />
+                </label>
+              )}
             </div>
           </>
         ) : musicaElegida ? (
@@ -748,13 +837,24 @@ export function TimelineEditor({
               <Icon name="trash" size={14} /> Quitar
             </button>
           </>
+        ) : (fraseElegida || nuevaVoz) && generarVoz ? (
+          <InspectorVoz
+            frase={fraseElegida}
+            timeline={timeline}
+            tiempo={tiempo}
+            historial={historial}
+            generar={generarVoz}
+            onElegir={(id) => (setNuevaVoz(false), onElegir(id ? { tipo: 'voz', id } : null))}
+            onCerrar={() => setNuevaVoz(false)}
+          />
         ) : textoElegido ? (
           <>
-            <input
+            <textarea
               ref={textoRef}
-              className="tl-texto-input"
+              className="tl-texto-input tl-texto-area"
+              rows={Math.min(4, Math.max(1, textoElegido.texto.split('\n').length))}
               value={textoElegido.texto}
-              placeholder="Escribe el rótulo"
+              placeholder="Escribe el rótulo (Enter para otra línea)"
               onFocus={() => (escribiendo.current = false)}
               onChange={(e) => {
                 const nueva = cambiarTexto(timeline, textoElegido.id, { texto: e.target.value })
@@ -774,6 +874,48 @@ export function TimelineEditor({
               <option value="centro">Centro</option>
               <option value="abajo">Abajo</option>
             </select>
+            <label className="tl-ajuste en-linea">
+              <span>
+                Tamaño <b>{Math.round((textoElegido.tamano ?? 1) * 100)} %</b>
+              </span>
+              <input
+                type="range"
+                min={LIMITES_TAMANO[0]}
+                max={LIMITES_TAMANO[1]}
+                step={0.05}
+                value={textoElegido.tamano ?? 1}
+                onPointerDown={empezarAjuste}
+                onFocus={empezarAjuste}
+                onChange={(e) => deslizar(cambiarTexto(timeline, textoElegido.id, { tamano: Number(e.target.value) }))}
+              />
+            </label>
+            <select
+              value={textoElegido.fuente ?? 'normal'}
+              title="La letra"
+              onChange={(e) => historial.aplicar(cambiarTexto(timeline, textoElegido.id, { fuente: e.target.value }))}
+            >
+              {Object.entries(FUENTES_TEXTO).map(([clave, f]) => (
+                <option key={clave} value={clave} style={{ fontFamily: f.familia }}>
+                  {f.nombre}
+                </option>
+              ))}
+            </select>
+            <input
+              type="color"
+              className="tl-color"
+              title="Color de la letra"
+              value={textoElegido.color ?? '#ffffff'}
+              onPointerDown={empezarAjuste}
+              onChange={(e) => deslizar(cambiarTexto(timeline, textoElegido.id, { color: e.target.value }))}
+            />
+            <label className="tl-check" title="Sin la caja oscura: solo la letra con su borde">
+              <input
+                type="checkbox"
+                checked={!textoElegido.sinCaja}
+                onChange={(e) => historial.aplicar(cambiarTexto(timeline, textoElegido.id, { sinCaja: !e.target.checked }))}
+              />
+              Caja
+            </label>
             <span className="tl-dim">
               {tc(textoElegido.inicio)} · {textoElegido.duracion.toFixed(1)} s
             </span>

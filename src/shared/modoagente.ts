@@ -32,6 +32,11 @@ export interface ResultadoAgente {
   duracion?: number
   ancho?: number
   alto?: number
+  /**
+   * La receta del kit con la que se hizo esta versión, copiada junto al video (`salidas/…`).
+   * Con ella el editor abre cada recurso suelto en su pista, en vez del video entero.
+   */
+  receta?: string
 }
 
 export interface EstadoModoAgente {
@@ -41,6 +46,21 @@ export interface EstadoModoAgente {
   resultado?: ResultadoAgente
   /** Cuántas veces trabajó (cada cambio es una ronda). */
   rondas: number
+  /** En qué paso del plan va (1 = el primero), según lo que el agente va diciendo. */
+  paso?: number
+  /**
+   * La conversación del agente que sigue viva entre rondas (Claude Code, Codex): cada cambio
+   * la retoma, así el agente recuerda lo que ya vio e hizo y no lo vuelve a leer (menos créditos).
+   * Solo vale con el mismo agente: si el usuario cambia de agente, se empieza otra.
+   */
+  sesion?: SesionAgente
+}
+
+export interface SesionAgente {
+  agente: string
+  id: string
+  /** Cuánto lleva gastado la conversación, si el agente lo dice (Claude: dólares a precio de API). */
+  costoUsd?: number
 }
 
 export const MAX_REGISTRO = 60
@@ -68,10 +88,11 @@ export function validarPlan(crudo: unknown): PlanAgente | null {
 }
 
 /** Lo que el agente deja en `resultado.json` al terminar. */
-export function validarEntrega(crudo: unknown): { archivo?: string; resumen: string; comprobaciones: string[] } {
+export function validarEntrega(crudo: unknown): { archivo?: string; receta?: string; resumen: string; comprobaciones: string[] } {
   const r = (crudo && typeof crudo === 'object' ? crudo : {}) as Record<string, unknown>
   return {
     ...(texto(r.archivo, 300) ? { archivo: texto(r.archivo, 300) } : {}),
+    ...(texto(r.receta, 300) ? { receta: texto(r.receta, 300) } : {}),
     resumen: texto(r.resumen, 600),
     comprobaciones: lista(r.comprobaciones, 12, 240)
   }
@@ -87,4 +108,15 @@ export function esAprobacion(mensaje: string): boolean {
     .replace(/\s+/g, ' ')
     .trim()
   return /^(si|sí|ok|okay|dale|hazlo|hazlo asi|adelante|listo|perfecto|de acuerdo|va|vale|me parece bien|asi esta bien|si hazlo|si dale|empieza|procede)( .{0,20})?$/.test(t)
+}
+
+/**
+ * El paso del plan que anuncia una línea del agente («PASO 3: montar…», «Paso 3/5»). El agente
+ * lo dice al empezar cada paso (se lo pide el pedido): así el chat marca los pasos hechos.
+ */
+export function pasoAnunciado(linea: string, total: number): number | null {
+  const m = /(?:^|[^a-záéíóúñ])paso\s+(\d{1,2})(?!\d)/i.exec(linea)
+  if (!m) return null
+  const n = Number(m[1])
+  return n >= 1 && n <= total ? n : null
 }

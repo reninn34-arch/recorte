@@ -8,6 +8,11 @@ import {
   borrarTexto,
   borrarTramo,
   cambiarTexto,
+  borrarVoz,
+  cambiarVoz,
+  anadirVoz,
+  silenciarClip,
+  FUENTES_TEXTO,
   dividir,
   duracionTimeline,
   FUENTE_PRINCIPAL,
@@ -37,13 +42,40 @@ export type OperacionTL =
   | { op: 'mover_clip'; clip: number; a: number }
   | { op: 'recortar_clip'; clip: number; entrada?: number; salida?: number }
   | { op: 'anadir_texto'; inicio: number; duracion?: number; texto: string; posicion?: PosicionTexto }
-  | { op: 'cambiar_texto'; texto_n: number; texto?: string; inicio?: number; duracion?: number; posicion?: PosicionTexto }
+  | {
+      op: 'cambiar_texto'
+      texto_n: number
+      texto?: string
+      inicio?: number
+      duracion?: number
+      posicion?: PosicionTexto
+      tamano?: number
+      color?: string
+      sin_caja?: boolean
+      fuente?: string
+    }
   | { op: 'borrar_texto'; texto_n: number }
   | { op: 'reconstruir'; cortes: { entrada: number; salida: number }[] }
   | { op: 'zoom'; clip?: number; zoom: number }
   | { op: 'color'; clip?: number; brillo?: number; contraste?: number; saturacion?: number }
   | { op: 'musica'; volumen?: number; ducking?: boolean }
   | { op: 'quitar_musica' }
+  | { op: 'sonido_clip'; clip: number; sonido: boolean }
+  /**
+   * La narración frase a frase. Si cambia lo que dice (o la voz), Recorte genera el audio nuevo
+   * ANTES de aplicarla y le pone `audio` (el agente nunca lo da: se descarta si lo trae).
+   */
+  | { op: 'cambiar_voz'; voz_n: number; texto?: string; voz?: string; inicio?: number; volumen?: number; audio?: AudioGenerado }
+  | { op: 'anadir_voz'; inicio: number; texto: string; voz?: string; audio?: AudioGenerado }
+  | { op: 'borrar_voz'; voz_n: number }
+
+/** El audio que generó Recorte para una frase (ya está en `media/` del proyecto). */
+export interface AudioGenerado {
+  archivo: string
+  duracion: number
+  voz: string
+  texto: string
+}
 
 export interface MensajeChat {
   id: string
@@ -163,7 +195,11 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
             texto: typeof x.texto === 'string' ? x.texto.slice(0, 200) : undefined,
             inicio: num(x.inicio) ?? undefined,
             duracion: num(x.duracion) ?? undefined,
-            posicion: pos(x.posicion)
+            posicion: pos(x.posicion),
+            tamano: num(x.tamano) ?? undefined,
+            color: typeof x.color === 'string' && /^#[0-9a-f]{6}$/i.test(x.color) ? x.color : undefined,
+            sin_caja: typeof x.sin_caja === 'boolean' ? x.sin_caja : undefined,
+            fuente: typeof x.fuente === 'string' && x.fuente in FUENTES_TEXTO ? x.fuente : undefined
           })
         }
         break
@@ -192,6 +228,41 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
       case 'quitar_musica':
         ops.push({ op: 'quitar_musica' })
         break
+      case 'sonido_clip': {
+        const c = num(x.clip)
+        if (c !== null && typeof x.sonido === 'boolean') ops.push({ op: 'sonido_clip', clip: c, sonido: x.sonido })
+        break
+      }
+      case 'cambiar_voz': {
+        const n = num(x.voz_n)
+        if (n === null) break
+        ops.push({
+          op: 'cambiar_voz',
+          voz_n: n,
+          texto: typeof x.texto === 'string' && x.texto.trim() ? x.texto.replace(/\s+/g, ' ').trim().slice(0, 600) : undefined,
+          voz: typeof x.voz === 'string' && x.voz.trim() ? x.voz.trim().slice(0, 40) : undefined,
+          inicio: num(x.inicio) ?? undefined,
+          volumen: num(x.volumen) ?? undefined
+        })
+        break
+      }
+      case 'anadir_voz': {
+        const i = num(x.inicio)
+        if (i !== null && typeof x.texto === 'string' && x.texto.trim()) {
+          ops.push({
+            op: 'anadir_voz',
+            inicio: i,
+            texto: x.texto.replace(/\s+/g, ' ').trim().slice(0, 600),
+            voz: typeof x.voz === 'string' && x.voz.trim() ? x.voz.trim().slice(0, 40) : undefined
+          })
+        }
+        break
+      }
+      case 'borrar_voz': {
+        const n = num(x.voz_n)
+        if (n !== null) ops.push({ op: 'borrar_voz', voz_n: n })
+        break
+      }
       case 'reconstruir': {
         if (!Array.isArray(x.cortes)) break
         const cortes = x.cortes
@@ -313,6 +384,10 @@ export function aplicarOperaciones(
         if (o.inicio !== undefined) cambio.inicio = o.inicio
         if (o.duracion !== undefined) cambio.duracion = o.duracion
         if (o.posicion !== undefined) cambio.posicion = o.posicion
+        if (o.tamano !== undefined) cambio.tamano = o.tamano
+        if (o.color !== undefined) cambio.color = o.color
+        if (o.sin_caja !== undefined) cambio.sinCaja = o.sin_caja
+        if (o.fuente !== undefined) cambio.fuente = o.fuente
         tl = cambiarTexto(tl, t.id, cambio)
         cambios.push(`Cambié el texto ${o.texto_n}`)
         break
@@ -365,6 +440,53 @@ export function aplicarOperaciones(
         cambios.push('Quité la música')
         break
       }
+      case 'sonido_clip': {
+        const c = clipEn(o.clip)
+        if (!c) fallos.push(`No existe el clip ${o.clip}.`)
+        else {
+          tl = silenciarClip(tl, c.id, !o.sonido)
+          cambios.push(o.sonido ? `Devolví el sonido al clip ${o.clip}` : `Quité el sonido del clip ${o.clip}`)
+        }
+        break
+      }
+      case 'cambiar_voz': {
+        const v = tl.voces?.[Math.round(o.voz_n) - 1]
+        if (!v) {
+          fallos.push(`No existe la frase de voz ${o.voz_n}.`)
+          break
+        }
+        if ((o.texto !== undefined || o.voz !== undefined) && !o.audio) {
+          fallos.push(`No pude generar la voz nueva de la frase ${o.voz_n}.`)
+          break
+        }
+        tl = cambiarVoz(tl, v.id, {
+          ...(o.audio ? { archivo: o.audio.archivo, duracion: o.audio.duracion, texto: o.audio.texto, voz: o.audio.voz } : {}),
+          ...(o.inicio !== undefined ? { inicio: o.inicio } : {}),
+          ...(o.volumen !== undefined ? { volumen: o.volumen } : {})
+        })
+        cambios.push(o.audio ? `Rehice la frase ${o.voz_n}: «${o.audio.texto}» (${o.audio.voz})` : `Ajusté la frase de voz ${o.voz_n}`)
+        break
+      }
+      case 'anadir_voz': {
+        if (!o.audio) {
+          fallos.push(`No pude generar la frase «${o.texto}».`)
+          break
+        }
+        const r = anadirVoz(tl, { inicio: o.inicio, duracion: o.audio.duracion, archivo: o.audio.archivo, texto: o.audio.texto, voz: o.audio.voz })
+        if (r.timeline === tl) fallos.push('La frase nueva cae fuera del video.')
+        else cambios.push(`Añadí la frase «${o.audio.texto}» en ${mmss(o.inicio)}`)
+        tl = r.timeline
+        break
+      }
+      case 'borrar_voz': {
+        const v = tl.voces?.[Math.round(o.voz_n) - 1]
+        if (!v) fallos.push(`No existe la frase de voz ${o.voz_n}.`)
+        else {
+          tl = borrarVoz(tl, v.id)
+          cambios.push(`Quité la frase «${v.texto || o.voz_n}»`)
+        }
+        break
+      }
       case 'reconstruir': {
         const cortes = o.cortes
           .map((c) => ({ start: Math.max(0, Math.min(c.entrada, c.salida)), end: Math.min(contexto.duracionFuente, Math.max(c.entrada, c.salida)) }))
@@ -390,7 +512,9 @@ export function describirTimelineParaAgente(
   tl: Timeline,
   transcript: TranscriptSegment[] | undefined,
   duracionFuente: number,
-  limite = 30_000
+  limite = 30_000,
+  /** El nombre de cada medio del proyecto (para que sepa qué foto o qué video es cada clip). */
+  nombres: Record<string, string> = {}
 ): string {
   const lineas: string[] = []
   lineas.push(`Material fuente: ${duracionFuente.toFixed(1)} s. Timeline: ${duracionTimeline(tl).toFixed(1)} s.`)
@@ -400,12 +524,29 @@ export function describirTimelineParaAgente(
     const extra = tr.clip.ajustes
       ? ` [zoom ${a.zoom}, brillo ${a.brillo}, contraste ${a.contraste}, saturación ${a.saturacion}]`
       : ''
-    lineas.push(`  ${tr.indice + 1}. timeline ${tr.inicio.toFixed(2)}–${tr.fin.toFixed(2)} ← fuente ${tr.clip.entrada.toFixed(2)}–${tr.clip.salida.toFixed(2)}${extra}`)
+    const origen = tr.clip.fuente === FUENTE_PRINCIPAL ? 'video principal' : (nombres[tr.clip.fuente] ?? 'otro medio')
+    lineas.push(
+      `  ${tr.indice + 1}. timeline ${tr.inicio.toFixed(2)}–${tr.fin.toFixed(2)} ← ${origen} ${tr.clip.entrada.toFixed(2)}–${tr.clip.salida.toFixed(2)}${extra}${tr.clip.mudo ? ' (sin sonido)' : ''}`
+    )
   }
   if (tl.clips.length === 0) lineas.push('  (vacía)')
   lineas.push('Textos (rótulos):')
-  tl.textos.forEach((t, i) => lineas.push(`  ${i + 1}. ${t.inicio.toFixed(2)}–${(t.inicio + t.duracion).toFixed(2)} ${t.posicion}: «${t.texto}»`))
+  tl.textos.forEach((t, i) => {
+    const estilo = [
+      t.tamano ? `tamaño ${t.tamano}` : '',
+      t.color ? `color ${t.color}` : '',
+      t.sinCaja ? 'sin caja' : '',
+      t.fuente ? `letra ${t.fuente}` : ''
+    ].filter(Boolean)
+    lineas.push(`  ${i + 1}. ${t.inicio.toFixed(2)}–${(t.inicio + t.duracion).toFixed(2)} ${t.posicion}: «${t.texto.replace(/\n/g, ' / ')}»${estilo.length ? ` [${estilo.join(', ')}]` : ''}`)
+  })
   if (tl.textos.length === 0) lineas.push('  (ninguno)')
+  if (tl.voces?.length) {
+    lineas.push('Narración (frases de voz generadas, cada una con su audio):')
+    tl.voces.forEach((v, i) =>
+      lineas.push(`  ${i + 1}. ${v.inicio.toFixed(2)}–${(v.inicio + v.duracion).toFixed(2)}${v.voz ? ` voz ${v.voz}` : ''}${v.volumen !== undefined ? ` volumen ${v.volumen}` : ''}: «${v.texto}»`)
+    )
+  }
   lineas.push(
     tl.musica
       ? `Música: «${tl.musica.nombre}», volumen ${tl.musica.volumen.toFixed(2)}, ${tl.musica.ducking ? 'baja cuando hay voz' : 'volumen fijo'}.`
@@ -461,6 +602,12 @@ Operaciones disponibles (los tiempos van en segundos con decimales):
 - {"op":"color","clip":N,"brillo":B,"contraste":C,"saturacion":S}  brillo -0.3 a 0.3 (0 neutro), contraste 0.5 a 1.8 (1 neutro), saturación 0 (blanco y negro) a 2 (1 neutro). Sin "clip", a todos. Pon solo lo que cambies.
 - {"op":"musica","volumen":V,"ducking":true|false}  volumen 0 a 1 de la música ya puesta (bajo la voz suele ir bien 0.2–0.4); ducking hace que baje sola cuando hay voz.
 - {"op":"quitar_musica"}
+- {"op":"sonido_clip","clip":N,"sonido":true|false}  quita o devuelve el sonido propio del clip N.
+- {"op":"cambiar_texto","texto_n":N,"tamano":1.5,"color":"#ffcc00","sin_caja":true,"fuente":"gruesa"}  también cambia el estilo del rótulo: tamano 0.5–2.5 (1 normal), color #rrggbb, sin_caja (solo la letra con borde), fuente: normal, gruesa, impacto, elegante, maquina. Para varias líneas usa \\n en "texto".
+- {"op":"cambiar_voz","voz_n":N,"texto":"…","voz":"Kore","inicio":T,"volumen":V}  cambia la frase de narración N. Con "texto" o "voz", Recorte vuelve a generar SOLO esa frase (con la voz que ya tenía si no das otra). "inicio" la mueve, "volumen" 0–1.5.
+- {"op":"anadir_voz","inicio":T,"texto":"…","voz":"Kore"}  añade una frase de narración nueva en el segundo T (sin "voz", la de las demás frases).
+- {"op":"borrar_voz","voz_n":N}
+Las voces son de Gemini: Kore, Puck, Charon, Zephyr, Fenrir, Leda, Orus, Aoede, Callirrhoe, Autonoe, Enceladus, Iapetus, Umbriel, Algieba, Despina, Erinome, Algenib, Rasalgethi, Laomedeia, Achernar, Alnilam, Schedar, Gacrux, Pulcherrima, Achird, Zubenelgenubi, Vindemiatrix, Sadachbia, Sadaltager, Sulafat. Cambia solo las frases que el usuario pide: cada frase nueva gasta voz.
 
 Las operaciones se aplican en orden y cada una ve la timeline que dejó la anterior.
 Corta siempre en fronteras de frase: usa los tiempos de la voz. No inventes contenido que no está en la transcripción.

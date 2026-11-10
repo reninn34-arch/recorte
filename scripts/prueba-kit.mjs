@@ -1,5 +1,5 @@
-import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -63,6 +63,73 @@ try {
   const r = spawnSync(python, [kit, 'armar', 'mala.json'], { cwd: dir, encoding: 'utf8' })
   if (r.status === 0 || !/no encuentro/.test(r.stderr)) throw new Error(`Una receta con un archivo que falta debía decirlo: ${r.stderr}`)
   console.log('receta con un archivo que falta: lo dice en claro ✓')
+
+  // La voz: el kit deja el pedido en voz/ y espera a Recorte. Aquí se hace de Recorte (un tono
+  // por frase) para probar el buzón y que `armar` mezcle cada frase en su segundo, con la música.
+  const trabajo = join(dir, 'trabajo')
+  mkdirSync(join(trabajo, 'kit'), { recursive: true })
+  mkdirSync(join(trabajo, 'voz'), { recursive: true })
+  copyFileSync(kit, join(trabajo, 'kit', 'kit.py'))
+  writeFileSync(join(trabajo, 'voz', 'narracion.txt'), 'Primera frase de prueba.\n\nSegunda frase, un poco más larga.\n', 'utf8')
+  const pedir = spawn(python, ['kit/kit.py', 'voz', 'voz/narracion.txt'], { cwd: trabajo })
+  let dicho = ''
+  pedir.stdout.on('data', (b) => (dicho += b))
+  const fin = new Promise((ok) => pedir.on('close', ok))
+  let id = null
+  for (let i = 0; i < 100 && !id; i++) {
+    await new Promise((ok) => setTimeout(ok, 100))
+    id = readdirSync(join(trabajo, 'voz')).map((n) => /^pedido-(\w+)\.json$/.exec(n)?.[1]).find(Boolean) ?? null
+  }
+  if (!id) throw new Error('El kit no dejó el pedido de voz.')
+  const pedido = JSON.parse(readFileSync(join(trabajo, 'voz', `pedido-${id}.json`), 'utf8'))
+  if (pedido.frases.length !== 2) throw new Error(`El pedido debía traer 2 frases: ${JSON.stringify(pedido)}`)
+  const frases = pedido.frases.map((texto, i) => {
+    const archivo = `voz/${id}-0${i + 1}.wav`
+    correr('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', `sine=frequency=${330 + i * 110}:duration=${1 + i * 0.5}`, '-ar', '24000', '-ac', '1', archivo], trabajo)
+    return { texto, archivo, duracion: 1 + i * 0.5 }
+  })
+  writeFileSync(join(trabajo, 'voz', `respuesta-${id}.json`), JSON.stringify({ ok: true, voz: 'Kore', frases, total: 2.5 }))
+  if ((await fin) !== 0) throw new Error('`kit.py voz` falló con una respuesta buena.')
+  const dada = json(dicho)
+  if (!dada.ok || dada.frases.length !== 2 || dada.frases[1].archivo !== frases[1].archivo) throw new Error(`El kit no devolvió las frases: ${dicho}`)
+  console.log('voz: el kit pide, espera y devuelve cada frase con su archivo ✓')
+
+  correr('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=600x800', '-frames:v', '1', 'foto.jpg'], trabajo)
+  correr('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=110:duration=5', 'musica.wav'], trabajo)
+  writeFileSync(
+    join(trabajo, 'receta.json'),
+    JSON.stringify({
+      ancho: 270, alto: 480, fps: 12, duracion: 4,
+      musica: { archivo: 'musica.wav' },
+      voz: [{ archivo: frases[0].archivo, en: 0.3 }, { archivo: frases[1].archivo, en: 1.8 }],
+      momentos: [{ tipo: 'foto', archivo: 'foto.jpg', desde: 0, hasta: 4 }]
+    })
+  )
+  const conVoz = json(correr(python, ['kit/kit.py', 'armar', 'receta.json'], trabajo))
+  if (!conVoz.audio || Math.abs(conVoz.duracion - 4) > 0.2) throw new Error(`El video con voz no salió bien: ${JSON.stringify(conVoz)}`)
+  // La voz está donde se pidió: entre 0,3 y 1,3 s suena mucho más que la música sola (a 0.25) entre 3,5 y 4 s.
+  const volumen = (desde, dura) => {
+    const r = spawnSync('ffmpeg', ['-v', 'info', '-ss', String(desde), '-t', String(dura), '-i', conVoz.salida, '-af', 'volumedetect', '-f', 'null', '-'], { cwd: trabajo, encoding: 'utf8' })
+    return Number(/mean_volume: (-?[\d.]+) dB/.exec(r.stderr)?.[1])
+  }
+  const [conFrase, sinFrase] = [volumen(0.4, 0.8), volumen(3.5, 0.4)]
+  if (!(conFrase > sinFrase + 4)) throw new Error(`La voz no suena sobre la música: ${conFrase} dB con frase, ${sinFrase} dB sin ella`)
+  console.log(`voz en el video: ${conFrase} dB con frase frente a ${sinFrase} dB de música sola ✓`)
+
+  // Sin voz elegida, Recorte lo dice y el kit termina con ese motivo.
+  writeFileSync(join(trabajo, 'voz', 'una.txt'), 'Otra frase.\n', 'utf8')
+  const negado = spawn(python, ['kit/kit.py', 'voz', 'voz/una.txt'], { cwd: trabajo })
+  let motivo = ''
+  negado.stderr.on('data', (b) => (motivo += b))
+  const finNegado = new Promise((ok) => negado.on('close', ok))
+  let otro = null
+  for (let i = 0; i < 100 && !otro; i++) {
+    await new Promise((ok) => setTimeout(ok, 100))
+    otro = readdirSync(join(trabajo, 'voz')).map((n) => /^pedido-(\w+)\.json$/.exec(n)?.[1]).find((x) => x && x !== id) ?? null
+  }
+  writeFileSync(join(trabajo, 'voz', `respuesta-${otro}.json`), JSON.stringify({ ok: false, error: 'El usuario eligió hacer este video SIN voz.' }))
+  if ((await finNegado) === 0 || !/SIN voz/.test(motivo)) throw new Error(`Sin voz elegida, el kit debía decirlo: ${motivo}`)
+  console.log('voz no elegida: el kit lo dice y no inventa otra ✓')
   console.log('prueba kit: ok')
 } catch (error) {
   console.error(`prueba kit: error · ${error instanceof Error ? error.message : String(error)}`)

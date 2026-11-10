@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { ajustesDe, duracionTimeline, FUENTE_PRINCIPAL, vozEnTimeline, tramos, type PosicionTexto, type Timeline } from '../shared/timeline'
+import { ajustesDe, duracionTimeline, FUENTE_PRINCIPAL, FUENTES_TEXTO, vozEnTimeline, tramos, tramosDeVoces, type PosicionTexto, type Timeline } from '../shared/timeline'
 import type { OpcionesExport } from '../shared/api'
 import type { ClipSuggestion, Project } from '../shared/types'
 
@@ -63,7 +63,8 @@ function bloquesDeVoz(proyecto: Project, timeline: Timeline): Bloque[] {
  * de 0,15 s. Los tramos de voz son los de la transcripción (los mismos que usa el monitor).
  */
 function envolventeDucking(timeline: Timeline, proyecto: Project): string | null {
-  const voz = vozEnTimeline(timeline, proyecto.transcript)
+  // La voz es lo que se dice en los clips (su transcripción) y la narración puesta frase a frase.
+  const voz = [...vozEnTimeline(timeline, proyecto.transcript), ...tramosDeVoces(timeline)]
   if (!voz.length) return null
   const rampa = 0.15
   const tramosVoz: [number, number][] = []
@@ -102,6 +103,10 @@ function escribirAss(
     `Style: RotuloArriba,Arial,${tamRotulo},&H00FFFFFF,&H00FFFFFF,&H4D000000,&H4D000000,-1,0,0,0,100,100,0,0,3,${caja},0,8,40,40,${margenArriba},1`,
     `Style: RotuloCentro,Arial,${tamRotulo},&H00FFFFFF,&H00FFFFFF,&H4D000000,&H4D000000,-1,0,0,0,100,100,0,0,3,${caja},0,5,40,40,0,1`,
     `Style: RotuloAbajo,Arial,${tamRotulo},&H00FFFFFF,&H00FFFFFF,&H4D000000,&H4D000000,-1,0,0,0,100,100,0,0,3,${caja},0,2,40,40,${margenAbajo},1`,
+    // Los mismos sin caja: la letra con borde y sombra, como un título.
+    `Style: RotuloArribaLibre,Arial,${tamRotulo},&H00FFFFFF,&H00FFFFFF,&H00101010,&H80000000,-1,0,0,0,100,100,0,0,1,${Math.max(2, Math.round(tamRotulo / 14))},2,8,40,40,${margenArriba},1`,
+    `Style: RotuloCentroLibre,Arial,${tamRotulo},&H00FFFFFF,&H00FFFFFF,&H00101010,&H80000000,-1,0,0,0,100,100,0,0,1,${Math.max(2, Math.round(tamRotulo / 14))},2,5,40,40,0,1`,
+    `Style: RotuloAbajoLibre,Arial,${tamRotulo},&H00FFFFFF,&H00FFFFFF,&H00101010,&H80000000,-1,0,0,0,100,100,0,0,1,${Math.max(2, Math.round(tamRotulo / 14))},2,2,40,40,${margenAbajo},1`,
     `Style: Voz,Arial,${tamVoz},${color},&H00FFFFFF,&H00121212,&H80000000,-1,0,0,0,100,100,0,0,1,${Math.max(2, Math.round(tamVoz / 16))},2,2,60,60,${Math.round(alto * (alto > ancho ? 0.16 : 0.08))},1`
   ]
   const nombreEstilo: Record<PosicionTexto, string> = { arriba: 'RotuloArriba', centro: 'RotuloCentro', abajo: 'RotuloAbajo' }
@@ -109,10 +114,23 @@ function escribirAss(
   const eventos = [
     ...voz.map((b) => `Dialogue: 0,${tiempoAss(b.start)},${tiempoAss(b.end)},Voz,,0,0,0,,${escapar(b.texto)}`),
     // Un rótulo abajo empuja los subtítulos hacia arriba al compartir alineación: van en otra capa.
-    ...textos.map(
-      (t) =>
-        `Dialogue: 1,${tiempoAss(t.inicio)},${tiempoAss(t.inicio + t.duracion)},${nombreEstilo[t.posicion]},,0,0,0,,{\\an${ALINEACION[t.posicion]}}${escapar(t.texto)}`
-    )
+    ...textos.map((t) => {
+      // El tamaño y el color propios del rótulo van como etiquetas sobre el estilo de su posición.
+      const etiquetas = [
+        `\\an${ALINEACION[t.posicion]}`,
+        ...(t.tamano ? [`\\fs${Math.round(tamRotulo * t.tamano)}`] : []),
+        ...(t.color ? [`\\1c${colorAss(t.color).replace('&H00', '&H')}&`] : []),
+        // La letra: una fuente de Windows, la misma que dibuja el monitor.
+        ...(t.fuente && FUENTES_TEXTO[t.fuente] ? [`\\fn${FUENTES_TEXTO[t.fuente].familia}`, FUENTES_TEXTO[t.fuente].negrita ? '\\b1' : '\\b0'] : [])
+      ].join('')
+      // Cada línea del rótulo es una línea en el video.
+      const lineas = t.texto
+        .split(/\r?\n/)
+        .map((l) => escapar(l))
+        .filter(Boolean)
+        .join('\\N')
+      return `Dialogue: 1,${tiempoAss(t.inicio)},${tiempoAss(t.inicio + t.duracion)},${nombreEstilo[t.posicion]}${t.sinCaja ? 'Libre' : ''},,0,0,0,,{${etiquetas}}${lineas}`
+    })
   ].join('\n')
 
   const contenido = `[Script Info]
@@ -160,7 +178,11 @@ export async function exportarTimeline(
   if (lista.length === 0) return { ok: false, error: 'La timeline está vacía: no hay nada que exportar.' }
   const duracion = duracionTimeline(timeline)
   // Con que un clip tenga sonido, la salida lleva audio; los demás aportan silencio.
-  const conAudio = lista.some((t) => fuenteDe(t.clip.fuente)!.conAudio)
+  const conAudio = lista.some((t) => fuenteDe(t.clip.fuente)!.conAudio && !t.clip.mudo)
+  // La narración: cada frase es un archivo de la carpeta del proyecto, en su segundo.
+  const frases = (timeline.voces ?? []).filter((v) => existsSync(join(carpeta, v.archivo)))
+  /** Hay «voz» que mezclar con la música: el sonido de los clips, la narración o ambos. */
+  const hayBus = conAudio || frases.length > 0
 
   // La música vive en la carpeta del proyecto; normalizarMusica ya validó la ruta.
   let musica: { ruta: string; volumen: number; ducking: boolean } | null = null
@@ -200,16 +222,25 @@ export async function exportarTimeline(
     if (f.tipo === 'imagen') entradas.push('-loop', '1', '-framerate', String(fps), '-t', largo.toFixed(3), '-i', f.ruta)
     else entradas.push('-ss', t.clip.entrada.toFixed(3), '-t', largo.toFixed(3), '-i', f.ruta)
     const iv = n++
-    // Zoom: recorte centrado antes de encuadrar. Color: eq. Lo mismo que el monitor.
+    // Zoom: recorte hacia el punto (cx, cy) antes de encuadrar. Color: eq. Lo mismo que el monitor.
     const a = ajustesDe(t.clip)
-    const zoom = a.zoom > 1.001 ? `crop=trunc(iw/${a.zoom}/2)*2:trunc(ih/${a.zoom}/2)*2,` : ''
+    const zoom =
+      a.zoom > 1.001
+        ? `crop=trunc(iw/${a.zoom}/2)*2:trunc(ih/${a.zoom}/2)*2:(iw-ow)*${a.cx.toFixed(3)}:(ih-oh)*${a.cy.toFixed(3)},`
+        : ''
+    // Acercamiento lento: zoompan cuadro a cuadro, al doble de tamaño para que no tiemble.
+    const cuadros = Math.max(1, Math.round(largo * fps))
+    const lento =
+      a.acercar > 0.001
+        ? `,scale=${ancho * 2}:${alto * 2},zoompan=z='1+${a.acercar.toFixed(4)}*on/${cuadros}':x='(iw-iw/zoom)*${a.cx.toFixed(3)}':y='(ih-ih/zoom)*${a.cy.toFixed(3)}':d=1:s=${ancho}x${alto}:fps=${fps}`
+        : ''
     const color =
       a.brillo !== 0 || a.contraste !== 1 || a.saturacion !== 1
         ? `,eq=brightness=${a.brillo.toFixed(3)}:contrast=${a.contraste.toFixed(3)}:saturation=${a.saturacion.toFixed(3)}`
         : ''
-    partes.push(`[${iv}:v]setpts=PTS-STARTPTS,fps=${fps},${zoom}${encuadre},setsar=1${color},format=yuv420p[v${i}]`)
+    partes.push(`[${iv}:v]setpts=PTS-STARTPTS,fps=${fps},${zoom}${encuadre}${lento},setsar=1${color},format=yuv420p,settb=AVTB[v${i}]`)
     if (conAudio) {
-      if (f.conAudio) {
+      if (f.conAudio && !t.clip.mudo) {
         // apad + atrim: cada tramo de audio dura exactamente lo que su video, o concat se desfasa.
         partes.push(`[${iv}:a]asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo,apad,atrim=0:${largo.toFixed(3)}[a${i}]`)
       } else {
@@ -219,9 +250,42 @@ export async function exportarTimeline(
       }
     }
   })
-  const pares = lista.map((_, i) => (conAudio ? `[v${i}][a${i}]` : `[v${i}]`)).join('')
   const conMusica = Boolean(musica)
-  partes.push(`${pares}concat=n=${lista.length}:v=1:a=${conAudio ? 1 : 0}[vcat]${conAudio ? (conMusica ? '[vozcat]' : '[aout]') : ''}`)
+  // El «bus» de voz sale con este nombre: va a la mezcla con la música o directo a la salida.
+  const bus = conMusica ? '[vozcat]' : '[aout]'
+  // La imagen: los clips uno tras otro. Un clip con fundido entra encima del anterior, que se
+  // queda congelado en su último cuadro esos segundos (tpad): la duración total no cambia.
+  if (lista.some((t, i) => i > 0 && t.clip.fundido)) {
+    let previo = '[v0]'
+    let acumulado = lista[0].fin - lista[0].inicio
+    lista.forEach((t, i) => {
+      if (i === 0) return
+      const salida = i === lista.length - 1 ? '[vcat]' : `[vx${i}]`
+      const d = t.clip.fundido
+      if (d) {
+        partes.push(`${previo}tpad=stop_mode=clone:stop_duration=${d.toFixed(3)}[vp${i}]`)
+        partes.push(`[vp${i}][v${i}]xfade=transition=fade:duration=${d.toFixed(3)}:offset=${acumulado.toFixed(3)}${salida}`)
+      } else {
+        partes.push(`${previo}[v${i}]concat=n=2:v=1:a=0${salida}`)
+      }
+      previo = salida
+      acumulado += t.fin - t.inicio
+    })
+  } else {
+    partes.push(`${lista.map((_, i) => `[v${i}]`).join('')}concat=n=${lista.length}:v=1:a=0[vcat]`)
+  }
+  if (conAudio) partes.push(`${lista.map((_, i) => `[a${i}]`).join('')}concat=n=${lista.length}:v=0:a=1${frases.length ? '[clipsa]' : bus}`)
+  if (frases.length) {
+    const etiquetas: string[] = conAudio ? ['[clipsa]'] : []
+    frases.forEach((v, i) => {
+      entradas.push('-i', join(carpeta, v.archivo))
+      partes.push(
+        `[${n++}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=${(v.volumen ?? 1).toFixed(3)},adelay=${Math.round(v.inicio * 1000)}:all=1[fr${i}]`
+      )
+      etiquetas.push(`[fr${i}]`)
+    })
+    partes.push(`${etiquetas.join('')}amix=inputs=${etiquetas.length}:duration=longest:normalize=0,apad,atrim=0:${duracion.toFixed(3)}${bus}`)
+  }
   partes.push(ass ? `[vcat]subtitles=${ass}[vout]` : '[vcat]null[vout]')
 
   if (musica) {
@@ -234,7 +298,7 @@ export async function exportarTimeline(
         `afade=t=out:st=${Math.max(0, duracion - 1.5).toFixed(3)}:d=1.5[mus]`
     )
     const envolvente = musica.ducking ? envolventeDucking(timeline, proyecto) : null
-    if (!conAudio) partes.push('[mus]anull[aout]')
+    if (!hayBus) partes.push('[mus]anull[aout]')
     else if (envolvente) {
       // Ducking exacto: baja en los tramos con voz de la transcripción, como en el monitor.
       partes.push(`[mus]volume=volume='${envolvente}':eval=frame[musbaja]`)
@@ -250,7 +314,7 @@ export async function exportarTimeline(
       partes.push('[voz][mus]amix=inputs=2:duration=first:normalize=0[aout]')
     }
   }
-  const salidaAudio = conAudio || conMusica
+  const salidaAudio = hayBus || conMusica
   const archivoFiltro = 'filtro-timeline.txt'
   writeFileSync(join(carpeta, archivoFiltro), partes.join(';' + String.fromCharCode(10)), 'utf8')
 

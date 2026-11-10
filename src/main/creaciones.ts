@@ -13,7 +13,7 @@ import {
   type MensajeCreacion,
   type PeticionCreacion
 } from '../shared/creacion'
-import { COSTO_CLIP, MAX_CLIPS_VEO, TOPE_CLIP_VEO } from '../shared/creacion'
+import { COSTO_CLIP, MAX_CLIPS_VEO, TOPE_CLIP_VEO, VOCES_GEMINI } from '../shared/creacion'
 import { estiloPorId } from '../shared/estilos'
 import { INSTRUCCIONES_CRITERIO, leerCriterio } from '../shared/gustos'
 import { resolverBinario } from './binarios'
@@ -156,6 +156,8 @@ export class Creaciones {
       adjuntos,
       fase: p.modo === 'agente' ? 'plan' : referencia ? 'estilo' : 'guion',
       ...(p.modo === 'agente' ? { modo: 'agente' as const, agente: { registro: [], rondas: 0 } } : {}),
+      ...(p.modo === 'agente' && typeof p.vozElegida === 'string' && VOCES_GEMINI.some((v) => v.id === p.vozElegida) ? { vozElegida: p.vozElegida } : {}),
+      ...(p.modo === 'agente' && p.directo === true ? { directo: true } : {}),
       ...(referencia ? { referencia } : {}),
       mensajes: descartados.length
         ? [{ id: randomUUID(), rol: 'agente' as const, texto: `No pude usar: ${descartados.join('; ')}.`, fecha: Date.now(), error: true }]

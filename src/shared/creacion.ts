@@ -231,6 +231,10 @@ export interface Creacion {
   modo?: ModoCreacion
   /** El estado del modo agente: plan, registro y resultado. */
   agente?: EstadoModoAgente
+  /** Modo agente: la voz de Gemini que el usuario eligió para narrar (sin ella, sin narración). */
+  vozElegida?: string
+  /** Modo agente: tras el plan, si no hay preguntas, se hace sin esperar el «Hazlo». */
+  directo?: boolean
   /** Video de referencia cuyo estilo se copia (copiado a `analisis/`; no entra en el video). */
   referencia?: { archivo: string; nombre: string }
   /** La ficha de estilo que salió de la referencia (también en `analisis/estilo.json`). */
@@ -276,6 +280,10 @@ export interface PeticionCreacion {
   tareas?: TareasCreacion
   /** Imágenes (gratis) y clips de Veo (gastan créditos) generados en Google Flow. */
   flow?: FlowCreacion
+  /** La voz de Gemini que narra, elegida en la caja (sin esto, el video va sin narración). */
+  vozElegida?: string
+  /** Hacerlo directo: tras el plan, si el agente no tiene preguntas, empieza sin esperar el «Hazlo». */
+  directo?: boolean
 }
 
 export interface FlowCreacion {

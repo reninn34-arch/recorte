@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { duracionTimeline, tramos, ubicar, vozEnTimeline, type Timeline } from '../../../shared/timeline'
+import { duracionTimeline, tramos, tramosDeVoces, ubicar, vozEnTimeline, type Timeline } from '../../../shared/timeline'
 import type { TranscriptSegment } from '../../../shared/types'
 
 const LIMITE_HISTORIAL = 200
@@ -283,7 +283,11 @@ export function useMusica(
 ): React.RefObject<HTMLAudioElement | null> {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const musica = timeline.musica
-  const voz = useMemo(() => (musica?.ducking ? vozEnTimeline(timeline, transcript) : []), [timeline, transcript, musica?.ducking])
+  // La voz que baja la música: lo que se dice en los clips y la narración puesta frase a frase.
+  const voz = useMemo(
+    () => (musica?.ducking ? [...vozEnTimeline(timeline, transcript), ...tramosDeVoces(timeline)] : []),
+    [timeline, transcript, musica?.ducking]
+  )
   const total = duracionTimeline(timeline)
   const { tiempo, reproduciendo } = reproductor
 
@@ -309,6 +313,41 @@ export function useMusica(
     if (Math.abs(audio.currentTime - esperado) > 0.3) audio.currentTime = esperado
     if (audio.paused) void audio.play().catch(() => {})
   }, [reproduciendo, tiempo, musica])
+
+  return audioRef
+}
+
+/**
+ * La narración en el monitor: un `<audio>` que suena la frase que toca en el segundo del
+ * cabezal y sigue al reloj de la timeline. `urlDe` da la URL de cada archivo del proyecto.
+ */
+export function useVoces(timeline: Timeline, reproductor: Reproductor, urlDe: (archivo: string) => string): React.RefObject<HTMLAudioElement | null> {
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const actual = useRef<string | null>(null)
+  const { tiempo, reproduciendo } = reproductor
+  const voces = timeline.voces
+
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    const frase = voces?.find((v) => tiempo >= v.inicio && tiempo < v.inicio + v.duracion)
+    if (!frase) {
+      if (!audio.paused) audio.pause()
+      return
+    }
+    const esperado = tiempo - frase.inicio
+    if (actual.current !== frase.archivo) {
+      actual.current = frase.archivo
+      audio.src = urlDe(frase.archivo)
+      audio.currentTime = esperado
+    } else if (Math.abs(audio.currentTime - esperado) > 0.3) {
+      audio.currentTime = esperado
+    }
+    audio.volume = Math.max(0, Math.min(1, frase.volumen ?? 1))
+    if (reproduciendo) {
+      if (audio.paused) void audio.play().catch(() => {})
+    } else if (!audio.paused) audio.pause()
+  }, [tiempo, reproduciendo, voces, urlDe])
 
   return audioRef
 }

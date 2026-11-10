@@ -502,18 +502,32 @@ def armar(ruta, prueba=None):
         return
     salida = L.ruta(r.get('salida', 'salida/final.mp4'))
     os.makedirs(os.path.dirname(salida), exist_ok=True)
-    entrada_audio, filtro_audio = [], []
+    # El audio: la música (una) y la voz (una frase por archivo, cada una en su segundo).
+    entrada_audio, filtro_audio, partes, pistas = [], [], [], []
     musica = r.get('musica')
+    frases = r.get('voz') or []
     if musica:
         desde, hasta = float(musica.get('desde', 0)), musica.get('hasta')
         en = float(musica.get('en', 0))
         fade = float(musica.get('fundido', 0.2))
-        vol = float(musica.get('volumen', 1))
+        # Con voz encima, la música baja sola si la receta no dice otra cosa.
+        vol = float(musica.get('volumen', 0.25 if frases else 1))
         fin = (float(hasta) - desde) if hasta is not None else dur - en
-        entrada_audio = ['-i', L.ruta(musica['archivo'])]
-        filtro_audio = ['-filter_complex',
-                        f'[1:a]atrim={desde}:{desde + fin},asetpts=PTS-STARTPTS,volume={vol},'
-                        f'afade=t=out:st={max(0, fin - fade):.3f}:d={fade},adelay={int(en * 1000)}:all=1,apad[a]',
+        entrada_audio += ['-i', L.ruta(musica['archivo'])]
+        n = len(entrada_audio) // 2
+        partes.append(f'[{n}:a]aresample=48000,atrim={desde}:{desde + fin},asetpts=PTS-STARTPTS,volume={vol},'
+                      f'afade=t=out:st={max(0, fin - fade):.3f}:d={fade},adelay={int(en * 1000)}:all=1[m]')
+        pistas.append('[m]')
+    for i, f in enumerate(frases):
+        entrada_audio += ['-i', L.ruta(f['archivo'])]
+        n = len(entrada_audio) // 2
+        partes.append(f'[{n}:a]aresample=48000,aformat=channel_layouts=stereo,volume={float(f.get("volumen", 1))},'
+                      f'adelay={int(float(f.get("en", 0)) * 1000)}:all=1[v{i}]')
+        pistas.append(f'[v{i}]')
+    if pistas:
+        mezcla = (f'{"".join(pistas)}amix=inputs={len(pistas)}:normalize=0:dropout_transition=0,apad[a]'
+                  if len(pistas) > 1 else f'{pistas[0]}apad[a]')
+        filtro_audio = ['-filter_complex', ';'.join(partes + [mezcla]),
                         '-map', '0:v', '-map', '[a]', '-c:a', 'aac', '-b:a', '192k', '-shortest']
     orden = [FFMPEG, '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', f'{L.W}x{L.H}', '-r', str(L.fps), '-i', '-',
              *entrada_audio, *filtro_audio,
@@ -586,7 +600,48 @@ def vista_encuadre(foto, zoom, cx, cy, ancho, alto):
     print(json.dumps({'vista': salida}, ensure_ascii=False))
 
 
+def voz(archivo, espera=900):
+    """Pide a Recorte la narración con la voz que eligió el usuario: una frase por línea del archivo.
+
+    Deja el pedido en voz/ y espera la respuesta de Recorte (que es quien tiene la cuenta de voz). Devuelve cada frase
+    con su archivo y lo que dura, para poner cada momento en su frase.
+    """
+    import time
+    import uuid
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(archivo, encoding='utf-8') as f:
+        frases = [l.strip() for l in f if l.strip()]
+    if not frases:
+        raise SystemExit('El archivo no tiene frases (una por línea).')
+    carpeta = os.path.join(base, 'voz')
+    os.makedirs(carpeta, exist_ok=True)
+    ident = uuid.uuid4().hex[:8]
+    temporal = os.path.join(carpeta, f'_pedido-{ident}.tmp')
+    with open(temporal, 'w', encoding='utf-8') as f:
+        json.dump({'frases': frases}, f, ensure_ascii=False)
+    os.replace(temporal, os.path.join(carpeta, f'pedido-{ident}.json'))
+    respuesta = os.path.join(carpeta, f'respuesta-{ident}.json')
+    limite = time.time() + espera
+    while time.time() < limite:
+        if os.path.exists(respuesta):
+            time.sleep(0.2)
+            with open(respuesta, encoding='utf-8') as f:
+                r = json.load(f)
+            print(json.dumps(r, ensure_ascii=False))
+            if not r.get('ok'):
+                raise SystemExit(r.get('error') or 'Recorte no pudo generar la voz.')
+            return
+        time.sleep(1)
+    raise SystemExit('Recorte no respondió al pedido de voz. Sigue sin narración y dilo en el resumen.')
+
+
 def main():
+    # En Windows la consola no es UTF-8: sin esto, las tildes de lo que se imprime llegan rotas al agente.
+    for flujo in (sys.stdout, sys.stderr):
+        try:
+            flujo.reconfigure(encoding='utf-8')
+        except Exception:
+            pass
     p = argparse.ArgumentParser(description='El kit de Recorte para el modo agente.')
     sub = p.add_subparsers(dest='orden', required=True)
     g = sub.add_parser('golpes')
@@ -606,8 +661,12 @@ def main():
     a = sub.add_parser('armar')
     a.add_argument('receta')
     a.add_argument('--prueba', help='segundos separados por coma: solo esos fotogramas, a revision/')
+    v = sub.add_parser('voz')
+    v.add_argument('archivo', help='texto con una frase por línea')
     x = p.parse_args()
-    if x.orden == 'golpes':
+    if x.orden == 'voz':
+        voz(x.archivo)
+    elif x.orden == 'golpes':
         golpes(x.archivo, x.n)
     elif x.orden == 'hoja':
         print(json.dumps({'hoja': hoja(x.video, x.n, x.salida)}, ensure_ascii=False))

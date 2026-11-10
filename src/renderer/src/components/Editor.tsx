@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { OpcionesExport, Progreso } from '../../../shared/api'
 import type { ClipSuggestion, MedioProyecto, Project, RenderJob } from '../../../shared/types'
 import { ClipList } from './ClipList'
@@ -8,8 +8,8 @@ import { RenderQueue } from './RenderQueue'
 import { SourceCard } from './SourceCard'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
-import { ajustesDe, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, textosEn, ubicar, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, type Timeline } from '../../../shared/timeline'
-import { useHistorial, useMusica, useReproductor, type FuentesVista, type Reproductor } from '../hooks/timeline'
+import { ajustesDe, cambiarFuente, zoomEn, FUENTES_TEXTO, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, textosEn, ubicar, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, type Timeline } from '../../../shared/timeline'
+import { useHistorial, useMusica, useReproductor, useVoces, type FuentesVista, type Reproductor } from '../hooks/timeline'
 import { MediosPanel } from './MediosPanel'
 import { TimelineEditor, type Elegido } from './TimelineEditor'
 import type { PuenteEditor } from './ChatAgente'
@@ -34,11 +34,27 @@ function Monitor({
   const rotulos = textosEn(timeline, reproductor.tiempo)
   const vacia = timeline.clips.length === 0
   const musicaRef = useMusica(timeline, reproductor, proyecto.transcript)
-  // Zoom y color del clip bajo el cabezal; en el render son crop y eq de FFmpeg.
-  const a = ajustesDe(ubicar(timeline, reproductor.tiempo)?.clip)
+  const urlDe = useCallback((archivo: string) => mediaUrl(proyecto.id, archivo), [proyecto.id])
+  const vocesRef = useVoces(timeline, reproductor, urlDe)
+  const ubicado = ubicar(timeline, reproductor.tiempo)
+  const clipActual = ubicado?.clip
+  // Un clip mudo solo aporta imagen: su sonido va en las pistas de voz y música.
+  useEffect(() => {
+    if (reproductor.videoRef.current) reproductor.videoRef.current.muted = Boolean(clipActual?.mudo)
+  }, [clipActual?.id, clipActual?.mudo, reproductor.videoRef])
+  // Zoom, encuadre, acercamiento y color del clip bajo el cabezal; en el render son crop,
+  // zoompan y eq de FFmpeg.
+  const a = ajustesDe(clipActual)
+  const largoClip = ubicado ? ubicado.fin - ubicado.inicio : 1
+  const enClip = ubicado ? reproductor.tiempo - ubicado.inicio : 0
+  const z = zoomEn(a, enClip / Math.max(0.01, largoClip))
+  // El fundido de entrada: el clip aparece sobre negro (en el render, sobre el clip anterior).
+  const fundido = clipActual?.fundido && ubicado && ubicado.indice > 0 ? Math.min(1, enClip / clipActual.fundido) : 1
   const estiloImagen: React.CSSProperties = {
     visibility: vacia ? 'hidden' : 'visible',
-    transform: a.zoom !== 1 ? `scale(${a.zoom})` : undefined,
+    transform: z !== 1 ? `scale(${z})` : undefined,
+    transformOrigin: a.cx !== 0.5 || a.cy !== 0.5 ? `${a.cx * 100}% ${a.cy * 100}%` : undefined,
+    opacity: fundido < 1 ? fundido : undefined,
     filter:
       a.brillo !== 0 || a.contraste !== 1 || a.saturacion !== 1
         ? `brightness(${(1 + a.brillo * 1.5).toFixed(3)}) contrast(${a.contraste}) saturate(${a.saturacion})`
@@ -63,8 +79,19 @@ function Monitor({
       {timeline.musica && !proyecto.demo && (
         <audio ref={musicaRef} src={mediaUrl(proyecto.id, timeline.musica.archivo)} preload="auto" loop />
       )}
+      {timeline.voces?.length && !proyecto.demo ? <audio ref={vocesRef} preload="auto" /> : null}
       {rotulos.map((r) => (
-        <span key={r.id} className={`monitor-rotulo ${r.posicion}`}>
+        <span
+          key={r.id}
+          className={`monitor-rotulo ${r.posicion} ${r.sinCaja ? 'sin-caja' : ''}`}
+          style={{
+            ...(r.tamano ? { fontSize: `calc(clamp(12px, 3.4cqw, 44px) * ${r.tamano})` } : {}),
+            ...(r.color ? { color: r.color } : {}),
+            ...(r.fuente && FUENTES_TEXTO[r.fuente]
+              ? { fontFamily: `"${FUENTES_TEXTO[r.fuente].familia}", Arial, sans-serif`, fontWeight: FUENTES_TEXTO[r.fuente].negrita ? 700 : 400 }
+              : {})
+          }}
+        >
           {r.texto}
         </span>
       ))}
@@ -166,6 +193,23 @@ export function Editor({
     return r.timeline
   }
 
+  /** Pone otra foto u otro video en el lugar de un clip (el primero que elija), sin mover lo demás. */
+  async function cambiarArchivo(clipId: string) {
+    if (agregando) return
+    setAgregando(true)
+    try {
+      const r = await window.recorte.agregarMedios(proyecto.id)
+      const m = r?.project.medios?.find((x) => x.id === r.agregados[0])
+      if (!r || !m) return
+      onMedios(r.project.medios ?? [])
+      historial.aplicar(cambiarFuente(timeline, clipId, m.id, m.tipo === 'imagen' ? MAX_IMAGEN : m.duracion))
+    } catch (error) {
+      onAviso(`No pude cambiarlo: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setAgregando(false)
+    }
+  }
+
   /** Agrega varios archivos a la biblioteca y los pone al final de la timeline. */
   async function agregarMedios() {
     if (agregando || proyecto.demo) return
@@ -245,6 +289,19 @@ export function Editor({
         historial={historial}
         elegido={elegido}
         onElegir={elegir}
+        generarVoz={
+          proyecto.demo
+            ? undefined
+            : async (texto, voz) => {
+                try {
+                  return await window.recorte.vozFrase(proyecto.id, { texto, ...(voz ? { voz } : {}) })
+                } catch (error) {
+                  onAviso(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error))
+                  return null
+                }
+              }
+        }
+        onCambiarArchivo={proyecto.demo ? undefined : (clipId) => void cambiarArchivo(clipId)}
         importarMusica={async () => {
           const r = await window.recorte.importarMusica(proyecto.id)
           if (r && !r.ok) onAviso(r.error ?? 'No pude añadir la música.')
