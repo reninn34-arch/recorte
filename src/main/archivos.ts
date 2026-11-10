@@ -16,7 +16,8 @@ export const EXT_HEIC = ['.heic', '.heif']
 /** Lo que se puede elegir en «Adjuntar» (sin punto). */
 export const EXTENSIONES_SUBIBLES = [...EXT_IMAGEN, ...EXT_HEIC, ...EXT_VIDEO, '.zip'].map((e) => e.slice(1))
 
-const MAX_ARCHIVOS = 40
+/** Lo más que entra en una creación (una carpeta de material puede traer muchos). */
+const MAX_ARCHIVOS = 80
 
 function correr(exe: string, args: string[], timeoutMs: number): Promise<boolean> {
   return new Promise((ok) => {
@@ -117,8 +118,17 @@ export async function prepararArchivos(rutas: string[], trabajo: string): Promis
   const listos: string[] = []
   const descartados: string[] = []
   let n = 0
-  const tratar = async (ruta: string): Promise<void> => {
+  const tratar = async (ruta: string, deCarpeta = false): Promise<void> => {
     if (listos.length >= MAX_ARCHIVOS) return
+    // Una carpeta de material: entra todo lo que sirva de dentro (también subcarpetas).
+    if (statSync(ruta).isDirectory()) {
+      const antes = listos.length
+      const archivos = listar(ruta)
+      for (const a of archivos) await tratar(a, true)
+      if (listos.length === antes) descartados.push(`${basename(ruta)} (la carpeta no tiene fotos ni videos)`)
+      else if (listos.length >= MAX_ARCHIVOS && archivos.length > listos.length - antes) descartados.push(`${basename(ruta)}: solo entran ${MAX_ARCHIVOS} archivos`)
+      return
+    }
     const ext = extname(ruta).toLowerCase()
     if (EXT_IMAGEN.includes(ext) || EXT_VIDEO.includes(ext)) {
       listos.push(ruta)
@@ -136,7 +146,8 @@ export async function prepararArchivos(rutas: string[], trabajo: string): Promis
       const antes = listos.length
       for (const a of archivos) await tratar(a)
       if (listos.length === antes) descartados.push(`${basename(ruta)} (no traía fotos ni videos)`)
-    } else {
+    } else if (!deCarpeta) {
+      // Dentro de una carpeta, lo que no es foto o video (documentos, textos…) se salta sin avisar.
       descartados.push(`${basename(ruta)} (formato que Recorte no usa)`)
     }
   }

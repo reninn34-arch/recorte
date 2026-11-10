@@ -20,7 +20,8 @@ import { activarHerramientas } from './herramientas'
 import { carpetaPorDefecto, copiarAVideos, carpetaDelProyecto } from './carpetas'
 import { abrirFlow, agregarCuentaFlow, ajustesFlow, estadoFlow, leerSaldosFlow, pedirFlow, quitarCuentaFlow } from './flow'
 import { MODELO_CHATGPT, MODELOS_IMAGEN, modelosVideoVigentes, type PedidoFlow } from '../shared/flow'
-import { estadoChatGPT } from './imagenchatgpt'
+import { estadoChatGPT, generarImagenChatGPT } from './imagenchatgpt'
+import { atenderMedios } from './mediosagente'
 import { avisarSesionCaida, definirEntornoAgentes, empezarTrabajo, esParado, pararTrabajo, terminarTrabajo } from './ia'
 import { comandoConEleccion } from './modelos'
 import { catalogoAgente } from './catalogo'
@@ -474,6 +475,17 @@ app.whenReady().then(() => {
       const config = await configParaTarea(c.tareas?.video)
       // Mientras trabaja, Recorte atiende sus pedidos de voz con la voz elegida en la caja.
       const pararVoz = atenderVoz(join(carpeta, 'trabajo'), c.vozElegida, generarFraseVoz, (l) => avisarAgente(c, l, 0.5))
+      // Y sus pedidos de imágenes y clips, con Flow o ChatGPT (lo que eligió en la caja).
+      const pararMedios = atenderMedios(
+        join(carpeta, 'trabajo'),
+        c.flow,
+        c.formato === 'horizontal' ? '16:9' : '9:16',
+        {
+          flow: (pedido, destino) => pedirFlow(pedido, destino, senal),
+          chatgpt: (pedido, destino, nombre) => generarImagenChatGPT(pedido, destino, nombre, senal)
+        },
+        (l) => avisarAgente(c, l, 0.5)
+      )
       try {
         enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.05, texto: 'El agente está trabajando' })
         // Si pide un cambio sobre lo hecho, va como pedido; si solo aprobó el plan, sin pedido.
@@ -520,6 +532,7 @@ app.whenReady().then(() => {
         else c.mensajes.push(mensaje('agente', `No pude terminarlo: ${textoError(e)}`, true))
       } finally {
         pararVoz()
+        pararMedios()
       }
   }
 
@@ -561,6 +574,11 @@ app.whenReady().then(() => {
       filters: [{ name: 'Fotos y videos', extensions: EXTENSIONES_ADJUNTOS }]
     })
     return r.canceled ? [] : r.filePaths
+  })
+  // Una carpeta donde el usuario ya juntó el material del video: entra todo lo que sirva.
+  ipcMain.handle('dialog:open-carpeta', async () => {
+    const r = await dialog.showOpenDialog({ title: 'La carpeta con el material de tu video', properties: ['openDirectory'] })
+    return r.canceled ? null : (r.filePaths[0] ?? null)
   })
   ipcMain.handle('dialog:open-referencia', async () => {
     const r = await dialog.showOpenDialog({

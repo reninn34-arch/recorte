@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, isAbsolute, join, resolve, sep } from 'node:path'
-import type { Creacion } from '../shared/creacion'
+import { MAX_CLIPS_VEO, type Creacion } from '../shared/creacion'
 import {
   MAX_REGISTRO,
   validarEntrega,
@@ -15,6 +15,7 @@ import { ejecutar } from './crear'
 import { probeVideo } from './ffmpeg'
 import { extraerJson, falloDeAgente, Parado, rechazoPorPolitica } from './ia'
 import { agenteConHerramientas, SesionPerdida, turnoAgente } from './turnoagente'
+import { mediosDisponibles } from './mediosagente'
 import { buscarPython, rutaScriptPython } from './transcribir'
 
 /**
@@ -55,7 +56,7 @@ export function copiarEntrada(rutas: string[], carpeta: string): { archivo: stri
   mkdirSync(entrada, { recursive: true })
   mkdirSync(join(carpetaTrabajo(carpeta), 'salida'), { recursive: true })
   const copiados: { archivo: string; nombre: string; tipo: 'imagen' | 'video' }[] = []
-  for (const [i, ruta] of rutas.slice(0, 30).entries()) {
+  for (const [i, ruta] of rutas.slice(0, 80).entries()) {
     if (!existsSync(ruta)) continue
     const ext = extname(ruta).toLowerCase()
     const tipo = EXT_VIDEO.includes(ext) ? 'video' : EXT_IMAGEN.includes(ext) ? 'imagen' : null
@@ -179,9 +180,26 @@ Te devuelve cada frase con su archivo y su duración: ajusta cada momento a su f
       : 'El usuario eligió hacer este video SIN voz: no pongas narración ni generes voz por tu cuenta.'
   }
 
+## Imágenes y clips generados
+${(() => {
+    const m = mediosDisponibles(c.flow)
+    if (!conKit || (!m.imagenes && !m.clips)) {
+      return 'El usuario no eligió generar imágenes ni clips: trabaja con sus archivos y con lo que diseñes con código (fondos, formas, tipografía).'
+    }
+    return [
+      m.imagenes
+        ? `- Imágenes con ${m.imagenes}: \`python kit/kit.py imagen "descripción" [--ref entrada/foto.jpg]\`. Úsalas cuando el video necesite algo que no está en sus archivos (una escena, un objeto, un fondo).`
+        : '- Imágenes generadas: NO (el usuario no las eligió).',
+      m.clips
+        ? `- Clips de video con ${m.clips}: \`python kit/kit.py clip "descripción" [--ref …]\`. GASTAN créditos del usuario: solo para los momentos clave, ${MAX_CLIPS_VEO} como mucho.`
+        : '- Clips generados: NO (el usuario no los eligió).',
+      'Lee «Imágenes y clips generados» en `kit/RECETA.md`. Sin texto escrito dentro de lo generado: los rótulos van en la receta.'
+    ].join('\n')
+  })()}
+
 ## Reglas
 - No salgas de esta carpeta, no borres nada de \`entrada/\` y no toques archivos del sistema.
-- No bajes material de internet con derechos de terceros ni gastes créditos de servicios de pago.
+- No bajes material de internet con derechos de terceros ni uses servicios de pago por tu cuenta: lo generado se pide a Recorte (arriba).
 - Si algo del pedido es ambiguo, elige lo más sensato para el objetivo y dilo en el resumen.
 - Textos en pantalla solo si el pedido los pide o el tipo de video claramente los necesita.
 `
@@ -370,7 +388,7 @@ function contexto(c: Creacion): string {
     .slice(-12)
     .map((m) => `${m.rol === 'usuario' ? 'Usuario' : 'Tú'}: ${m.texto}`)
     .join('\n')
-  return `PEDIDO ORIGINAL DEL USUARIO:\n"""\n${c.peticion}\n"""\n\nArchivos en entrada/:\n${archivos}\n\nFormato elegido en la app: ${c.formato === 'horizontal' ? 'horizontal 16:9' : 'vertical 9:16'}, unos ${c.duracion} s (orientativo: manda lo que pida el usuario).${charla ? `\n\nConversación hasta ahora:\n${charla}` : ''}`
+  return `PEDIDO ORIGINAL DEL USUARIO:\n"""\n${c.peticion}\n"""\n\nArchivos en entrada/:\n${archivos}\n\nFormato elegido en la app: ${c.formato === 'horizontal' ? 'horizontal 16:9' : 'vertical 9:16'}, la duración que pida el usuario; si no la dice, la que mejor sirva al video (un reel suele ir de 15 a 45 s).${charla ? `\n\nConversación hasta ahora:\n${charla}` : ''}`
 }
 
 /** Lo último que dijo el usuario en la conversación (para el turno que retoma la sesión). */

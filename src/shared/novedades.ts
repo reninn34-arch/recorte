@@ -24,6 +24,35 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.18',
+    fecha: '2026-11-10',
+    resumen: 'El agente genera imágenes y clips con tus cuentas, recibe carpetas enteras de material y eliges su modelo en un menú nuevo.',
+    novedades: [
+      {
+        icono: 'image',
+        titulo: 'Imágenes y clips para el agente',
+        texto:
+          'Elige en la caja imágenes de Google Flow (Nano Banana) o de ChatGPT y clips de Flow (Veo u Omni). El agente los pide cuando el video los necesita, con tus fotos de referencia si hace falta; los clips, hasta 3 y con tope de costo.'
+      },
+      {
+        icono: 'carpeta',
+        titulo: 'Una carpeta entera de material',
+        texto: 'El botón «+» añade archivos o una carpeta: el agente recibe todas sus fotos y videos, también los de subcarpetas.'
+      },
+      {
+        icono: 'sliders',
+        titulo: 'Elegir modelo, más claro',
+        texto:
+          'Los agentes a un lado y sus modelos al otro, con para qué sirve cada uno, el recomendado y el esfuerzo. Aparecen los modelos nuevos (Fable 5.2) y los nombres exactos de ChatGPT (GPT-6-Luna, GPT-5.6-Terra…).'
+      },
+      {
+        icono: 'check',
+        titulo: 'Caja más simple',
+        texto: 'Empieza sin voz, ya no pide la duración (dila en tu pedido si la quieres) y enviar es una flecha.'
+      }
+    ]
+  },
+  {
     version: '0.1.17',
     fecha: '2026-11-10',
     resumen: 'Crear es un solo agente con voz desde el principio, y el video que hace se abre en el editor con cada cosa suelta para retocarla a mano.',

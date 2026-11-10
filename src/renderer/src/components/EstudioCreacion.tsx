@@ -144,7 +144,7 @@ export function EstudioCreacion({
         <div className="estudio-titulo">
           <strong>{c.guion?.titulo ?? c.nombre}</strong>
           <span>
-            {estiloEditorial.nombre} · {c.formato === 'vertical' ? 'Vertical 9:16' : 'Horizontal 16:9'} · {c.duracion} s
+            {estiloEditorial.nombre} · {c.formato === 'vertical' ? 'Vertical 9:16' : 'Horizontal 16:9'}{c.modo === 'agente' ? '' : ` · ${c.duracion} s`}
             {c.modo === 'agente' ? ` · ${c.vozElegida ? `Voz ${c.vozElegida}` : 'Sin voz'}` : ''}
           </span>
         </div>

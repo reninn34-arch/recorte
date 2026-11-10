@@ -57,3 +57,14 @@ Recorte genera la narración con la voz que eligió el usuario; tú solo escribe
 - Para cambiar lo que dice UNA frase: un archivo con solo esa línea, `kit.py voz` otra vez, y reemplaza su entrada en `"voz"`.
   No vuelvas a pedir las que no cambian.
 - Si `kit.py voz` responde que el usuario eligió sin voz, o falla, sigue sin narración y dilo en el resumen. No uses otra voz ni otro TTS.
+
+## Imágenes y clips generados
+Si el usuario eligió generar imágenes o clips (lo dice AGENTS.md), Recorte los hace con SUS cuentas (Google Flow o ChatGPT):
+- `python kit/kit.py imagen "descripción" [--ref entrada/01-foto.jpg]` → `{"archivo": "medios/img-….png"}` (unos segundos o un minuto).
+- `python kit/kit.py clip "descripción" [--ref …]` → `{"archivo": "medios/clip-….mp4"}` (varios minutos; GASTA créditos: hasta 3 por ronda).
+- Describe bien: sujeto, acción, encuadre (vertical u horizontal ya va solo), luz y estilo. Sin texto escrito dentro de la imagen:
+  los rótulos los pones tú en la receta (así el usuario los edita).
+- `--ref` usa fotos del usuario como referencia (que se parezca a su producto, su local, su cara); hasta 3.
+- Pide varias a la vez con `&` o en paralelo si las necesitas todas: Recorte las reparte entre sus cuentas.
+- Úsalas en la receta como cualquier archivo: `{"tipo": "foto", "archivo": "medios/img-….png", …}` o `{"tipo": "video", "archivo": "medios/clip-….mp4", …}`.
+- Si responde que el usuario no eligió generar, o falla, sigue con lo que tienes y dilo en el resumen.

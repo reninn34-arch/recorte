@@ -274,6 +274,8 @@ export interface RecorteApi {
   importarMusica: (id: string) => Promise<{ ok: boolean; musica?: MusicaTL; error?: string } | null>
   /** Crear con IA: videos desde cero, sin material importado. */
   elegirAdjuntos: () => Promise<string[]>
+  /** Una carpeta de material: el agente recibe todas sus fotos y videos. */
+  elegirCarpeta: () => Promise<string | null>
   /** El video de referencia cuyo estilo se copia (uno; no entra en el video). */
   elegirReferencia: () => Promise<string | null>
   creacionesListar: () => Promise<Creacion[]>

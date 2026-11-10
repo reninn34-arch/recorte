@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { app } from 'electron'
 import { ID_SEGURO, type AgenteId, type ModeloAgente } from '../shared/creacion'
@@ -13,11 +14,13 @@ import { matarArbol } from './ia'
  *   `supportedEffortLevels`. No manda nada al modelo ni gasta.
  * - OpenCode: `opencode models --verbose`, con el precio (0 = gratis) y sus variantes.
  * - Antigravity: las opciones de una sesión ACP (antigravity.ts).
+ * - Codex: su propia lista (`~/.codex/models_cache.json`, la que baja Codex), con los niveles.
  * - Kimi y Gemini CLI no tienen cómo listar sus modelos: van los conocidos.
- * Se recuerda un día; «forzar» vuelve a preguntar.
+ * Lo recordado se da al instante y, si tiene más de una hora, se vuelve a preguntar de fondo:
+ * así un modelo nuevo aparece sin esperar un día. «forzar» pregunta ya.
  */
 
-const UN_DIA = 24 * 60 * 60_000
+const UNA_HORA = 60 * 60_000
 const ruta = () => join(app.getPath('userData'), 'catalogo-modelos.json')
 type Guardado = Partial<Record<AgenteId, { fecha: number; modelos: ModeloAgente[] }>>
 
@@ -67,6 +70,33 @@ function salidaDe(orden: string, entrada: string | null, limite: number, hasta?:
   })
 }
 
+/** Lo que dice cada familia de Claude, en español (su descripción viene en inglés). */
+const FAMILIAS_CLAUDE: Record<string, string> = {
+  fable: 'El más capaz: lo más difícil y largo',
+  opus: 'Completo para el día a día y lo complejo',
+  sonnet: 'Rápido y eficiente para lo de siempre',
+  haiku: 'El más rápido, para lo sencillo'
+}
+
+/** «Opus 5.5» → ['opus', 5.5]: la familia y la versión, para saber cuál es la más nueva. */
+function familiaYVersion(nombre: string): [string, number] {
+  const m = /^([A-Za-z-]+?)[\s-]*(\d+(?:\.\d+)?)/.exec(nombre.trim())
+  return m ? [m[1].toLowerCase().replace(/^gpt-?/, 'gpt-'), Number(m[2])] : [nombre.toLowerCase(), 0]
+}
+
+/** Marca como «anterior» lo que no es la versión más nueva de su familia. */
+function marcarAnteriores(modelos: ModeloAgente[], familiaDe: (m: ModeloAgente) => [string, number] = (m) => familiaYVersion(m.nombre)): ModeloAgente[] {
+  const mejor = new Map<string, number>()
+  for (const m of modelos) {
+    const [f, v] = familiaDe(m)
+    mejor.set(f, Math.max(mejor.get(f) ?? 0, v))
+  }
+  return modelos.map((m) => {
+    const [f, v] = familiaDe(m)
+    return v < (mejor.get(f) ?? 0) ? { ...m, anterior: true } : m
+  })
+}
+
 async function modelosClaude(): Promise<ModeloAgente[]> {
   if (!resolverBinario('claude')) return []
   const pedido = JSON.stringify({ type: 'control_request', request_id: 'catalogo', request: { subtype: 'initialize' } }) + '\n'
@@ -80,6 +110,8 @@ async function modelosClaude(): Promise<ModeloAgente[]> {
     try {
       const m = JSON.parse(linea) as { response?: { response?: { models?: Record<string, unknown>[] } } }
       const lista = m.response?.response?.models ?? []
+      // «default» dice cuál recomienda Claude (a qué modelo apunta).
+      const recomendado = String(lista.find((x) => x.value === 'default')?.resolvedModel ?? '')
       const vistos = new Set<string>()
       const modelos: ModeloAgente[] = []
       for (const x of lista) {
@@ -88,14 +120,19 @@ async function modelosClaude(): Promise<ModeloAgente[]> {
         if (!id || id === 'default' || !ID_SEGURO.test(id) || vistos.has(String(x.resolvedModel ?? id))) continue
         vistos.add(String(x.resolvedModel ?? id))
         const esfuerzos = Array.isArray(x.supportedEffortLevels) ? x.supportedEffortLevels.filter((e): e is string => typeof e === 'string' && ID_SEGURO.test(e)) : []
+        const nombre = typeof x.displayName === 'string' ? x.displayName : id
+        const descripcion = FAMILIAS_CLAUDE[familiaYVersion(nombre)[0]]
         modelos.push({
           id,
-          nombre: typeof x.displayName === 'string' ? x.displayName : id,
+          nombre,
           esfuerzos,
-          esfuerzoDefecto: esfuerzos.includes('high') ? 'high' : esfuerzos[0]
+          esfuerzoDefecto: esfuerzos.includes('high') ? 'high' : esfuerzos[0],
+          ...(descripcion ? { descripcion } : {}),
+          ...(recomendado && String(x.resolvedModel ?? id) === recomendado ? { recomendado: true } : {})
         })
       }
-      return modelos
+      // La más nueva de cada familia arriba; las anteriores, al final.
+      return marcarAnteriores(modelos).sort((a, b) => Number(Boolean(a.anterior)) - Number(Boolean(b.anterior)))
     } catch {
       return []
     }
@@ -128,12 +165,58 @@ async function modelosOpenCode(): Promise<ModeloAgente[]> {
   return modelos.sort((a, b) => Number(Boolean(b.gratis)) - Number(Boolean(a.gratis)))
 }
 
+/** Lo que dice cada modelo de Codex, en español (su descripción viene en inglés). */
+const DESCRIPCION_CODEX: [RegExp, string][] = [
+  [/fast and affordable model for easier/i, 'Rápido y económico, para lo sencillo'],
+  [/fast and affordable agentic coding/i, 'Rápido y económico para programar'],
+  [/balanced/i, 'Equilibrado'],
+  [/fast and efficient/i, 'Rápido y eficiente'],
+  [/most capable|frontier|hardest/i, 'El más capaz']
+]
+
+/**
+ * Los modelos de Codex: los que Codex ofrece en su selector (`visibility: list`), con sus
+ * niveles de razonamiento. Los baja Codex mismo; Recorte solo los lee (no gasta nada).
+ */
+function modelosCodex(): ModeloAgente[] {
+  const archivo = join(homedir(), '.codex', 'models_cache.json')
+  try {
+    const d = JSON.parse(readFileSync(archivo, 'utf8')) as { models?: Record<string, unknown>[] }
+    const modelos: ModeloAgente[] = []
+    for (const x of d.models ?? []) {
+      const id = typeof x.slug === 'string' ? x.slug : ''
+      if (!id || x.visibility !== 'list' || !ID_SEGURO.test(id)) continue
+      const niveles = Array.isArray(x.supported_reasoning_levels) ? x.supported_reasoning_levels : []
+      const esfuerzos = niveles.map((n) => String((n as { effort?: unknown }).effort ?? '')).filter((e) => ID_SEGURO.test(e))
+      const ingles = typeof x.description === 'string' ? x.description : ''
+      const descripcion = DESCRIPCION_CODEX.find(([re]) => re.test(ingles))?.[1]
+      modelos.push({
+        id,
+        nombre: typeof x.display_name === 'string' ? x.display_name : id,
+        esfuerzos,
+        ...(typeof x.default_reasoning_level === 'string' && esfuerzos.includes(x.default_reasoning_level) ? { esfuerzoDefecto: x.default_reasoning_level } : {}),
+        ...(descripcion ? { descripcion } : {}),
+        ...(/^older/i.test(ingles) ? { anterior: true } : {})
+      })
+    }
+    return modelos
+  } catch {
+    return []
+  }
+}
+
 const enCurso = new Map<AgenteId, Promise<ModeloAgente[]>>()
 
 export async function catalogoAgente(id: AgenteId, forzar = false): Promise<ModeloAgente[]> {
   if (FIJOS[id]) return FIJOS[id]!
+  // Codex guarda su propia lista al día: se lee cada vez (es un archivo local).
+  if (id === 'codex') return modelosCodex()
   const guardado = leer()[id]
-  if (!forzar && guardado && Date.now() - guardado.fecha < UN_DIA && guardado.modelos.length) return guardado.modelos
+  if (!forzar && guardado?.modelos.length) {
+    // Lo recordado al instante; si es de hace más de una hora, se pregunta de fondo para la próxima.
+    if (Date.now() - guardado.fecha > UNA_HORA && !enCurso.has(id)) void catalogoAgente(id, true).catch(() => [])
+    return guardado.modelos
+  }
   const ya = enCurso.get(id)
   if (ya) return ya
   const pedido = (async () => {

@@ -5,9 +5,10 @@ import { Icon } from '../Icons'
 import { LogoAgente } from './Logos'
 
 /**
- * Los modelos de cada agente conectado, tal como los dice el agente, con sus esfuerzos
- * (bajo, medio, alto…). Elegir un modelo lo deja con su esfuerzo de siempre; elegir un
- * esfuerzo cierra el menú. Los catálogos se recuerdan mientras la app está abierta.
+ * Elegir quién hace el trabajo: a la izquierda los agentes conectados, a la derecha los
+ * modelos del que se mira (tal como los dice el agente: nombre, para qué sirve y si es el
+ * recomendado), con las versiones anteriores plegadas y, abajo, el esfuerzo del modelo
+ * elegido. Elegir un modelo con esfuerzos deja el menú abierto para ajustar el esfuerzo.
  */
 
 const catalogos = new Map<AgenteId, ModeloAgente[]>()
@@ -29,7 +30,9 @@ export function useCatalogos(ids: AgenteId[]): { modelos: Partial<Record<AgenteI
       .finally(() => setCargando((c) => c.filter((x) => x !== id)))
   }
   useEffect(() => {
-    for (const id of ids) if (!catalogos.has(id)) pedir(id)
+    // Siempre se vuelve a pedir al abrir: el proceso principal responde al instante con lo
+    // recordado y lo pone al día de fondo (así un modelo nuevo aparece sin reiniciar).
+    for (const id of ids) pedir(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clave])
   return {
@@ -60,81 +63,127 @@ export function ElegirModelo({
   cerrar: () => void
 }) {
   const { modelos, cargando, refrescar } = useCatalogos(agentes.map((a) => a.id))
-  const [verPago, setVerPago] = useState<Partial<Record<AgenteId, boolean>>>({})
+  const [visto, setVisto] = useState<AgenteId | undefined>(valor?.agente ?? agentes[0]?.id)
+  const [verAnteriores, setVerAnteriores] = useState(false)
+  const [verPago, setVerPago] = useState(false)
+  const a = agentes.find((x) => x.id === visto) ?? agentes[0]
+  if (!a) return <p className="cc-nota">Conecta un agente en Inicio para elegir su modelo.</p>
+
+  const lista = modelos[a.id] ?? []
+  const hayGratis = lista.some((m) => m.gratis)
+  const elegidoAqui = valor?.agente === a.id
+  // OpenCode trae decenas: primero los gratis y los de pago a un clic.
+  const porPrecio = hayGratis && !verPago ? lista.filter((m) => m.gratis || (elegidoAqui && valor?.modelo === m.id)) : lista
+  const principales = porPrecio.filter((m) => !m.anterior || (elegidoAqui && valor?.modelo === m.id))
+  const anteriores = porPrecio.filter((m) => m.anterior && !(elegidoAqui && valor?.modelo === m.id))
+  const modeloElegido = elegidoAqui && valor?.modelo ? lista.find((m) => m.id === valor.modelo) : undefined
+
+  const fila = (m: ModeloAgente) => {
+    const elegido = elegidoAqui && valor?.modelo === m.id
+    return (
+      <button
+        key={m.id}
+        type="button"
+        className={`em-modelo ${elegido ? 'is-elegido' : ''}`}
+        onClick={() => {
+          onElegir({ agente: a.id, modelo: m.id, ...(m.esfuerzoDefecto ? { esfuerzo: m.esfuerzoDefecto } : {}) })
+          if (!m.esfuerzos.length) cerrar()
+        }}
+      >
+        <span className="em-modelo-texto">
+          <span className="em-modelo-nombre">
+            {m.nombre}
+            {m.recomendado && <span className="em-etiqueta">Recomendado</span>}
+            {m.gratis && <span className="em-etiqueta is-gratis">Gratis</span>}
+          </span>
+          {m.descripcion && <span className="em-modelo-desc">{m.descripcion}</span>}
+        </span>
+        {elegido && <Icon name="check" size={14} />}
+      </button>
+    )
+  }
 
   return (
-    <>
-      {agentes.map((a) => {
-        const lista = modelos[a.id] ?? []
-        const hayGratis = lista.some((m) => m.gratis)
-        // OpenCode trae decenas: primero los gratis y los de pago a un clic.
-        const visibles = hayGratis && !verPago[a.id] ? lista.filter((m) => m.gratis || (valor?.agente === a.id && valor.modelo === m.id)) : lista
-        return (
-          <div key={a.id} className="cc-grupo">
-            <span className="cc-grupo-nombre">
-              <LogoAgente id={a.id} size={16} /> {a.nombre}
-              <button
-                type="button"
-                className="cc-refrescar"
-                title="Volver a preguntar sus modelos"
-                aria-label={`Volver a preguntar los modelos de ${a.nombre}`}
-                onClick={() => refrescar(a.id)}
-              >
-                <Icon name="undo" size={11} />
-              </button>
+    <div className="em">
+      <div className="em-agentes" role="tablist" aria-label="Agentes conectados">
+        {agentes.map((x) => (
+          <button
+            key={x.id}
+            type="button"
+            role="tab"
+            aria-selected={x.id === a.id}
+            className={`em-agente ${x.id === a.id ? 'is-visto' : ''} ${valor?.agente === x.id ? 'is-elegido' : ''}`}
+            onClick={() => (setVisto(x.id), setVerAnteriores(false), setVerPago(false))}
+          >
+            <LogoAgente id={x.id} size={18} />
+            <span>{x.nombre.replace(/ Code$| CLI$| · Google$/, '')}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="em-lado">
+        <div className="em-cabeza">
+          <span>Modelos de {a.nombre}</span>
+          <button type="button" className="cc-refrescar" title="Volver a preguntar sus modelos" aria-label={`Volver a preguntar los modelos de ${a.nombre}`} onClick={() => refrescar(a.id)}>
+            <Icon name="undo" size={12} />
+          </button>
+        </div>
+        <div className="em-modelos">
+          <button
+            type="button"
+            className={`em-modelo ${elegidoAqui && !valor?.modelo && !valor?.esfuerzo ? 'is-elegido' : ''}`}
+            onClick={() => (onElegir({ agente: a.id }), cerrar())}
+          >
+            <span className="em-modelo-texto">
+              <span className="em-modelo-nombre">Su modelo de siempre</span>
+              <span className="em-modelo-desc">El que {a.nombre} usa si no le dices otro</span>
             </span>
-            <button
-              type="button"
-              className={`cc-opcion ${valor?.agente === a.id && !valor.modelo && !valor.esfuerzo ? 'is-elegida' : ''}`}
-              onClick={() => (onElegir({ agente: a.id }), cerrar())}
-            >
-              <span className="cc-opcion-texto">Su modelo de siempre</span>
-              {valor?.agente === a.id && !valor.modelo && !valor.esfuerzo && <Icon name="check" size={13} />}
-            </button>
-            {cargando.includes(a.id) && !lista.length && <span className="cc-nota">Preguntando a {a.nombre} qué modelos tiene…</span>}
-            {!cargando.includes(a.id) && !lista.length && <span className="cc-nota">{a.nombre} no dijo sus modelos: usa el suyo.</span>}
-            {visibles.map((m) => {
-              const elegido = valor?.agente === a.id && valor.modelo === m.id
-              return (
-                <div key={m.id} className={`cc-modelo ${elegido ? 'is-elegida' : ''}`}>
-                  <button
-                    type="button"
-                    className={`cc-opcion ${elegido ? 'is-elegida' : ''}`}
-                    onClick={() => {
-                      onElegir({ agente: a.id, modelo: m.id, ...(m.esfuerzoDefecto ? { esfuerzo: m.esfuerzoDefecto } : {}) })
-                      if (!m.esfuerzos.length) cerrar()
-                    }}
-                  >
-                    <span className="cc-opcion-texto">{m.nombre}</span>
-                    {m.gratis && <span className="cc-opcion-nota">gratis</span>}
-                    {elegido && <Icon name="check" size={13} />}
-                  </button>
-                  {m.esfuerzos.length > 0 && (
-                    <div className="cc-esfuerzos" role="group" aria-label={`Esfuerzo de ${m.nombre}`}>
-                      {m.esfuerzos.map((e) => (
-                        <button
-                          key={e}
-                          type="button"
-                          className={`cc-esfuerzo ${elegido && valor?.esfuerzo === e ? 'is-elegido' : ''}`}
-                          onClick={() => (onElegir({ agente: a.id, modelo: m.id, esfuerzo: e }), cerrar())}
-                        >
-                          {NOMBRE_ESFUERZO[e] ?? e}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-            {hayGratis && lista.length > visibles.length && (
-              <button type="button" className="cc-opcion cc-mas" onClick={() => setVerPago((v) => ({ ...v, [a.id]: true }))}>
-                <span className="cc-opcion-texto">Ver los de pago ({lista.length - visibles.length})</span>
-                <span className="cc-opcion-nota">gastan saldo</span>
+            {elegidoAqui && !valor?.modelo && !valor?.esfuerzo && <Icon name="check" size={14} />}
+          </button>
+          {cargando.includes(a.id) && !lista.length && <span className="cc-nota">Preguntando a {a.nombre} qué modelos tiene…</span>}
+          {!cargando.includes(a.id) && !lista.length && <span className="cc-nota">{a.nombre} no dijo sus modelos: usa el suyo.</span>}
+          {principales.map(fila)}
+          {anteriores.length > 0 &&
+            (verAnteriores ? (
+              <>
+                <span className="em-separador">Versiones anteriores</span>
+                {anteriores.map(fila)}
+              </>
+            ) : (
+              <button type="button" className="em-mas" onClick={() => setVerAnteriores(true)}>
+                Versiones anteriores ({anteriores.length}) <Icon name="chevron" size={11} />
               </button>
-            )}
+            ))}
+          {hayGratis && lista.length > porPrecio.length && (
+            <button type="button" className="em-mas" onClick={() => setVerPago(true)}>
+              Ver los de pago ({lista.length - porPrecio.length}) · gastan saldo <Icon name="chevron" size={11} />
+            </button>
+          )}
+          {a.id === 'antigravity' && lista.length === 1 && (
+            <span className="cc-nota">Antigravity solo ofrece este modelo a tu cuenta cuando trabaja desde otra app.</span>
+          )}
+        </div>
+
+        {modeloElegido && modeloElegido.esfuerzos.length > 0 && (
+          <div className="em-esfuerzo">
+            <span>Esfuerzo</span>
+            <div className="em-esfuerzos" role="radiogroup" aria-label={`Esfuerzo de ${modeloElegido.nombre}`}>
+              {modeloElegido.esfuerzos.map((e) => (
+                <button
+                  key={e}
+                  type="button"
+                  role="radio"
+                  aria-checked={valor?.esfuerzo === e}
+                  className={valor?.esfuerzo === e ? 'is-elegido' : ''}
+                  onClick={() => (onElegir({ agente: a.id, modelo: modeloElegido.id, esfuerzo: e }), cerrar())}
+                >
+                  {NOMBRE_ESFUERZO[e] ?? e}
+                </button>
+              ))}
+            </div>
           </div>
-        )
-      })}
-    </>
+        )}
+      </div>
+    </div>
   )
 }

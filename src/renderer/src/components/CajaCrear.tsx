@@ -30,7 +30,22 @@ const NIVELES: { id: NivelModelo; nombre: string; nota: string }[] = [
 ]
 
 /** Un botón que abre un menú; se cierra al elegir o al hacer clic fuera. */
-function Menu({ etiqueta, activo, children, ancho }: { etiqueta: React.ReactNode; activo?: boolean; children: (cerrar: () => void) => React.ReactNode; ancho?: number }) {
+function Menu({
+  etiqueta,
+  activo,
+  children,
+  ancho,
+  redondo,
+  titulo
+}: {
+  etiqueta: React.ReactNode
+  activo?: boolean
+  children: (cerrar: () => void) => React.ReactNode
+  ancho?: number
+  /** Un botón redondo solo con icono (el «+»), sin la flecha de desplegar. */
+  redondo?: boolean
+  titulo?: string
+}) {
   const [abierto, setAbierto] = useState(false)
   const caja = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
@@ -48,9 +63,15 @@ function Menu({ etiqueta, activo, children, ancho }: { etiqueta: React.ReactNode
   }, [abierto])
   return (
     <div className="cc-menu" ref={caja}>
-      <button type="button" className={`cc-pastilla ${activo ? 'is-on' : ''} ${abierto ? 'is-abierto' : ''}`} onClick={() => setAbierto((v) => !v)}>
-        {etiqueta} <Icon name="chevron" size={11} />
-      </button>
+      {redondo ? (
+        <button type="button" className={`cc-redondo ${abierto ? 'is-on' : ''}`} onClick={() => setAbierto((v) => !v)} title={titulo} aria-label={titulo}>
+          {etiqueta}
+        </button>
+      ) : (
+        <button type="button" className={`cc-pastilla ${activo ? 'is-on' : ''} ${abierto ? 'is-abierto' : ''}`} onClick={() => setAbierto((v) => !v)}>
+          {etiqueta} <Icon name="chevron" size={11} />
+        </button>
+      )}
       {abierto && (
         <div className="cc-panel" style={ancho ? { width: ancho } : undefined}>
           {children(() => setAbierto(false))}
@@ -87,6 +108,8 @@ export function CajaCrear({
   const [formato, setFormato] = useState<FormatoCreacion>('vertical')
   const [duracion, setDuracion] = useState(30)
   const [adjuntos, setAdjuntos] = useState<string[]>([])
+  // Las carpetas elegidas van en `adjuntos` (el proceso principal las recorre); aquí se marcan para verlas como carpeta.
+  const [carpetas, setCarpetas] = useState<string[]>([])
   const [referencia, setReferencia] = useState<string | null>(null)
   // Agente: trabaja con herramientas (plan → hacer → comprobar). Guiado: guion → voz → video.
   const puedeAgente = Boolean(agentes.activo && ['claude', 'antigravity', 'kimi', 'codex', 'opencode', 'gemini'].includes(agentes.activo.id))
@@ -103,9 +126,8 @@ export function CajaCrear({
     void window.recorte
       .vozEstado()
       .then((e) => {
-        const hay = e.tieneClave || Boolean(e.google?.correo)
-        setVozConectada(hay)
-        if (hay && !vozTocada.current && e.vozGemini && VOCES_GEMINI.some((v) => v.id === e.vozGemini)) setVoz(e.vozGemini)
+        // Empieza siempre «Sin voz»: la voz se elige a propósito para cada video.
+        setVozConectada(e.tieneClave || Boolean(e.google?.correo))
       })
       .catch(() => {})
     void window.recorte
@@ -168,6 +190,13 @@ export function CajaCrear({
     if (rutas.length) setAdjuntos((a) => [...a, ...rutas.filter((r) => !a.includes(r))].slice(0, 12))
   }
 
+  async function elegirCarpeta() {
+    const ruta = await window.recorte.elegirCarpeta()
+    if (!ruta) return
+    setCarpetas((c) => (c.includes(ruta) ? c : [...c, ruta]))
+    setAdjuntos((a) => (a.includes(ruta) ? a : [...a, ruta]))
+  }
+
   async function elegirReferencia() {
     const ruta = await window.recorte.elegirReferencia()
     if (ruta) setReferencia(ruta)
@@ -181,6 +210,17 @@ export function CajaCrear({
     const tareas = porPaso && (tGuion || tVideo) ? { ...(tGuion ? { guion: tGuion } : {}), ...(tVideo ? { video: tVideo } : {}) } : undefined
     const imagenes = Boolean(modeloImagen) && (modeloImagen === MODELO_CHATGPT ? conChatGPT : conFlow)
     const videos = conFlow && Boolean(modeloVideo)
+    const flow =
+      imagenes || videos
+        ? {
+            flow: {
+              imagenes,
+              videos,
+              ...(imagenes && modeloImagen ? { modeloImagen } : {}),
+              ...(modeloVideo ? { modeloVideo } : {})
+            }
+          }
+        : {}
     if (enAgente) {
       onCrear({
         peticion: peticion.trim(),
@@ -192,7 +232,9 @@ export function CajaCrear({
         // En el agente solo hay una tarea: quien hace el video.
         ...(tVideo ? { tareas: { video: tVideo } } : {}),
         ...(voz && vozConectada ? { vozElegida: voz } : {}),
-        ...(directo ? { directo: true } : {})
+        ...(directo ? { directo: true } : {}),
+        // Lo que puede pedir generar: imágenes (Flow o ChatGPT) y clips (Flow).
+        ...flow
       })
       return
     }
@@ -274,9 +316,10 @@ export function CajaCrear({
         {adjuntos.length > 0 && (
           <div className="crear-adjuntos">
             {adjuntos.map((r) => (
-              <span key={r} className="crear-adjunto" title={r}>
+              <span key={r} className={`crear-adjunto ${carpetas.includes(r) ? 'is-carpeta' : ''}`} title={carpetas.includes(r) ? `${r} — el agente recibe todas sus fotos y videos` : r}>
+                {carpetas.includes(r) && <Icon name="carpeta" size={12} />}
                 {r.split(/[\\/]/).pop()}
-                <button aria-label="Quitar" onClick={() => setAdjuntos((a) => a.filter((x) => x !== r))}>
+                <button aria-label="Quitar" onClick={() => (setAdjuntos((a) => a.filter((x) => x !== r)), setCarpetas((c) => c.filter((x) => x !== r)))}>
                   <Icon name="x" size={11} />
                 </button>
               </span>
@@ -296,29 +339,38 @@ export function CajaCrear({
         )}
 
         <div className="cc-fila">
-          <button type="button" className="cc-redondo" onClick={() => void adjuntar()} title="Tus fotos o clips para el video" aria-label="Adjuntar">
-            <Icon name="paperclip" size={15} />
-          </button>
-          {enAgente && (
-            <Menu ancho={340} activo={Boolean(tVideo)} etiqueta={<>{logoQuien(tVideo)} {corto(tVideo)}</>}>
-              {(cerrar) => (
-                <>
-                  <span className="cc-grupo-nombre">Quién hace el video</span>
-                  {opcionesTarea('video', tVideo, cerrar)}
-                </>
-              )}
-            </Menu>
-          )}
-          {!enAgente && (
-          <button
-            type="button"
-            className={`cc-redondo ${referencia ? 'is-on' : ''}`}
-            onClick={() => void elegirReferencia()}
-            title="Video de referencia: se analiza para copiar su edición; no entra en tu video"
-            aria-label="Video de referencia"
+          <Menu
+            redondo
+            etiqueta={<Icon name="plus" size={16} />}
+            titulo="Añadir tu material"
+            ancho={250}
           >
-            <Icon name="film" size={15} />
-          </button>
+            {(cerrar) => (
+              <>
+                <Opcion elegida={false} onClick={() => (cerrar(), void adjuntar())} nota="fotos, videos o .zip">
+                  <Icon name="image" size={14} /> Archivos
+                </Opcion>
+                <Opcion elegida={false} onClick={() => (cerrar(), void elegirCarpeta())} nota="todo su material">
+                  <Icon name="carpeta" size={14} /> Una carpeta
+                </Opcion>
+                {!enAgente && (
+                  <Opcion elegida={Boolean(referencia)} onClick={() => (cerrar(), void elegirReferencia())} nota="copia su edición">
+                    <Icon name="film" size={14} /> Video de referencia
+                  </Opcion>
+                )}
+              </>
+            )}
+          </Menu>
+          {enAgente && (
+            <Menu ancho={560} activo={Boolean(tVideo)} etiqueta={<>{logoQuien(tVideo)} {corto(tVideo)}</>}>
+              {(cerrar) =>
+                conectados.length ? (
+                  <ElegirModelo agentes={conectados} valor={tVideo ?? (activo ? { agente: activo.id } : null)} onElegir={setTVideo} cerrar={cerrar} />
+                ) : (
+                  <p className="cc-nota">Conecta un agente en Inicio para elegir quién hace el video.</p>
+                )
+              }
+            </Menu>
           )}
 
           {!enAgente && (
@@ -373,17 +425,8 @@ export function CajaCrear({
             ))}
           </div>
 
-          <Menu etiqueta={<><Icon name="clock" size={13} /> {duracion} s</>}>
-            {(cerrar) =>
-              DURACIONES.map((d) => (
-                <Opcion key={d} elegida={duracion === d} onClick={() => ((tocado.current = true), setDuracion(d), cerrar())} nota={d <= 15 ? 'un gancho' : d <= 30 ? 'un reel' : d <= 60 ? 'explicar algo' : 'contar a fondo'}>
-                  {d} segundos
-                </Opcion>
-              ))
-            }
-          </Menu>
 
-          {enAgente ? null : conFlow || conChatGPT ? (
+          {conFlow || conChatGPT ? (
             <>
               <Menu activo={Boolean(modeloImagen)} etiqueta={<><Icon name="image" size={13} /> {modeloImagen ?? 'Sin imágenes'}</>} ancho={280}>
                 {(cerrar) => (
@@ -408,8 +451,8 @@ export function CajaCrear({
                     )}
                     <p className="cc-nota">
                       {modeloImagen === MODELO_CHATGPT
-                        ? 'ChatGPT hace las imágenes que pida el guion, una a la vez, con el modelo de imágenes de tu plan.'
-                        : 'Hace las imágenes que pida el guion, con tus cuentas.'}
+                        ? 'ChatGPT hace las imágenes que el agente necesite, una a la vez, con el modelo de imágenes de tu plan.'
+                        : 'El agente pide las imágenes que necesite y Flow las hace con tus cuentas. Puede usar tus fotos de referencia.'}
                     </p>
                   </>
                 )}
@@ -431,7 +474,7 @@ export function CajaCrear({
                         {m}
                       </Opcion>
                     ))}
-                    <p className="cc-nota">Hasta 3 clips para las escenas clave. Gastan puntos de Flow (se lee el costo exacto antes de generar).</p>
+                    <p className="cc-nota">El agente pide hasta 3 clips para los momentos clave. Gastan puntos de Flow (se lee el costo exacto antes de generar y no pasa del tope).</p>
                   </>
                 )}
               </Menu>
@@ -509,7 +552,7 @@ export function CajaCrear({
             title={agentes.listo ? 'Crear (Enter)' : 'Conecta un agente primero'}
             aria-label="Crear"
           >
-            <Icon name={creando ? 'clock' : 'sparkles'} size={16} />
+            <Icon name={creando ? 'clock' : 'enviar'} size={18} />
           </button>
         </div>
       </div>

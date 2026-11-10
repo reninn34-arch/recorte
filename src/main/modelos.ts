@@ -71,6 +71,11 @@ export function comandoConEleccion(
       if (modelo) extra.push(`--model ${modelo}`)
       if (esfuerzo) extra.push(`--effort ${esfuerzo}`)
       break
+    case 'codex':
+      // `codex exec -m <modelo> -c model_reasoning_effort=<nivel>` (verificado con Codex 0.167).
+      if (modelo) extra.push(`-m ${modelo}`)
+      if (esfuerzo) extra.push(`-c model_reasoning_effort=${esfuerzo}`)
+      break
     default:
       if (modelo) extra.push(`-m ${modelo}`)
   }

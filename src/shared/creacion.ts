@@ -42,6 +42,12 @@ export interface ModeloAgente {
   esfuerzoDefecto?: string
   /** No gasta saldo (OpenCode). */
   gratis?: boolean
+  /** Para qué sirve, en una línea. */
+  descripcion?: string
+  /** El que el agente recomienda (el suyo por defecto). */
+  recomendado?: boolean
+  /** Una versión anterior de una familia que ya tiene otra más nueva: va en «Anteriores». */
+  anterior?: boolean
 }
 
 /** Lo que el usuario lee de cada esfuerzo. */
@@ -52,7 +58,8 @@ export const NOMBRE_ESFUERZO: Record<string, string> = {
   medium: 'Medio',
   high: 'Alto',
   xhigh: 'Muy alto',
-  max: 'Máximo'
+  max: 'Máximo',
+  ultra: 'Ultra'
 }
 
 /** Solo letras, números y . - _ / : (va en la línea de comandos del agente). */

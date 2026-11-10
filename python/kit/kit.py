@@ -600,25 +600,20 @@ def vista_encuadre(foto, zoom, cx, cy, ancho, alto):
     print(json.dumps({'vista': salida}, ensure_ascii=False))
 
 
-def voz(archivo, espera=900):
-    """Pide a Recorte la narración con la voz que eligió el usuario: una frase por línea del archivo.
+def pedir_a_recorte(buzon, datos, espera, que):
+    """Deja un pedido en `<trabajo>/<buzon>/` y espera a que Recorte lo atienda (él tiene las cuentas del usuario).
 
-    Deja el pedido en voz/ y espera la respuesta de Recorte (que es quien tiene la cuenta de voz). Devuelve cada frase
-    con su archivo y lo que dura, para poner cada momento en su frase.
+    Devuelve la respuesta; si no salió, termina con el motivo, para que el agente siga sin ello y lo diga.
     """
     import time
     import uuid
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    with open(archivo, encoding='utf-8') as f:
-        frases = [l.strip() for l in f if l.strip()]
-    if not frases:
-        raise SystemExit('El archivo no tiene frases (una por línea).')
-    carpeta = os.path.join(base, 'voz')
+    carpeta = os.path.join(base, buzon)
     os.makedirs(carpeta, exist_ok=True)
     ident = uuid.uuid4().hex[:8]
     temporal = os.path.join(carpeta, f'_pedido-{ident}.tmp')
     with open(temporal, 'w', encoding='utf-8') as f:
-        json.dump({'frases': frases}, f, ensure_ascii=False)
+        json.dump(datos, f, ensure_ascii=False)
     os.replace(temporal, os.path.join(carpeta, f'pedido-{ident}.json'))
     respuesta = os.path.join(carpeta, f'respuesta-{ident}.json')
     limite = time.time() + espera
@@ -629,10 +624,33 @@ def voz(archivo, espera=900):
                 r = json.load(f)
             print(json.dumps(r, ensure_ascii=False))
             if not r.get('ok'):
-                raise SystemExit(r.get('error') or 'Recorte no pudo generar la voz.')
-            return
+                raise SystemExit(r.get('error') or f'Recorte no pudo generar {que}.')
+            return r
         time.sleep(1)
-    raise SystemExit('Recorte no respondió al pedido de voz. Sigue sin narración y dilo en el resumen.')
+    raise SystemExit(f'Recorte no respondió al pedido de {que}. Sigue sin ello y dilo en el resumen.')
+
+
+def voz(archivo, espera=900):
+    """Pide a Recorte la narración con la voz que eligió el usuario: una frase por línea del archivo.
+
+    Devuelve cada frase con su archivo y lo que dura, para poner cada momento en su frase.
+    """
+    with open(archivo, encoding='utf-8') as f:
+        frases = [l.strip() for l in f if l.strip()]
+    if not frases:
+        raise SystemExit('El archivo no tiene frases (una por línea).')
+    pedir_a_recorte('voz', {'frases': frases}, espera, 'la voz')
+
+
+def medio(tipo, prompt, referencias, espera):
+    """Pide a Recorte una imagen o un clip generado (Google Flow o ChatGPT, con las cuentas del usuario).
+
+    Las referencias (fotos de entrada/ o de medios/) hacen que lo generado se parezca a ellas. Devuelve el archivo en medios/.
+    """
+    if not prompt.strip():
+        raise SystemExit('Describe qué generar.')
+    pedir_a_recorte('medios', {'tipo': tipo, 'prompt': prompt, 'referencias': referencias or []}, espera,
+                    'la imagen' if tipo == 'imagen' else 'el clip')
 
 
 def main():
@@ -663,9 +681,16 @@ def main():
     a.add_argument('--prueba', help='segundos separados por coma: solo esos fotogramas, a revision/')
     v = sub.add_parser('voz')
     v.add_argument('archivo', help='texto con una frase por línea')
+    for nombre in ('imagen', 'clip'):
+        m = sub.add_parser(nombre)
+        m.add_argument('prompt', help='qué tiene que verse, bien descrito (sujeto, encuadre, luz, estilo)')
+        m.add_argument('--ref', action='append', help='foto de referencia (entrada/… o medios/…); se puede repetir')
     x = p.parse_args()
     if x.orden == 'voz':
         voz(x.archivo)
+    elif x.orden in ('imagen', 'clip'):
+        # Un clip puede tardar varios minutos en Flow.
+        medio(x.orden, x.prompt, x.ref, 900 if x.orden == 'imagen' else 1500)
     elif x.orden == 'golpes':
         golpes(x.archivo, x.n)
     elif x.orden == 'hoja':

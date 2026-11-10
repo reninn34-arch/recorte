@@ -2690,3 +2690,43 @@ button { cursor: pointer; }
 
 /* Rótulo de varias líneas en el panel */
 .tl-texto-area { resize: vertical; min-height: 30px; line-height: 1.35; font-family: inherit; padding-top: 6px; padding-bottom: 6px; }
+
+/* Elegir agente y modelo (ElegirModelo.tsx): agentes a la izquierda, sus modelos a la derecha */
+.em { display: grid; grid-template-columns: 150px 1fr; min-height: 260px; margin: -2px; }
+.em-agentes { display: flex; flex-direction: column; gap: 2px; padding: 4px; border-right: 1px solid var(--line); }
+.em-agente { display: flex; align-items: center; gap: 9px; padding: 8px 9px; border: none; border-radius: 9px; background: none; color: var(--muted); font-size: 12.5px; text-align: left; }
+.em-agente:hover { background: var(--panel-3); color: var(--text); }
+.em-agente.is-visto { background: var(--panel-3); color: var(--text); }
+.em-agente.is-elegido::after { content: ''; width: 6px; height: 6px; margin-left: auto; border-radius: 50%; background: var(--accent); }
+.em-lado { display: flex; flex-direction: column; min-width: 0; }
+.em-cabeza { display: flex; align-items: center; gap: 6px; padding: 8px 12px 4px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+.em-modelos { display: flex; flex-direction: column; gap: 1px; padding: 0 4px 4px; overflow-y: auto; max-height: 330px; }
+.em-modelo { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: none; border-radius: 9px; background: none; color: var(--text); text-align: left; }
+.em-modelo:hover { background: var(--panel-3); }
+.em-modelo.is-elegido { background: color-mix(in srgb, var(--accent) 11%, var(--panel-3)); }
+.em-modelo.is-elegido > svg { color: var(--accent); flex: none; }
+.em-modelo-texto { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.em-modelo-nombre { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; }
+.em-modelo-desc { font-size: 11.5px; color: var(--dim); line-height: 1.35; }
+.em-etiqueta { padding: 1px 6px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); font-size: 10px; font-weight: 600; letter-spacing: .2px; }
+.em-etiqueta.is-gratis { background: color-mix(in srgb, var(--blue) 16%, transparent); color: var(--blue); }
+.em-separador { padding: 8px 10px 2px; font-size: 10.5px; color: var(--dim); text-transform: uppercase; letter-spacing: .6px; }
+.em-mas { display: flex; align-items: center; gap: 5px; margin-top: 2px; padding: 7px 10px; border: none; border-radius: 9px; background: none; color: var(--muted); font-size: 12px; text-align: left; }
+.em-mas:hover { background: var(--panel-3); color: var(--text); }
+.em-esfuerzo { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--muted); }
+.em-esfuerzos { display: flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); }
+.em-esfuerzos button { padding: 3px 9px; border: none; border-radius: 999px; background: none; color: var(--muted); font-size: 11.5px; }
+.em-esfuerzos button:hover { color: var(--text); }
+.em-esfuerzos button.is-elegido { background: var(--accent); color: var(--ink); font-weight: 600; }
+@media (max-width: 640px) { .em { grid-template-columns: 1fr; } .em-agentes { flex-direction: row; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--line); } }
+
+/* Caja de crear: «+» redondo, carpeta como adjunto y enviar con flecha */
+.crear-adjunto.is-carpeta { border: 1px solid color-mix(in srgb, var(--blue) 45%, transparent); color: var(--blue); }
+.crear-adjunto.is-carpeta svg { flex: none; }
+.cc-redondo { width: 32px; height: 32px; }
+.cc-enviar { width: 34px; height: 34px; transition: transform .12s ease, opacity .12s ease; }
+.cc-enviar:not(:disabled):hover { transform: translateY(-1px); }
+/* Enviar siempre abajo a la derecha de la caja, aunque las pastillas pasen a otra línea */
+.crear-caja.cc { position: relative; }
+.crear-caja.cc .cc-fila { padding-right: 44px; }
+.crear-caja.cc .cc-enviar { position: absolute; right: 12px; bottom: 10px; }

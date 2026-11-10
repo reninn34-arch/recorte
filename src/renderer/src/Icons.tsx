@@ -1,4 +1,6 @@
 import {
+  ArrowUp,
+  FolderOpen,
   Check,
   ChevronRight,
   Clock,
@@ -68,7 +70,9 @@ const ICONOS = {
   image: Image,
   gift: Gift,
   alerta: TriangleAlert,
-  'log-out': LogOut
+  'log-out': LogOut,
+  enviar: ArrowUp,
+  carpeta: FolderOpen
 } satisfies Record<string, LucideIcon>
 
 export type IconName = keyof typeof ICONOS
