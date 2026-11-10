@@ -17,6 +17,34 @@ export interface PlanAgente {
   preguntas: string[]
   /** Con qué lo va a hacer (FFmpeg, Python, HyperFrames…). */
   herramienta?: string
+  /**
+   * El guion gráfico, cuando el video se hace con imágenes o clips generados: una escena por
+   * frase o idea, con cuánto dura, qué se ve y el prompt para el generador. De aquí sale cuántos
+   * clips se generan (y lo que cuestan) una vez que el usuario dice «Hazlo».
+   */
+  escenas?: EscenaPlan[]
+}
+
+export interface EscenaPlan {
+  /** Lo que se dice (o el texto en pantalla) en esta escena. */
+  texto: string
+  /** Desde y hasta, en segundos del video (con narración grabada, los de su frase). */
+  desde?: number
+  hasta?: number
+  /** Qué se ve: un clip generado (Veo/Omni), una imagen generada, material del usuario o diseño (texto, logo). */
+  medio: 'clip' | 'imagen' | 'material' | 'diseno'
+  /** Lo que ve el espectador, en palabras del usuario. */
+  visual: string
+  /** El prompt para el generador (si es clip o imagen). */
+  prompt?: string
+}
+
+/** Lo más que se generan de clips por video, aunque el guion gráfico pida más. */
+export const MAX_CLIPS_GUION = 12
+
+/** Cuántos clips pide el guion gráfico (lo que el usuario aprueba con «Hazlo»). */
+export function clipsDelPlan(plan?: PlanAgente | null): number {
+  return Math.min(MAX_CLIPS_GUION, (plan?.escenas ?? []).filter((e) => e.medio === 'clip').length)
 }
 
 /**
@@ -92,11 +120,29 @@ export function validarPlan(crudo: unknown): PlanAgente | null {
   const pasos = lista(p.pasos, 10, 200)
   const preguntas = lista(p.preguntas, 4, 200)
   if (!entendi && !pasos.length && !preguntas.length) return null
+  const medios = ['clip', 'imagen', 'material', 'diseno'] as const
+  const escenas: EscenaPlan[] = (Array.isArray(p.escenas) ? p.escenas : [])
+    .slice(0, 40)
+    .filter((e): e is Record<string, unknown> => Boolean(e) && typeof e === 'object')
+    .map((e) => {
+      const medio = (medios as readonly string[]).includes(String(e.medio)) ? (String(e.medio) as EscenaPlan['medio']) : 'diseno'
+      const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.round(v * 100) / 100 : undefined)
+      return {
+        texto: texto(e.texto, 300),
+        ...(n(e.desde) !== undefined ? { desde: n(e.desde) } : {}),
+        ...(n(e.hasta) !== undefined ? { hasta: n(e.hasta) } : {}),
+        medio,
+        visual: texto(e.visual, 300),
+        ...(texto(e.prompt, 1200) ? { prompt: texto(e.prompt, 1200) } : {})
+      }
+    })
+    .filter((e) => e.texto || e.visual)
   return {
     entendi: entendi || 'Plan del agente',
     pasos,
     preguntas,
-    ...(texto(p.herramienta, 80) ? { herramienta: texto(p.herramienta, 80) } : {})
+    ...(texto(p.herramienta, 80) ? { herramienta: texto(p.herramienta, 80) } : {}),
+    ...(escenas.length ? { escenas } : {})
   }
 }
 

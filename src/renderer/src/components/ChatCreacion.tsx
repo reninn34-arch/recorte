@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { aplicarOperaciones, type MensajeChat } from '../../../shared/chat'
 import type { AjustesCreacion, Creacion, MensajeCreacion } from '../../../shared/creacion'
-import type { PlanAgente } from '../../../shared/modoagente'
+import { clipsDelPlan, type PlanAgente } from '../../../shared/modoagente'
+import { COSTO_CLIP } from '../../../shared/creacion'
 import type { Project } from '../../../shared/types'
 import type { Agentes } from '../hooks/agentes'
 import { Icon } from '../Icons'
@@ -44,7 +45,24 @@ function PasosPlan({ pasos, actual }: { pasos: string[]; actual: number }) {
   )
 }
 
-function TarjetaPlan({ plan, puedeHacer, onHazlo }: { plan: PlanAgente; puedeHacer: boolean; onHazlo: () => void }) {
+const NOMBRE_MEDIO: Record<string, string> = { clip: 'Clip', imagen: 'Imagen', material: 'Tu material', diseno: 'Diseño' }
+const seg = (s?: number) => (s === undefined ? '' : `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`)
+
+function TarjetaPlan({
+  plan,
+  puedeHacer,
+  onHazlo,
+  modeloClip
+}: {
+  plan: PlanAgente
+  puedeHacer: boolean
+  onHazlo: () => void
+  /** El modelo de clips elegido en la caja: para decir lo que cuestan. */
+  modeloClip?: string
+}) {
+  const escenas = plan.escenas ?? []
+  const clips = clipsDelPlan(plan)
+  const porClip = modeloClip ? COSTO_CLIP[modeloClip] : undefined
   return (
     <div className="cr-plan">
       <div className="cr-plan-cabeza">
@@ -52,7 +70,37 @@ function TarjetaPlan({ plan, puedeHacer, onHazlo }: { plan: PlanAgente; puedeHac
         {plan.herramienta && <span className="tl-dim">con {plan.herramienta}</span>}
       </div>
       {plan.entendi && <p>{plan.entendi}</p>}
-      {plan.pasos.length > 0 && (
+      {escenas.length > 0 && (
+        <div className="cr-guion">
+          <span className="cr-guion-titulo">Guion gráfico · {escenas.length} escenas</span>
+          <ol>
+            {escenas.map((e, i) => (
+              <li key={i} title={e.prompt ? `Prompt: ${e.prompt}` : undefined}>
+                <span className="cr-escena-cabeza">
+                  <b>{i + 1}</b>
+                  {e.desde !== undefined && (
+                    <span className="tl-dim">
+                      {seg(e.desde)}
+                      {e.hasta !== undefined ? `–${seg(e.hasta)}` : ''}
+                    </span>
+                  )}
+                  <span className={`cr-medio is-${e.medio}`}>{NOMBRE_MEDIO[e.medio]}</span>
+                </span>
+                {e.texto && <span className="cr-escena-texto">«{e.texto}»</span>}
+                {e.visual && <span className="cr-escena-visual">{e.visual}</span>}
+              </li>
+            ))}
+          </ol>
+          {clips > 0 && (
+            <span className="cr-costo">
+              <Icon name="film" size={12} /> {clips} {clips === 1 ? 'clip' : 'clips'}
+              {modeloClip ? ` con ${modeloClip}` : ''}
+              {porClip ? ` ≈ ${clips * porClip} créditos` : ''} · se generan solo al decir «Hazlo»
+            </span>
+          )}
+        </div>
+      )}
+      {plan.pasos.length > 0 && !escenas.length && (
         <ol>
           {plan.pasos.map((p, i) => (
             <li key={i}>{p}</li>
@@ -239,7 +287,14 @@ export function ChatCreacion({
                   )}
                 </div>
               ) : null}
-              {m.plan && <TarjetaPlan plan={m.plan} puedeHacer={m.id === ultimoConPlan && !hayVideo && !ocupado} onHazlo={onHazlo} />}
+              {m.plan && (
+                <TarjetaPlan
+                  plan={m.plan}
+                  puedeHacer={m.id === ultimoConPlan && !hayVideo && !ocupado}
+                  onHazlo={onHazlo}
+                  modeloClip={c.flow?.videos ? c.flow.modeloVideo : undefined}
+                />
+              )}
               {m.cambios && (
                 <ul className="chat-cambios">
                   {m.cambios.map((x, i) => (

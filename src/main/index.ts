@@ -41,14 +41,14 @@ import { conectarVozGoogle, desconectarVozGoogle, estadoVozGoogle, generarVozGoo
 import { analizarMaterialCreacion } from './estilo/material'
 import { anotar, archivoEntregado, copiarEntrada, LimiteUso, pasoHacer, pasoPlan, revisarYPublicar } from './modoagente'
 import { prepararArchivos } from './archivos'
-import { esAprobacion, pasoAnunciado } from '../shared/modoagente'
+import { clipsDelPlan, esAprobacion, pasoAnunciado } from '../shared/modoagente'
 import { atenderVoz } from './vozagente'
 import { proyectoDesdeReceta } from './recetaeditor'
 import { medirReferencia } from './estilo/referencia'
 import { analizarConGeminiVideo, interpretarEstilo } from './estilo/ficha'
 import { viabilidadDe } from './estilo/viabilidad'
 import { guardar } from './disco'
-import { cambiaElGuion, ID_SEGURO, mismaNarracion, pideMontarVoz, textoNarracion, VOCES_GEMINI, vozDesactualizada, vozVigente } from '../shared/creacion'
+import { cambiaElGuion, ID_SEGURO, MAX_CLIPS_VEO, mismaNarracion, pideMontarVoz, textoNarracion, VOCES_GEMINI, vozDesactualizada, vozVigente } from '../shared/creacion'
 import type { AgenteId, Creacion, EleccionTarea, MensajeCreacion, NivelModelo, PeticionCreacion, TareasCreacion } from '../shared/creacion'
 import { turnoAgente } from './chat'
 import { buscarActualizacion, estadoActualizacion, instalarActualizacion, prepararActualizaciones } from './actualizar'
@@ -454,7 +454,9 @@ app.whenReady().then(() => {
         flow: (pedido, destino) => pedirFlow(pedido, destino, senal),
         chatgpt: (pedido, destino, nombre) => generarImagenChatGPT(pedido, destino, nombre, senal)
       },
-      (l) => avisarAgente(c, l, 0.5)
+      (l) => avisarAgente(c, l, 0.5),
+      // Haciendo el video: los clips del guion gráfico aprobado. En la charla, uno o dos de muestra como mucho.
+      c.fase === 'video' ? clipsDelPlan(c.agente?.plan) || MAX_CLIPS_VEO : 2
     )
     let parado = false
     return () => {

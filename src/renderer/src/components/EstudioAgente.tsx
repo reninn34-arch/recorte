@@ -75,6 +75,12 @@ export function EstudioAgente({
                     <figure key={a.archivo} title={a.nombre} className={a.tipo === 'video' ? 'is-video' : ''}>
                       {a.tipo === 'imagen' ? (
                         <img src={url(a.archivo)} alt="" loading="lazy" />
+                      ) : a.tipo === 'audio' ? (
+                        <div className="ea-audio">
+                          <Icon name="music" size={22} />
+                          <span>Tu narración</span>
+                          <audio src={url(a.archivo)} controls preload="metadata" />
+                        </div>
                       ) : (
                         // Los .MOV del iPhone (HEVC) no siempre se ven aquí: se muestra su hoja de
                         // fotogramas del vistazo y, si aún no existe, el video.

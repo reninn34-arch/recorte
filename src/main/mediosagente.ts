@@ -51,7 +51,9 @@ export function atenderMedios(
   flow: FlowCreacion | undefined,
   formato: '9:16' | '16:9',
   generar: Generadores,
-  onLinea: (texto: string) => void
+  onLinea: (texto: string) => void,
+  /** Cuántos clips puede pedir en esta ronda: los del guion gráfico aprobado (o los de siempre). */
+  maxClips = MAX_CLIPS_VEO
 ): () => void {
   const dir = join(trabajo, 'medios')
   const atendidos = new Set<string>()
@@ -93,8 +95,12 @@ export function atenderMedios(
     if (tipo === 'imagen' && imagenes >= MAX_IMAGENES_RONDA) {
       return responder(id, { ok: false, tipo, error: `Ya pediste ${MAX_IMAGENES_RONDA} imágenes en esta ronda: usa las que tienes.` })
     }
-    if (tipo === 'clip' && clips >= MAX_CLIPS_VEO) {
-      return responder(id, { ok: false, tipo, error: `Ya pediste ${MAX_CLIPS_VEO} clips en esta ronda (cada uno gasta créditos del usuario): usa los que tienes.` })
+    if (tipo === 'clip' && clips >= maxClips) {
+      return responder(id, {
+        ok: false,
+        tipo,
+        error: `Ya pediste ${maxClips} clips en esta ronda, los que aprobó el usuario (cada uno gasta sus créditos): usa los que tienes o haz imágenes.`
+      })
     }
     if (tipo === 'imagen') imagenes += 1
     else clips += 1

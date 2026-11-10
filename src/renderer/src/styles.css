@@ -2783,3 +2783,16 @@ button { cursor: pointer; }
 .cr-pausa { display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap; padding: 10px 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, #f2b84b 45%, var(--line)); background: color-mix(in srgb, #f2b84b 8%, var(--panel)); font-size: 12.5px; color: var(--text); }
 .cr-pausa svg { flex: none; margin-top: 2px; color: #f2b84b; }
 .cr-pausa span { flex: 1; min-width: 180px; }
+/* El guion gráfico dentro de la tarjeta del plan */
+.cr-guion { display: flex; flex-direction: column; gap: 6px; }
+.cr-guion-titulo { font-size: 12px; color: var(--muted); }
+.cr-guion ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 340px; overflow-y: auto; }
+.cr-guion li { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); font-size: 12px; }
+.cr-escena-cabeza { display: flex; gap: 6px; align-items: center; }
+.cr-escena-texto { color: var(--text); }
+.cr-escena-visual { color: var(--dim); }
+.cr-medio { margin-left: auto; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; border: 1px solid var(--line-2); color: var(--muted); }
+.cr-medio.is-clip { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.cr-costo { display: inline-flex; gap: 5px; align-items: center; font-size: 12px; color: var(--accent); }
+.ea-audio { aspect-ratio: 16 / 10; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 8px; color: var(--muted); font-size: 12px; }
+.ea-audio audio { width: 100%; height: 30px; }

@@ -98,7 +98,8 @@ export interface AdjuntoCreacion {
   /** Ruta dentro de la composición (`media/<archivo>`). */
   archivo: string
   nombre: string
-  tipo: 'imagen' | 'video'
+  /** «audio»: una narración grabada (solo en modo agente): el video se arma sobre ella. */
+  tipo: 'imagen' | 'video' | 'audio'
   /** Lo que dura, si es video (segundos). */
   duracion?: number
 }

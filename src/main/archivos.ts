@@ -13,8 +13,10 @@ import { resolverBinario } from './binarios'
 export const EXT_IMAGEN = ['.jpg', '.jpeg', '.png', '.webp']
 export const EXT_VIDEO = ['.mp4', '.mov', '.webm', '.mkv', '.m4v']
 export const EXT_HEIC = ['.heic', '.heif']
+/** Audios: una narración grabada (también los .ogg/.opus de WhatsApp) sobre la que se arma el video. */
+export const EXT_AUDIO = ['.mp3', '.wav', '.m4a', '.ogg', '.opus', '.aac', '.flac']
 /** Lo que se puede elegir en «Adjuntar» (sin punto). */
-export const EXTENSIONES_SUBIBLES = [...EXT_IMAGEN, ...EXT_HEIC, ...EXT_VIDEO, '.zip'].map((e) => e.slice(1))
+export const EXTENSIONES_SUBIBLES = [...EXT_IMAGEN, ...EXT_HEIC, ...EXT_VIDEO, ...EXT_AUDIO, '.zip'].map((e) => e.slice(1))
 
 /** Lo más que entra en una creación (una carpeta de material puede traer muchos). */
 const MAX_ARCHIVOS = 80
@@ -130,7 +132,7 @@ export async function prepararArchivos(rutas: string[], trabajo: string): Promis
       return
     }
     const ext = extname(ruta).toLowerCase()
-    if (EXT_IMAGEN.includes(ext) || EXT_VIDEO.includes(ext)) {
+    if (EXT_IMAGEN.includes(ext) || EXT_VIDEO.includes(ext) || EXT_AUDIO.includes(ext)) {
       listos.push(ruta)
     } else if (EXT_HEIC.includes(ext)) {
       const jpg = await heicAJpg(ruta, join(trabajo, `heic-${++n}`))

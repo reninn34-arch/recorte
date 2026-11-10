@@ -407,7 +407,7 @@ export function CajaCrear({
           >
             {(cerrar) => (
               <>
-                <Opcion elegida={false} onClick={() => (cerrar(), void adjuntar())} nota="fotos, videos o .zip">
+                <Opcion elegida={false} onClick={() => (cerrar(), void adjuntar())} nota="fotos, videos, audios o .zip">
                   <Icon name="image" size={14} /> Archivos
                 </Opcion>
                 <Opcion elegida={false} onClick={() => (cerrar(), void elegirCarpeta())} nota="todo su material">

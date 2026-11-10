@@ -1,9 +1,11 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, isAbsolute, join, resolve, sep } from 'node:path'
-import { MAX_CLIPS_VEO, type Creacion } from '../shared/creacion'
+import { COSTO_CLIP, MAX_CLIPS_VEO, type Creacion } from '../shared/creacion'
 import {
   MAX_REGISTRO,
+  clipsDelPlan,
   limiteDeUso,
+  MAX_CLIPS_GUION,
   validarCharla,
   validarEntrega,
   type CharlaPlan,
@@ -17,7 +19,7 @@ import { probeVideo } from './ffmpeg'
 import { extraerJson, falloDeAgente, Parado, rechazoPorPolitica } from './ia'
 import { agenteConHerramientas, SesionPerdida, turnoAgente } from './turnoagente'
 import { mediosDisponibles } from './mediosagente'
-import { buscarPython, rutaScriptPython } from './transcribir'
+import { buscarPython, rutaScriptPython, transcribirArchivo } from './transcribir'
 
 /**
  * El modo agente (ver shared/modoagente.ts). Cada creación en este modo tiene su carpeta
@@ -37,6 +39,7 @@ export const carpetaTrabajo = (carpeta: string): string => join(carpeta, 'trabaj
 
 const EXT_VIDEO = ['.mp4', '.mov', '.webm', '.mkv', '.m4v']
 const EXT_IMAGEN = ['.png', '.jpg', '.jpeg', '.webp']
+const EXT_AUDIO = ['.mp3', '.wav', '.m4a', '.ogg', '.opus', '.aac', '.flac']
 
 /** Un nombre de archivo sin sorpresas para la línea de comandos (sin espacios ni tildes). */
 export function nombreLimpio(nombre: string, i: number): string {
@@ -57,16 +60,16 @@ export function copiarEntrada(
   carpeta: string,
   /** Cuántos archivos hay ya en entrada/ (al añadir más desde el chat, la numeración sigue). */
   yaHay = 0
-): { archivo: string; nombre: string; tipo: 'imagen' | 'video' }[] {
+): { archivo: string; nombre: string; tipo: 'imagen' | 'video' | 'audio' }[] {
   const entrada = join(carpetaTrabajo(carpeta), 'entrada')
   mkdirSync(entrada, { recursive: true })
   mkdirSync(join(carpetaTrabajo(carpeta), 'salida'), { recursive: true })
-  const copiados: { archivo: string; nombre: string; tipo: 'imagen' | 'video' }[] = []
+  const copiados: { archivo: string; nombre: string; tipo: 'imagen' | 'video' | 'audio' }[] = []
   for (const [j, ruta] of rutas.slice(0, Math.max(0, 80 - yaHay)).entries()) {
     const i = yaHay + j
     if (!existsSync(ruta)) continue
     const ext = extname(ruta).toLowerCase()
-    const tipo = EXT_VIDEO.includes(ext) ? 'video' : EXT_IMAGEN.includes(ext) ? 'imagen' : null
+    const tipo = EXT_VIDEO.includes(ext) ? 'video' : EXT_IMAGEN.includes(ext) ? 'imagen' : EXT_AUDIO.includes(ext) ? 'audio' : null
     if (!tipo) continue
     const destino = nombreLimpio(basename(ruta), i)
     copyFileSync(ruta, join(entrada, destino))
@@ -201,6 +204,19 @@ No hay duración por defecto: NO recortes a 30 s (ni a ninguna cifra) si el usua
 Video ${ancho}×${alto} (${c.formato === 'horizontal' ? '16:9' : '9:16 vertical'}), 30 fps, H.264 (libx264, yuv420p, \`-movflags +faststart\`), audio AAC si hay audio.
 Con croma en H.264 4:2:0, alinea los bordes del croma a píxeles pares (el color se guarda en bloques de 2×2).
 
+## La narración que trajo el usuario
+${
+    c.adjuntos.some((a) => a.tipo === 'audio')
+      ? `El usuario subió su narración grabada (vistazo/narracion-NN.wav, con lo que dice frase por frase y sus segundos en
+vistazo/narracion-NN.txt y cada palabra en el .json). ESA es la voz del video: no generes otra voz ni la cambies, y el video
+dura lo que ella (más el cierre). Recorta solo el silencio del principio y del final.
+- Cada escena dura lo que su frase: usa los tiempos de la transcripción para poner cada imagen, clip y texto en su segundo.
+- Corrige lo que la transcripción entendió mal según el sentido (p. ej. «para tu casa» → «para tu caso»).
+- En la receta del kit va como una sola entrada de voz: \`"voz": [{ "archivo": "vistazo/narracion-01.wav", "en": 0 }]\`.
+- Las palabras clave o subtítulos en pantalla, con los tiempos de las palabras del .json.`
+      : 'No trajo narración grabada.'
+  }
+
 ## La voz
 ${
     c.vozElegida && conKit
@@ -222,7 +238,7 @@ ${(() => {
         ? `- Imágenes con ${m.imagenes}: \`python kit/kit.py imagen "descripción" [--ref entrada/foto.jpg]\`. Úsalas cuando el video necesite algo que no está en sus archivos (una escena, un objeto, un fondo).`
         : '- Imágenes generadas: NO (el usuario no las eligió).',
       m.clips
-        ? `- Clips de video con ${m.clips}: \`python kit/kit.py clip "descripción" [--ref …]\`. GASTAN créditos del usuario: solo para los momentos clave, ${MAX_CLIPS_VEO} como mucho.`
+        ? `- Clips de video con ${m.clips}: \`python kit/kit.py clip "descripción" [--ref …]\`. GASTAN créditos del usuario: solo los de las escenas "clip" del guion gráfico que aprobó (${clipsDelPlan(c.agente?.plan) ? `${clipsDelPlan(c.agente?.plan)} clips` : `${MAX_CLIPS_VEO} como mucho, para los momentos clave`}). Haz antes la imagen de cada escena y pásala con --ref al clip para que todo se vea coherente.`
         : '- Clips generados: NO (el usuario no los eligió).',
       'Lee «Imágenes y clips generados» en `kit/RECETA.md`. Sin texto escrito dentro de lo generado: los rótulos van en la receta.'
     ].join('\n')
@@ -437,6 +453,34 @@ export async function prepararVistazo(c: Creacion, carpeta: string): Promise<str
       ''
     )
   }
+  // Una narración grabada: el video se arma sobre ella, frase por frase con sus tiempos.
+  for (const [i, a] of c.adjuntos.filter((x) => x.tipo === 'audio').entries()) {
+    const n = String(i + 1).padStart(2, '0')
+    const ruta = join(carpeta, a.archivo)
+    const wav = join(dir, `narracion-${n}.wav`)
+    await ejecutar([`"${ffmpeg}"`, '-y', '-v', 'error', '-i', `"${ruta}"`, '-vn', '-ac', '1', '-ar', '48000', `"${wav}"`], trabajo, 120_000)
+    const json = join(dir, `narracion-${n}.json`)
+    const r = existsSync(wav) ? await transcribirArchivo(wav, json, () => {}) : { ok: false as const }
+    let frases = ''
+    let dura = ''
+    if (r.ok && existsSync(json)) {
+      try {
+        const t = JSON.parse(readFileSync(json, 'utf8')) as { duration?: number; segments?: { start: number; end: number; text: string }[] }
+        dura = t.duration ? `, dura ${t.duration.toFixed(2)} s` : ''
+        frases = (t.segments ?? []).map((s) => `  [${s.start.toFixed(2)}–${s.end.toFixed(2)}] ${s.text.trim()}`).join('\n')
+        writeFileSync(join(dir, `narracion-${n}.txt`), frases + '\n', 'utf8')
+      } catch {
+        // Sin transcripción legible, el agente la oye por su cuenta.
+      }
+    }
+    lineas.push(
+      `narracion-${n}.wav: la NARRACIÓN que grabó el usuario (${a.archivo.replace(/^trabajo\//, '')}, «${a.nombre}»${dura}). El video se arma sobre ella.`,
+      ...(frases
+        ? [`narracion-${n}.txt y .json: lo que dice, frase por frase con sus segundos (el .json trae cada palabra con su tiempo). Corrige lo que la transcripción entendió mal según el sentido.`, frases]
+        : ['(No pude transcribirla: transcríbela tú o escúchala con el audio en WAV.)']),
+      ''
+    )
+  }
   rmSync(join(dir, 'tmp'), { recursive: true, force: true })
   writeFileSync(leeme, lineas.join('\n'), 'utf8')
   return hojas
@@ -463,7 +507,35 @@ function ultimoDelUsuario(c: Creacion): string {
   return [...c.mensajes].reverse().find((m) => m.rol === 'usuario')?.texto ?? ''
 }
 
-const FORMATO_PLAN = `{"mensaje": "lo que le dices al usuario en el chat", "propuestas": ["respuestas cortas que puede tocar"], "entendi": "qué vas a hacer, en 1-2 frases, con los datos que mediste", "pasos": ["paso corto", "…"], "preguntas": ["lo que aún necesitas saber (vacío si nada)"], "herramienta": "Kit de Recorte | FFmpeg | Python + FFmpeg | HyperFrames | …"}`
+const FORMATO_PLAN = `{"mensaje": "lo que le dices al usuario en el chat", "propuestas": ["respuestas cortas que puede tocar"], "entendi": "qué vas a hacer, en 1-2 frases, con los datos que mediste", "pasos": ["paso corto", "…"], "preguntas": ["lo que aún necesitas saber (vacío si nada)"], "herramienta": "Kit de Recorte | FFmpeg | Python + FFmpeg | HyperFrames | …", "escenas": [{"texto": "lo que se dice en esta escena", "desde": 0.0, "hasta": 3.2, "medio": "clip | imagen | material | diseno", "visual": "qué se ve, en palabras del usuario", "prompt": "el prompt para el generador (si es clip o imagen)"}]}`
+
+/** Cuándo y cómo arma el guion gráfico (las escenas) en el plan. */
+function comoGuionGrafico(c: Creacion): string {
+  const m = mediosDisponibles(c.flow)
+  const narracion = c.adjuntos.some((a) => a.tipo === 'audio')
+  if (!m.imagenes && !m.clips) {
+    return narracion
+      ? 'El usuario trajo su narración grabada: en "escenas" pon una por frase con sus segundos (desde/hasta de vistazo/narracion-NN.txt) y qué se ve, con su material o con diseño (no eligió generar imágenes ni clips).'
+      : ''
+  }
+  return `GUION GRÁFICO: como el video se hace con ${[m.imagenes && `imágenes de ${m.imagenes}`, m.clips && `clips de ${m.clips}`].filter(Boolean).join(' y ')}, el plan trae "escenas":
+- Una escena por frase o idea del guion${narracion ? ' (el de su narración grabada: usa los segundos de vistazo/narracion-NN.txt para desde/hasta)' : ' (si el usuario pegó su guion, respétalo palabra por palabra; si no, escríbelo tú)'}.
+- Cada escena dice qué se ve ("visual", corto y claro para el usuario) y su "prompt" para el generador (en inglés, detallado:
+  sujeto, acción, encuadre, luz, estilo; sin texto escrito dentro). "medio": "clip" para lo que tiene que moverse
+  (una acción, un proceso), "imagen" para lo que puede ser un plano fijo con movimiento de cámara, "material" si usas
+  un archivo suyo, "diseno" para textos, logo o cierre.
+- Los clips duran hasta 8 s: una escena más larga va en dos clips o con una imagen; una más corta se recorta.
+- Para que todas las escenas se vean coherentes (el mismo diente, la misma persona, el mismo lugar), define al principio
+  del guion gráfico el estilo común y repítelo en cada prompt; y haz primero la imagen de la escena y pásala con --ref al clip.
+${m.clips ? `- En "mensaje" dile cuántos clips son y lo que cuestan (${m.clips}: ${costoClips(c)} por clip), y que solo se generan cuando diga «Hazlo». Como mucho ${MAX_CLIPS_GUION} clips.` : ''}`
+}
+
+/** El costo por clip del modelo elegido, en palabras. */
+function costoClips(c: Creacion): string {
+  const modelo = c.flow?.modeloVideo
+  const costo = modelo ? COSTO_CLIP[modelo] : undefined
+  return costo ? `${costo} créditos` : 'unos créditos'
+}
 
 /** Cómo conversa el agente antes de hacer el video, según lo que eligió el usuario en la caja. */
 function comoConversar(c: Creacion): string {
@@ -520,6 +592,7 @@ TODAVÍA NO HAGAS EL VIDEO: no midas el audio a fondo, no hagas pruebas ni rende
 Escribe en notas.md, en pocas líneas, lo que viste (qué es cada archivo y lo importante de cada uno) para usarlo después.
 
 ${comoConversar(c)}
+${comoGuionGrafico(c)}
 
 ${contexto(c)}
 
@@ -529,6 +602,7 @@ ${FORMATO_PLAN}`
   const corto = `El usuario te contesta: «${ultimoDelUsuario(c)}».
 Sigue la charla: respóndele y deja el plan al día con eso (sigue SIN hacer el video; ya miraste los archivos, no lo repitas salvo que te pida mirar algo nuevo).
 ${comoConversar(c)}
+${comoGuionGrafico(c)}
 Responde SOLO con JSON, sin texto alrededor:
 ${FORMATO_PLAN}`
   const turno = await trabajarAgente(cmd.orden, trabajo, corto, onLinea, senal, 30 * 60_000, await imagenesDeEntrada(c, carpeta), undefined, c.agente?.sesion, completo)

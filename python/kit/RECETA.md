@@ -61,7 +61,7 @@ Recorte genera la narración con la voz que eligió el usuario; tú solo escribe
 ## Imágenes y clips generados
 Si el usuario eligió generar imágenes o clips (lo dice AGENTS.md), Recorte los hace con SUS cuentas (Google Flow o ChatGPT):
 - `python kit/kit.py imagen "descripción" [--ref entrada/01-foto.jpg]` → `{"archivo": "medios/img-….png"}` (unos segundos o un minuto).
-- `python kit/kit.py clip "descripción" [--ref …]` → `{"archivo": "medios/clip-….mp4"}` (varios minutos; GASTA créditos: hasta 3 por ronda).
+- `python kit/kit.py clip "descripción" [--ref …]` → `{"archivo": "medios/clip-….mp4"}` (varios minutos; GASTA créditos: solo los del guion gráfico que aprobó el usuario).
 - Describe bien: sujeto, acción, encuadre (vertical u horizontal ya va solo), luz y estilo. Sin texto escrito dentro de la imagen:
   los rótulos los pones tú en la receta (así el usuario los edita).
 - `--ref` usa fotos del usuario como referencia (que se parezca a su producto, su local, su cara); hasta 3.
