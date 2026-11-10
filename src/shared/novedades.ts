@@ -24,6 +24,24 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.22',
+    fecha: '2026-11-10',
+    resumen: 'Nueva tarjeta «Explicativo 3D»: un mundo 3D animado con personaje, íconos y texto palabra por palabra, que se guarda como plantilla para que cada video salga igual.',
+    novedades: [
+      {
+        icono: 'cubo',
+        titulo: 'Explicativo 3D',
+        texto:
+          'En «Enseñar». El agente arma un mundo 3D animado (un personaje del tema, dos ambientes, íconos 3D, texto palabra por palabra y tarjetitas) con tu guion o tu audio, sin fotos ni clips generados.'
+      },
+      {
+        icono: 'layers',
+        titulo: 'Su plantilla se reutiliza',
+        texto: 'Cuando el primer video sale bien, Recorte guarda su diseño: los siguientes de ese tipo parten de él, se ven igual y gastan menos.'
+      }
+    ]
+  },
+  {
     version: '0.1.21',
     fecha: '2026-11-10',
     resumen: 'Subtítulos de principio a fin y editables uno a uno, las tarjetas de tipo de video vuelven a guiar al agente y más clips cuando los pides.',
