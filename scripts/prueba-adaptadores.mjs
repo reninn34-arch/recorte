@@ -47,11 +47,33 @@ const de = (evs, t) => evs.filter((e) => e.t === t)
   assert.equal(retoma, 'codex exec resume -m gpt-5 --json --skip-git-repo-check -c sandbox_mode=workspace-write abc -')
 }
 
+// OpenCode 1.19: `run --format json` (grabado) y `-s <id>` para seguir la sesión.
+{
+  const sid = 'ses_e382decb0ffeUGrGgHT3lVhDjE'
+  const evs = leer('opencode', [
+    `{"type":"step_start","sessionID":"${sid}","part":{"type":"step-start"}}`,
+    `{"type":"tool_use","sessionID":"${sid}","part":{"type":"tool","tool":"write","state":{"status":"completed","input":{"filePath":"C:\\\\t\\\\hola.txt","content":"hola"}}}}`,
+    `{"type":"step_finish","sessionID":"${sid}","part":{"reason":"tool-calls","type":"step-finish"}}`,
+    `{"type":"text","sessionID":"${sid}","part":{"type":"text","text":"listo"}}`,
+    `{"type":"step_finish","sessionID":"${sid}","part":{"reason":"stop","type":"step-finish"}}`
+  ])
+  assert.equal(de(evs, 'sesion')[0].id, sid)
+  assert.equal(de(evs, 'linea')[0].texto, 'Write: hola.txt')
+  assert.equal(de(evs, 'respuesta')[0].texto, 'listo')
+  // Solo el «stop» termina el turno (los «tool-calls» son pasos intermedios).
+  assert.equal(de(evs, 'fin').length, 1)
+  assert.deepEqual(de(evs, 'fin')[0], { t: 'fin', ok: true })
+  assert.equal(ADAPTADORES.opencode.conSesion, true)
+  assert.equal(ADAPTADORES.opencode.orden('opencode run', 'C:\\t'), 'opencode run --format json --auto --dir "C:\\t"')
+  assert.equal(ADAPTADORES.opencode.orden('opencode run -m x/y', 'C:\\t', sid), `opencode run -m x/y --format json --auto --dir "C:\\t" -s ${sid}`)
+  const fallo = leer('opencode', ['{"type":"error","error":{"name":"APIError","data":{"message":"Rate limit exceeded"}}}'])
+  assert.deepEqual(de(fallo, 'fin')[0], { t: 'fin', ok: false, error: 'Rate limit exceeded' })
+}
+
 // Los de texto: sin sesión, y Gemini con `-p` bien formado.
 {
   assert.equal(ADAPTADORES.kimi.conSesion, false)
-  assert.equal(ADAPTADORES.gemini.orden('gemini -p -m gemini-2.5-pro', 'C:\\t'), 'gemini -m gemini-2.5-pro --yolo -p "Sigue al pie de la letra las instrucciones de arriba."')
-  assert.equal(ADAPTADORES.opencode.orden('opencode run', 'C:\\t'), 'opencode run --auto --dir "C:\\t"')
+  assert.equal(ADAPTADORES.gemini.orden('gemini -p -m gemini-2.5-pro', 'C:\\t'), 'gemini -m gemini-2.5-pro --yolo --skip-trust -p "Sigue al pie de la letra las instrucciones de arriba."')
   const evs = leer('kimi', ['Leyendo entrada/', 'Listo.'])
   assert.equal(de(evs, 'respuesta').map((e) => e.texto).join(''), 'Leyendo entrada/\nListo.\n')
 }

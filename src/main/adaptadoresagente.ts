@@ -141,7 +141,50 @@ const CODEX: Adaptador = {
 }
 
 // ---------------------------------------------------------------------------
-// Los demás (Kimi, Gemini CLI, OpenCode): texto. Sin sesión ni evento final: el turno acaba
+// OpenCode: `run --format json` (eventos JSON) y `-s <id>` para seguir la sesión. Grabado de
+// OpenCode 1.19: step_start, tool_use (part.tool + part.state.input), text (part.text) y
+// step_finish (part.reason: "tool-calls" entre pasos, "stop" al terminar el turno).
+// ---------------------------------------------------------------------------
+
+const OPENCODE: Adaptador = {
+  conSesion: true,
+  stderrEsAvance: false,
+  orden: (base, cwd, sesion) => `${base.trim()} --format json --auto --dir "${cwd}"${sesion ? ` -s ${sesion}` : ''}`,
+  leer(linea) {
+    const ev = json(linea)
+    if (!ev) return linea.trim() ? [{ t: 'linea', texto: corto(linea.replace(/\x1b\[[0-9;]*m/g, ''), 200) }] : []
+    const fuera: EventoAgente[] = []
+    if (typeof ev.sessionID === 'string' && ev.sessionID) fuera.push({ t: 'sesion', id: ev.sessionID })
+    const parte = (ev.part ?? {}) as Record<string, unknown>
+    if (ev.type === 'tool_use') {
+      const e = ((parte.state as { input?: unknown } | undefined)?.input ?? {}) as Record<string, unknown>
+      const detalle =
+        typeof e.description === 'string'
+          ? e.description
+          : typeof e.command === 'string'
+            ? e.command
+            : typeof e.filePath === 'string'
+              ? basename(e.filePath)
+              : typeof e.pattern === 'string'
+                ? e.pattern
+                : ''
+      const herramienta = String(parte.tool ?? 'herramienta')
+      fuera.push({ t: 'linea', texto: `${herramienta.charAt(0).toUpperCase()}${herramienta.slice(1)}: ${corto(detalle)}` })
+    } else if (ev.type === 'text' && typeof parte.text === 'string' && parte.text.trim()) {
+      fuera.push({ t: 'respuesta', texto: parte.text }, { t: 'linea', texto: corto(parte.text, 200) })
+    } else if (ev.type === 'step_finish' && parte.reason === 'stop') {
+      fuera.push({ t: 'fin', ok: true })
+    } else if (ev.type === 'error') {
+      const e = (ev.error ?? {}) as Record<string, unknown>
+      const mensaje = (e.data as { message?: unknown } | undefined)?.message ?? e.message ?? e.name ?? 'OpenCode no pudo terminar el turno.'
+      fuera.push({ t: 'fin', ok: false, error: String(mensaje) })
+    }
+    return fuera
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Los demás (Kimi, Gemini CLI): texto. Sin sesión ni evento final: el turno acaba
 // cuando sale el proceso o cuando ya dejó su entrega y se calló.
 // ---------------------------------------------------------------------------
 
@@ -159,9 +202,9 @@ const texto = (ajustar: (b: string, cwd: string) => string): Adaptador => ({
 })
 
 const KIMI = texto((b) => b.replace(/^kimi\b/, 'kimi --auto'))
-const OPENCODE = texto((b, cwd) => `${b} --auto --dir "${cwd}"`)
 // `-p` lleva valor: sin él, el siguiente flag (`-m`, `--yolo`) se toma como el prompt. El
 // pedido llega por stdin y `-p` se le suma al final (así lo documenta `gemini --help`).
-const GEMINI = texto((b) => `${b.replace(/\s-p(?=\s|$)/, '')} --yolo -p "Sigue al pie de la letra las instrucciones de arriba."`)
+// `--skip-trust`: en una carpeta nueva, Gemini no la trata como «no confiable» (que le quita herramientas).
+const GEMINI = texto((b) => `${b.replace(/\s-p(?=\s|$)/, '')} --yolo --skip-trust -p "Sigue al pie de la letra las instrucciones de arriba."`)
 
 export const ADAPTADORES: Record<string, Adaptador> = { claude: CLAUDE, codex: CODEX, kimi: KIMI, opencode: OPENCODE, gemini: GEMINI }

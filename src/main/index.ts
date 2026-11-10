@@ -540,10 +540,15 @@ app.whenReady().then(() => {
         const desde = desdeCharla
         const { charla, sesion } = await pasoPlan(c, creaciones.carpeta(c.id), await configParaTarea(c.tareas?.video), (l) => avisarAgente(c, l, pctPorTiempo(desde, 180)), senal)
         // La conversación queda viva: cada respuesta, «Hazlo» y cada cambio la retoman (no se vuelve a mirar todo).
-        const plan = charla.plan ?? c.agente?.plan
+        // Con «Hazlo directo» el agente a veces solo cuenta lo que hará: eso ya es su plan.
+        const plan =
+          charla.plan ??
+          c.agente?.plan ??
+          (c.directo === true && charla.mensaje ? { entendi: charla.mensaje.slice(0, 400), pasos: [], preguntas: [] } : undefined)
         c.agente = { ...(c.agente ?? { registro: [], rondas: 0 }), ...(plan ? { plan } : {}), ...(sesion ? { sesion } : {}) }
         // «Hazlo directo»: sin preguntas pendientes, empieza sin esperar la aprobación.
-        const directo = c.directo === true && Boolean(plan) && !plan?.preguntas.length && !c.agente.resultado
+        // «Hazlo directo»: con el plan listo empieza sin esperar, aunque el agente dude de algo (decide él).
+        const directo = c.directo === true && Boolean(plan) && !c.agente.resultado
         // Lo que dice el agente es su mensaje; si no dijo nada, el plan en limpio.
         const texto = charla.mensaje || (plan ? [plan.entendi, ...(plan.preguntas.length ? [`Antes de hacerlo: ${plan.preguntas.join(' ')}`] : [])].join('\n') : '')
         const propuestas = directo ? [] : charla.propuestas.length ? charla.propuestas : plan && !plan.preguntas.length ? ['Hazlo'] : []
@@ -882,7 +887,10 @@ app.whenReady().then(() => {
       ...(x.modo === 'agente' ? { modo: 'agente' as const } : {}),
       ...(typeof x.referencia === 'string' && /\.(mp4|mov|webm|mkv|m4v)$/i.test(x.referencia) ? { referencia: x.referencia } : {}),
       tareas: limpiarTareas(x.tareas),
-      ...(limpiarFlow(x.flow) ? { flow: limpiarFlow(x.flow) } : {})
+      ...(limpiarFlow(x.flow) ? { flow: limpiarFlow(x.flow) } : {}),
+      // La voz elegida en la caja y «Hazlo directo» (antes se perdían aquí y el agente no los recibía).
+      ...(typeof x.vozElegida === 'string' && VOCES_GEMINI.some((v) => v.id === x.vozElegida) ? { vozElegida: x.vozElegida } : {}),
+      ...(x.directo === true ? { directo: true } : {})
     })
   })
   ipcMain.handle('creacion:guion', (_evento, id: unknown, pedido: unknown) =>
@@ -1399,7 +1407,7 @@ app.whenReady().then(() => {
     const id = agenteDeOrden(orden)
     const variable = id ? VARIABLE_LLAVE[id] : undefined
     if (!id || !variable) return {}
-    const llave = await ajustes.llaveSiPagaConLlave(id)
+    const llave = (await ajustes.llaveSiPagaConLlave(id)) ?? (id === 'gemini' ? await ajustes.claveVoz() : undefined)
     return llave ? { [variable]: llave } : {}
   })
   // Si la sesión de un agente se cae mientras trabaja, deja de contar como conectado y la

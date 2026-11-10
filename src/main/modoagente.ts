@@ -621,7 +621,7 @@ mejorado con lo que tiene conectado.
 /** Cómo conversa el agente antes de hacer el video, según lo que eligió el usuario en la caja. */
 function comoConversar(c: Creacion): string {
   if (c.directo === true) {
-    return `El usuario eligió «Hazlo directo»: si no tienes dudas importantes, deja "preguntas" vacío y en "mensaje" cuéntale en 1-2 frases qué vas a hacer.`
+    return `El usuario eligió «Hazlo directo»: NO le preguntes nada. Decide tú lo más sensato en lo que dudes, deja "preguntas" vacío y en "mensaje" cuéntale en 1-2 frases qué vas a hacer (y lo que decidiste por él). Recorte empieza el video en cuanto respondas.`
   }
   return `El usuario eligió «Pregúntame antes»: quiere CONVERSAR contigo hasta llegar al mejor video, como con un editor de verdad.
 En "mensaje" háblale con naturalidad y en tono cercano (tutéalo): lo que viste en sus archivos que importa, tu idea (gancho del

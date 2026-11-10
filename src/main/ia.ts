@@ -135,6 +135,9 @@ export function falloDeAgente(orden: string, texto: string): string {
 export function explicarFallo(texto: string): string {
   const rechazo = rechazoPorPolitica(texto)
   if (rechazo) return rechazo
+  if (/no longer supported for Gemini Code Assist|migrate to the Antigravity|IneligibleTier|Please set an Auth method/i.test(texto)) {
+    return 'Google ya no deja usar Gemini CLI con la cuenta personal de Google (lo pasó a Antigravity). Usa Antigravity, que es de Google y entra con tu misma cuenta, o paga Gemini CLI con tu clave de AI Studio (la de Ajustes → Voz sirve).'
+  }
   if (SESION_CAIDA.test(texto)) {
     return 'La sesión de tu agente caducó o se cerró. Vuelve a conectarlo en Inicio (botón «Conectar») e inténtalo otra vez.'
   }

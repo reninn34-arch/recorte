@@ -320,6 +320,13 @@ try {
   if (tardo > 15) throw new Error(`Con un proceso de fondo, el plan tardó ${tardo.toFixed(1)} s (esperó al proceso de fondo).`)
   console.log(`con un proceso de fondo abierto, el plan llega en ${tardo.toFixed(1)} s ✓`)
 
+  // «Hazlo directo» y la voz elegida en la caja llegan a la creación, y directo pasa solo del plan al video.
+  const directa = await evaluar(cliente, `window.recorte.creacionNueva(${JSON.stringify({ peticion: 'Directo con voz', estilo: 'libre', formato: 'vertical', duracion: 15, adjuntos: [foto], modo: 'agente', directo: true, vozElegida: 'Kore' })})`)
+  if (directa.directo !== true || directa.vozElegida !== 'Kore') throw new Error(`La creación perdió «Hazlo directo» o la voz: ${JSON.stringify({ directo: directa.directo, voz: directa.vozElegida })}`)
+  const directaHecha = await evaluar(cliente, `window.recorte.agentePlan(${JSON.stringify(directa.id)})`, 5 * 60_000)
+  if (directaHecha.fase !== 'listo' || directaHecha.version !== 1) throw new Error(`«Hazlo directo» no hizo el video tras el plan: fase ${directaHecha.fase}, v${directaHecha.version}`)
+  console.log('«Hazlo directo» y la voz de la caja llegan, y pasa solo del plan al video ✓')
+
   // La tarjeta de tipo de video (Crear con IA) llega al agente como dirección editorial.
   unlinkSync(join(medios, 'fondo.txt'))
   const conTipo = await evaluar(cliente, `window.recorte.creacionNueva(${JSON.stringify({ peticion: '5 tips para fotos de comida', estilo: 'lista', formato: 'vertical', duracion: 30, adjuntos: [foto], modo: 'agente' })})`)

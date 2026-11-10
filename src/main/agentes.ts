@@ -139,7 +139,8 @@ export async function versionesAgentes(): Promise<Record<string, string | null>>
 }
 
 /** Los agentes que, además de la suscripción, aceptan pagar por uso con una llave de API. */
-export const VARIABLE_LLAVE: Partial<Record<EstadoAgente['id'], string>> = { claude: 'ANTHROPIC_API_KEY' }
+// Gemini CLI ya no funciona con la cuenta personal de Google (Google lo pasó a Antigravity): solo con llave.
+export const VARIABLE_LLAVE: Partial<Record<EstadoAgente['id'], string>> = { claude: 'ANTHROPIC_API_KEY', gemini: 'GEMINI_API_KEY' }
 
 /** Qué agente corre una orden (por su binario o su comando). */
 export function agenteDeOrden(orden: string): EstadoAgente['id'] | null {

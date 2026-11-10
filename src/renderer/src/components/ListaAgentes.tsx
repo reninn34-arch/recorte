@@ -176,7 +176,7 @@ export function ListaAgentes({ agentes, compacta = false }: { agentes: Agentes; 
 
               {pidiendo === a.id && (
                 <CampoLlave
-                  placeholder={a.id === 'claude' ? 'sk-ant-…' : 'Tu llave de API'}
+                  placeholder={a.id === 'claude' ? 'sk-ant-…' : a.id === 'gemini' ? 'AIza…' : 'Tu llave de API'}
                   ayuda={
                     a.id === 'claude' ? (
                       <>
@@ -185,6 +185,14 @@ export function ListaAgentes({ agentes, compacta = false }: { agentes: Agentes; 
                           console.anthropic.com
                         </a>
                         . Se cobra por uso a tu cuenta de Anthropic.
+                      </>
+                    ) : a.id === 'gemini' ? (
+                      <>
+                        Google ya no deja usar Gemini CLI con la cuenta personal: va con tu clave de{' '}
+                        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">
+                          AI Studio
+                        </a>
+                        . Si ya la pusiste en Ajustes → Voz, se usa esa sola.
                       </>
                     ) : undefined
                   }
