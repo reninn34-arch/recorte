@@ -1,5 +1,5 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { basename, extname, isAbsolute, join, resolve, sep } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, resolve, sep } from 'node:path'
 import { COSTO_CLIP, MAX_CLIPS_VEO, VOCES_GEMINI, type Creacion } from '../shared/creacion'
 import { MODELO_CHATGPT, MODELOS_IMAGEN, modelosVideoVigentes } from '../shared/flow'
 import { estiloPorId } from '../shared/estilos'
@@ -870,7 +870,8 @@ export async function revisarYPublicar(
   c: Creacion,
   carpeta: string,
   version: number,
-  desde = 0
+  desde = 0,
+  onLinea: (t: string) => void = () => {}
 ): Promise<{ resultado?: ResultadoAgente; problemas: string[] }> {
   const hallado = archivoEntregado(carpeta, desde)
   if (!hallado) {
@@ -930,19 +931,28 @@ export async function revisarYPublicar(
   if (problemas.length) return { problemas }
   // La receta de esta versión se guarda con ella: la siguiente ronda puede cambiar la de trabajo.
   let receta: string | undefined
+  let limpio: string | undefined
   const rutaReceta = tipo === 'video' ? recetaEntregada(carpeta, hallado.entrega.receta) : null
   if (rutaReceta) {
+    // Con voz, los subtítulos van en la receta (editables) y de principio a fin.
+    const faltan = subtitulosQueFaltan(rutaReceta, c, info.duracion)
+    if (faltan) return { problemas: [faltan] }
     try {
       copyFileSync(rutaReceta, join(salidas, `agente-v${version}.receta.json`))
       receta = `salidas/agente-v${version}.receta.json`
     } catch {
       // Sin receta, el editor abre el video entero.
     }
+    if (receta) {
+      onLinea('Recorte prepara la versión editable (sin textos pegados al video)')
+      limpio = (await renderLimpio(rutaReceta, carpeta, version)) ?? undefined
+    }
   }
   return {
     problemas,
     resultado: {
       ...(receta ? { receta } : {}),
+      ...(limpio ? { limpio } : {}),
       archivo: `salidas/${nombre}`,
       tipo,
       resumen: hallado.entrega.resumen || 'Listo.',
@@ -950,6 +960,73 @@ export async function revisarYPublicar(
       revision,
       ...info
     }
+  }
+}
+
+/**
+ * Si el video lleva voz, la receta tiene que traer sus subtítulos (en `"subtitulos"`, editables) y
+ * llegar hasta el final de lo que se dice. Devuelve el problema para que el agente lo corrija, o null.
+ */
+function subtitulosQueFaltan(rutaReceta: string, c: Creacion, duracion?: number): string | null {
+  let r: { voz?: unknown[]; subtitulos?: { frases?: { hasta?: unknown }[] } }
+  try {
+    r = JSON.parse(readFileSync(rutaReceta, 'utf8'))
+  } catch {
+    return null
+  }
+  const conVoz = (Array.isArray(r.voz) && r.voz.length > 0) || Boolean(c.vozElegida) || c.adjuntos.some((a) => a.tipo === 'audio')
+  if (!conVoz) return null
+  const frases = Array.isArray(r.subtitulos?.frases) ? r.subtitulos!.frases! : []
+  if (!frases.length) {
+    return 'El video lleva voz pero la receta no trae "subtitulos": ponlos EN LA RECETA (ver «Subtítulos» en kit/RECETA.md), de principio a fin, y NO los quemes con un script propio (el usuario los edita en su editor). Vuelve a armar con el kit.'
+  }
+  const ultimo = Math.max(...frases.map((f) => (typeof f.hasta === 'number' ? f.hasta : 0)))
+  // Lo que queda sin subtítulo al final, sin contar un cierre con logo (unos segundos).
+  if (duracion && ultimo < duracion - 12) {
+    return `Los subtítulos de la receta acaban en el segundo ${ultimo.toFixed(1)} y el video dura ${duracion.toFixed(1)} s: faltan los del final. Cubre todo lo que se dice y vuelve a armar con el kit.`
+  }
+  return null
+}
+
+/**
+ * La receta renderizada sin subtítulos ni rótulos, para los tramos fijos del editor (los textos van
+ * en su pista). Si algo falla, null: el editor usa el video entregado, como antes.
+ */
+async function renderLimpio(rutaReceta: string, carpeta: string, version: number): Promise<string | null> {
+  try {
+    const r = JSON.parse(readFileSync(rutaReceta, 'utf8')) as Record<string, unknown> & { momentos?: Record<string, unknown>[] }
+    const momentos = Array.isArray(r.momentos) ? r.momentos : []
+    const conTextos =
+      Boolean((r.subtitulos as { frases?: unknown[] } | undefined)?.frases?.length) ||
+      momentos.some((m) => m.rotulo || (m.tipo === 'texto' && Number(m.oscurecer ?? 0) > 0))
+    if (!conTextos) return null
+    const trabajo = carpetaTrabajo(carpeta)
+    const kit = join(trabajo, 'kit', 'kit.py')
+    const py = await buscarPython()
+    if (!py || !existsSync(kit)) return null
+    delete r.subtitulos
+    r.momentos = momentos
+      // Los rótulos que van encima de otra cosa son textos del editor: fuera.
+      .filter((m) => !(m.tipo === 'texto' && Number(m.oscurecer ?? 0) > 0))
+      .map((m) => ({ ...m, rotulo: null }))
+    const nombre = `.limpio-v${version}.mp4`
+    r.salida = `salida/${nombre}`
+    // Junto a la receta original: sus rutas relativas siguen valiendo.
+    const limpia = join(dirname(rutaReceta), '.receta-limpia.json')
+    writeFileSync(limpia, JSON.stringify(r), 'utf8')
+    const res = await ejecutar(
+      [[py.cmd, ...py.args].map((x) => (x.includes(' ') ? `"${x}"` : x)).join(' '), `"${kit}"`, 'armar', `"${limpia}"`],
+      trabajo,
+      30 * 60_000
+    )
+    const hecho = join(dirname(rutaReceta), 'salida', nombre)
+    if (res.codigo !== 0 || !existsSync(hecho)) return null
+    const destino = `salidas/agente-v${version}-limpio.mp4`
+    copyFileSync(hecho, join(carpeta, destino))
+    rmSync(hecho, { force: true })
+    return destino
+  } catch {
+    return null
   }
 }
 

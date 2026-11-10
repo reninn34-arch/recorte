@@ -91,6 +91,12 @@ export interface ResultadoAgente {
    * Con ella el editor abre cada recurso suelto en su pista, en vez del video entero.
    */
   receta?: string
+  /**
+   * La misma receta renderizada SIN subtítulos ni rótulos (`salidas/…-limpio.mp4`). El editor la usa
+   * para los tramos que no puede separar en piezas: los textos van solo en su pista, editables (si
+   * usara el video entregado, se verían dos veces).
+   */
+  limpio?: string
 }
 
 export interface EstadoModoAgente {

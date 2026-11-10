@@ -90,6 +90,25 @@ process.stdin.on('end', async () => {
     })
     return
   }
+  if (prompt.includes('Subtitulos de prueba')) {
+    const wav = join(cwd, 'voz.wav')
+    if (!existsSync(wav)) execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=300:duration=3', '-ac', '2', wav])
+    const conSubs = prompt.includes('no trae "subtitulos"')
+    const receta = {
+      ancho: 540, alto: 960, fps: 15, duracion: 3, salida: 'salida/final.mp4',
+      momentos: [
+        { tipo: 'texto', lineas: ['Hola'], desde: 0, hasta: 1 },
+        { tipo: 'foto', archivo: 'entrada/' + entrada[0], desde: 1, hasta: 3, rotulo: 'TITULO' }
+      ],
+      voz: [{ archivo: 'voz.wav', en: 0 }]
+    }
+    if (conSubs) receta.subtitulos = { frases: [{ texto: 'hola mundo', desde: 0, hasta: 1.5 }, { texto: 'adios', desde: 1.5, hasta: 3 }], caja: '#0A2540' }
+    writeFileSync(join(cwd, 'receta.json'), JSON.stringify(receta))
+    execFileSync('python', [join(cwd, 'kit', 'kit.py'), 'armar', join(cwd, 'receta.json')], { cwd, stdio: 'ignore' })
+    writeFileSync(join(cwd, 'resultado.json'), JSON.stringify({ archivo: 'salida/final.mp4', receta: 'receta.json', resumen: 'Con subtitulos: ' + conSubs, comprobaciones: [] }))
+    ev({ type: 'result', result: 'Listo.' })
+    return
+  }
   if (prompt.includes('Explicativo 3D') || existsSync(join(cwd, 'plantilla'))) {
     // Una tarjeta con plantilla: la primera vez la arma; después parte de la que trae Recorte.
     const yaHabia = existsSync(join(cwd, 'plantilla', 'momentos.json'))
@@ -327,6 +346,24 @@ try {
     throw new Error('El segundo Explicativo 3D no partió de la plantilla guardada.')
   }
   console.log('Explicativo 3D: guarda su plantilla y el siguiente video parte de ella ✓')
+
+  // Subtítulos: con voz, Recorte exige que vayan en la receta; en el editor son textos sueltos y los
+  // tramos fijos salen de la versión sin textos (nada se ve dos veces).
+  const conVoz = await evaluar(cliente, `window.recorte.creacionNueva(${JSON.stringify({ peticion: 'Subtitulos de prueba', estilo: 'libre', formato: 'vertical', duracion: 30, adjuntos: [foto], modo: 'agente' })})`)
+  await evaluar(cliente, `window.recorte.agentePlan(${JSON.stringify(conVoz.id)})`)
+  const hechaVoz = await evaluar(cliente, `window.recorte.agenteHacer(${JSON.stringify(conVoz.id)})`, 8 * 60_000)
+  const rv = hechaVoz.agente?.resultado
+  if (hechaVoz.fase !== 'listo' || !rv) throw new Error(`El video con voz no terminó: ${hechaVoz.mensajes.at(-1)?.texto}`)
+  if (!/true/.test(rv.resumen)) throw new Error('Recorte aceptó un video con voz sin subtítulos en la receta.')
+  if (!rv.limpio) throw new Error('No se hizo la versión sin textos para el editor.')
+  console.log('con voz y sin subtítulos: Recorte lo devuelve y el agente los pone en la receta ✓')
+  const enEditor = await evaluar(cliente, `window.recorte.creacionAlEditor(${JSON.stringify(conVoz.id)})`, 2 * 60_000)
+  const textosEd = enEditor.timeline?.textos ?? []
+  const limpioId = (enEditor.medios ?? []).find((m) => /sin textos/.test(m.nombre))?.id
+  const fuentes = (enEditor.timeline?.clips ?? []).map((x) => x.fuente)
+  if (textosEd.filter((t) => /hola mundo|adios/.test(t.texto)).length !== 2) throw new Error(`Los subtítulos no son textos sueltos en el editor: ${JSON.stringify(textosEd.map((t) => t.texto))}`)
+  if (!limpioId || fuentes.includes('principal') || !fuentes.includes(limpioId)) throw new Error(`Los tramos fijos no salen de la versión sin textos: ${JSON.stringify(fuentes)}`)
+  console.log('en el editor: subtítulos editables y tramos fijos sin textos (sin duplicados) ✓')
 
   // Sin uso del plan a mitad del video: queda en pausa (nada se pierde) y sigue solo al renovarse.
   writeFileSync(join(medios, 'limite.txt'), '1')

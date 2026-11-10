@@ -604,7 +604,7 @@ app.whenReady().then(() => {
         }
         avisarAgente(c, 'Recorte revisa la entrega', 0.95)
         // Solo vale lo que el agente escribió en esta ronda (nunca el video anterior).
-        let revisado = await revisarYPublicar(c, carpeta, c.version + 1, desde)
+        let revisado = await revisarYPublicar(c, carpeta, c.version + 1, desde, (l) => avisarAgente(c, l, 0.96))
         if (revisado.problemas.length) {
           // Recorte encontró algo mal: el agente lo corrige una vez.
           avisarAgente(c, `Recorte revisó y encontró: ${revisado.problemas.join(' ')}`, 0.85)
@@ -614,7 +614,7 @@ app.whenReady().then(() => {
             : ''
           const turno = await pasoHacer(c, carpeta, config, `La revisión de Recorte encontró problemas en tu entrega: ${revisado.problemas.join(' ')}${sinArchivo} Corrígelo y vuelve a entregar.`, (l) => avisarAgente(c, l, 0.9), senal, true)
           if (turno.sesion) c.agente.sesion = turno.sesion
-          revisado = await revisarYPublicar(c, carpeta, c.version + 1, desde)
+          revisado = await revisarYPublicar(c, carpeta, c.version + 1, desde, (l) => avisarAgente(c, l, 0.96))
         }
         if (!revisado.resultado) throw new Error(revisado.problemas.join(' '))
         delete c.agente.pausa
@@ -990,6 +990,34 @@ app.whenReady().then(() => {
       return creaciones.guardar(c)
     })
   )
+  /**
+   * La versión del agente sin subtítulos ni rótulos (`resultado.limpio`), como un medio más: los tramos
+   * que la receta no separa salen de ella, así los textos solo están en su pista (editables) y no se
+   * ven dos veces. Null si no hay (el editor usa el video entregado).
+   */
+  const medioLimpio = async (c: Creacion): Promise<MedioProyecto | null> => {
+    const rel = c.agente?.resultado?.limpio
+    if (!rel) return null
+    const ruta = join(creaciones.carpeta(c.id), rel)
+    if (!existsSync(ruta)) return null
+    try {
+      const info = await probeVideo(ruta)
+      return {
+        id: `m-${randomUUID().slice(0, 8)}`,
+        ruta,
+        nombre: `Versión ${c.version} del agente (sin textos)`,
+        tipo: 'video',
+        duracion: info.duration,
+        ancho: info.width,
+        alto: info.height,
+        conAudio: info.hasAudio
+      }
+    } catch {
+      return null
+    }
+  }
+  /** Los tramos fijos (los del video entregado) pasan a salir de `fuente`. */
+  const tramosDe = (tl: Timeline, fuente: string): Timeline => ({ ...tl, clips: tl.clips.map((x) => (x.fuente === FUENTE_PRINCIPAL ? { ...x, fuente } : x)) })
   ipcMain.handle('creacion:editor', async (_evento, id: unknown) => {
     if (typeof id !== 'string') throw new Error('Creación inválida.')
     const c = creaciones.get(id)
@@ -1026,8 +1054,10 @@ app.whenReady().then(() => {
             const armado = await proyectoDesdeReceta(join(carpeta, receta), join(carpeta, 'trabajo'), proyectos.carpeta(previo.id), info.duration)
             if (armado) {
               medios.push(...armado.medios)
-              // Lo que la receta no puede separar sale del video nuevo, no del primero.
-              timeline = { ...armado.timeline, clips: armado.timeline.clips.map((x) => (x.fuente === FUENTE_PRINCIPAL ? { ...x, fuente: mid } : x)) }
+              // Lo que la receta no puede separar sale del video nuevo (sin textos, si lo hay), no del primero.
+              const limpio = await medioLimpio(c)
+              if (limpio) medios.push(limpio)
+              timeline = tramosDe(armado.timeline, limpio?.id ?? mid)
             }
           } catch {
             // Sin receta legible, la versión entra como un solo clip.
@@ -1054,8 +1084,10 @@ app.whenReady().then(() => {
         const p = ingesta.project
         const armado = await proyectoDesdeReceta(join(carpeta, receta), join(carpeta, 'trabajo'), proyectos.carpeta(p.id), p.source.duration)
         if (armado) {
-          p.medios = armado.medios
-          p.timeline = armado.timeline
+          // Los tramos fijos, de la versión sin textos: así los subtítulos y rótulos no salen dos veces.
+          const limpio = await medioLimpio(c)
+          p.medios = [...armado.medios, ...(limpio ? [limpio] : [])]
+          p.timeline = limpio ? tramosDe(armado.timeline, limpio.id) : armado.timeline
           proyectos.save(p)
         }
       } catch {
