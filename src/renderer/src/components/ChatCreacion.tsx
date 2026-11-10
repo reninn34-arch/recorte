@@ -3,6 +3,7 @@ import { aplicarOperaciones, type MensajeChat } from '../../../shared/chat'
 import type { AjustesCreacion, Creacion, MensajeCreacion } from '../../../shared/creacion'
 import { clipsDelPlan, type PlanAgente } from '../../../shared/modoagente'
 import { COSTO_CLIP } from '../../../shared/creacion'
+import { MODELO_CHATGPT, MODELOS_IMAGEN, modelosVideoVigentes } from '../../../shared/flow'
 import type { Project } from '../../../shared/types'
 import type { Agentes } from '../hooks/agentes'
 import { Icon } from '../Icons'
@@ -48,17 +49,48 @@ function PasosPlan({ pasos, actual }: { pasos: string[]; actual: number }) {
 const NOMBRE_MEDIO: Record<string, string> = { clip: 'Clip', imagen: 'Imagen', material: 'Tu material', diseno: 'Diseño' }
 const seg = (s?: number) => (s === undefined ? '' : `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`)
 
+/** Lo que el agente sugiere activar (conectado pero no elegido), con un botón por cosa. */
+function Sugerencias({ plan, creacion, onActivar }: { plan: PlanAgente; creacion: Creacion; onActivar: (que: 'voz' | 'imagenes' | 'clips') => void }) {
+  const s = plan.sugiere
+  if (!s) return null
+  const c = creacion
+  const opciones = [
+    s.voz && !c.vozElegida ? { que: 'voz' as const, texto: `Narrar con la voz ${s.voz}` } : null,
+    s.imagenes && !c.flow?.imagenes ? { que: 'imagenes' as const, texto: 'Activar imágenes generadas' } : null,
+    s.clips && !c.flow?.videos
+      ? { que: 'clips' as const, texto: `Activar ${s.clips} ${s.clips === 1 ? 'clip' : 'clips'} (Veo 3.1 Lite ≈ ${s.clips * (COSTO_CLIP['Veo 3.1 - Lite'] ?? 10)} créditos)` }
+      : null
+  ].filter((x): x is { que: 'voz' | 'imagenes' | 'clips'; texto: string } => Boolean(x))
+  if (!opciones.length) return null
+  return (
+    <div className="cr-sugiere">
+      <span>
+        <Icon name="sparkles" size={12} /> Tienes esto conectado y mejoraría el video{s.porque ? `: ${s.porque}` : '.'}
+      </span>
+      <div className="cr-sugiere-botones">
+        {opciones.map((o) => (
+          <button key={o.que} className="chip" onClick={() => onActivar(o.que)}>
+            <Icon name="plus" size={11} /> {o.texto}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function TarjetaPlan({
   plan,
   puedeHacer,
   onHazlo,
-  modeloClip
+  modeloClip,
+  sugerencias
 }: {
   plan: PlanAgente
   puedeHacer: boolean
   onHazlo: () => void
   /** El modelo de clips elegido en la caja: para decir lo que cuestan. */
   modeloClip?: string
+  sugerencias?: React.ReactNode
 }) {
   const escenas = plan.escenas ?? []
   const clips = clipsDelPlan(plan)
@@ -107,6 +139,7 @@ function TarjetaPlan({
           ))}
         </ol>
       )}
+      {sugerencias}
       {puedeHacer && (
         <button className="btn primary small" onClick={onHazlo}>
           <Icon name="play" size={13} /> Hazlo
@@ -229,6 +262,23 @@ export function ChatCreacion({
     if (turnoRapido.current === mio) setRapido(null)
   }
 
+  async function activar(que: 'voz' | 'imagenes' | 'clips') {
+    const plan = [...c.mensajes].reverse().find((m) => m.plan)?.plan
+    if (que === 'voz' && plan?.sugiere?.voz) return onAjustar({ vozElegida: plan.sugiere.voz })
+    const [flow, gpt] = await Promise.all([window.recorte.flowEstado().catch(() => null), window.recorte.chatgptEstado().catch(() => null)])
+    const conFlow = Boolean(flow?.cuentas.length)
+    const base = c.flow ?? { imagenes: false, videos: false }
+    if (que === 'imagenes') {
+      const modeloImagen = base.modeloImagen ?? (conFlow ? MODELOS_IMAGEN[0] : gpt?.conectado ? MODELO_CHATGPT : undefined)
+      if (!modeloImagen) return
+      onAjustar({ flow: { ...base, imagenes: true, modeloImagen } })
+    } else if (que === 'clips' && conFlow) {
+      const vigentes = modelosVideoVigentes()
+      const modeloVideo = base.modeloVideo ?? (vigentes.includes('Veo 3.1 - Lite') ? 'Veo 3.1 - Lite' : vigentes[0])
+      onAjustar({ flow: { ...base, videos: true, ...(modeloVideo ? { modeloVideo } : {}) } })
+    }
+  }
+
   function enviar(texto: string) {
     if (ocupado) return
     if (hayVideo && editor && via === 'rapido') void cambioRapido(texto)
@@ -293,6 +343,7 @@ export function ChatCreacion({
                   puedeHacer={m.id === ultimoConPlan && !hayVideo && !ocupado}
                   onHazlo={onHazlo}
                   modeloClip={c.flow?.videos ? c.flow.modeloVideo : undefined}
+                  sugerencias={m.id === ultimoConPlan && !hayVideo ? <Sugerencias plan={m.plan} creacion={c} onActivar={(q) => void activar(q)} /> : undefined}
                 />
               )}
               {m.cambios && (

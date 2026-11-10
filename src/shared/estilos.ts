@@ -20,8 +20,6 @@ export interface EstiloVideo {
    * siguientes videos (la carpeta `plantilla/` del agente): todos se ven igual y gastan menos.
    */
   plantilla?: boolean
-  /** Todo se hace con código (sin imágenes ni clips generados): la caja los apaga al elegirla. */
-  sinGenerados?: boolean
 }
 
 export type GrupoEstilo = 'libre' | 'ensenar' | 'vender' | 'contar' | 'inspirar'
@@ -61,9 +59,9 @@ export const ESTILOS: EstiloVideo[] = [
     icono: 'cubo',
     descripcion: 'Un mundo 3D animado con personaje, íconos y texto palabra por palabra.',
     plantilla: true,
-    sinGenerados: true,
-    guia: `Explicativo 3D animado (motion graphics en 3D, como un video educativo de marca). NADA de fotos ni clips
-realistas generados: todo se programa. Herramienta: HyperFrames con Three.js para el 3D (o CSS 3D si no alcanza).
+    guia: `Explicativo 3D animado (motion graphics en 3D, como un video educativo de marca). El protagonista es el 3D que
+programas con HyperFrames y Three.js (o CSS 3D si no alcanza). Se combina con todo lo que el usuario eligió en la caja:
+la voz, las imágenes y clips generados (como fondos, texturas, tarjetitas con foto o un detalle en movimiento) y su material.
 - Guion: el del usuario palabra por palabra, o su narración grabada; si no trae ninguno, escríbelo tú (gancho que
   contradice lo que cree el espectador, el problema, la explicación y la llamada a la acción).
 - Personaje: UN objeto 3D estilizado que representa el tema (en salud dental, una boca de caricatura con labios y dientes;

@@ -316,6 +316,7 @@ try {
   await evaluar(cliente, `window.recorte.agentePlan(${JSON.stringify(primera.id)})`)
   const manual3d = readFileSync(join(datos, 'creaciones', primera.id, 'trabajo', 'CLAUDE.md'), 'utf8')
   if (!manual3d.includes('La plantilla de «Explicativo 3D»') || !manual3d.includes('Es la primera vez')) throw new Error('El manual no presenta la plantilla de «Explicativo 3D».')
+  if (!manual3d.includes('## Todas tus herramientas') || !manual3d.includes('PROPÓNSELO')) throw new Error('El manual no le enseña al agente todas las herramientas del usuario.')
   const hecha3d = await evaluar(cliente, `window.recorte.agenteHacer(${JSON.stringify(primera.id)})`, 5 * 60_000)
   if (hecha3d.fase !== 'listo') throw new Error(`El primer Explicativo 3D no terminó: ${hecha3d.mensajes.at(-1)?.texto}`)
   if (!existsSync(join(datos, 'estilos', 'explicativo3d', 'momentos.json'))) throw new Error('Recorte no guardó la plantilla del Explicativo 3D.')

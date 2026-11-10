@@ -23,6 +23,21 @@ export interface PlanAgente {
    * clips se generan (y lo que cuestan) una vez que el usuario dice «Hazlo».
    */
   escenas?: EscenaPlan[]
+  /**
+   * Herramientas que el usuario tiene conectadas pero no eligió y que mejorarían el video: el chat
+   * las muestra con un botón «Activar» (nunca se usan sin que el usuario las active).
+   */
+  sugiere?: SugerenciaPlan
+}
+
+export interface SugerenciaPlan {
+  /** Una voz de Gemini para narrar. */
+  voz?: string
+  imagenes?: boolean
+  /** Cuántos clips generados harían falta. */
+  clips?: number
+  /** Por qué mejoraría el video, en una frase. */
+  porque?: string
 }
 
 export interface EscenaPlan {
@@ -137,12 +152,21 @@ export function validarPlan(crudo: unknown): PlanAgente | null {
       }
     })
     .filter((e) => e.texto || e.visual)
+  const s = (p.sugiere && typeof p.sugiere === 'object' ? p.sugiere : {}) as Record<string, unknown>
+  const sugiere: SugerenciaPlan = {
+    ...(texto(s.voz, 30) && /^[A-Z][a-z]+$/.test(texto(s.voz, 30)) ? { voz: texto(s.voz, 30) } : {}),
+    ...(s.imagenes === true ? { imagenes: true } : {}),
+    ...(typeof s.clips === 'number' && s.clips >= 1 ? { clips: Math.min(MAX_CLIPS_GUION, Math.round(s.clips)) } : s.clips === true ? { clips: 1 } : {}),
+    ...(texto(s.porque, 300) ? { porque: texto(s.porque, 300) } : {})
+  }
+  const hay = sugiere.voz || sugiere.imagenes || sugiere.clips
   return {
     entendi: entendi || 'Plan del agente',
     pasos,
     preguntas,
     ...(texto(p.herramienta, 80) ? { herramienta: texto(p.herramienta, 80) } : {}),
-    ...(escenas.length ? { escenas } : {})
+    ...(escenas.length ? { escenas } : {}),
+    ...(hay ? { sugiere } : {})
   }
 }
 

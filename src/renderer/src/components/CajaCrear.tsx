@@ -14,7 +14,6 @@ import {
 } from '../../../shared/creacion'
 import { avisoRetiro, MODELO_CHATGPT, MODELOS_IMAGEN, modelosVideoVigentes } from '../../../shared/flow'
 import { favorito } from '../../../shared/gustos'
-import { estiloPorId } from '../../../shared/estilos'
 import type { Agentes } from '../hooks/agentes'
 import { Icon } from '../Icons'
 import { ElegirModelo, nombreModelo } from './ElegirModelo'
@@ -205,14 +204,6 @@ export function CajaCrear({
       .catch(() => {})
   }, [])
 
-  // Una tarjeta que lo hace todo con código (Explicativo 3D) no usa imágenes ni clips generados.
-  useEffect(() => {
-    if (chat || !estiloPorId(estilo).sinGenerados) return
-    setModeloImagen(null)
-    setModeloVideo(null)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [estilo])
-
   const conectados = agentes.lista.filter((a) => a.conectado && a.instalado)
   const activo = agentes.activo
   const hayFotos = adjuntos.some((r) => /\.(jpe?g|png|webp|heic|heif|zip)$/i.test(r))
@@ -244,6 +235,17 @@ export function CajaCrear({
 
   // En el chat, lo que cambia en la caja se guarda en la creación al elegirlo (vale para el siguiente turno).
   const ajustesVistos = useRef<string | null>(null)
+  // Y si cambia desde fuera (el botón «Activar» de una sugerencia del agente), la caja lo refleja.
+  const deFuera = JSON.stringify([c0?.vozElegida ?? null, c0?.flow ?? null, c0?.tareas?.video ?? null, Boolean(c0?.directo)])
+  useEffect(() => {
+    if (!c0) return
+    setVoz(c0.vozElegida ?? null)
+    setDirecto(Boolean(c0.directo))
+    setTVideo(c0.tareas?.video ?? null)
+    setModeloImagen(c0.flow?.imagenes ? (c0.flow.modeloImagen ?? MODELOS_IMAGEN[0] ?? null) : null)
+    setModeloVideo(c0.flow?.videos ? (c0.flow.modeloVideo ?? null) : null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deFuera])
   useEffect(() => {
     if (!chat) return
     const imagenes = Boolean(modeloImagen) && (modeloImagen === MODELO_CHATGPT ? conChatGPT : conFlow)

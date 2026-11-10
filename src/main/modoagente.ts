@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, isAbsolute, join, resolve, sep } from 'node:path'
-import { COSTO_CLIP, MAX_CLIPS_VEO, type Creacion } from '../shared/creacion'
+import { COSTO_CLIP, MAX_CLIPS_VEO, VOCES_GEMINI, type Creacion } from '../shared/creacion'
+import { MODELO_CHATGPT, MODELOS_IMAGEN, modelosVideoVigentes } from '../shared/flow'
 import { estiloPorId } from '../shared/estilos'
 import {
   MAX_REGISTRO,
@@ -162,7 +163,7 @@ Escribe código propio solo para lo que el kit no tenga, y aun así usa el kit p
 
 `
       : ''
-  }${seccionPlantilla(c, trabajo)}## El método (síguelo siempre)
+  }${seccionPlantilla(c, trabajo)}${await seccionHerramientas(c)}## El método (síguelo siempre)
 1. **Entiende el pedido.** ¿Es un video para redes, un recurso para otro editor (sin textos, con croma…),
    una pieza corta? No impongas un formato: haz lo que se pide.
 2. **Mira los archivos de verdad.** Abre cada imagen de \`entrada/\` y míralas. De los videos, usa ffprobe y
@@ -547,7 +548,7 @@ function ultimoDelUsuario(c: Creacion): string {
   return [...c.mensajes].reverse().find((m) => m.rol === 'usuario')?.texto ?? ''
 }
 
-const FORMATO_PLAN = `{"mensaje": "lo que le dices al usuario en el chat", "propuestas": ["respuestas cortas que puede tocar"], "entendi": "qué vas a hacer, en 1-2 frases, con los datos que mediste", "pasos": ["paso corto", "…"], "preguntas": ["lo que aún necesitas saber (vacío si nada)"], "herramienta": "Kit de Recorte | FFmpeg | Python + FFmpeg | HyperFrames | …", "escenas": [{"texto": "lo que se dice en esta escena", "desde": 0.0, "hasta": 3.2, "medio": "clip | imagen | material | diseno", "visual": "qué se ve, en palabras del usuario", "prompt": "el prompt para el generador (si es clip o imagen)"}]}`
+const FORMATO_PLAN = `{"sugiere": {"voz": "Kore (solo si no eligió voz)", "imagenes": true, "clips": 3, "porque": "para qué, en una frase (solo lo conectado y NO elegido que mejoraría el video; si nada, omite sugiere)"}, "mensaje": "lo que le dices al usuario en el chat", "propuestas": ["respuestas cortas que puede tocar"], "entendi": "qué vas a hacer, en 1-2 frases, con los datos que mediste", "pasos": ["paso corto", "…"], "preguntas": ["lo que aún necesitas saber (vacío si nada)"], "herramienta": "Kit de Recorte | FFmpeg | Python + FFmpeg | HyperFrames | …", "escenas": [{"texto": "lo que se dice en esta escena", "desde": 0.0, "hasta": 3.2, "medio": "clip | imagen | material | diseno", "visual": "qué se ve, en palabras del usuario", "prompt": "el prompt para el generador (si es clip o imagen)"}]}`
 
 /** Cuándo y cómo arma el guion gráfico (las escenas) en el plan. */
 function comoGuionGrafico(c: Creacion): string {
@@ -575,6 +576,46 @@ function costoClips(c: Creacion): string {
   const modelo = c.flow?.modeloVideo
   const costo = modelo ? COSTO_CLIP[modelo] : undefined
   return costo ? `${costo} créditos` : 'unos créditos'
+}
+
+/** Lo que el usuario tiene conectado en Recorte (lo pone index.ts: voz, Flow, ChatGPT). */
+export interface Conectadas {
+  voz: boolean
+  flow: boolean
+  chatgpt: boolean
+}
+let leerConectadas: () => Promise<Conectadas> = async () => ({ voz: false, flow: false, chatgpt: false })
+export function definirConectadas(fn: () => Promise<Conectadas>): void {
+  leerConectadas = fn
+}
+
+/**
+ * Todas sus herramientas, elegidas o solo conectadas: el agente usa lo elegido y propone lo que
+ * mejoraría el video (con un botón para activarlo). Nunca usa lo que el usuario no activó.
+ */
+async function seccionHerramientas(c: Creacion): Promise<string> {
+  const k = await leerConectadas().catch(() => ({ voz: false, flow: false, chatgpt: false }))
+  const m = mediosDisponibles(c.flow)
+  const fotos = c.adjuntos.filter((a) => a.tipo === 'imagen').length
+  const videos = c.adjuntos.filter((a) => a.tipo === 'video').length
+  const narracion = c.adjuntos.some((a) => a.tipo === 'audio')
+  const costos = modelosVideoVigentes()
+    .map((x) => `${x} ${COSTO_CLIP[x] ?? '?'} créditos`)
+    .join(', ')
+  const linea = (nombre: string, elegido: string | null, conectado: boolean, detalle: string) =>
+    `- ${nombre}: ${elegido ? `ELEGIDO (${elegido}).` : conectado ? `conectado pero NO elegido (${detalle}).` : 'no está conectado.'}`
+  return `## Todas tus herramientas (úsalas para el mejor resultado)
+${linea('Voz que narra', c.vozElegida ?? null, k.voz, `voces de Gemini: ${VOCES_GEMINI.map((v) => v.id).join(', ')}`)}
+${linea('Imágenes generadas', m.imagenes ?? null, k.flow || k.chatgpt, [k.flow && `Google Flow: ${MODELOS_IMAGEN.join(', ')} (gratis)`, k.chatgpt && `ChatGPT: ${MODELO_CHATGPT}`].filter(Boolean).join('; '))}
+${linea('Clips generados', m.clips ?? null, k.flow, `Google Flow: ${costos}`)}
+- Su material: ${fotos} ${fotos === 1 ? 'foto' : 'fotos'}, ${videos} ${videos === 1 ? 'video' : 'videos'}${narracion ? ' y su narración grabada' : ''}.
+Lo ELEGIDO lo usas. Lo conectado pero NO elegido todavía no lo puedes usar (Recorte no atiende el pedido), pero si
+mejoraría el video, PROPÓNSELO: en la charla, en "mensaje" (para qué y cuánto cuesta) y en "sugiere" del plan; el usuario
+lo activa con un botón y vale desde el siguiente turno. Si no hay voz, ni narración, ni material, y la voz está conectada,
+propón narrar. Si estás haciendo el video sin charla («Hazlo directo»), no lo uses: al final del resumen di qué habría
+mejorado con lo que tiene conectado.
+
+`
 }
 
 /** Cómo conversa el agente antes de hacer el video, según lo que eligió el usuario en la caja. */

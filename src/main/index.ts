@@ -39,7 +39,7 @@ import { convertirAVoz, generarVozGemini, prepararVoz } from './voz'
 import { montarVozEnVideo } from './montajevoz'
 import { conectarVozGoogle, desconectarVozGoogle, estadoVozGoogle, generarVozGoogle } from './vozgoogle'
 import { analizarMaterialCreacion } from './estilo/material'
-import { anotar, archivoEntregado, copiarEntrada, LimiteUso, pasoHacer, pasoPlan, revisarYPublicar } from './modoagente'
+import { anotar, archivoEntregado, copiarEntrada, definirConectadas, LimiteUso, pasoHacer, pasoPlan, revisarYPublicar } from './modoagente'
 import { prepararArchivos } from './archivos'
 import { clipsDelPlan, esAprobacion, MAX_CLIPS_GUION, pasoAnunciado } from '../shared/modoagente'
 import { estiloPorId } from '../shared/estilos'
@@ -468,6 +468,12 @@ app.whenReady().then(() => {
       pararMedios()
     }
   }
+  // El agente ve todo lo que el usuario tiene conectado (para proponérselo aunque no lo eligiera).
+  definirConectadas(async () => ({
+    voz: Boolean((await ajustes.claveVoz()) || estadoVozGoogle().correo),
+    flow: estadoFlow().cuentas.length > 0,
+    chatgpt: Boolean(estadoChatGPT().conectado)
+  }))
   // ===== Plantillas de las tarjetas con estilo propio (Explicativo 3D) =====
   const carpetaEstilos = join(app.getPath('userData'), 'estilos')
   /** Antes de trabajar: la plantilla que funcionó en videos anteriores de ese tipo, a trabajo/plantilla/. */
