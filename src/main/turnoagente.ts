@@ -87,7 +87,11 @@ export async function turnoAgente(p: PeticionTurno): Promise<ResultadoTurno> {
   }
   const extra = await entornoParaAgente(comando)
   return new Promise<ResultadoTurno>((resolver, rechazar) => {
-    const hijo = spawn(comando, { cwd: p.cwd, shell: true, windowsHide: true, env: { ...process.env, ...extra, PATH: pathAmpliado() } })
+    // Un render largo debe poder esperarse en primer plano: si el agente lo deja en segundo
+    // plano y termina su turno, al cerrar su proceso se corta el render (y no hay entrega).
+    // Claude Code acepta estos topes por entorno (por defecto, 2 y 10 min).
+    const esperaLarga = { BASH_DEFAULT_TIMEOUT_MS: String(30 * 60_000), BASH_MAX_TIMEOUT_MS: String(60 * 60_000) }
+    const hijo = spawn(comando, { cwd: p.cwd, shell: true, windowsHide: true, env: { ...process.env, ...esperaLarga, ...extra, PATH: pathAmpliado() } })
     let resto = ''
     let restoErr = ''
     let respuesta = ''

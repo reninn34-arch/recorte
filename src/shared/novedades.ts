@@ -24,6 +24,43 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.19',
+    fecha: '2026-11-10',
+    resumen: 'Todo pasa en el editor: conversas el plan con el agente, le pides cambios en vivo y, si se acaba el uso de tu plan, sigue solo donde iba.',
+    novedades: [
+      {
+        icono: 'layers',
+        titulo: 'Todo en el editor, con el chat al lado',
+        texto:
+          'Ya no hay pantalla de pasos: ves tu material y, al terminar, el editor ocupa ese lugar con el mismo chat. La caja del chat trae todo: material, agente y modelo, voz, imágenes, clips y «Pregúntame antes / Hazlo directo». Puedes parar al agente cuando quieras.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Conversa el plan',
+        texto:
+          'Con «Pregúntame antes» el agente te propone ideas y te pregunta con opciones hasta tener el plan; tú dices «Hazlo». También puede generarte imágenes o clips en plena charla (antes de un clip te dice cuánto cuesta).'
+      },
+      {
+        icono: 'scissors',
+        titulo: 'Cambios en el mismo video',
+        texto:
+          '«Cambio rápido» toca la timeline al momento, sin rehacer el video. Si el agente lo rehace, la versión nueva entra en el mismo editor y Ctrl+Z vuelve a la anterior con tus retoques.'
+      },
+      {
+        icono: 'clock',
+        titulo: 'Si se acaba el uso, no se pierde nada',
+        texto:
+          'Si tu plan se queda sin uso a mitad del video, queda en pausa y sigue solo cuando se renueva (con la app abierta), desde donde iba. O elige otro agente y dale a «Seguir donde iba». Si el render ya había terminado, te lo entrega igual.'
+      },
+      {
+        icono: 'film',
+        titulo: 'Mejor criterio de edición',
+        texto:
+          'La duración la decide el material (ya no 30 s por defecto), el agente ordena las tomas por lo que cuenta, pone los logos cuando se nombran, no tapa caras, no monta subtítulos y no deja renders a medias.'
+      }
+    ]
+  },
+  {
     version: '0.1.18',
     fecha: '2026-11-10',
     resumen: 'El agente genera imágenes y clips con tus cuentas, recibe carpetas enteras de material y eliges su modelo en un menú nuevo.',

@@ -19,6 +19,17 @@ export interface PlanAgente {
   herramienta?: string
 }
 
+/**
+ * Un turno de la conversación antes de hacer el video («Pregúntame antes»): lo que el agente
+ * le dice al usuario (ideas, lo que vio, preguntas con opciones), las respuestas rápidas que
+ * puede tocar y el plan tal como va quedando.
+ */
+export interface CharlaPlan {
+  mensaje: string
+  propuestas: string[]
+  plan: PlanAgente | null
+}
+
 export interface ResultadoAgente {
   /** El archivo final, relativo a la carpeta de la creación (`salidas/…`). */
   archivo: string
@@ -54,6 +65,8 @@ export interface EstadoModoAgente {
    * Solo vale con el mismo agente: si el usuario cambia de agente, se empieza otra.
    */
   sesion?: SesionAgente
+  /** Se quedó sin uso de su plan a mitad: en pausa hasta que se renueve (o se siga con otro agente). */
+  pausa?: PausaCreacion
 }
 
 export interface SesionAgente {
@@ -85,6 +98,76 @@ export function validarPlan(crudo: unknown): PlanAgente | null {
     preguntas,
     ...(texto(p.herramienta, 80) ? { herramienta: texto(p.herramienta, 80) } : {})
   }
+}
+
+/**
+ * La respuesta del agente en la charla del plan. Con JSON: su mensaje, sus respuestas rápidas
+ * y el plan. Sin JSON (contestó en prosa): eso es su mensaje y el plan sigue como estaba.
+ */
+export function validarCharla(crudo: unknown, prosa: string): CharlaPlan | null {
+  const plan = validarPlan(crudo)
+  const p = (crudo && typeof crudo === 'object' ? crudo : {}) as Record<string, unknown>
+  const mensaje = texto(p.mensaje, 2500) || (plan ? '' : prosa.trim().slice(0, 2500))
+  const propuestas = lista(p.propuestas, 4, 80)
+  if (!mensaje && !plan) return null
+  return { mensaje, propuestas, plan }
+}
+
+/**
+ * El trabajo quedó en pausa porque el agente se quedó sin uso de su plan. Nada se pierde:
+ * la carpeta de trabajo y la conversación siguen. Se reanuda solo cuando se renueva (si el
+ * agente dijo cuándo) o con «Seguir donde iba», con el mismo agente o con otro.
+ */
+export interface PausaCreacion {
+  motivo: 'limite'
+  /** Dónde se quedó: en la charla del plan o haciendo el video. */
+  etapa: 'plan' | 'hacer'
+  /** Cuándo empezó la ronda que se cortó (ms): lo que el agente dejó desde entonces cuenta como suyo. */
+  desde: number
+  /** Cuándo se renueva el uso (ms), si el agente lo dijo. */
+  reanudar?: number
+  /** Qué agente se quedó sin uso. */
+  agente?: string
+}
+
+const LIMITE_USO =
+  /l[ií]mite de uso|usage limit|limit reached|hit your (usage |session |weekly )?limit|reached your (current )?(usage |quota|limit)|quota (exceeded|reached)|out of (credits|usage)|rate.?limit(ed)?|too many requests|\b429\b|limit will reset|credit balance is too low/i
+
+/**
+ * Si un texto del agente dice que se quedó sin uso de su plan, y cuándo se renueva.
+ * Entiende «resets 5pm», «try again at 3:40 PM», «will reset in 6 days, 7 hours»,
+ * «in 2 hours 15 minutes» y el «…limit reached|1731234567» de Claude. Null si no es eso.
+ */
+export function limiteDeUso(texto: string, ahora = Date.now()): { reanudar?: number } | null {
+  if (!LIMITE_USO.test(texto)) return null
+  const margen = 60_000
+  const epoca = /\|(\d{10})\b/.exec(texto)
+  if (epoca) return { reanudar: Number(epoca[1]) * 1000 + margen }
+  const enRato = /(?:reset|resets|try again|available)\D{0,25}?\bin\s+((?:\d+\s*(?:days?|d|hours?|hrs?|h|minutes?|mins?|m)\b[\s,]*(?:and\s*)?)+)/i.exec(texto)
+  if (enRato) {
+    let ms = 0
+    for (const m of enRato[1].matchAll(/(\d+)\s*(days?|d|hours?|hrs?|h|minutes?|mins?|m)\b/gi)) {
+      const n = Number(m[1])
+      const u = m[2].toLowerCase()
+      ms += u.startsWith('d') ? n * 86_400_000 : u.startsWith('h') ? n * 3_600_000 : n * 60_000
+    }
+    if (ms > 0) return { reanudar: ahora + ms + margen }
+  }
+  const aLas = /(?:resets?|try again|available)(?:\s+at)?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?/i.exec(texto)
+  if (aLas) {
+    let h = Number(aLas[1])
+    const min = Number(aLas[2] ?? 0)
+    const ap = aLas[3]?.toLowerCase().replace(/\./g, '')
+    if (ap === 'pm' && h < 12) h += 12
+    if (ap === 'am' && h === 12) h = 0
+    if (h <= 23 && min <= 59) {
+      const d = new Date(ahora)
+      d.setHours(h, min, 0, 0)
+      if (d.getTime() <= ahora) d.setDate(d.getDate() + 1)
+      return { reanudar: d.getTime() + margen }
+    }
+  }
+  return {}
 }
 
 /** Lo que el agente deja en `resultado.json` al terminar. */

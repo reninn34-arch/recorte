@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from 'electron'
-import { duracionesDeMedios, normalizarTimeline, quitarFuente, type Timeline } from '../shared/timeline'
+import { duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, timelineVacia, type Timeline } from '../shared/timeline'
 import { randomUUID } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, join, resolve, sep } from 'node:path'
 import type {
   AnalisisResultado,
@@ -12,7 +12,7 @@ import type {
   RenderResultado,
   TranscripcionResultado
 } from '../shared/api'
-import type { AjustesIA, Project } from '../shared/types'
+import type { AjustesIA, MedioProyecto, Project } from '../shared/types'
 import { Ajustes } from './ajustes'
 import { conectarAgente, desconectarAgente, estadoAgentes, prepararAgentes, versionesAgentes, agenteDeOrden, marcarSesionCaida, VARIABLE_LLAVE } from './agentes'
 import { estadoSistema, instalarHerramienta } from './sistema'
@@ -39,7 +39,8 @@ import { convertirAVoz, generarVozGemini, prepararVoz } from './voz'
 import { montarVozEnVideo } from './montajevoz'
 import { conectarVozGoogle, desconectarVozGoogle, estadoVozGoogle, generarVozGoogle } from './vozgoogle'
 import { analizarMaterialCreacion } from './estilo/material'
-import { anotar, archivoEntregado, pasoHacer, pasoPlan, revisarYPublicar } from './modoagente'
+import { anotar, archivoEntregado, copiarEntrada, LimiteUso, pasoHacer, pasoPlan, revisarYPublicar } from './modoagente'
+import { prepararArchivos } from './archivos'
 import { esAprobacion, pasoAnunciado } from '../shared/modoagente'
 import { atenderVoz } from './vozagente'
 import { proyectoDesdeReceta } from './recetaeditor'
@@ -258,6 +259,21 @@ app.whenReady().then(() => {
     return guion || video ? t : undefined
   }
 
+  /** Lo de imágenes y clips generados que llega de la interfaz: solo modelos conocidos. */
+  const limpiarFlow = (x: unknown): Creacion['flow'] | undefined => {
+    if (!x || typeof x !== 'object') return undefined
+    const f = x as { imagenes?: unknown; videos?: unknown; modeloImagen?: unknown; modeloVideo?: unknown }
+    if (!f.imagenes && !f.videos) return undefined
+    return {
+      imagenes: Boolean(f.imagenes),
+      videos: Boolean(f.videos),
+      ...(typeof f.modeloImagen === 'string' && (MODELOS_IMAGEN.includes(f.modeloImagen) || f.modeloImagen === MODELO_CHATGPT)
+        ? { modeloImagen: f.modeloImagen }
+        : {}),
+      ...(typeof f.modeloVideo === 'string' && modelosVideoVigentes().includes(f.modeloVideo) ? { modeloVideo: f.modeloVideo } : {})
+    }
+  }
+
   // ===== Crear con IA =====
   const creandoAhora = new Set<string>()
   const mensaje = (rol: MensajeCreacion['rol'], texto: string, error = false): MensajeCreacion => ({
@@ -422,38 +438,87 @@ app.whenReady().then(() => {
     if (!estadoVozGoogle().correo) throw new Error('no hay una cuenta de Google ni una clave de AI Studio conectada (Ajustes → Voz)')
     return generarVozGoogle(texto, voz, salida)
   }
+  /**
+   * Mientras el agente trabaja (en la charla del plan o haciendo el video), Recorte atiende sus
+   * pedidos de voz (con la voz elegida en la caja) y de imágenes y clips (Flow o ChatGPT).
+   * Devuelve con qué dejar de atenderlos.
+   */
+  const atenderPedidos = (c: Creacion, senal: AbortSignal): (() => void) => {
+    const trabajo = join(creaciones.carpeta(c.id), 'trabajo')
+    const pararVoz = atenderVoz(trabajo, c.vozElegida, generarFraseVoz, (l) => avisarAgente(c, l, 0.5))
+    const pararMedios = atenderMedios(
+      trabajo,
+      c.flow,
+      c.formato === 'horizontal' ? '16:9' : '9:16',
+      {
+        flow: (pedido, destino) => pedirFlow(pedido, destino, senal),
+        chatgpt: (pedido, destino, nombre) => generarImagenChatGPT(pedido, destino, nombre, senal)
+      },
+      (l) => avisarAgente(c, l, 0.5)
+    )
+    let parado = false
+    return () => {
+      if (parado) return
+      parado = true
+      pararVoz()
+      pararMedios()
+    }
+  }
+  /** Las imágenes y clips que el agente generó desde `desde` (para verlos en su mensaje del chat). */
+  const mediosNuevos = (c: Creacion, desde: number): string[] => {
+    const dir = join(creaciones.carpeta(c.id), 'trabajo', 'medios')
+    if (!existsSync(dir)) return []
+    return readdirSync(dir)
+      .filter((n) => /\.(png|jpe?g|webp|mp4|mov|webm)$/i.test(n))
+      .map((n) => ({ n, t: statSync(join(dir, n)).mtimeMs }))
+      .filter((x) => x.t >= desde - 1000)
+      .sort((a, b) => a.t - b.t)
+      .slice(0, 12)
+      .map((x) => `trabajo/medios/${x.n}`)
+  }
   ipcMain.handle('agente:plan', (_evento, id: unknown, pedido: unknown) =>
     conCreacion(id, async (c, senal) => {
       const texto = typeof pedido === 'string' && pedido.trim() ? pedido.trim().slice(0, 2000) : undefined
       if (texto) c.mensajes.push(mensaje('usuario', texto))
+      await charlaConAgente(c, senal)
+      enviarProgreso({ id: c.id, fase: 'creacion', pct: 1, texto: 'Listo' })
+      return creaciones.guardar(c)
+    })
+  )
+  /** Un turno de la charla del plan (y, con «Hazlo directo» y sin dudas, el video). */
+  async function charlaConAgente(c: Creacion, senal: AbortSignal): Promise<void> {
       c.fase = 'plan'
       creaciones.guardar(c)
       enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.1, texto: 'El agente está mirando tus archivos' })
+      // En la charla también puede generar imágenes o clips para enseñarte una idea (o porque se los pides).
+      const dejarDeAtender = atenderPedidos(c, senal)
+      const desdeCharla = Date.now()
       try {
-        const desde = Date.now()
-        const { plan, sesion } = await pasoPlan(c, creaciones.carpeta(c.id), await configParaTarea(c.tareas?.video), (l) => avisarAgente(c, l, pctPorTiempo(desde, 180)), senal)
-        // La conversación queda viva: «Hazlo» y cada cambio la retoman (no se vuelve a mirar todo).
-        c.agente = { ...(c.agente ?? { registro: [], rondas: 0 }), plan, ...(sesion ? { sesion } : {}) }
-        const partes = [plan.entendi, ...plan.pasos.map((p, i) => `${i + 1}. ${p}`)]
-        if (plan.preguntas.length) partes.push(`Antes de hacerlo: ${plan.preguntas.join(' ')}`)
+        const desde = desdeCharla
+        const { charla, sesion } = await pasoPlan(c, creaciones.carpeta(c.id), await configParaTarea(c.tareas?.video), (l) => avisarAgente(c, l, pctPorTiempo(desde, 180)), senal)
+        // La conversación queda viva: cada respuesta, «Hazlo» y cada cambio la retoman (no se vuelve a mirar todo).
+        const plan = charla.plan ?? c.agente?.plan
+        c.agente = { ...(c.agente ?? { registro: [], rondas: 0 }), ...(plan ? { plan } : {}), ...(sesion ? { sesion } : {}) }
         // «Hazlo directo»: sin preguntas pendientes, empieza sin esperar la aprobación.
-        const directo = c.directo === true && !plan.preguntas.length && !c.agente.resultado
-        c.mensajes.push({
-          ...mensaje('agente', partes.join('\n')),
-          propuestas: plan.preguntas.length || directo ? [] : ['Hazlo']
-        })
+        const directo = c.directo === true && Boolean(plan) && !plan?.preguntas.length && !c.agente.resultado
+        // Lo que dice el agente es su mensaje; si no dijo nada, el plan en limpio.
+        const texto = charla.mensaje || (plan ? [plan.entendi, ...(plan.preguntas.length ? [`Antes de hacerlo: ${plan.preguntas.join(' ')}`] : [])].join('\n') : '')
+        const propuestas = directo ? [] : charla.propuestas.length ? charla.propuestas : plan && !plan.preguntas.length ? ['Hazlo'] : []
+        const generados = mediosNuevos(c, desde)
+        c.mensajes.push({ ...mensaje('agente', texto), propuestas, ...(charla.plan ? { plan: charla.plan } : {}), ...(generados.length ? { medios: generados } : {}) })
+        dejarDeAtender()
         if (directo) {
           creaciones.guardar(c)
           await hacerConAgente(c, senal)
         }
       } catch (e) {
         if (esParado(e)) c.mensajes.push(mensaje('agente', 'Lo paraste. Cuando quieras, escríbeme qué hacemos.'))
+        else if (e instanceof LimiteUso) pausar(c, 'plan', desdeCharla, e)
         else c.mensajes.push(mensaje('agente', `No pude preparar el plan: ${textoError(e)}`, true))
+      } finally {
+        dejarDeAtender()
       }
-      enviarProgreso({ id: c.id, fase: 'creacion', pct: 1, texto: 'Listo' })
-      return creaciones.guardar(c)
-    })
-  )
+  }
   ipcMain.handle('agente:hacer', (_evento, id: unknown, pedido: unknown) =>
     conCreacion(id, async (c, senal) => {
       const texto = typeof pedido === 'string' && pedido.trim() ? pedido.trim().slice(0, 2000) : undefined
@@ -464,7 +529,7 @@ app.whenReady().then(() => {
     })
   )
   /** El agente hace (o cambia) el video, Recorte lo revisa y lo deja publicado en la creación. */
-  async function hacerConAgente(c: Creacion, senal: AbortSignal, texto?: string): Promise<void> {
+  async function hacerConAgente(c: Creacion, senal: AbortSignal, texto?: string, seguir = false): Promise<void> {
       const faseAntes = c.fase
       c.fase = 'video'
       if (!c.agente) c.agente = { registro: [], rondas: 0 }
@@ -473,26 +538,18 @@ app.whenReady().then(() => {
       creaciones.guardar(c)
       const carpeta = creaciones.carpeta(c.id)
       const config = await configParaTarea(c.tareas?.video)
-      // Mientras trabaja, Recorte atiende sus pedidos de voz con la voz elegida en la caja.
-      const pararVoz = atenderVoz(join(carpeta, 'trabajo'), c.vozElegida, generarFraseVoz, (l) => avisarAgente(c, l, 0.5))
-      // Y sus pedidos de imágenes y clips, con Flow o ChatGPT (lo que eligió en la caja).
-      const pararMedios = atenderMedios(
-        join(carpeta, 'trabajo'),
-        c.flow,
-        c.formato === 'horizontal' ? '16:9' : '9:16',
-        {
-          flow: (pedido, destino) => pedirFlow(pedido, destino, senal),
-          chatgpt: (pedido, destino, nombre) => generarImagenChatGPT(pedido, destino, nombre, senal)
-        },
-        (l) => avisarAgente(c, l, 0.5)
-      )
+      // Mientras trabaja, Recorte atiende sus pedidos de voz, imágenes y clips.
+      const dejarDeAtender = atenderPedidos(c, senal)
+      let desdeHacer = Date.now()
       try {
-        enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.05, texto: 'El agente está trabajando' })
+        enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.05, texto: seguir ? 'El agente sigue donde iba' : 'El agente está trabajando' })
         // Si pide un cambio sobre lo hecho, va como pedido; si solo aprobó el plan, sin pedido.
         const cambio = texto && !esAprobacion(texto) ? texto : undefined
-        const desde = Date.now()
+        // Al seguir tras el límite, lo que dejó desde la ronda cortada cuenta como de esta ronda.
+        const desde = seguir ? (c.agente.pausa?.desde ?? Date.now()) : Date.now()
+        desdeHacer = desde
         try {
-          const turno = await pasoHacer(c, carpeta, config, cambio, (l) => avisarAgente(c, l, pctPorTiempo(desde, 480)), senal)
+          const turno = await pasoHacer(c, carpeta, config, cambio, (l) => avisarAgente(c, l, pctPorTiempo(desde, 480)), senal, false, seguir)
           if (turno.sesion) c.agente.sesion = turno.sesion
           creaciones.guardar(c)
         } catch (e) {
@@ -507,11 +564,16 @@ app.whenReady().then(() => {
         if (revisado.problemas.length) {
           // Recorte encontró algo mal: el agente lo corrige una vez.
           avisarAgente(c, `Recorte revisó y encontró: ${revisado.problemas.join(' ')}`, 0.85)
-          const turno = await pasoHacer(c, carpeta, config, `La revisión de Recorte encontró problemas en tu entrega: ${revisado.problemas.join(' ')} Corrígelo y vuelve a entregar.`, (l) => avisarAgente(c, l, 0.9), senal, true)
+          // Sin archivo, casi siempre es un render que quedó en segundo plano y se cortó al cerrar el turno.
+          const sinArchivo = !archivoEntregado(carpeta, desde)
+            ? ' Si dejaste un render en segundo plano, se cortó al terminar tu turno: vuelve a lanzarlo EN PRIMER PLANO y espera a que acabe antes de escribir resultado.json.'
+            : ''
+          const turno = await pasoHacer(c, carpeta, config, `La revisión de Recorte encontró problemas en tu entrega: ${revisado.problemas.join(' ')}${sinArchivo} Corrígelo y vuelve a entregar.`, (l) => avisarAgente(c, l, 0.9), senal, true)
           if (turno.sesion) c.agente.sesion = turno.sesion
           revisado = await revisarYPublicar(c, carpeta, c.version + 1, desde)
         }
         if (!revisado.resultado) throw new Error(revisado.problemas.join(' '))
+        delete c.agente.pausa
         c.version += 1
         c.agente.rondas += 1
         c.agente.resultado = revisado.resultado
@@ -529,12 +591,84 @@ app.whenReady().then(() => {
       } catch (e) {
         c.fase = c.agente?.resultado ? 'listo' : faseAntes === 'video' ? 'plan' : faseAntes
         if (esParado(e)) c.mensajes.push(mensaje('agente', c.agente?.resultado ? 'Lo paraste. La versión anterior sigue intacta.' : 'Lo paraste. El plan sigue aquí.'))
+        else if (e instanceof LimiteUso) pausar(c, 'hacer', desdeHacer, e)
         else c.mensajes.push(mensaje('agente', `No pude terminarlo: ${textoError(e)}`, true))
       } finally {
-        pararVoz()
-        pararMedios()
+        dejarDeAtender()
       }
   }
+
+  // ===== Sin uso del plan a mitad: pausa, «Seguir donde iba» y reanudar solo =====
+  const horaCorta = (ms: number): string => {
+    const d = new Date(ms)
+    const hoy = new Date()
+    const hora = d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })
+    if (d.toDateString() === hoy.toDateString()) return `hoy a las ${hora}`
+    const manana = new Date(hoy)
+    manana.setDate(hoy.getDate() + 1)
+    if (d.toDateString() === manana.toDateString()) return `mañana a las ${hora}`
+    return `el ${d.toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' })} a las ${hora}`
+  }
+  /** Deja la creación en pausa (nada se pierde) y, si se sabe cuándo se renueva, la reanuda sola. */
+  const pausar = (c: Creacion, etapa: 'plan' | 'hacer', desde: number, e: LimiteUso) => {
+    if (!c.agente) c.agente = { registro: [], rondas: 0 }
+    const agente = c.tareas?.video?.agente
+    c.agente.pausa = { motivo: 'limite', etapa, desde, ...(e.reanudar ? { reanudar: e.reanudar } : {}), ...(agente ? { agente } : {}) }
+    const cuando = e.reanudar
+      ? `Se renueva ${horaCorta(e.reanudar)}: a esa hora sigo solo desde donde iba, con la app abierta.`
+      : 'Cuando se renueve, dale a «Seguir donde iba».'
+    c.mensajes.push({
+      ...mensaje(
+        'agente',
+        `Se acabó el uso de tu plan justo mientras ${etapa === 'plan' ? 'preparaba el plan' : 'hacía el video'}. No se pierde nada: lo que llevo sigue en su carpeta. ${cuando} Si no quieres esperar, elige otro agente en la caja y dale a «Seguir donde iba»: continúa desde lo que dejé.`
+      ),
+      propuestas: ['Seguir donde iba']
+    })
+    creaciones.guardar(c)
+    programarReanudar(c)
+  }
+  const relojes = new Map<string, ReturnType<typeof setTimeout>>()
+  /** A la hora en que se renueva el uso, sigue solo (si nadie lo siguió antes). */
+  const programarReanudar = (c: Creacion) => {
+    const id = c.id
+    const cuando = c.agente?.pausa?.reanudar
+    clearTimeout(relojes.get(id))
+    relojes.delete(id)
+    if (!cuando) return
+    // setTimeout no aguanta más de ~24 días; se revisa cada 6 horas como mucho.
+    const espera = Math.min(Math.max(5_000, cuando - Date.now()), 6 * 3_600_000)
+    relojes.set(
+      id,
+      setTimeout(() => {
+        relojes.delete(id)
+        const actual = creaciones.get(id)
+        if (!actual?.agente?.pausa?.reanudar) return
+        if (Date.now() < actual.agente.pausa.reanudar) return programarReanudar(actual)
+        if (creandoAhora.has(id)) return
+        void seguirCreacion(id).catch(() => {})
+      }, espera)
+    )
+  }
+  /** Sigue una creación en pausa: la charla o el video, desde donde se cortó. */
+  const seguirCreacion = (id: unknown) =>
+    conCreacion(id, async (c, senal) => {
+      const pausa = c.agente?.pausa
+      if (!pausa) throw new Error('No hay nada en pausa en esta creación.')
+      clearTimeout(relojes.get(c.id))
+      relojes.delete(c.id)
+      c.mensajes.push(mensaje('usuario', 'Seguir donde iba'))
+      if (pausa.etapa === 'plan') {
+        delete c.agente!.pausa
+        await charlaConAgente(c, senal)
+      } else {
+        await hacerConAgente(c, senal, undefined, true)
+      }
+      enviarProgreso({ id: c.id, fase: 'creacion', pct: 1, texto: 'Listo' })
+      return creaciones.guardar(c)
+    })
+  ipcMain.handle('agente:seguir', (_evento, id: unknown) => seguirCreacion(id))
+  // Al abrir la app, las pausas con hora vuelven a esperar su hora.
+  for (const c of creaciones.listar()) if (c.agente?.pausa?.reanudar) programarReanudar(c)
 
   ipcMain.handle('estilo:continuar', (_evento, id: unknown) =>
     conCreacion(id, async (c) => {
@@ -612,6 +746,80 @@ app.whenReady().then(() => {
     const c = typeof id === 'string' ? creaciones.get(id) : null
     return c ? destrabar(c) : null
   })
+  /**
+   * Lo que el usuario cambia en la caja del chat a mitad de la creación (la voz, imágenes y
+   * clips, quién lo hace, «Pregúntame antes / Hazlo directo»): vale desde el siguiente turno.
+   */
+  ipcMain.handle('creacion:ajustar', (_evento, id: unknown, cambios: unknown) => {
+    const c = typeof id === 'string' ? creaciones.get(id) : null
+    if (!c) throw new Error('Esa creación ya no existe.')
+    const x = (cambios ?? {}) as Record<string, unknown>
+    if ('vozElegida' in x) {
+      if (typeof x.vozElegida === 'string' && VOCES_GEMINI.some((v) => v.id === x.vozElegida)) c.vozElegida = x.vozElegida
+      else delete c.vozElegida
+    }
+    if ('directo' in x) {
+      if (x.directo === true) c.directo = true
+      else delete c.directo
+    }
+    if ('flow' in x) {
+      const flow = limpiarFlow(x.flow)
+      if (flow) c.flow = flow
+      else delete c.flow
+    }
+    if ('tareas' in x) {
+      const tareas = limpiarTareas(x.tareas)
+      if (tareas) c.tareas = tareas
+      else delete c.tareas
+    }
+    return creaciones.guardar(c)
+  })
+  /** Más material desde el «+» del chat: entra a trabajo/entrada y el vistazo se rehace. */
+  ipcMain.handle('creacion:adjuntar', async (_evento, id: unknown, rutas: unknown) => {
+    const c = typeof id === 'string' ? creaciones.get(id) : null
+    if (!c) throw new Error('Esa creación ya no existe.')
+    if (creandoAhora.has(c.id)) throw new Error('Espera a que el agente termine (o páralo) para añadir archivos.')
+    const lista = Array.isArray(rutas) ? rutas.filter((r): r is string => typeof r === 'string') : []
+    if (!lista.length) return c
+    const carpeta = creaciones.carpeta(c.id)
+    const preparando = join(carpeta, '.preparando')
+    try {
+      const { listos, descartados } = await prepararArchivos(lista, preparando)
+      const nuevos = copiarEntrada(listos, carpeta, c.adjuntos.filter((a) => a.archivo.startsWith('trabajo/entrada/')).length)
+      c.adjuntos.push(...nuevos)
+      // El vistazo (miniaturas, fotogramas) se vuelve a preparar con lo nuevo.
+      rmSync(join(carpeta, 'trabajo', 'vistazo'), { recursive: true, force: true })
+      const nombres = nuevos.map((a) => a.nombre)
+      if (nombres.length) {
+        c.mensajes.push(mensaje('usuario', `Añadí ${nombres.length === 1 ? 'un archivo' : `${nombres.length} archivos`}: ${nombres.slice(0, 8).join(', ')}${nombres.length > 8 ? '…' : ''}`))
+      }
+      if (descartados.length) c.mensajes.push(mensaje('agente', `No pude usar: ${descartados.join('; ')}.`, true))
+    } finally {
+      rmSync(preparando, { recursive: true, force: true })
+    }
+    return creaciones.guardar(c)
+  })
+  /** Los mensajes de un cambio rápido en la timeline (el chat del editor) quedan en la conversación. */
+  ipcMain.handle('creacion:anotar', (_evento, id: unknown, nuevos: unknown) => {
+    const c = typeof id === 'string' ? creaciones.get(id) : null
+    if (!c) throw new Error('Esa creación ya no existe.')
+    const texto = (v: unknown, n: number) => (typeof v === 'string' ? v.slice(0, n) : '')
+    const lista = (v: unknown) => (Array.isArray(v) ? v.filter((t): t is string => typeof t === 'string').slice(0, 20).map((t) => t.slice(0, 240)) : [])
+    for (const m of Array.isArray(nuevos) ? nuevos.slice(0, 4) : []) {
+      if (!m || typeof m !== 'object') continue
+      const y = m as Record<string, unknown>
+      if (y.rol !== 'usuario' && y.rol !== 'agente') continue
+      const cambios = lista(y.cambios)
+      const fallos = lista(y.fallos)
+      c.mensajes.push({
+        ...mensaje(y.rol, texto(y.texto, 4000), y.error === true),
+        ...(cambios.length ? { cambios } : {}),
+        ...(fallos.length ? { fallos } : {}),
+        ...(lista(y.propuestas).length ? { propuestas: lista(y.propuestas).slice(0, 4) } : {})
+      })
+    }
+    return creaciones.guardar(c)
+  })
   ipcMain.handle('creacion:nueva', async (_evento, p: unknown) => {
     const x = (p ?? {}) as Partial<PeticionCreacion>
     if (typeof x.peticion !== 'string' || !x.peticion.trim()) throw new Error('Cuéntale al agente qué video quieres.')
@@ -625,21 +833,7 @@ app.whenReady().then(() => {
       ...(x.modo === 'agente' ? { modo: 'agente' as const } : {}),
       ...(typeof x.referencia === 'string' && /\.(mp4|mov|webm|mkv|m4v)$/i.test(x.referencia) ? { referencia: x.referencia } : {}),
       tareas: limpiarTareas(x.tareas),
-      ...(x.flow && typeof x.flow === 'object'
-        ? (() => {
-            const f = x.flow as { imagenes?: unknown; videos?: unknown; modeloImagen?: unknown; modeloVideo?: unknown }
-            return {
-              flow: {
-                imagenes: Boolean(f.imagenes),
-                videos: Boolean(f.videos),
-                ...(typeof f.modeloImagen === 'string' && (MODELOS_IMAGEN.includes(f.modeloImagen) || f.modeloImagen === MODELO_CHATGPT)
-                  ? { modeloImagen: f.modeloImagen }
-                  : {}),
-                ...(typeof f.modeloVideo === 'string' && modelosVideoVigentes().includes(f.modeloVideo) ? { modeloVideo: f.modeloVideo } : {})
-              }
-            }
-          })()
-        : {})
+      ...(limpiarFlow(x.flow) ? { flow: limpiarFlow(x.flow) } : {})
     })
   })
   ipcMain.handle('creacion:guion', (_evento, id: unknown, pedido: unknown) =>
@@ -755,6 +949,48 @@ app.whenReady().then(() => {
     if (c.proyectoEditor && (c.editorSalida ?? c.salida) === c.salida) {
       const previo = proyectos.abrir(c.proyectoEditor)
       if (previo) return previo
+    }
+    // Una versión nueva del agente entra en el MISMO proyecto: su video como un medio más y sus
+    // pistas como timeline pendiente, que el editor aplica como un paso de deshacer.
+    if (c.proyectoEditor) {
+      const previo = proyectos.abrir(c.proyectoEditor)
+      if (previo) {
+        const carpeta = creaciones.carpeta(id)
+        const ruta = join(carpeta, c.salida)
+        const info = await probeVideo(ruta)
+        const mid = `m-${randomUUID().slice(0, 8)}`
+        const medio: MedioProyecto = {
+          id: mid,
+          ruta,
+          nombre: `Versión ${c.version} del agente`,
+          tipo: 'video',
+          duracion: info.duration,
+          ancho: info.width,
+          alto: info.height,
+          conAudio: info.hasAudio
+        }
+        const medios = [...(previo.medios ?? []), medio]
+        let timeline = insertarClip(timelineVacia(), { fuente: mid, entrada: 0, salida: info.duration }).timeline
+        const receta = c.modo === 'agente' ? c.agente?.resultado?.receta : undefined
+        if (receta) {
+          try {
+            const armado = await proyectoDesdeReceta(join(carpeta, receta), join(carpeta, 'trabajo'), proyectos.carpeta(previo.id), info.duration)
+            if (armado) {
+              medios.push(...armado.medios)
+              // Lo que la receta no puede separar sale del video nuevo, no del primero.
+              timeline = { ...armado.timeline, clips: armado.timeline.clips.map((x) => (x.fuente === FUENTE_PRINCIPAL ? { ...x, fuente: mid } : x)) }
+            }
+          } catch {
+            // Sin receta legible, la versión entra como un solo clip.
+          }
+        }
+        previo.medios = medios
+        previo.timelinePendiente = timeline
+        proyectos.save(previo)
+        c.editorSalida = c.salida
+        creaciones.guardar(c)
+        return proyectos.abrir(previo.id) ?? previo
+      }
     }
     const ingesta = await ingerir(join(creaciones.carpeta(id), c.salida), `${c.guion?.titulo ?? c.nombre}${c.version > 1 ? ` (v${c.version})` : ''}`)
     c.proyectoEditor = ingesta.project.id

@@ -3,10 +3,11 @@ import { basename, extname, isAbsolute, join, resolve, sep } from 'node:path'
 import { MAX_CLIPS_VEO, type Creacion } from '../shared/creacion'
 import {
   MAX_REGISTRO,
+  limiteDeUso,
+  validarCharla,
   validarEntrega,
-  validarPlan,
+  type CharlaPlan,
   type EstadoModoAgente,
-  type PlanAgente,
   type ResultadoAgente,
   type SesionAgente
 } from '../shared/modoagente'
@@ -51,12 +52,18 @@ export function nombreLimpio(nombre: string, i: number): string {
 }
 
 /** Copia los archivos del usuario tal cual (sin convertir: el color y la calidad exactos). */
-export function copiarEntrada(rutas: string[], carpeta: string): { archivo: string; nombre: string; tipo: 'imagen' | 'video' }[] {
+export function copiarEntrada(
+  rutas: string[],
+  carpeta: string,
+  /** Cuántos archivos hay ya en entrada/ (al añadir más desde el chat, la numeración sigue). */
+  yaHay = 0
+): { archivo: string; nombre: string; tipo: 'imagen' | 'video' }[] {
   const entrada = join(carpetaTrabajo(carpeta), 'entrada')
   mkdirSync(entrada, { recursive: true })
   mkdirSync(join(carpetaTrabajo(carpeta), 'salida'), { recursive: true })
   const copiados: { archivo: string; nombre: string; tipo: 'imagen' | 'video' }[] = []
-  for (const [i, ruta] of rutas.slice(0, 80).entries()) {
+  for (const [j, ruta] of rutas.slice(0, Math.max(0, 80 - yaHay)).entries()) {
+    const i = yaHay + j
     if (!existsSync(ruta)) continue
     const ext = extname(ruta).toLowerCase()
     const tipo = EXT_VIDEO.includes(ext) ? 'video' : EXT_IMAGEN.includes(ext) ? 'imagen' : null
@@ -132,6 +139,9 @@ ${(await herramientasDisponibles()).join('\n')}
 - Una pregunta, una medición corta: un script de segundos (ffprobe, el volumen cada 0,1 s, los golpes, el color de
   una zona). No recorras videos fotograma a fotograma ni repitas lo que ya mediste.
 - Antes del render completo, genera unos pocos fotogramas clave, míralos y corrige. Renderiza entero solo al final.
+- **Los renders, en primer plano y esperando a que terminen.** Nunca los lances en segundo plano (\`&\`, \`nohup\`,
+  \`Start-Process\`, «run in background») ni termines tu turno «mientras se renderiza»: al acabar tu turno Recorte
+  cierra tus procesos y el render se corta sin dejar el video. Si tarda, espera (tienes hasta 30 min por comando).
 - Si hay \`notas.md\`, léelo: es lo que ya miraste en el plan. Apunta ahí lo que midas (tiempos, colores, zonas).
 
 ${
@@ -165,6 +175,27 @@ Escribe código propio solo para lo que el kit no tenga, y aun así usa el kit p
 7. **Entrega** escribiendo \`resultado.json\` en esta carpeta:
    \`{"archivo": "salida/<nombre>", "receta": "receta.json", "resumen": "qué hiciste, en 1-3 frases", "comprobaciones": ["qué comprobaste y cómo salió", "…"]}\`
    (\`receta\` solo si lo hiciste con el kit: con ella el usuario abre cada foto, rótulo y frase de voz suelta en su editor para retocarla a mano. Por eso, si el kit alcanza, úsalo.)
+
+## La duración la decide el material, no una cifra
+No hay duración por defecto: NO recortes a 30 s (ni a ninguna cifra) si el usuario no la pide.
+- Si alguien habla a cámara, el video dura lo que dura su mensaje completo: quita pausas largas, repeticiones y
+  tomas falladas, pero no cortes ideas ni frases a medias (si dice «Cangrejal La Ñañita Pink», que termine el «Pink»).
+- Con fotos o clips sin voz, lo que pida la historia y el ritmo de la música; sin relleno.
+- Di en el plan cuánto durará y por qué (p. ej. «~1:30: es lo que dura su explicación sin pausas»).
+
+## Criterio de edición (lo que espera el usuario)
+- **El orden cuenta la historia.** Cuando alguien anuncia algo («te voy a enseñar el parqueo»), la toma siguiente es
+  justo eso. Ordena las tomas por sentido, no por el nombre del archivo.
+- **Lo que se nombra, se ve en ese momento.** Si nombra una red social, una marca o un producto, su logo o su imagen
+  aparece justo al nombrarlo, en el orden en que lo dice; si señala con la mano, ponlo donde señala (cerca, sin tapar el dedo).
+- **Nada tapa la cara ni las manos.** En los planos cerrados (la cara cerca de la cámara), sube o aparta los rótulos e
+  íconos. Mira los fotogramas para comprobarlo.
+- **Subtítulos limpios.** Nunca dos a la vez en pantalla (cada bloque termina cuando empieza el siguiente) y nunca se
+  salen del cuadro: si una frase no cabe, parte el bloque o achica la letra. Corrige lo que la transcripción entienda mal.
+- **Identidad de la marca.** Si hay logo, toma de él los colores y el estilo para rótulos y transiciones; el logo
+  completo va solo donde lo pida el usuario (normalmente, al cierre).
+- **Sonido en los momentos clave** (un golpe de aire en los cortes, un «pop» al aparecer un rótulo, una campana o caja
+  registradora en precios y promociones), siempre por debajo de la voz. Los recursos que crees (íconos, efectos), hazlos tú.
 
 ## Formato por defecto (salvo que el pedido diga otra cosa)
 Video ${ancho}×${alto} (${c.formato === 'horizontal' ? '16:9' : '9:16 vertical'}), 30 fps, H.264 (libx264, yuv420p, \`-movflags +faststart\`), audio AAC si hay audio.
@@ -228,10 +259,46 @@ export interface TurnoModoAgente {
 }
 
 /**
+ * El agente se quedó sin uso de su plan a mitad de un turno. `reanudar`: cuándo se renueva
+ * (ms), si lo dijo. Lo que ya hizo sigue en su carpeta y su conversación sigue viva.
+ */
+export class LimiteUso extends Error {
+  constructor(
+    readonly reanudar: number | undefined,
+    readonly detalle: string
+  ) {
+    super('Tu agente se quedó sin uso de su plan.')
+    this.name = 'LimiteUso'
+  }
+}
+
+/**
+ * Lanza al agente en su carpeta (ver `turnoConSesion`). Si se queda sin uso de su plan,
+ * lo dice como error o como respuesta corta: en los dos casos sale `LimiteUso`.
+ */
+export async function trabajarAgente(
+  ...args: Parameters<typeof turnoConSesion>
+): Promise<TurnoModoAgente> {
+  let turno: TurnoModoAgente
+  try {
+    turno = await turnoConSesion(...args)
+  } catch (e) {
+    if (e instanceof Parado || e instanceof LimiteUso) throw e
+    const texto = e instanceof Error ? e.message : String(e)
+    const limite = limiteDeUso(texto)
+    if (limite) throw new LimiteUso(limite.reanudar, texto.slice(0, 300))
+    throw e
+  }
+  const limite = turno.respuesta.length < 1500 ? limiteDeUso(turno.respuesta) : null
+  if (limite) throw new LimiteUso(limite.reanudar, turno.respuesta.slice(0, 300))
+  return turno
+}
+
+/**
  * Lanza al agente en su carpeta. Con `sesion` (del mismo agente) retoma esa conversación;
  * si ya no existe, empieza otra con `promptCompleto` (el pedido con todo el contexto).
  */
-export async function trabajarAgente(
+async function turnoConSesion(
   orden: string,
   cwd: string,
   prompt: string,
@@ -388,7 +455,7 @@ function contexto(c: Creacion): string {
     .slice(-12)
     .map((m) => `${m.rol === 'usuario' ? 'Usuario' : 'Tú'}: ${m.texto}`)
     .join('\n')
-  return `PEDIDO ORIGINAL DEL USUARIO:\n"""\n${c.peticion}\n"""\n\nArchivos en entrada/:\n${archivos}\n\nFormato elegido en la app: ${c.formato === 'horizontal' ? 'horizontal 16:9' : 'vertical 9:16'}, la duración que pida el usuario; si no la dice, la que mejor sirva al video (un reel suele ir de 15 a 45 s).${charla ? `\n\nConversación hasta ahora:\n${charla}` : ''}`
+  return `PEDIDO ORIGINAL DEL USUARIO:\n"""\n${c.peticion}\n"""\n\nArchivos en entrada/:\n${archivos}\n\nFormato elegido en la app: ${c.formato === 'horizontal' ? 'horizontal 16:9' : 'vertical 9:16'}, duración: la que pida el usuario; si no la dice, la decides tú según el material y lo que se cuenta (lee «La duración la decide el material» en AGENTS.md), sin recortar a una cifra fija.${charla ? `\n\nConversación hasta ahora:\n${charla}` : ''}`
 }
 
 /** Lo último que dijo el usuario en la conversación (para el turno que retoma la sesión). */
@@ -396,33 +463,72 @@ function ultimoDelUsuario(c: Creacion): string {
   return [...c.mensajes].reverse().find((m) => m.rol === 'usuario')?.texto ?? ''
 }
 
-const FORMATO_PLAN = `{"entendi": "qué vas a hacer, en 1-2 frases, con los datos que mediste", "pasos": ["paso corto", "…"], "preguntas": ["solo si de verdad no puedes decidir algo importante"], "herramienta": "Kit de Recorte | FFmpeg | Python + FFmpeg | HyperFrames | …"}`
+const FORMATO_PLAN = `{"mensaje": "lo que le dices al usuario en el chat", "propuestas": ["respuestas cortas que puede tocar"], "entendi": "qué vas a hacer, en 1-2 frases, con los datos que mediste", "pasos": ["paso corto", "…"], "preguntas": ["lo que aún necesitas saber (vacío si nada)"], "herramienta": "Kit de Recorte | FFmpeg | Python + FFmpeg | HyperFrames | …"}`
 
-/** Paso 1: el agente mira los archivos y propone un plan corto (o pregunta). No produce nada. */
+/** Cómo conversa el agente antes de hacer el video, según lo que eligió el usuario en la caja. */
+function comoConversar(c: Creacion): string {
+  if (c.directo === true) {
+    return `El usuario eligió «Hazlo directo»: si no tienes dudas importantes, deja "preguntas" vacío y en "mensaje" cuéntale en 1-2 frases qué vas a hacer.`
+  }
+  return `El usuario eligió «Pregúntame antes»: quiere CONVERSAR contigo hasta llegar al mejor video, como con un editor de verdad.
+En "mensaje" háblale con naturalidad y en tono cercano (tutéalo): lo que viste en sus archivos que importa, tu idea (gancho del
+inicio, estructura, ritmo, estilo de textos y subtítulos, música, sonidos, cierre) y, si de verdad cambia el resultado, hasta 3
+preguntas concretas con opciones («¿cierras con el logo o con el teléfono?»). Sin rodeos ni listas eternas.
+En "propuestas" pon de 2 a 4 respuestas cortas que pueda tocar (por ejemplo las opciones de tu pregunta; y «Hazlo» cuando el plan esté listo).
+El plan ("entendi", "pasos") va siempre al día con lo que hayan hablado. No hagas el video hasta que el usuario diga «Hazlo».
+${generarEnCharla(c)}`
+}
+
+/** Lo que puede generar en plena charla (imágenes, clips), según lo que eligió el usuario en la caja. */
+function generarEnCharla(c: Creacion): string {
+  const m = mediosDisponibles(c.flow)
+  if (!m.imagenes && !m.clips) {
+    return 'Si te pide una imagen o un clip generado, dile que elija un modelo en «Imágenes» o «Clips» de la caja del chat y te lo vuelva a pedir.'
+  }
+  return [
+    'Si en la charla te pide una imagen o un clip (o quieres enseñarle una idea), genéralo YA con el kit y cuéntale cómo salió: se le muestra en el chat.',
+    m.imagenes ? `- Imagen: \`python kit/kit.py imagen "descripción detallada"\` (con ${m.imagenes}; puedes pasar --ref con sus fotos).` : '',
+    m.clips
+      ? `- Clip: \`python kit/kit.py clip "descripción"\` (con ${m.clips}). Gasta créditos: ANTES de pedirlo dile cuántos clips y cuánto cuestan y espera su «sí».`
+      : '',
+    'Escribe tú la descripción para el generador (detallada, sin texto dentro de la imagen) y, si no salió bien, rehazla una vez.'
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+/**
+ * Paso 1: la charla del plan. El agente mira los archivos, conversa con el usuario y deja el
+ * plan al día; cada respuesta del usuario es otro turno de la misma conversación. No produce nada.
+ */
 export async function pasoPlan(
   c: Creacion,
   carpeta: string,
   config: ConfigModoAgente,
   onLinea: (t: string) => void,
   senal?: AbortSignal
-): Promise<{ plan: PlanAgente; sesion?: SesionAgente }> {
+): Promise<{ charla: CharlaPlan; sesion?: SesionAgente }> {
   const trabajo = carpetaTrabajo(carpeta)
   const cmd = config.activa && config.proveedor === 'cli' ? comandoAgentico(config.comandoCli) : null
   if (!cmd) throw new Error('El modo agente necesita un agente que trabaje con herramientas (Claude Code, Antigravity, Kimi, Codex u OpenCode). Conéctalo en Inicio.')
   await escribirManual(carpeta, c)
   onLinea('Recorte prepara un vistazo de tus archivos')
   await prepararVistazo(c, carpeta)
-  const completo = `Lee AGENTS.md (tu manual). Esto es SOLO EL PLAN: un vistazo rápido, de pocos minutos.
+  const completo = `Lee AGENTS.md (tu manual). Esto es SOLO LA CHARLA DEL PLAN: un vistazo rápido, de pocos minutos.
 Mira vistazo/LEEME.txt y las hojas de vistazo/ (miniaturas y fotogramas), entiende el pedido y propón cómo lo harás.
 TODAVÍA NO HAGAS EL VIDEO: no midas el audio a fondo, no hagas pruebas ni renders y no crees nada en salida/.
 Escribe en notas.md, en pocas líneas, lo que viste (qué es cada archivo y lo importante de cada uno) para usarlo después.
+
+${comoConversar(c)}
 
 ${contexto(c)}
 
 Responde SOLO con JSON, sin texto alrededor:
 ${FORMATO_PLAN}`
-  // Con la conversación viva (el usuario contestó a las preguntas del plan), basta con lo nuevo.
-  const corto = `El usuario contestó: «${ultimoDelUsuario(c)}». Ajusta el plan con eso (sigue SIN hacer el video: ya miraste los archivos, no lo repitas).
+  // Con la conversación viva, basta con lo nuevo que dijo el usuario.
+  const corto = `El usuario te contesta: «${ultimoDelUsuario(c)}».
+Sigue la charla: respóndele y deja el plan al día con eso (sigue SIN hacer el video; ya miraste los archivos, no lo repitas salvo que te pida mirar algo nuevo).
+${comoConversar(c)}
 Responde SOLO con JSON, sin texto alrededor:
 ${FORMATO_PLAN}`
   const turno = await trabajarAgente(cmd.orden, trabajo, corto, onLinea, senal, 30 * 60_000, await imagenesDeEntrada(c, carpeta), undefined, c.agente?.sesion, completo)
@@ -430,14 +536,11 @@ ${FORMATO_PLAN}`
   try {
     datos = extraerJson(turno.respuesta)
   } catch {
-    // Sin JSON: que se vea lo que dijo el agente, no un error de formato.
+    // Sin JSON: contestó en prosa; eso es su mensaje y el plan sigue como estaba.
   }
-  const plan = validarPlan(datos)
-  if (!plan) {
-    const dijo = turno.respuesta.replace(/\s+/g, ' ').trim().slice(0, 300)
-    throw new Error(dijo ? `El agente no devolvió el plan. Dijo: «${dijo}»` : 'El agente no devolvió un plan.')
-  }
-  return { plan, ...(turno.sesion ? { sesion: turno.sesion } : {}) }
+  const charla = validarCharla(datos, datos ? '' : turno.respuesta)
+  if (!charla) throw new Error('El agente no respondió nada.')
+  return { charla, ...(turno.sesion ? { sesion: turno.sesion } : {}) }
 }
 
 /** Paso 2: el agente hace (o cambia) el video siguiendo el plan, se comprueba y entrega. */
@@ -449,18 +552,22 @@ export async function pasoHacer(
   onLinea: (t: string) => void,
   senal?: AbortSignal,
   /** Lo pide la revisión de Recorte, no el usuario: corregir la entrega de esta ronda. */
-  esCorreccion = false
+  esCorreccion = false,
+  /** Se había quedado sin uso a mitad: sigue desde lo que dejó (este agente u otro). */
+  seguir = false
 ): Promise<TurnoModoAgente> {
   const trabajo = carpetaTrabajo(carpeta)
   const cmd = config.activa && config.proveedor === 'cli' ? comandoAgentico(config.comandoCli) : null
   if (!cmd) throw new Error('El modo agente necesita un agente que trabaje con herramientas (Claude Code, Antigravity, Kimi, Codex u OpenCode). Conéctalo en Inicio.')
   await escribirManual(carpeta, c)
   const resultadoJson = join(trabajo, 'resultado.json')
-  if (existsSync(resultadoJson)) rmSync(resultadoJson, { force: true })
+  // Al seguir, su resultado.json (si alcanzó a escribirlo) vale: no se borra.
+  if (!seguir && existsSync(resultadoJson)) rmSync(resultadoJson, { force: true })
   const plan = c.agente?.plan
   const hay = c.agente?.resultado
   await prepararVistazo(c, carpeta)
-  const desde = Date.now()
+  // Al seguir tras el límite, lo que dejó desde que empezó la ronda cortada también cuenta.
+  const desde = seguir ? (c.agente?.pausa?.desde ?? Date.now()) : Date.now()
   const versionAnterior = hay ? hay.archivo.replace(/^salidas\//, '') : ''
   // El chat marca los pasos del plan según estas líneas (`pasoAnunciado`).
   const anunciar = plan?.pasos.length
@@ -499,6 +606,19 @@ Renderiza a un archivo NUEVO en salida/, mira 2 o 3 fotogramas de lo que cambias
       : `El usuario aprobó el plan${pedido ? ` con esto: ${pedido}` : ''}. Ahora hazlo: sigue el método de AGENTS.md del paso 2 al 7 (ya miraste los archivos y apuntaste en notas.md: no lo repitas).${anunciar}
 Cuando lo hayas comprobado mirando los fotogramas, escribe resultado.json como dice el manual y termina (no dejes servidores ni previsualizaciones abiertas).`
   const entregaLista = () => fecha(resultadoJson) >= desde && archivoEntregado(carpeta, desde) !== null
+  if (seguir) {
+    // Se cortó por el límite de uso: ni de cero ni repitiendo lo hecho.
+    const comoSeguir = `Te quedaste sin uso de tu plan a mitad de este trabajo y ya se renovó (o el usuario eligió seguir con otro agente).
+SIGUE EXACTAMENTE DESDE DONDE IBAS: mira lo que ya hay en esta carpeta (notas.md, tus scripts, receta.json, salida/, revision/)
+y no rehagas lo que ya está hecho. Si un render quedó a medias, vuelve a lanzarlo en primer plano y espera a que acabe.
+Termina, compruébalo mirando fotogramas, escribe resultado.json como dice el manual y termina sin dejar procesos abiertos.${anunciar}`
+    const completoSeguir = `Lee AGENTS.md (tu manual). Otro turno de trabajo (quizá de otro agente) empezó este video y se cortó porque se acabó el uso del plan.
+
+${contexto(c)}
+${plan ? `\nEL PLAN QUE EL USUARIO APROBÓ:\n${plan.entendi}\n${plan.pasos.map((p, i) => `${i + 1}. ${p}`).join('\n')}\n` : ''}
+${comoSeguir}`
+    return trabajarAgente(cmd.orden, trabajo, comoSeguir, onLinea, senal, 40 * 60_000, await imagenesDeEntrada(c, carpeta), entregaLista, c.agente?.sesion, completoSeguir)
+  }
   return trabajarAgente(cmd.orden, trabajo, corto, onLinea, senal, 40 * 60_000, await imagenesDeEntrada(c, carpeta), entregaLista, c.agente?.sesion, completo)
 }
 

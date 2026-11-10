@@ -36,7 +36,7 @@ process.stdin.on('end', async () => {
   const cambio = /LO QUE PIDE AHORA EL USUARIO: (.*)/.exec(prompt)
   appendFileSync(
     process.env.REGISTRO_FALSO,
-    JSON.stringify({ args: process.argv.slice(2), cwd, manual: existsSync(join(cwd, 'CLAUDE.md')), plan: prompt.includes('TODAVÍA NO HAGAS'), cambio: cambio ? cambio[1] : null }) + '\n'
+    JSON.stringify({ args: process.argv.slice(2), cwd, manual: existsSync(join(cwd, 'CLAUDE.md')), plan: prompt.includes('TODAVÍA NO HAGAS'), seguir: prompt.includes('SIGUE EXACTAMENTE'), cambio: cambio ? cambio[1] : null }) + '\n'
   )
   const ev = (o) => console.log(JSON.stringify(o))
   if (existsSync(join(process.env.REGISTRO_FALSO, '..', 'fondo.txt'))) {
@@ -47,6 +47,13 @@ process.stdin.on('end', async () => {
   if (existsSync(join(process.env.REGISTRO_FALSO, '..', 'filtro.txt'))) {
     // Como responde Antigravity cuando el filtro de Google rechaza el pedido (respuesta normal, sin JSON).
     ev({ type: 'result', result: "The prompt could not be submitted. The prompt contains sensitive words that violate Google's [Generative AI Prohibited Use policy](https://policies.google.com/terms/generative-ai/use-policy). Try rephrasing the prompt." })
+    return
+  }
+  if (existsSync(join(process.env.REGISTRO_FALSO, '..', 'limite.txt')) && !prompt.includes('TODAVÍA NO HAGAS') && !prompt.includes('SIGUE EXACTAMENTE')) {
+    // Se queda sin uso del plan a mitad del video, como Claude Code: dice cuándo se renueva (en 6 s).
+    ev({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { description: 'Montar la base' } }] } })
+    writeFileSync(join(cwd, 'notas.md'), 'Base montada; falta el render final.\n')
+    ev({ type: 'result', is_error: true, result: 'Claude AI usage limit reached|' + Math.floor(Date.now() / 1000 + 6) })
     return
   }
   if (existsSync(join(process.env.REGISTRO_FALSO, '..', 'fallar.txt'))) {
@@ -270,6 +277,27 @@ try {
   if (!conFondo.agente?.plan || conFondo.mensajes.at(-1)?.error) throw new Error(`Con un proceso de fondo, el plan no llegó: ${conFondo.mensajes.at(-1)?.texto}`)
   if (tardo > 15) throw new Error(`Con un proceso de fondo, el plan tardó ${tardo.toFixed(1)} s (esperó al proceso de fondo).`)
   console.log(`con un proceso de fondo abierto, el plan llega en ${tardo.toFixed(1)} s ✓`)
+
+  // Sin uso del plan a mitad del video: queda en pausa (nada se pierde) y sigue solo al renovarse.
+  unlinkSync(join(medios, 'fondo.txt'))
+  writeFileSync(join(medios, 'limite.txt'), '1')
+  const pausada = await evaluar(cliente, `window.recorte.agenteHacer(${JSON.stringify(c.id)}, 'Haz el título más grande')`, 5 * 60_000)
+  const pausa = pausada.agente?.pausa
+  if (!pausa || pausa.etapa !== 'hacer' || !pausa.reanudar) throw new Error(`Sin uso del plan no quedó en pausa con hora: ${JSON.stringify(pausa)} · ${pausada.mensajes.at(-1)?.texto}`)
+  if (pausada.mensajes.at(-1)?.error) throw new Error('La pausa por límite salió como error.')
+  if (!/Seguir donde iba/.test(JSON.stringify(pausada.mensajes.at(-1)?.propuestas ?? []))) throw new Error('La pausa no ofrece «Seguir donde iba».')
+  console.log('sin uso del plan: queda en pausa con la hora en que se renueva ✓')
+  // A los ~6 s se renueva: Recorte lo sigue solo y entrega la versión 3.
+  let seguida = null
+  for (let i = 0; i < 90 && !seguida; i++) {
+    await new Promise((r) => setTimeout(r, 1000))
+    const x = await evaluar(cliente, `window.recorte.creacionAbrir(${JSON.stringify(c.id)})`)
+    if (x.version === 3 && !x.agente?.pausa && x.fase === 'listo') seguida = x
+  }
+  if (!seguida) throw new Error('No siguió solo al renovarse el uso.')
+  const llamadasSeguir = readFileSync(registroFalso, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  if (!llamadasSeguir.some((l) => l.seguir)) throw new Error('Al seguir, el agente no recibió «sigue donde ibas».')
+  console.log('al renovarse sigue solo desde donde iba y entrega ✓')
   console.log('prueba modo agente: ok')
 } catch (error) {
   console.error(`prueba modo agente: error · ${error instanceof Error ? error.message : String(error)}`)

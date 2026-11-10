@@ -116,3 +116,29 @@ Cada fase se puede publicar sola y deja la app funcionando.
 ## Pendiente de decidir
 - Codex en Windows no puede escribir con su sandbox: o trabaja sin sandbox, o se avisa en la app
   de que en Windows no sirve para el modo agente.
+
+### Fase 5 · Todo en el editor, con el chat como conversación
+
+> **Estado (2026-11-10): hecha, probada sin agente real** (pruebas de modo agente, adaptadores, medios, kit y e2e;
+> capturas de la app con datos de prueba). Lo pidió el fundador tras probar 0.1.18: la pantalla Idea/Plan/Hacer/Revisar
+> sobraba, en el editor no se podía parar al agente ni usar la caja, y quería conversar el plan como en un chat.
+- Sin la pantalla de pasos: una creación del agente se ve con su material al centro y el chat a la derecha
+  (`EstudioAgente.tsx`); al entregar, el editor ocupa ese lugar con el mismo chat (`ChatCreacion.tsx`).
+- «Pregúntame antes» es una charla: el agente propone ideas y pregunta con opciones (`mensaje` y `propuestas` del
+  plan, `validarCharla`); el plan va en una tarjeta con «Hazlo». Sin JSON, su prosa es su mensaje.
+- La caja del chat es la de crear (`CajaCrear` con `chat`): agente y modelo, voz, imágenes, clips, «+» para archivos
+  y carpetas (`creacion:adjuntar`) y «Pregúntame antes / Hazlo directo» (`creacion:ajustar`); mientras trabaja, el
+  botón de enviar es el de parar (y Esc).
+- Con el video hecho: «Cambio rápido» toca la timeline al momento (operaciones, Ctrl+Z, `creacion:anotar`) o
+  «Que lo rehaga el agente».
+- En la charla el agente puede generar imágenes y clips (Flow/ChatGPT) y se ven en su mensaje; antes de clips dice
+  cuántos y cuánto cuestan.
+- La duración la decide el material (sin 30 s por defecto) y el manual trae el criterio de edición aprendido.
+- Renders: nunca en segundo plano (se cortaban al cerrar el turno); Claude Code espera hasta 30 min por comando.
+- Una versión nueva del agente entra en el MISMO proyecto: su video como un medio más y sus pistas como
+  `timelinePendiente`, que el editor aplica como un paso de deshacer (Ctrl+Z vuelve a la anterior con lo retocado).
+- Sin uso del plan a mitad: `LimiteUso` (venga como error o como respuesta), la creación queda en `pausa` con la hora
+  en que se renueva (`limiteDeUso` entiende «resets 5pm», «in 6 days, 7 hours», «try again at…», el «|epoch» de
+  Claude) y sigue sola a esa hora con la app abierta; «Seguir donde iba» sigue ya, también con otro agente. Si el
+  render ya había terminado, se entrega igual. Probado con un Claude de prueba (`prueba-modo-agente`).
+Falta: probarlo con un agente real; tomar del registro qué imagen se pidió para mostrar su descripción.

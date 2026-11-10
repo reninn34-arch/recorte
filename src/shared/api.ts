@@ -1,7 +1,7 @@
 import type { MensajeChat, OperacionTL } from './chat'
 import type { Gustos, SenalGusto } from './gustos'
 import type { MusicaTL, Timeline } from './timeline'
-import type { Creacion, ModeloAgente, PeticionCreacion } from './creacion'
+import type { AjustesCreacion, Creacion, MensajeCreacion, ModeloAgente, PeticionCreacion } from './creacion'
 import type { EstadoFlow, PedidoFlow, ResultadoFlow } from './flow'
 import type { AjustesIA, Project, TranscriptSegment } from './types'
 
@@ -288,6 +288,14 @@ export interface RecorteApi {
   agentePlan: (id: string, pedido?: string) => Promise<Creacion>
   /** Modo agente: hace (o cambia) el video con herramientas, se comprueba y entrega. */
   agenteHacer: (id: string, pedido?: string) => Promise<Creacion>
+  /** Sigue una creación que se quedó sin uso del plan a mitad, desde donde iba (con el agente que esté elegido). */
+  agenteSeguir: (id: string) => Promise<Creacion>
+  /** Lo que se cambia en la caja del chat a mitad de la creación; vale desde el siguiente turno. */
+  creacionAjustar: (id: string, cambios: AjustesCreacion) => Promise<Creacion>
+  /** Más fotos, videos o carpetas para el agente (desde el «+» del chat). */
+  creacionAdjuntar: (id: string, rutas: string[]) => Promise<Creacion>
+  /** Deja en la conversación los mensajes de un cambio rápido sobre la timeline. */
+  creacionAnotar: (id: string, mensajes: Partial<MensajeCreacion>[]) => Promise<Creacion>
   estiloAnalizar: (id: string, modo?: 'gemini') => Promise<Creacion>
   /** Deja la fase Estilo y pasa al guion. */
   estiloContinuar: (id: string) => Promise<Creacion>

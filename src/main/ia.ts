@@ -139,7 +139,8 @@ export function explicarFallo(texto: string): string {
     return 'La sesión de tu agente caducó o se cerró. Vuelve a conectarlo en Inicio (botón «Conectar») e inténtalo otra vez.'
   }
   if (/rate.?limit|usage limit|quota|\b429\b|too many requests|limit reached/i.test(texto)) {
-    return 'Tu agente llegó al límite de uso de su plan por ahora. Espera un rato o usa otro agente.'
+    // El detalle va al final: trae cuándo se renueva y Recorte lo usa para seguir solo a esa hora.
+    return `Tu agente llegó al límite de uso de su plan por ahora. Espera un rato o usa otro agente. (${texto.replace(/\s+/g, ' ').trim().slice(0, 240)})`
   }
   return texto
 }

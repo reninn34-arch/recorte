@@ -132,8 +132,11 @@ export function Editor({
   lote,
   onRenderLote,
   onAbrirSalida,
-  textoVacio
+  textoVacio,
+  onPendienteAplicada
 }: {
+  /** La versión nueva del agente ya se puso en la timeline: se quita de pendiente. */
+  onPendienteAplicada: () => void
   proyecto: Project
   progreso: Progreso | null
   seleccion: string
@@ -176,6 +179,20 @@ export function Editor({
   }, [proyecto.id, proyecto.proxy, proyecto.medios])
   const reproductor = useReproductor(timeline, proyecto.id, fuentes)
   const [agregando, setAgregando] = useState(false)
+
+  // Una versión nueva del agente llega como timeline pendiente: entra como un paso más, así
+  // Ctrl+Z vuelve a la versión anterior con lo que retocaste a mano.
+  useEffect(() => {
+    const nueva = proyecto.timelinePendiente
+    if (!nueva) return
+    reproductor.pausar()
+    historial.aplicar(nueva)
+    setElegido(null)
+    reproductor.buscar(0)
+    onPendienteAplicada()
+    onAviso('La versión nueva del agente ya está en la timeline. Ctrl+Z vuelve a la anterior, con tus retoques.')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proyecto.id, proyecto.timelinePendiente])
 
   const duracionDe = (fuente: string) => {
     if (fuente === 'principal') return proyecto.source.duration

@@ -9,7 +9,10 @@ import { Novedades } from './components/Novedades'
 import { Inicio } from './components/Inicio'
 import { CrearIA } from './components/CrearIA'
 import { EstudioCreacion } from './components/EstudioCreacion'
-import type { Creacion, PeticionCreacion } from '../../shared/creacion'
+import { EstudioAgente } from './components/EstudioAgente'
+import { ChatCreacion } from './components/ChatCreacion'
+import type { AjustesCreacion, Creacion, MensajeCreacion, PeticionCreacion } from '../../shared/creacion'
+import { esAprobacion } from '../../shared/modoagente'
 import type { PuenteEditor } from './components/ChatAgente'
 import type { MensajeChat } from '../../shared/chat'
 import { useAgentes } from './hooks/agentes'
@@ -87,6 +90,12 @@ export default function App() {
   /** El último aviso de progreso de cada creación (uno por creación: no se pisan entre ellas). */
   const [progresoCreacion, setProgresoCreacion] = useState<Record<string, Progreso>>({})
   const trabajandoCreacion = Boolean(creacion && enCurso[creacion.id])
+  // Lo último de enCurso para los avisos de progreso, y las creaciones que el agente sigue solo
+  // (tras renovarse el uso del plan) sin que la interfaz lo haya pedido.
+  const enCursoRef = useRef(enCurso)
+  enCursoRef.current = enCurso
+  const solos = useRef(new Set<string>())
+  const terminoSoloRef = useRef<(id: string) => void>(() => {})
   const [estadoVoz, setEstadoVoz] = useState<Awaited<ReturnType<typeof window.recorte.vozEstado>>>({ tieneClave: false })
   const [renderizando, setRenderizando] = useState(false)
   const [exportando, setExportando] = useState(false)
@@ -169,6 +178,15 @@ export default function App() {
         setProgreso(evento)
         if (evento.fase === 'creacion') {
           setProgresoCreacion((p) => ({ ...p, [evento.id]: evento }))
+          if (evento.pct < 1 && !enCursoRef.current[evento.id] && !solos.current.has(evento.id)) {
+            // Lo empezó el proceso principal (sigue solo tras el límite de uso): se ve trabajando.
+            solos.current.add(evento.id)
+            setEnCurso((e) => ({ ...e, [evento.id]: evento.desde ?? Date.now() }))
+          } else if (evento.pct >= 1 && solos.current.has(evento.id)) {
+            solos.current.delete(evento.id)
+            setEnCurso(({ [evento.id]: _, ...resto }) => resto)
+            terminoSoloRef.current(evento.id)
+          }
           // La hora real de inicio la sabe el proceso principal.
           const desde = evento.desde
           if (desde !== undefined) setEnCurso((e) => (e[evento.id] !== undefined && e[evento.id] !== desde ? { ...e, [evento.id]: desde } : e))
@@ -391,6 +409,8 @@ export default function App() {
 
   /** Corre un paso de la creación (guion o video) y deja la versión que devuelve. */
   async function pasoCreacion(id: string, paso: () => Promise<Creacion>) {
+    // Ya, sin esperar al render: el primer aviso de progreso tiene que saber que esto lo pidió la interfaz.
+    enCursoRef.current = { ...enCursoRef.current, [id]: enCursoRef.current[id] ?? Date.now() }
     setEnCurso((e) => ({ ...e, [id]: e[id] ?? Date.now() }))
     setProgresoCreacion(({ [id]: _, ...resto }) => resto)
     // Mientras trabaja, el mensaje del usuario ya se ve (el proceso principal lo guarda).
@@ -402,7 +422,8 @@ export default function App() {
       // El agente entregó una versión nueva y el usuario sigue en su estudio: directo al editor,
       // con cada recurso en su pista para retocarlo a mano. Si se fue a otra cosa, no se le mueve.
       const versionNueva = nueva.modo === 'agente' && nueva.fase === 'listo' && nueva.agente?.resultado?.tipo === 'video' && nueva.editorSalida !== nueva.salida
-      if (versionNueva && !ultimo?.error && viendo.current.vista === 'estudio' && viendo.current.creacion === id) await abrirEnEditor(id)
+      const mirando = viendo.current.creacion === id && (viendo.current.vista === 'estudio' || viendo.current.vista === 'proyectos')
+      if (versionNueva && !ultimo?.error && mirando) await abrirEnEditor(id)
     } catch (error) {
       setAviso(mensajeDe(error))
     } finally {
@@ -456,6 +477,99 @@ export default function App() {
     }
     setCreacion(c)
     setVista('estudio')
+    if (c.modo === 'agente' && c.salida && c.agente?.resultado?.tipo === 'video' && trabajos[id] === undefined) await abrirEnEditor(id)
+  }
+
+  // ===== El chat de una creación del agente (en su pantalla y en el editor) =====
+
+  /** Un mensaje para el agente: charla del plan, «Hazlo» o un cambio que rehace el video. */
+  function pedirAlAgente(texto: string) {
+    if (!creacion || trabajandoCreacion) return
+    const c = creacion
+    const id = c.id
+    setCreacion(conPedido(c, texto))
+    if (c.agente?.resultado) void pasoCreacion(id, () => window.recorte.agenteHacer(id, texto))
+    else if (c.agente?.plan && esAprobacion(texto)) void pasoCreacion(id, () => window.recorte.agenteHacer(id, texto))
+    else void pasoCreacion(id, () => window.recorte.agentePlan(id, texto))
+  }
+
+  function hazloAgente() {
+    if (!creacion || trabajandoCreacion) return
+    const id = creacion.id
+    void pasoCreacion(id, () => window.recorte.agenteHacer(id))
+  }
+
+  /** El agente terminó algo que siguió solo: se recarga la creación y, si hay versión nueva y la estás mirando, al editor. */
+  terminoSoloRef.current = (id: string) => {
+    void (async () => {
+      const nueva = await window.recorte.creacionAbrir(id).catch(() => null)
+      if (!nueva) return
+      setCreacion((c) => (c && c.id === id ? nueva : c))
+      setCreaciones(await window.recorte.creacionesListar().catch(() => creaciones))
+      avisarFin(nueva.fase === 'listo' ? 'Tu video con IA está listo.' : (nueva.mensajes.at(-1)?.texto ?? 'Listo.'))
+      const mirando = viendo.current.creacion === id && (viendo.current.vista === 'estudio' || viendo.current.vista === 'proyectos')
+      if (mirando && nueva.agente?.resultado?.tipo === 'video' && nueva.editorSalida !== nueva.salida) await abrirEnEditor(id)
+    })()
+  }
+
+  function seguirAgente() {
+    if (!creacion || trabajandoCreacion) return
+    const id = creacion.id
+    void pasoCreacion(id, () => window.recorte.agenteSeguir(id))
+  }
+
+  async function ajustarCreacion(ajustes: AjustesCreacion) {
+    if (!creacion) return
+    try {
+      const nueva = await window.recorte.creacionAjustar(creacion.id, ajustes)
+      setCreacion((c) => (c && c.id === nueva.id ? { ...c, vozElegida: nueva.vozElegida, directo: nueva.directo, flow: nueva.flow, tareas: nueva.tareas } : c))
+    } catch (error) {
+      setAviso(`No pude guardar ese cambio: ${mensajeDe(error)}`)
+    }
+  }
+
+  async function adjuntarACreacion(rutas: string[]) {
+    if (!creacion) return
+    try {
+      setAviso('Añadiendo tu material…')
+      const nueva = await window.recorte.creacionAdjuntar(creacion.id, rutas)
+      setCreacion((c) => (c && c.id === nueva.id ? nueva : c))
+      setAviso(null)
+    } catch (error) {
+      setAviso(mensajeDe(error))
+    }
+  }
+
+  async function anotarEnCreacion(mensajes: Partial<MensajeCreacion>[]) {
+    if (!creacion) return
+    try {
+      const nueva = await window.recorte.creacionAnotar(creacion.id, mensajes)
+      setCreacion((c) => (c && c.id === nueva.id ? nueva : c))
+    } catch (error) {
+      setAviso(mensajeDe(error))
+    }
+  }
+
+  /** El chat de la creación; con `editor`, los cambios rápidos van a su timeline. */
+  function chatDeCreacion(c: Creacion, editor?: { proyecto: Project; puente: typeof puente }) {
+    return (
+      <ChatCreacion
+        creacion={c}
+        agentes={agentes}
+        trabajando={Boolean(enCurso[c.id])}
+        desde={enCurso[c.id]}
+        progreso={progresoCreacion[c.id] ?? null}
+        onPedir={pedirAlAgente}
+        onHazlo={hazloAgente}
+        onSeguir={seguirAgente}
+        onParar={() => void window.recorte.creacionParar(c.id)}
+        onAjustar={(a) => void ajustarCreacion(a)}
+        onAdjuntar={(r) => void adjuntarACreacion(r)}
+        onAnotar={anotarEnCreacion}
+        onConectar={() => setVista('inicio')}
+        editor={editor}
+      />
+    )
   }
 
   function conPedido(c: Creacion, pedido?: string): Creacion {
@@ -717,6 +831,23 @@ export default function App() {
     )
   }
 
+  if (vista === 'estudio' && creacion && creacion.modo === 'agente') {
+    return (
+      <>
+        <EstudioAgente
+          creacion={creacion}
+          trabajando={trabajandoCreacion}
+          onVolver={() => setVista('inicio')}
+          onEditor={() => void creacionAlEditor()}
+          chat={chatDeCreacion(creacion)}
+        />
+        {aviso && <Toast text={aviso} />}
+        <AvisoActualizacion />
+        <Novedades forzar={verNovedades} onCerrar={() => setVerNovedades(false)} />
+      </>
+    )
+  }
+
   if (vista === 'estudio' && creacion) {
     return (
       <>
@@ -892,7 +1023,11 @@ export default function App() {
                 onRenderLote={renderizarLote}
                 onAbrirSalida={abrirSalida}
                 textoVacio={textoVacio}
+                onPendienteAplicada={() => setProyecto((p) => (p ? { ...p, timelinePendiente: undefined } : p))}
               />
+              {creacion?.modo === 'agente' && creacion.proyectoEditor === proyecto.id ? (
+                chatDeCreacion(creacion, { proyecto, puente })
+              ) : (
               <AgentePanel
                 proyecto={proyecto}
                 agentes={agentes}
@@ -907,6 +1042,7 @@ export default function App() {
                 onRenderizarEdicion={renderizarEdicion}
                 onAbrirAjustes={() => setVista('ajustes')}
               />
+              )}
             </>
           ) : (
             <div className="workspace">

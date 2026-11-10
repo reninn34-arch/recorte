@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  type AjustesCreacion,
+  type Creacion,
   COSTO_CLIP,
   DURACIONES,
   MODELOS_AGENTE,
@@ -91,19 +93,37 @@ function Opcion({ elegida, onClick, children, nota }: { elegida: boolean; onClic
   )
 }
 
+/**
+ * La caja dentro del chat de una creación: las mismas herramientas, pero cada cambio vale
+ * para el siguiente turno del agente (se guarda al elegirlo), el «+» añade material al
+ * momento y, mientras el agente trabaja, el botón de enviar es el de parar.
+ */
+export interface CajaEnChat {
+  creacion: Creacion
+  ocupado: boolean
+  onParar: () => void
+  onEnviar: (texto: string) => void
+  onAjustar: (ajustes: AjustesCreacion) => void
+  onAdjuntar: (rutas: string[]) => void
+  placeholder?: string
+}
+
 export function CajaCrear({
   agentes,
   creando,
   estilo,
   onCrear,
-  onConectar
+  onConectar,
+  chat
 }: {
   agentes: Agentes
   creando: boolean
   estilo: string
-  onCrear: (p: PeticionCreacion) => void
+  onCrear?: (p: PeticionCreacion) => void
   onConectar: () => void
+  chat?: CajaEnChat
 }) {
+  const c0 = chat?.creacion
   const [peticion, setPeticion] = useState('')
   const [formato, setFormato] = useState<FormatoCreacion>('vertical')
   const [duracion, setDuracion] = useState(30)
@@ -117,11 +137,11 @@ export function CajaCrear({
   // llave de API (Gemini, DeepSeek, Grok), que no puede trabajar con herramientas.
   const enAgente = puedeAgente
   // La voz que narra (una de Gemini) o null = sin voz. Empieza con la última que usó, si tiene la voz conectada.
-  const [voz, setVoz] = useState<string | null>(null)
+  const [voz, setVoz] = useState<string | null>(c0?.vozElegida ?? null)
   const [vozConectada, setVozConectada] = useState(false)
   const vozTocada = useRef(false)
   // Tras el plan: esperar el «Hazlo» (pregúntame antes) o empezar solo si no hay preguntas.
-  const [directo, setDirecto] = useState(false)
+  const [directo, setDirecto] = useState(Boolean(c0?.directo))
   useEffect(() => {
     void window.recorte
       .vozEstado()
@@ -130,22 +150,25 @@ export function CajaCrear({
         setVozConectada(e.tieneClave || Boolean(e.google?.correo))
       })
       .catch(() => {})
+    // En el chat manda lo que ya eligió para esta creación.
+    if (chat) return
     void window.recorte
       .preferenciasCargar()
       .then((p) => setDirecto(Boolean(p.crearDirecto)))
       .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const [falta, setFalta] = useState(false)
   // Quién lo hace: null = optimizado (el agente activo hace todo con su modelo de siempre).
   const [porPaso, setPorPaso] = useState(false)
   const [tGuion, setTGuion] = useState<EleccionTarea | null>(null)
-  const [tVideo, setTVideo] = useState<EleccionTarea | null>(null)
+  const [tVideo, setTVideo] = useState<EleccionTarea | null>(c0?.tareas?.video ?? null)
   // Google Flow
   const [conFlow, setConFlow] = useState(false)
   const [conChatGPT, setConChatGPT] = useState(false)
   const [derechos, setDerechos] = useState(false)
-  const [modeloImagen, setModeloImagen] = useState<string | null>(null)
-  const [modeloVideo, setModeloVideo] = useState<string | null>(null)
+  const [modeloImagen, setModeloImagen] = useState<string | null>(c0?.flow?.imagenes ? (c0.flow.modeloImagen ?? MODELOS_IMAGEN[0] ?? null) : null)
+  const [modeloVideo, setModeloVideo] = useState<string | null>(c0?.flow?.videos ? (c0.flow.modeloVideo ?? null) : null)
   const tocado = useRef(false)
 
   // La caja empieza con lo que más usa (si ya lo usó varias veces y no tocó nada aún).
@@ -187,12 +210,20 @@ export function CajaCrear({
 
   async function adjuntar() {
     const rutas = await window.recorte.elegirAdjuntos()
+    if (chat) {
+      if (rutas.length) chat.onAdjuntar(rutas)
+      return
+    }
     if (rutas.length) setAdjuntos((a) => [...a, ...rutas.filter((r) => !a.includes(r))].slice(0, 12))
   }
 
   async function elegirCarpeta() {
     const ruta = await window.recorte.elegirCarpeta()
     if (!ruta) return
+    if (chat) {
+      chat.onAdjuntar([ruta])
+      return
+    }
     setCarpetas((c) => (c.includes(ruta) ? c : [...c, ruta]))
     setAdjuntos((a) => (a.includes(ruta) ? a : [...a, ruta]))
   }
@@ -202,7 +233,33 @@ export function CajaCrear({
     if (ruta) setReferencia(ruta)
   }
 
+  // En el chat, lo que cambia en la caja se guarda en la creación al elegirlo (vale para el siguiente turno).
+  const ajustesVistos = useRef<string | null>(null)
+  useEffect(() => {
+    if (!chat) return
+    const imagenes = Boolean(modeloImagen) && (modeloImagen === MODELO_CHATGPT ? conChatGPT : conFlow)
+    const videos = conFlow && Boolean(modeloVideo)
+    const ajustes: AjustesCreacion = {
+      vozElegida: voz && vozConectada ? voz : null,
+      directo,
+      flow: imagenes || videos ? { imagenes, videos, ...(imagenes && modeloImagen ? { modeloImagen } : {}), ...(modeloVideo ? { modeloVideo } : {}) } : null,
+      tareas: tVideo ? { video: tVideo } : null
+    }
+    const clave = JSON.stringify(ajustes)
+    // La primera vez solo se apunta: no se guarda nada que el usuario no tocó.
+    if (ajustesVistos.current !== null && ajustesVistos.current !== clave) chat.onAjustar(ajustes)
+    ajustesVistos.current = clave
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voz, vozConectada, directo, modeloImagen, modeloVideo, tVideo, conFlow, conChatGPT])
+
   function enviar() {
+    if (chat) {
+      if (!peticion.trim() || chat.ocupado) return
+      chat.onEnviar(peticion.trim())
+      setPeticion('')
+      return
+    }
+    if (!onCrear) return
     if (!peticion.trim()) {
       setFalta(true)
       return
@@ -296,18 +353,21 @@ export function CajaCrear({
 
   return (
     <>
-      <div className={`crear-caja cc ${falta ? 'is-falta' : ''}`}>
+      <div className={`crear-caja cc ${falta ? 'is-falta' : ''} ${chat ? 'is-chat' : ''}`}>
         <textarea
           autoFocus
           value={peticion}
-          rows={3}
-          placeholder="Qué video quieres… un reel de 30 segundos con 3 trucos para fotografiar comida"
+          rows={chat ? 2 : 3}
+          placeholder={chat ? (chat.placeholder ?? 'Escríbele al agente…') : 'Qué video quieres… un reel con 3 trucos para fotografiar comida'}
           onChange={(e) => {
             setPeticion(e.target.value)
             setFalta(false)
           }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+            if (e.key === 'Escape' && chat?.ocupado) {
+              e.preventDefault()
+              chat.onParar()
+            } else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault()
               enviar()
             }
@@ -411,6 +471,7 @@ export function CajaCrear({
 
           )}
 
+          {!chat && (
           <div className="cc-segmento" role="radiogroup" aria-label="Formato">
             {(['vertical', 'horizontal'] as const).map((f) => (
               <button
@@ -424,6 +485,7 @@ export function CajaCrear({
               </button>
             ))}
           </div>
+          )}
 
 
           {conFlow || conChatGPT ? (
@@ -544,26 +606,32 @@ export function CajaCrear({
           )}
 
           <span className="tl-flex" />
-          <button
-            type="button"
-            className="cc-enviar"
-            onClick={enviar}
-            disabled={creando || !agentes.listo}
-            title={agentes.listo ? 'Crear (Enter)' : 'Conecta un agente primero'}
-            aria-label="Crear"
-          >
-            <Icon name={creando ? 'clock' : 'enviar'} size={18} />
-          </button>
+          {chat?.ocupado ? (
+            <button type="button" className="cc-enviar is-parar" onClick={chat.onParar} title="Parar al agente: deja de gastar al instante (Esc)" aria-label="Parar">
+              <span className="chat-cuadro" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="cc-enviar"
+              onClick={enviar}
+              disabled={creando || !agentes.listo || (Boolean(chat) && !peticion.trim())}
+              title={agentes.listo ? (chat ? 'Enviar (Enter)' : 'Crear (Enter)') : 'Conecta un agente primero'}
+              aria-label={chat ? 'Enviar' : 'Crear'}
+            >
+              <Icon name={creando ? 'clock' : 'enviar'} size={18} />
+            </button>
+          )}
         </div>
       </div>
       {falta && <p className="crear-error">Escribe qué video quieres para empezar.</p>}
-      {enAgente && (
+      {enAgente && !chat && (
         <p className="cc-nota-modo">
           <Icon name="sparkles" size={12} /> Tu agente mira tus archivos, te propone un plan corto y lo hace paso a paso: lo ves avanzar en el chat y
           comprueba el resultado antes de entregarlo.
         </p>
       )}
-      {!agentes.listo && agentes.cargado && (
+      {!agentes.listo && agentes.cargado && !chat && (
         <p className="crear-error">
           Conecta un agente para crear con IA: él escribe el guion y diseña el video.{' '}
           <button className="op-enlace en-linea" onClick={onConectar}>

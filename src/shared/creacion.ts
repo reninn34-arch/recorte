@@ -11,7 +11,7 @@
  */
 
 import type { FichaEstilo, Viabilidad } from './estilo'
-import type { EstadoModoAgente } from './modoagente'
+import type { EstadoModoAgente, PlanAgente } from './modoagente'
 
 export type FormatoCreacion = 'vertical' | 'horizontal'
 export type FaseCreacion = 'plan' | 'estilo' | 'guion' | 'voz' | 'video' | 'listo'
@@ -113,6 +113,16 @@ export interface MensajeCreacion {
   propuestas?: string[]
   /** Gustos que aprendió en este paso. */
   aprendido?: string[]
+  /** El plan tal como quedó en este turno de la charla (se dibuja con sus pasos y «Hazlo»). */
+  plan?: PlanAgente
+  /**
+   * Un cambio rápido sobre la timeline del editor (sin rehacer el video): lo que se cambió y
+   * lo que no se pudo. Lo hace el chat del editor con operaciones; se deshace con Ctrl+Z.
+   */
+  cambios?: string[]
+  fallos?: string[]
+  /** Imágenes y clips que el agente generó en este turno (rutas dentro de la creación). */
+  medios?: string[]
 }
 
 export interface VozCreacion {
@@ -291,6 +301,14 @@ export interface PeticionCreacion {
   vozElegida?: string
   /** Hacerlo directo: tras el plan, si el agente no tiene preguntas, empieza sin esperar el «Hazlo». */
   directo?: boolean
+}
+
+/** Lo que se puede cambiar de la caja a mitad de una creación (null = quitarlo). */
+export interface AjustesCreacion {
+  vozElegida?: string | null
+  directo?: boolean
+  flow?: FlowCreacion | null
+  tareas?: TareasCreacion | null
 }
 
 export interface FlowCreacion {

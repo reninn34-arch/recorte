@@ -93,6 +93,11 @@ export interface Project {
   creacionSalida?: string
   /** La edición viva: lo que se ve en el monitor y lo que se exporta. */
   timeline?: Timeline
+  /**
+   * Una versión nueva del agente que todavía no se puso en la timeline: el editor la aplica
+   * como un paso de deshacer (Ctrl+Z vuelve a la versión anterior, con lo retocado a mano).
+   */
+  timelinePendiente?: Timeline
   /** Más videos e imágenes del proyecto, además del principal (la biblioteca de Medios). */
   medios?: MedioProyecto[]
   /** Último MP4 exportado desde la timeline. */
