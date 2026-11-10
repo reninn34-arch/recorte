@@ -24,6 +24,31 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.20',
+    fecha: '2026-11-10',
+    resumen: 'Sube tu audio y el agente arma el video sobre él, con un guion gráfico que te dice cuántos clips de Flow usará y cuánto cuestan antes de gastar.',
+    novedades: [
+      {
+        icono: 'music',
+        titulo: 'Un video sobre tu audio',
+        texto:
+          'Con el «+» de la caja ya puedes subir audios (mp3, wav, m4a y los de WhatsApp). Recorte lo transcribe con sus tiempos y esa es la voz del video: cada escena calza con su frase.'
+      },
+      {
+        icono: 'film',
+        titulo: 'Guion gráfico con el costo',
+        texto:
+          'Antes de generar, el agente te muestra una escena por frase: sus segundos, qué se ve y si es clip o imagen, con el total de clips y créditos. Lo ajustan en el chat y solo se genera al decir «Hazlo».'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Los clips que pida el guion',
+        texto:
+          'Ya no hay tope de 3 clips: se generan los del guion que apruebes (hasta 12). Primero hace la imagen de cada escena y la usa de referencia para que todo se vea coherente.'
+      }
+    ]
+  },
+  {
     version: '0.1.19',
     fecha: '2026-11-10',
     resumen: 'Todo pasa en el editor: conversas el plan con el agente, le pides cambios en vivo y, si se acaba el uso de tu plan, sigue solo donde iba.',
