@@ -188,9 +188,78 @@ class Lienzo:
         self.fuente = r.get('fuente', 'fina')
         self.transicion = float(r.get('transicion', 0.22))
         self.base = os.path.dirname(os.path.abspath(r['_ruta']))
+        self.subs = leer_subtitulos(r.get('subtitulos'), self)
 
     def ruta(self, p):
         return p if os.path.isabs(p) else os.path.join(self.base, p)
+
+
+def leer_subtitulos(s, L):
+    """La pista de subtítulos de la receta: frases con sus segundos y un estilo para todas.
+
+    Van en la receta (no quemados con un script aparte) para que el usuario los edite uno a uno
+    en el editor de Recorte, con su letra, su color y su caja.
+    """
+    if not isinstance(s, dict):
+        return None
+    frases = []
+    for f in s.get('frases') or []:
+        try:
+            texto = str(f.get('texto', '')).strip()
+            desde, hasta = float(f['desde']), float(f['hasta'])
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+        if texto and hasta > desde:
+            frases.append({'texto': texto, 'desde': desde, 'hasta': hasta})
+    if not frases:
+        return None
+    caja = s.get('caja', '#000000')
+    return {
+        'frases': sorted(frases, key=lambda x: x['desde']),
+        'fuente': s.get('fuente', L.fuente),
+        'tam': int(s.get('tam', L.W * 0.058)),
+        'color': color(s.get('color'), (255, 255, 255)),
+        'caja': color(caja) if caja else None,
+        'pos': min(0.95, max(0.05, float(s.get('pos', 0.78)))),
+    }
+
+
+def subtitulo(lienzo, L, t):
+    """Dibuja la frase de subtítulo que toca en `t`, partida en líneas que caben, con su caja."""
+    s = L.subs
+    if not s:
+        return lienzo
+    fr = next((x for x in s['frases'] if x['desde'] <= t < x['hasta']), None)
+    if not fr:
+        return lienzo
+    f = fuente(s['fuente'], s['tam'])
+    capa = Image.new('RGBA', lienzo.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(capa)
+    lineas, actual = [], ''
+    for w in fr['texto'].split():
+        prueba = (actual + ' ' + w).strip()
+        if actual and d.textlength(prueba, font=f) > L.W * 0.84:
+            lineas.append(actual)
+            actual = w
+        else:
+            actual = prueba
+    if actual:
+        lineas.append(actual)
+    sube, baja = f.getmetrics()
+    pad = s['tam'] * 0.32
+    alto = int(sube + baja + pad * 0.9)
+    y0 = L.H * s['pos'] - alto * len(lineas) / 2
+    for i, ln in enumerate(lineas):
+        ancho = d.textlength(ln, font=f)
+        x = (L.W - ancho) / 2
+        y = y0 + i * alto
+        if s['caja']:
+            d.rounded_rectangle((x - pad, y - pad * 0.35, x + ancho + pad, y + sube + baja + pad * 0.35), radius=pad * 0.6, fill=s['caja'] + (235,))
+            d.text((x, y), ln, font=f, fill=s['color'])
+        else:
+            d.text((x, y), ln, font=f, fill=s['color'], stroke_width=max(2, s['tam'] // 14), stroke_fill=(0, 0, 0))
+    lienzo.alpha_composite(capa)
+    return lienzo
 
 
 class Momento:
@@ -469,6 +538,7 @@ def cuadro(L, momentos, t, dur, fundido_final):
             lienzo = capa if capa.mode == 'RGBA' else capa.convert('RGBA')
         elif k > 0.001:
             lienzo = Image.blend(lienzo, capa, k)
+    lienzo = subtitulo(lienzo, L, t)
     if fundido_final > 0:
         k = tramo(t, dur - fundido_final, dur)
         if k > 0:

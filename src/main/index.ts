@@ -41,7 +41,7 @@ import { conectarVozGoogle, desconectarVozGoogle, estadoVozGoogle, generarVozGoo
 import { analizarMaterialCreacion } from './estilo/material'
 import { anotar, archivoEntregado, copiarEntrada, LimiteUso, pasoHacer, pasoPlan, revisarYPublicar } from './modoagente'
 import { prepararArchivos } from './archivos'
-import { clipsDelPlan, esAprobacion, pasoAnunciado } from '../shared/modoagente'
+import { clipsDelPlan, esAprobacion, MAX_CLIPS_GUION, pasoAnunciado } from '../shared/modoagente'
 import { atenderVoz } from './vozagente'
 import { proyectoDesdeReceta } from './recetaeditor'
 import { medirReferencia } from './estilo/referencia'
@@ -456,7 +456,8 @@ app.whenReady().then(() => {
       },
       (l) => avisarAgente(c, l, 0.5),
       // Haciendo el video: los clips del guion gráfico aprobado. En la charla, uno o dos de muestra como mucho.
-      c.fase === 'video' ? clipsDelPlan(c.agente?.plan) || MAX_CLIPS_VEO : 2
+      // En un cambio que el usuario pide sobre lo ya hecho («anima también estas»), lo que pida, hasta el máximo.
+      c.fase === 'video' ? (c.agente?.resultado ? MAX_CLIPS_GUION : clipsDelPlan(c.agente?.plan) || MAX_CLIPS_VEO) : 2
     )
     let parado = false
     return () => {

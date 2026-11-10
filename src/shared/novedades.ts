@@ -24,6 +24,29 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.21',
+    fecha: '2026-11-10',
+    resumen: 'Subtítulos de principio a fin y editables uno a uno, las tarjetas de tipo de video vuelven a guiar al agente y más clips cuando los pides.',
+    novedades: [
+      {
+        icono: 'type',
+        titulo: 'Subtítulos editables',
+        texto:
+          'El agente pone los subtítulos y los rótulos en su receta, no pegados al video: en el editor cada frase es un texto suelto que cambias a mano (texto, letra, color y color de la caja) o con el chat. Y si hay voz, van de principio a fin.'
+      },
+      {
+        icono: 'layers',
+        titulo: 'Las tarjetas de tipo de video funcionan',
+        texto: 'Clase, Lista, Promo, Historia… vuelven a darle al agente su estructura, su ritmo y su cierre. La creación muestra el tipo elegido.'
+      },
+      {
+        icono: 'film',
+        titulo: 'Anima lo que le pidas',
+        texto: 'En un cambio sobre un video ya hecho, el agente puede generar los clips que le pidas (hasta 12) y te dice cuánto costaron. Antes se quedaba en los del primer plan.'
+      }
+    ]
+  },
+  {
     version: '0.1.20',
     fecha: '2026-11-10',
     resumen: 'Sube tu audio y el agente arma el video sobre él, con un guion gráfico que te dice cuántos clips de Flow usará y cuánto cuestan antes de gastar.',

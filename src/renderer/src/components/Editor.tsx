@@ -87,6 +87,7 @@ function Monitor({
           style={{
             ...(r.tamano ? { fontSize: `calc(clamp(12px, 3.4cqw, 44px) * ${r.tamano})` } : {}),
             ...(r.color ? { color: r.color } : {}),
+            ...(r.caja && !r.sinCaja ? { background: r.caja } : {}),
             ...(r.fuente && FUENTES_TEXTO[r.fuente]
               ? { fontFamily: `"${FUENTES_TEXTO[r.fuente].familia}", Arial, sans-serif`, fontWeight: FUENTES_TEXTO[r.fuente].negrita ? 700 : 400 }
               : {})

@@ -52,6 +52,7 @@ export type OperacionTL =
       tamano?: number
       color?: string
       sin_caja?: boolean
+      caja?: string
       fuente?: string
     }
   | { op: 'borrar_texto'; texto_n: number }
@@ -199,6 +200,7 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
             tamano: num(x.tamano) ?? undefined,
             color: typeof x.color === 'string' && /^#[0-9a-f]{6}$/i.test(x.color) ? x.color : undefined,
             sin_caja: typeof x.sin_caja === 'boolean' ? x.sin_caja : undefined,
+            caja: typeof x.caja === 'string' && /^#[0-9a-f]{6}$/i.test(x.caja) ? x.caja : undefined,
             fuente: typeof x.fuente === 'string' && x.fuente in FUENTES_TEXTO ? x.fuente : undefined
           })
         }
@@ -387,6 +389,7 @@ export function aplicarOperaciones(
         if (o.tamano !== undefined) cambio.tamano = o.tamano
         if (o.color !== undefined) cambio.color = o.color
         if (o.sin_caja !== undefined) cambio.sinCaja = o.sin_caja
+        if (o.caja !== undefined) cambio.caja = o.caja
         if (o.fuente !== undefined) cambio.fuente = o.fuente
         tl = cambiarTexto(tl, t.id, cambio)
         cambios.push(`Cambié el texto ${o.texto_n}`)
@@ -535,7 +538,7 @@ export function describirTimelineParaAgente(
     const estilo = [
       t.tamano ? `tamaño ${t.tamano}` : '',
       t.color ? `color ${t.color}` : '',
-      t.sinCaja ? 'sin caja' : '',
+      t.sinCaja ? 'sin caja' : t.caja ? `caja ${t.caja}` : '',
       t.fuente ? `letra ${t.fuente}` : ''
     ].filter(Boolean)
     lineas.push(`  ${i + 1}. ${t.inicio.toFixed(2)}–${(t.inicio + t.duracion).toFixed(2)} ${t.posicion}: «${t.texto.replace(/\n/g, ' / ')}»${estilo.length ? ` [${estilo.join(', ')}]` : ''}`)
@@ -603,7 +606,7 @@ Operaciones disponibles (los tiempos van en segundos con decimales):
 - {"op":"musica","volumen":V,"ducking":true|false}  volumen 0 a 1 de la música ya puesta (bajo la voz suele ir bien 0.2–0.4); ducking hace que baje sola cuando hay voz.
 - {"op":"quitar_musica"}
 - {"op":"sonido_clip","clip":N,"sonido":true|false}  quita o devuelve el sonido propio del clip N.
-- {"op":"cambiar_texto","texto_n":N,"tamano":1.5,"color":"#ffcc00","sin_caja":true,"fuente":"gruesa"}  también cambia el estilo del rótulo: tamano 0.5–2.5 (1 normal), color #rrggbb, sin_caja (solo la letra con borde), fuente: normal, gruesa, impacto, elegante, maquina. Para varias líneas usa \\n en "texto".
+- {"op":"cambiar_texto","texto_n":N,"tamano":1.5,"color":"#ffcc00","sin_caja":true,"caja":"#0a2540","fuente":"gruesa"}  también cambia el estilo del rótulo: tamano 0.5–2.5 (1 normal), color #rrggbb, sin_caja (solo la letra con borde), caja (el color de la caja, #rrggbb), fuente: normal, gruesa, impacto, elegante, maquina. Para varias líneas usa \\n en "texto".
 - {"op":"cambiar_voz","voz_n":N,"texto":"…","voz":"Kore","inicio":T,"volumen":V}  cambia la frase de narración N. Con "texto" o "voz", Recorte vuelve a generar SOLO esa frase (con la voz que ya tenía si no das otra). "inicio" la mueve, "volumen" 0–1.5.
 - {"op":"anadir_voz","inicio":T,"texto":"…","voz":"Kore"}  añade una frase de narración nueva en el segundo T (sin "voz", la de las demás frases).
 - {"op":"borrar_voz","voz_n":N}

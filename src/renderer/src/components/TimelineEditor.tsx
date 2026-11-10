@@ -916,6 +916,16 @@ export function TimelineEditor({
               />
               Caja
             </label>
+            {!textoElegido.sinCaja && (
+              <input
+                type="color"
+                className="tl-color"
+                title="Color de la caja"
+                value={textoElegido.caja ?? '#000000'}
+                onPointerDown={empezarAjuste}
+                onChange={(e) => deslizar(cambiarTexto(timeline, textoElegido.id, { caja: e.target.value }))}
+              />
+            )}
             <span className="tl-dim">
               {tc(textoElegido.inicio)} · {textoElegido.duracion.toFixed(1)} s
             </span>

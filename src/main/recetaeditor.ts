@@ -7,6 +7,7 @@ import {
   normalizarTimeline,
   nuevoId,
   type ClipTL,
+  type PosicionTexto,
   type TextoTL,
   type Timeline,
   type VozTL
@@ -200,6 +201,30 @@ export async function proyectoDesdeReceta(
       ...estiloRotulo,
       ...(typeof m.destacar === 'number' ? { tamano: 1.3 } : {})
     })
+  }
+  // Los subtítulos de la receta: cada frase es un texto suelto, con la letra, el color y la caja del kit.
+  const subs = (receta.subtitulos && typeof receta.subtitulos === 'object' ? receta.subtitulos : {}) as Record<string, unknown>
+  const hex = (v: unknown) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : undefined)
+  const anchoReceta = num(receta.ancho, 1080)
+  const altoReceta = num(receta.alto, 1920)
+  // El kit mide en píxeles; el editor, relativo a su tamaño de rótulo (6 % del lado corto).
+  const tamSub = num(subs.tam, anchoReceta * 0.058) / (Math.min(anchoReceta, altoReceta) * 0.06)
+  const fuenteSub = ({ fina: 'fina', normal: 'normal', negrita: 'normal', gruesa: 'gruesa' } as Record<string, string>)[String(subs.fuente ?? receta.fuente ?? 'negrita')] ?? 'normal'
+  const estiloSub = {
+    ...(hex(subs.color) && hex(subs.color) !== '#ffffff' ? { color: hex(subs.color) } : {}),
+    ...(subs.caja === null || subs.caja === false ? { sinCaja: true } : hex(subs.caja) ? { caja: hex(subs.caja) } : {}),
+    ...(fuenteSub !== 'normal' ? { fuente: fuenteSub } : {}),
+    ...(Math.abs(tamSub - 1) > 0.05 ? { tamano: pinza(tamSub, 0.5, 2.5) } : {})
+  }
+  const posSub: PosicionTexto = num(subs.pos, 0.78) < 0.35 ? 'arriba' : num(subs.pos, 0.78) < 0.65 ? 'centro' : 'abajo'
+  for (const f of Array.isArray(subs.frases) ? subs.frases : []) {
+    if (!f || typeof f !== 'object') continue
+    const x = f as Record<string, unknown>
+    const texto = typeof x.texto === 'string' ? x.texto.trim() : ''
+    const a = pinza(num(x.desde, -1), 0, total)
+    const b = pinza(num(x.hasta, -1), 0, total)
+    if (!texto || b - a < 0.05) continue
+    textos.push({ id: nuevoId('texto'), inicio: a, duracion: b - a, texto, posicion: posSub, ...estiloSub })
   }
   if (!editables) return null
 

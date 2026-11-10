@@ -88,6 +88,8 @@ export interface TextoTL {
   color?: string
   /** Sin la caja oscura de detrás: solo la letra con su borde. */
   sinCaja?: boolean
+  /** El color de la caja (`#rrggbb`); sin él, negra semitransparente. */
+  caja?: string
   /** La letra (una clave de FUENTES_TEXTO); sin ella, la normal. */
   fuente?: string
 }
@@ -109,13 +111,14 @@ export const LIMITES_TAMANO = [0.5, 2.5] as const
 const COLOR_HEX = /^#[0-9a-f]{6}$/i
 
 /** El estilo de un rótulo, limpio: lo neutro no se guarda. */
-function estiloTexto(t: Partial<TextoTL>): Pick<TextoTL, 'tamano' | 'color' | 'sinCaja' | 'fuente'> {
+function estiloTexto(t: Partial<TextoTL>): Pick<TextoTL, 'tamano' | 'color' | 'sinCaja' | 'fuente' | 'caja'> {
   const tamano = typeof t.tamano === 'number' && Number.isFinite(t.tamano) ? Math.round(pinza(t.tamano, LIMITES_TAMANO[0], LIMITES_TAMANO[1]) * 100) / 100 : 1
   const color = typeof t.color === 'string' && COLOR_HEX.test(t.color) ? t.color.toLowerCase() : '#ffffff'
   return {
     ...(Math.abs(tamano - 1) > 0.005 ? { tamano } : {}),
     ...(color !== '#ffffff' ? { color } : {}),
     ...(t.sinCaja === true ? { sinCaja: true } : {}),
+    ...(typeof t.caja === 'string' && COLOR_HEX.test(t.caja) ? { caja: t.caja.toLowerCase() } : {}),
     ...(typeof t.fuente === 'string' && t.fuente !== 'normal' && t.fuente in FUENTES_TEXTO ? { fuente: t.fuente } : {})
   }
 }
@@ -584,7 +587,7 @@ export function cambiarTexto(tl: Timeline, id: string, cambio: Partial<Omit<Text
     ...tl,
     textos: tl.textos.map((x) => {
       if (x.id !== id) return x
-      const { tamano: _t, color: _c, sinCaja: _s, fuente: _f, ...base } = { ...x, ...cambio }
+      const { tamano: _t, color: _c, sinCaja: _s, fuente: _f, caja: _k, ...base } = { ...x, ...cambio }
       const nuevo: TextoTL = { ...base, ...estiloTexto({ ...x, ...cambio }) }
       nuevo.inicio = pinza(nuevo.inicio, 0, Math.max(0, total - DURACION_MINIMA))
       nuevo.duracion = pinza(nuevo.duracion, DURACION_MINIMA, Math.max(DURACION_MINIMA, total - nuevo.inicio))

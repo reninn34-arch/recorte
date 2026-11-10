@@ -47,6 +47,21 @@ y deja `revision/hoja-final.jpg`. Con `--prueba 0.5,3,8` saca solo esos fotogram
 - `fuente`: `fina`, `normal`, `negrita`, `gruesa` o la ruta de un .ttf.
 - Si algo no está en el kit, escríbelo tú (Python + FFmpeg) y usa el kit para lo demás.
 
+## Subtítulos (una pista editable)
+Los subtítulos van en la receta, NUNCA quemados con un script aparte: así el usuario los ve y los edita uno a uno en el
+editor de Recorte (texto, letra, color y caja). Lo mismo con los rótulos: usa `rotulo` en cada momento o un momento
+`texto`; no los dibujes con código propio.
+```json
+"subtitulos": {
+  "frases": [{ "texto": "Si en las fotos sonríes", "desde": 0.4, "hasta": 1.9 }, { "texto": "con la boca cerrada,", "desde": 1.9, "hasta": 3.1 }],
+  "fuente": "negrita", "tam": 62, "color": "#FFFFFF", "caja": "#0A2540", "pos": 0.78
+}
+```
+- Una frase cada 3–6 palabras, partiendo en la puntuación; cada una dura lo que se dice (sin huecos ni solapes).
+- Con narración, saca los tiempos de las palabras (el .json de la transcripción o lo que devuelve `kit.py voz`).
+- `caja`: el color de la caja (`null` = sin caja, solo la letra con borde). `pos`: la altura (0 arriba, 1 abajo).
+- Cubre TODO lo que se dice, de principio a fin: si cambias escenas, revisa que ninguna frase quede sin subtítulo.
+
 ## La voz (narración)
 Recorte genera la narración con la voz que eligió el usuario; tú solo escribes qué dice.
 1. Escribe `voz/narracion.txt` con UNA frase por línea (una por momento, natural y hablada, ~2,5 palabras por segundo).

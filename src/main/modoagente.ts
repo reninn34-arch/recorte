@@ -196,6 +196,10 @@ No hay duración por defecto: NO recortes a 30 s (ni a ninguna cifra) si el usua
   íconos. Mira los fotogramas para comprobarlo.
 - **Subtítulos limpios.** Nunca dos a la vez en pantalla (cada bloque termina cuando empieza el siguiente) y nunca se
   salen del cuadro: si una frase no cabe, parte el bloque o achica la letra. Corrige lo que la transcripción entienda mal.
+  Si el video lleva voz, lleva subtítulos de PRINCIPIO A FIN (todas las escenas, también las que cambies después).
+- **Textos editables, nunca quemados.** Subtítulos y rótulos van EN LA RECETA (\`"subtitulos"\` y \`rotulo\` o momentos
+  \`texto\`, ver kit/RECETA.md), no dibujados con un script propio sobre el video: así el usuario los cambia uno a uno en
+  el editor (texto, letra, color, caja). Si haces algo que el kit no tiene, que el texto siga yendo en la receta.
 - **Identidad de la marca.** Si hay logo, toma de él los colores y el estilo para rótulos y transiciones; el logo
   completo va solo donde lo pida el usuario (normalmente, al cierre).
 - **Sonido en los momentos clave** (un golpe de aire en los cortes, un «pop» al aparecer un rótulo, una campana o caja
@@ -214,7 +218,7 @@ dura lo que ella (más el cierre). Recorta solo el silencio del principio y del 
 - Cada escena dura lo que su frase: usa los tiempos de la transcripción para poner cada imagen, clip y texto en su segundo.
 - Corrige lo que la transcripción entendió mal según el sentido (p. ej. «para tu casa» → «para tu caso»).
 - En la receta del kit va como una sola entrada de voz: \`"voz": [{ "archivo": "vistazo/narracion-01.wav", "en": 0 }]\`.
-- Las palabras clave o subtítulos en pantalla, con los tiempos de las palabras del .json.`
+- Los subtítulos (en \`"subtitulos"\` de la receta) con los tiempos de las palabras del .json, restando lo que recortes del principio.`
       : 'No trajo narración grabada.'
   }
 
@@ -239,7 +243,7 @@ ${(() => {
         ? `- Imágenes con ${m.imagenes}: \`python kit/kit.py imagen "descripción" [--ref entrada/foto.jpg]\`. Úsalas cuando el video necesite algo que no está en sus archivos (una escena, un objeto, un fondo).`
         : '- Imágenes generadas: NO (el usuario no las eligió).',
       m.clips
-        ? `- Clips de video con ${m.clips}: \`python kit/kit.py clip "descripción" [--ref …]\`. GASTAN créditos del usuario: solo los de las escenas "clip" del guion gráfico que aprobó (${clipsDelPlan(c.agente?.plan) ? `${clipsDelPlan(c.agente?.plan)} clips` : `${MAX_CLIPS_VEO} como mucho, para los momentos clave`}). Haz antes la imagen de cada escena y pásala con --ref al clip para que todo se vea coherente.`
+        ? `- Clips de video con ${m.clips}: \`python kit/kit.py clip "descripción" [--ref …]\`. GASTAN créditos del usuario: solo los de las escenas "clip" del guion gráfico que aprobó (${clipsDelPlan(c.agente?.plan) ? `${clipsDelPlan(c.agente?.plan)} clips` : `${MAX_CLIPS_VEO} como mucho, para los momentos clave`}); en un cambio sobre lo ya hecho, los que el usuario pida en ese cambio (hasta ${MAX_CLIPS_GUION}), y en el resumen di cuántos fueron y cuánto costaron. Haz antes la imagen de cada escena y pásala con --ref al clip para que todo se vea coherente.`
         : '- Clips generados: NO (el usuario no los eligió).',
       'Lee «Imágenes y clips generados» en `kit/RECETA.md`. Sin texto escrito dentro de lo generado: los rótulos van en la receta.'
     ].join('\n')
