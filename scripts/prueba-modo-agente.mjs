@@ -41,7 +41,7 @@ const binFalso = join(medios, 'bin')
 spawnSync(process.platform === 'win32' ? 'cmd' : 'mkdir', process.platform === 'win32' ? ['/c', 'mkdir', binFalso] : ['-p', binFalso])
 writeFileSync(join(binFalso, 'claude-falso.mjs'), String.raw`// Se hace pasar por Claude Code en modo agente: registra cómo lo lanzaron, «mira» la entrada
 // y, si le piden hacer, fabrica un video con FFmpeg en salida/ y escribe resultado.json.
-import { appendFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readdirSync, writeFileSync, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 let prompt = ''
@@ -89,6 +89,14 @@ process.stdin.on('end', async () => {
       })
     })
     return
+  }
+  if (prompt.includes('Explicativo 3D') || existsSync(join(cwd, 'plantilla'))) {
+    // Una tarjeta con plantilla: la primera vez la arma; después parte de la que trae Recorte.
+    const yaHabia = existsSync(join(cwd, 'plantilla', 'momentos.json'))
+    if (!yaHabia) {
+      mkdirSync(join(cwd, 'plantilla'), { recursive: true })
+      writeFileSync(join(cwd, 'plantilla', 'momentos.json'), JSON.stringify({ momentos: [{ texto: 'hola', desde: 0, hasta: 3 }] }))
+    }
   }
   ev({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { description: 'Renderizar el video con FFmpeg' } }] } })
   const img = join(cwd, 'entrada', entrada[0])
@@ -300,6 +308,24 @@ try {
   const llamadaTipo = readFileSync(registroFalso, 'utf8').trim().split(String.fromCharCode(10)).map((l) => JSON.parse(l)).filter((l) => l.plan).at(-1)
   if (llamadaTipo?.tipo !== 'Lista o top') throw new Error(`La tarjeta «Lista o top» no llegó al agente (llegó: ${llamadaTipo?.tipo})`)
   console.log('tarjeta de tipo de video: su guía llega al agente ✓')
+
+  // «Explicativo 3D»: el primer video arma su plantilla y Recorte la guarda; el segundo parte de ella.
+  const nueva3d = () =>
+    evaluar(cliente, `window.recorte.creacionNueva(${JSON.stringify({ peticion: 'Explica el sarro', estilo: 'explicativo3d', formato: 'vertical', duracion: 30, adjuntos: [foto], modo: 'agente' })})`)
+  const primera = await nueva3d()
+  await evaluar(cliente, `window.recorte.agentePlan(${JSON.stringify(primera.id)})`)
+  const manual3d = readFileSync(join(datos, 'creaciones', primera.id, 'trabajo', 'CLAUDE.md'), 'utf8')
+  if (!manual3d.includes('La plantilla de «Explicativo 3D»') || !manual3d.includes('Es la primera vez')) throw new Error('El manual no presenta la plantilla de «Explicativo 3D».')
+  const hecha3d = await evaluar(cliente, `window.recorte.agenteHacer(${JSON.stringify(primera.id)})`, 5 * 60_000)
+  if (hecha3d.fase !== 'listo') throw new Error(`El primer Explicativo 3D no terminó: ${hecha3d.mensajes.at(-1)?.texto}`)
+  if (!existsSync(join(datos, 'estilos', 'explicativo3d', 'momentos.json'))) throw new Error('Recorte no guardó la plantilla del Explicativo 3D.')
+  const segunda = await nueva3d()
+  await evaluar(cliente, `window.recorte.agentePlan(${JSON.stringify(segunda.id)})`)
+  const manual3d2 = readFileSync(join(datos, 'creaciones', segunda.id, 'trabajo', 'CLAUDE.md'), 'utf8')
+  if (!existsSync(join(datos, 'creaciones', segunda.id, 'trabajo', 'plantilla', 'momentos.json')) || !manual3d2.includes('PARTE DE ELLA')) {
+    throw new Error('El segundo Explicativo 3D no partió de la plantilla guardada.')
+  }
+  console.log('Explicativo 3D: guarda su plantilla y el siguiente video parte de ella ✓')
 
   // Sin uso del plan a mitad del video: queda en pausa (nada se pierde) y sigue solo al renovarse.
   writeFileSync(join(medios, 'limite.txt'), '1')

@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from 'electron'
 import { duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, timelineVacia, type Timeline } from '../shared/timeline'
 import { randomUUID } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, join, resolve, sep } from 'node:path'
 import type {
   AnalisisResultado,
@@ -42,6 +42,7 @@ import { analizarMaterialCreacion } from './estilo/material'
 import { anotar, archivoEntregado, copiarEntrada, LimiteUso, pasoHacer, pasoPlan, revisarYPublicar } from './modoagente'
 import { prepararArchivos } from './archivos'
 import { clipsDelPlan, esAprobacion, MAX_CLIPS_GUION, pasoAnunciado } from '../shared/modoagente'
+import { estiloPorId } from '../shared/estilos'
 import { atenderVoz } from './vozagente'
 import { proyectoDesdeReceta } from './recetaeditor'
 import { medirReferencia } from './estilo/referencia'
@@ -467,6 +468,38 @@ app.whenReady().then(() => {
       pararMedios()
     }
   }
+  // ===== Plantillas de las tarjetas con estilo propio (Explicativo 3D) =====
+  const carpetaEstilos = join(app.getPath('userData'), 'estilos')
+  /** Antes de trabajar: la plantilla que funcionó en videos anteriores de ese tipo, a trabajo/plantilla/. */
+  const traerPlantilla = (c: Creacion) => {
+    const estilo = estiloPorId(c.estilo)
+    if (!estilo.plantilla) return
+    const origen = join(carpetaEstilos, estilo.id)
+    const destino = join(creaciones.carpeta(c.id), 'trabajo', 'plantilla')
+    if (existsSync(origen) && !existsSync(destino)) cpSync(origen, destino, { recursive: true })
+  }
+  /** Tras un video que salió bien: su plantilla queda para los siguientes (sin dependencias ni renders pesados). */
+  const guardarPlantilla = (c: Creacion) => {
+    const estilo = estiloPorId(c.estilo)
+    const origen = join(creaciones.carpeta(c.id), 'trabajo', 'plantilla')
+    if (!estilo.plantilla || !existsSync(origen)) return
+    const destino = join(carpetaEstilos, estilo.id)
+    const nueva = `${destino}.nueva`
+    rmSync(nueva, { recursive: true, force: true })
+    cpSync(origen, nueva, {
+      recursive: true,
+      filter: (ruta) => {
+        if (/[\\/](node_modules|\.cache|renders?|out|salida)([\\/]|$)/i.test(ruta)) return false
+        try {
+          return statSync(ruta).isDirectory() || statSync(ruta).size < 40 * 1024 * 1024
+        } catch {
+          return false
+        }
+      }
+    })
+    rmSync(destino, { recursive: true, force: true })
+    renameSync(nueva, destino)
+  }
   /** Las imágenes y clips que el agente generó desde `desde` (para verlos en su mensaje del chat). */
   const mediosNuevos = (c: Creacion, desde: number): string[] => {
     const dir = join(creaciones.carpeta(c.id), 'trabajo', 'medios')
@@ -490,6 +523,7 @@ app.whenReady().then(() => {
   )
   /** Un turno de la charla del plan (y, con «Hazlo directo» y sin dudas, el video). */
   async function charlaConAgente(c: Creacion, senal: AbortSignal): Promise<void> {
+      traerPlantilla(c)
       c.fase = 'plan'
       creaciones.guardar(c)
       enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.1, texto: 'El agente está mirando tus archivos' })
@@ -534,6 +568,7 @@ app.whenReady().then(() => {
   /** El agente hace (o cambia) el video, Recorte lo revisa y lo deja publicado en la creación. */
   async function hacerConAgente(c: Creacion, senal: AbortSignal, texto?: string, seguir = false): Promise<void> {
       const faseAntes = c.fase
+      traerPlantilla(c)
       c.fase = 'video'
       if (!c.agente) c.agente = { registro: [], rondas: 0 }
       c.agente.registro = []
@@ -577,6 +612,11 @@ app.whenReady().then(() => {
         }
         if (!revisado.resultado) throw new Error(revisado.problemas.join(' '))
         delete c.agente.pausa
+        try {
+          guardarPlantilla(c)
+        } catch {
+          // Si no se pudo guardar, el video igual está bien: la próxima vez la arma otra vez.
+        }
         c.version += 1
         c.agente.rondas += 1
         c.agente.resultado = revisado.resultado

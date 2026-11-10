@@ -15,6 +15,13 @@ export interface EstiloVideo {
   guia: string
   /** Para qué sirve: así se agrupan las tarjetas en «Crear con IA». */
   grupo: GrupoEstilo
+  /**
+   * Un estilo visual propio que se guarda la primera vez que sale bien y se reutiliza en los
+   * siguientes videos (la carpeta `plantilla/` del agente): todos se ven igual y gastan menos.
+   */
+  plantilla?: boolean
+  /** Todo se hace con código (sin imágenes ni clips generados): la caja los apaga al elegirla. */
+  sinGenerados?: boolean
 }
 
 export type GrupoEstilo = 'libre' | 'ensenar' | 'vender' | 'contar' | 'inspirar'
@@ -44,8 +51,35 @@ export const ESTILOS: EstiloVideo[] = [
     guia: `Estructura de enseñanza:
 - Abre con la promesa ("esto vas a aprender") en el primer segundo, no con presentaciones.
 - Numera los pasos o errores con titulares grandes; un punto por escena.
-- Si hay fragmentos del usuario, cada fragmento enseña UN punto, con su titular encima.
+- Si hay videos del usuario, cada tramo enseña UN punto, con su titular encima.
 - Cierra con la idea que debe recordar y la marca.`
+  },
+  {
+    id: 'explicativo3d',
+    grupo: 'ensenar',
+    nombre: 'Explicativo 3D',
+    icono: 'cubo',
+    descripcion: 'Un mundo 3D animado con personaje, íconos y texto palabra por palabra.',
+    plantilla: true,
+    sinGenerados: true,
+    guia: `Explicativo 3D animado (motion graphics en 3D, como un video educativo de marca). NADA de fotos ni clips
+realistas generados: todo se programa. Herramienta: HyperFrames con Three.js para el 3D (o CSS 3D si no alcanza).
+- Guion: el del usuario palabra por palabra, o su narración grabada; si no trae ninguno, escríbelo tú (gancho que
+  contradice lo que cree el espectador, el problema, la explicación y la llamada a la acción).
+- Personaje: UN objeto 3D estilizado que representa el tema (en salud dental, una boca de caricatura con labios y dientes;
+  en otro tema, su objeto: una muela, un frasco, un auto…), suave, brillante y con los colores de la marca. Es el
+  protagonista: se abre, gira, se acerca y muestra cada problema (la mancha, el desgaste, el diente roto…).
+- Dos ambientes: uno oscuro (azul marino profundo, luz de estudio y suelo con reflejo) para el problema y otro claro
+  (blanco con celeste) para la solución. El paso de uno a otro marca el giro del guion.
+- Íconos 3D redondeados, estilo app y del color de la marca, que entran con un pequeño rebote para cada idea
+  (un ojo, un diente, un escáner de cara, una carpeta clínica, una cámara…).
+- Texto arriba y centrado, palabra por palabra al ritmo de la voz, en minúsculas naturales, con la palabra clave
+  resaltada (una caja suave de color). El primer titular puede ir grande y en mayúsculas.
+- Tarjetitas que resumen la idea («Timidez ≠ Tus dientes», «Todos blancos» tachado en rojo) y, si el usuario trajo
+  fotos, en marco blanco con su pie de foto. Nada de texto escrito dentro del 3D.
+- Cámara con movimientos suaves y continuos que se acercan a cada detalle; sin cortes bruscos.
+- Cierre: el logo del usuario (si lo adjuntó) en su fondo, sin texto encima.
+- Duración: la de la narración; cada frase es un momento de la animación.`
   },
   {
     id: 'lista',
@@ -56,7 +90,7 @@ export const ESTILOS: EstiloVideo[] = [
     guia: `Estructura de conteo:
 - El número manda: gigante, con el color de marca, entrando con fuerza.
 - Cada ítem es un golpe: titular corto, pausa mínima, siguiente.
-- Si hay fragmentos, alterna tarjeta numerada y fragmento que la demuestra.
+- Si hay videos del usuario, alterna el número en pantalla y el tramo que lo demuestra.
 - Deja el mejor para el final y cierra con pregunta o invitación.`
   },
   {
@@ -67,7 +101,7 @@ export const ESTILOS: EstiloVideo[] = [
     descripcion: 'Vender o anunciar: beneficio, prueba, llamada a la acción.',
     guia: `Estructura de venta honesta:
 - Abre con el beneficio, no con el producto ("graba mejor en la mitad de tiempo").
-- Muestra la prueba: si hay fragmentos del usuario, son la demostración.
+- Muestra la prueba: si hay videos o fotos del usuario, son la demostración.
 - Una sola llamada a la acción al cierre, clara y con la marca.
 - Ritmo ágil: ninguna escena pasa de 3 segundos sin que algo cambie.`
   },
@@ -104,7 +138,7 @@ export const ESTILOS: EstiloVideo[] = [
     guia: `Estructura de cocina:
 - Abre con el plato terminado o la promesa ("la pasta más fácil del mundo").
 - Ingredientes como lista visual breve; el proceso en pasos numerados.
-- Si hay fragmentos, cada uno muestra un paso con su rótulo encima.
+- Si hay videos del usuario, cada tramo muestra un paso con su rótulo encima.
 - Cierra con el resultado y la marca. Ritmo vivo, cortes cortos.`
   },
   {

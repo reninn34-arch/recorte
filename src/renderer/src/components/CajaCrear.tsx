@@ -14,6 +14,7 @@ import {
 } from '../../../shared/creacion'
 import { avisoRetiro, MODELO_CHATGPT, MODELOS_IMAGEN, modelosVideoVigentes } from '../../../shared/flow'
 import { favorito } from '../../../shared/gustos'
+import { estiloPorId } from '../../../shared/estilos'
 import type { Agentes } from '../hooks/agentes'
 import { Icon } from '../Icons'
 import { ElegirModelo, nombreModelo } from './ElegirModelo'
@@ -203,6 +204,14 @@ export function CajaCrear({
       })
       .catch(() => {})
   }, [])
+
+  // Una tarjeta que lo hace todo con código (Explicativo 3D) no usa imágenes ni clips generados.
+  useEffect(() => {
+    if (chat || !estiloPorId(estilo).sinGenerados) return
+    setModeloImagen(null)
+    setModeloVideo(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [estilo])
 
   const conectados = agentes.lista.filter((a) => a.conectado && a.instalado)
   const activo = agentes.activo

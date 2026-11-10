@@ -162,7 +162,7 @@ Escribe código propio solo para lo que el kit no tenga, y aun así usa el kit p
 
 `
       : ''
-  }## El método (síguelo siempre)
+  }${seccionPlantilla(c, trabajo)}## El método (síguelo siempre)
 1. **Entiende el pedido.** ¿Es un video para redes, un recurso para otro editor (sin textos, con croma…),
    una pieza corta? No impongas un formato: haz lo que se pide.
 2. **Mira los archivos de verdad.** Abre cada imagen de \`entrada/\` y míralas. De los videos, usa ffprobe y
@@ -291,6 +291,33 @@ export class LimiteUso extends Error {
     super('Tu agente se quedó sin uso de su plan.')
     this.name = 'LimiteUso'
   }
+}
+
+/**
+ * La plantilla del tipo de video (las tarjetas con estilo propio, como «Explicativo 3D»): si ya hay una
+ * de videos anteriores, se parte de ella; si no, el agente la arma reutilizable y Recorte la guarda.
+ */
+function seccionPlantilla(c: Creacion, trabajo: string): string {
+  const estilo = estiloPorId(c.estilo)
+  if (!estilo.plantilla) return ''
+  const hay = existsSync(join(trabajo, 'plantilla'))
+  return `## La plantilla de «${estilo.nombre}»
+Este tipo de video tiene su estilo visual propio y NO se hace con el kit (el kit no hace 3D): se hace con código
+(HyperFrames con Three.js) dentro de \`plantilla/\`, en esta carpeta.
+${
+    hay
+      ? `\`plantilla/\` es lo que funcionó en videos anteriores de este tipo. PARTE DE ELLA: cambia el contenido (textos,
+momentos, tiempos, el personaje o los íconos si el tema es otro, los colores si la marca es otra) y conserva el diseño, la
+cámara, las luces y las animaciones. No la rehagas desde cero: así sale igual de bien y gasta mucho menos.`
+      : `Es la primera vez: arma \`plantilla/\` para que sirva a los siguientes videos. Separa los DATOS del video (qué pasa
+en cada frase: texto, palabra clave, tiempos, qué hace el personaje, qué ícono o tarjetita aparece) en
+\`plantilla/momentos.json\` del DISEÑO (escenas, personaje 3D, íconos, luces, cámara, colores) en el código, para que el
+próximo video solo cambie los datos. Cuando el video salga bien, Recorte la guarda.`
+  }
+Aquí no hay receta del kit: los textos van dentro de la animación (en \`plantilla/momentos.json\`, para cambiarlos fácil).
+Renderiza a \`salida/\` en primer plano (nada de renders en segundo plano) y comprueba fotogramas antes de entregar.
+
+`
 }
 
 /**
@@ -510,7 +537,7 @@ function contexto(c: Creacion): string {
   const estilo = estiloPorId(c.estilo)
   const tipo =
     estilo.id !== 'libre'
-      ? `\n\nTIPO DE VIDEO QUE ELIGIÓ: «${estilo.nombre}» (${estilo.descripcion}). Síguelo como dirección editorial, salvo que su pedido o la charla digan otra cosa (si usas el kit, «fragmento» = un video suyo; «tarjeta» o «titular» = un rótulo):\n${estilo.guia}`
+      ? `\n\nTIPO DE VIDEO QUE ELIGIÓ: «${estilo.nombre}» (${estilo.descripcion}). Síguelo como dirección editorial, salvo que su pedido o la charla digan otra cosa :\n${estilo.guia}`
       : ''
   return `PEDIDO ORIGINAL DEL USUARIO:\n"""\n${c.peticion}\n"""\n\nArchivos en entrada/:\n${archivos}${tipo}\n\nFormato elegido en la app: ${c.formato === 'horizontal' ? 'horizontal 16:9' : 'vertical 9:16'}, duración: la que pida el usuario; si no la dice, la decides tú según el material y lo que se cuenta (lee «La duración la decide el material» en AGENTS.md), sin recortar a una cifra fija.${charla ? `\n\nConversación hasta ahora:\n${charla}` : ''}`
 }
