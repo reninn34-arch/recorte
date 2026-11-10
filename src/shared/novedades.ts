@@ -24,6 +24,24 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.23',
+    fecha: '2026-11-10',
+    resumen: 'El agente ve todo lo que tienes conectado y te propone usarlo cuando mejora el video, con un botón para activarlo.',
+    novedades: [
+      {
+        icono: 'sparkles',
+        titulo: 'Te propone tus herramientas',
+        texto:
+          'Si tienes la voz, Flow o ChatGPT conectados y no los elegiste, el agente te dice en la charla para qué servirían y cuánto cuestan. Un botón «Activar» los pone en la caja; nunca usa nada que no actives.'
+      },
+      {
+        icono: 'layers',
+        titulo: 'Las tarjetas se combinan con todo',
+        texto: 'Ninguna tarjeta apaga herramientas: «Explicativo 3D» mezcla el 3D con tu voz, tus imágenes y clips generados y tu material.'
+      }
+    ]
+  },
+  {
     version: '0.1.22',
     fecha: '2026-11-10',
     resumen: 'Nueva tarjeta «Explicativo 3D»: un mundo 3D animado con personaje, íconos y texto palabra por palabra, que se guarda como plantilla para que cada video salga igual.',
