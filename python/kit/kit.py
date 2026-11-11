@@ -2120,6 +2120,13 @@ def tramos_cambiados(antes, ahora, transicion):
     return juntos
 
 
+def memoria_render(base, receta):
+    """Dónde se recuerda el último render de una receta: una memoria por receta (la copia «limpia» que Recorte arma
+    para el editor, con otra receta, no pisa la del video)."""
+    nombre = os.path.splitext(os.path.basename(receta))[0]
+    return os.path.join(base, 'salida', '.ultimo-render.json' if nombre == 'receta' else f'.ultimo-render-{nombre}.json')
+
+
 def armar(ruta, prueba=None, todo=False):
     r, L, momentos, dur = cargar(ruta)
     avisos = avisos_receta(r, L, momentos)
@@ -2190,9 +2197,7 @@ def armar(ruta, prueba=None, todo=False):
              '-movflags', '+faststart', salida]
     # Render quirúrgico: si hay un render anterior de esta misma receta con otros cambios, solo se vuelven a dibujar los
     # segundos que cambiaron; el resto se copia de aquel video (minutos en vez de media hora).
-    # Una memoria por receta: la copia «limpia» que Recorte arma para el editor (otra receta) no pisa la del video.
-    nombre_receta = os.path.splitext(os.path.basename(ruta))[0]
-    memoria = os.path.join(L.base, 'salida', '.ultimo-render.json' if nombre_receta == 'receta' else f'.ultimo-render-{nombre_receta}.json')
+    memoria = memoria_render(L.base, ruta)
     huella = huella_receta(r, L)
     anterior, rehacer = None, None
     if not todo:
@@ -2986,7 +2991,7 @@ def donde(receta, consulta):
     hallados.sort(key=lambda h: (-h['coincide'], h['desde'] or 0))
     # El cuadro de cada una en el último render (si lo hay), para verla antes de tocarla.
     try:
-        with open(os.path.join(base, 'salida', '.ultimo-render.json'), encoding='utf-8') as f:
+        with open(memoria_render(base, receta), encoding='utf-8') as f:
             video = os.path.join(base, json.load(f)['salida'])
     except (OSError, ValueError, KeyError):
         video = None
