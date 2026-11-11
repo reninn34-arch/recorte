@@ -156,6 +156,15 @@ posición libre. Falta que el kit del modo agente entregue capas y sonidos en su
 mismas operaciones del cambio rápido, más las de 6.1), añadir medios, transcribir y exportar. El cambio
 rápido usa la transcripción de la narración en los proyectos del agente.
 
+*Hecho (2026-11-10):* servidor MCP dentro de Recorte (`mcp.ts`, Streamable HTTP con respuestas JSON, sin
+dependencias) en 127.0.0.1:47110 con contraseña propia (`userData/mcp.json`), protegido contra otros Host y Origin.
+Herramientas (`mcprecorte.ts`): listar_proyectos, ver_proyecto, ver_cuadro (la imagen exportada de un segundo),
+editar_timeline (las operaciones del chat), agregar_medios, crear_proyecto, transcribir, exportar y abrir_en_recorte.
+Lo que cambia el agente llega al editor abierto como timeline pendiente (un paso de Ctrl+Z). Ajustes › «Recorte desde
+tu agente» lo registra en Claude Code (`claude mcp add --scope user`) y da la configuración para otros. Probado con
+Claude Code real y con `prueba:mcp`. Los proyectos del agente se transcriben solos al abrirse y el chat usa esa
+narración. Sin voz nueva por MCP todavía (gasta créditos: 6.3).
+
 **6.3 · Crear por MCP.** Empezar una creación, conversar el plan, «Hazlo», generar una frase de voz (con su
 muestra) y pedir imágenes o clips a Flow, con confirmación del gasto.
 

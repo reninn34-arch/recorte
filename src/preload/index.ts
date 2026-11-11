@@ -51,6 +51,19 @@ const api: RecorteApi = {
   abrirExportacion: (id) => ipcRenderer.invoke('proyecto:abrir-exportacion', id),
   vozFrase: (id, pedido) => ipcRenderer.invoke('proyecto:voz-frase', id, pedido),
   importarMusica: (id) => ipcRenderer.invoke('proyecto:importar-musica', id),
+  mcpEstado: () => ipcRenderer.invoke('mcp:estado'),
+  mcpConectarClaude: () => ipcRenderer.invoke('mcp:conectar-claude'),
+  mcpNuevaContrasena: () => ipcRenderer.invoke('mcp:nueva-contrasena'),
+  onProyectoExterno: (cb) => {
+    const listener = (_evento: Electron.IpcRendererEvent, e: { proyecto: Project; quien: string; conTimeline: boolean }) => cb(e)
+    ipcRenderer.on('proyecto:externo', listener)
+    return () => ipcRenderer.removeListener('proyecto:externo', listener)
+  },
+  onAbrirProyecto: (cb) => {
+    const listener = (_evento: Electron.IpcRendererEvent, id: string) => cb(id)
+    ipcRenderer.on('proyecto:abrir', listener)
+    return () => ipcRenderer.removeListener('proyecto:abrir', listener)
+  },
   ponerSonido: (id, incluido) => ipcRenderer.invoke('proyecto:poner-sonido', id, incluido),
   elegirAdjuntos: () => ipcRenderer.invoke('dialog:open-adjuntos'),
   elegirCarpeta: () => ipcRenderer.invoke('dialog:open-carpeta'),

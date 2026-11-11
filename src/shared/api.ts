@@ -203,6 +203,19 @@ export interface TurnoChat {
   aprendido?: string[]
 }
 
+/** El servidor MCP de Recorte (para que un agente de fuera maneje la app). */
+export interface EstadoMcp {
+  activo: boolean
+  url: string
+  contrasena: string
+  error?: string
+  claudeInstalado: boolean
+  /** Claude Code ya lo tiene registrado con esta dirección y contraseña. */
+  claudeConectado: boolean
+  /** La configuración para otros agentes (formato `mcpServers`). */
+  configJson: string
+}
+
 export interface RecorteApi {
   openVideo: () => Promise<string | null>
   crearProyecto: (ruta: string) => Promise<IngestaResultado>
@@ -273,6 +286,13 @@ export interface RecorteApi {
   vozFrase: (id: string, pedido: { texto: string; voz?: string }) => Promise<{ archivo: string; duracion: number; texto: string; voz: string }>
   importarMusica: (id: string) => Promise<{ ok: boolean; musica?: MusicaTL; error?: string } | null>
   /** Copia un efecto de sonido al proyecto: uno incluido (su id) o, sin id, uno que elija el usuario. */
+  mcpEstado: () => Promise<EstadoMcp>
+  mcpConectarClaude: () => Promise<{ ok: boolean; error?: string }>
+  mcpNuevaContrasena: () => Promise<EstadoMcp>
+  /** Un agente cambió un proyecto por MCP (la interfaz lo recoge). Devuelve cómo dejar de escuchar. */
+  onProyectoExterno: (cb: (e: { proyecto: Project; quien: string; conTimeline: boolean }) => void) => () => void
+  /** Un agente pidió mostrar un proyecto en el editor. */
+  onAbrirProyecto: (cb: (id: string) => void) => () => void
   ponerSonido: (id: string, incluido?: string) => Promise<{ ok: boolean; sonido?: { archivo: string; nombre: string; duracion: number }; error?: string } | null>
   /** Crear con IA: videos desde cero, sin material importado. */
   elegirAdjuntos: () => Promise<string[]>

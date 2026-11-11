@@ -719,11 +719,20 @@ export function describirTimelineParaAgente(
       : 'Música: ninguna (solo el usuario puede elegir el archivo, con el botón «Música»).'
   )
 
-  if (transcript?.length) {
+  // Un proyecto del agente: sus clips salen de la versión limpia de SU video (mismo tiempo que el
+  // principal), no del principal. Lo que se dice va entonces en tiempo de timeline, tal cual.
+  const delPrincipal = tl.clips.some((c) => c.fuente === FUENTE_PRINCIPAL)
+  const mismoTiempo = Math.abs(duracionTimeline(tl) - duracionFuente) < 0.5
+  if (transcript?.length && !delPrincipal && mismoTiempo) {
+    lineas.push('Lo que se dice en el video (la narración, en tiempo de timeline) [timeline] texto:')
+    for (const s of transcript) lineas.push(`  [${s.start.toFixed(2)}–${s.end.toFixed(2)}] ${s.text.replace(/\s+/g, ' ').trim()}`)
+  } else if (transcript?.length) {
     // La voz en tiempo de timeline, por frases, con los tiempos de fuente para reconstruir.
     lineas.push('Voz dentro de la timeline [timeline | fuente] texto:')
     const voz: string[] = []
     for (const tr of tramos(tl)) {
+      // La transcripción es del video principal: los clips de otros medios no la llevan.
+      if (tr.clip.fuente !== FUENTE_PRINCIPAL) continue
       for (const seg of transcript) {
         if (seg.end <= tr.clip.entrada || seg.start >= tr.clip.salida) continue
         const ini = Math.max(seg.start, tr.clip.entrada)
@@ -735,13 +744,13 @@ export function describirTimelineParaAgente(
     }
     lineas.push(...voz)
     // Lo que quedó fuera de la timeline también sirve para reconstruir.
-    const dentro = (t: number) => tl.clips.some((c) => t >= c.entrada && t < c.salida)
+    const dentro = (t: number) => tl.clips.some((c) => c.fuente === FUENTE_PRINCIPAL && t >= c.entrada && t < c.salida)
     const fuera = transcript.filter((s) => !dentro((s.start + s.end) / 2))
     if (fuera.length) {
       lineas.push('Voz del material que NO está en la timeline [fuente] texto:')
       for (const s of fuera) lineas.push(`  [${s.start.toFixed(2)}–${s.end.toFixed(2)}] ${s.text.replace(/\s+/g, ' ').trim()}`)
     }
-  } else {
+  } else if (!tl.voces?.length) {
     lineas.push('El video aún no está transcrito: no sabes qué se dice.')
   }
 
@@ -749,11 +758,8 @@ export function describirTimelineParaAgente(
   return texto.length > limite ? `${texto.slice(0, limite)}\n… (recortado)` : texto
 }
 
-export const INSTRUCCIONES_AGENTE = `Eres el editor de video de Recorte. Editas la timeline del usuario hablando con él en español.
-Respondes SOLO con un objeto JSON, sin texto alrededor:
-{"mensaje": "lo que le dices al usuario, breve", "operaciones": [ ... ]}
-
-Operaciones disponibles (los tiempos van en segundos con decimales):
+/** Las operaciones sobre la timeline: las usa el chat del editor y el MCP. */
+export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segundos con decimales):
 - {"op":"borrar_tramo","desde":T,"hasta":T}  borra un tramo de la TIMELINE (lo de después se corre). Varios seguidos se aplican del último al primero, así que usa los tiempos de la timeline actual.
 - {"op":"quitar_pausas","minimo":0.6}  quita los silencios de la voz más largos que "minimo" (Recorte los calcula con precisión con la transcripción; úsala en vez de calcular tú las pausas).
 - {"op":"dividir","en":T}  divide el clip bajo el segundo T de la timeline.
@@ -778,7 +784,13 @@ Operaciones disponibles (los tiempos van en segundos con decimales):
 - {"op":"cambiar_capa","capa_n":N, …los mismos campos…}  y {"op":"borrar_capa","capa_n":N}
 - {"op":"anadir_sonido","sonido":"whoosh|pop|pop-alto|ding|caching","inicio":T,"volumen":0.6}  un efecto de sonido: whoosh (un cambio rápido), pop y pop-alto (algo que aparece), ding (un dato, un acierto), caching (una oferta, un precio). Úsalos con medida: en lo que aparece, no en cada corte.
 - {"op":"cambiar_sonido","sonido_n":N,"inicio":T,"volumen":V}  y {"op":"borrar_sonido","sonido_n":N}
-Las voces son de Gemini: Kore, Puck, Charon, Zephyr, Fenrir, Leda, Orus, Aoede, Callirrhoe, Autonoe, Enceladus, Iapetus, Umbriel, Algieba, Despina, Erinome, Algenib, Rasalgethi, Laomedeia, Achernar, Alnilam, Schedar, Gacrux, Pulcherrima, Achird, Zubenelgenubi, Vindemiatrix, Sadachbia, Sadaltager, Sulafat. Cambia solo las frases que el usuario pide: cada frase nueva gasta voz.
+Las voces son de Gemini: Kore, Puck, Charon, Zephyr, Fenrir, Leda, Orus, Aoede, Callirrhoe, Autonoe, Enceladus, Iapetus, Umbriel, Algieba, Despina, Erinome, Algenib, Rasalgethi, Laomedeia, Achernar, Alnilam, Schedar, Gacrux, Pulcherrima, Achird, Zubenelgenubi, Vindemiatrix, Sadachbia, Sadaltager, Sulafat. Cambia solo las frases que el usuario pide: cada frase nueva gasta voz.`
+
+export const INSTRUCCIONES_AGENTE = `Eres el editor de video de Recorte. Editas la timeline del usuario hablando con él en español.
+Respondes SOLO con un objeto JSON, sin texto alrededor:
+{"mensaje": "lo que le dices al usuario, breve", "operaciones": [ ... ]}
+
+${OPERACIONES_DOC}
 
 Las operaciones se aplican en orden y cada una ve la timeline que dejó la anterior.
 Corta siempre en fronteras de frase: usa los tiempos de la voz. No inventes contenido que no está en la transcripción.

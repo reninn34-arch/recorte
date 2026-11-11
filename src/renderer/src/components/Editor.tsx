@@ -8,7 +8,7 @@ import { RenderQueue } from './RenderQueue'
 import { SourceCard } from './SourceCard'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
-import { capaNueva, cambiarFuente, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, type Timeline } from '../../../shared/timeline'
+import { capaNueva, cambiarFuente, duracionTimeline, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, type Timeline } from '../../../shared/timeline'
 import { useHistorial, useReproductor, type FuentesVista } from '../hooks/timeline'
 import { Monitor } from './Monitor'
 import { MediosPanel } from './MediosPanel'
@@ -107,9 +107,10 @@ export function Editor({
     reproductor.pausar()
     historial.aplicar(nueva)
     setElegido(null)
-    reproductor.buscar(0)
+    // El cabezal se queda donde estaba si sigue cabiendo (un retoque del agente no te saca de ahí).
+    if (reproductor.tiempo >= duracionTimeline(nueva)) reproductor.buscar(0)
     onPendienteAplicada()
-    onAviso('La versión nueva del agente ya está en la timeline. Ctrl+Z vuelve a la anterior, con tus retoques.')
+    onAviso('El agente cambió la timeline. Ctrl+Z vuelve a como estaba, con tus retoques.')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proyecto.id, proyecto.timelinePendiente])
 

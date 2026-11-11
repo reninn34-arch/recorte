@@ -6,6 +6,7 @@ import { Icon } from '../Icons'
 import { ListaAgentes } from './ListaAgentes'
 import { LogoAgente, LogoHerramienta } from './Logos'
 import { SeccionFlow } from './SeccionFlow'
+import { SeccionMcp } from './SeccionMcp'
 import { SeccionCriterio } from './SeccionCriterio'
 import { FilaVersion } from './AvisoActualizacion'
 import { CarpetaVideos } from './CarpetaVideos'
@@ -382,6 +383,8 @@ export function Opciones({
         <SeccionFlow onAviso={onAviso} />
 
         <SeccionCriterio onAviso={onAviso} />
+
+        <SeccionMcp onAviso={onAviso} />
 
         <Seccion titulo="Avisos">
           <div className="op-fila">

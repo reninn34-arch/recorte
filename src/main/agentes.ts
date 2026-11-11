@@ -262,7 +262,7 @@ export async function estadoAgentes(): Promise<EstadoAgente[]> {
 }
 
 /** Corre un comando con shell y devuelve el código y lo último que dijo. */
-function correr(orden: string, limite: number): Promise<{ codigo: number | null; salida: string }> {
+export function correr(orden: string, limite: number): Promise<{ codigo: number | null; salida: string }> {
   return new Promise((resolver) => {
     let salida = ''
     let hecho = false

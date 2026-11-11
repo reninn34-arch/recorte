@@ -889,3 +889,33 @@ export const SONIDOS_INCLUIDOS: { id: string; nombre: string; para: string }[] =
   { id: 'ding', nombre: 'Ding', para: 'un dato, un acierto, un precio' },
   { id: 'caching', nombre: 'Caja registradora', para: 'una oferta, un descuento, una venta' }
 ]
+
+/**
+ * Solo el tramo `desde`–`hasta` de la timeline, empezando en 0: los clips recortados y los
+ * rótulos, capas, frases y sonidos que caen dentro, corridos. Sin música. Sirve para ver un cuadro.
+ */
+export function ventanaTimeline(tl: Timeline, desde: number, hasta: number): Timeline {
+  const total = duracionTimeline(tl)
+  const a = Math.max(0, Math.min(desde, total))
+  const b = Math.max(a, Math.min(hasta, total))
+  let corta = b < total ? borrarTramo(tl, b, total) : tl
+  corta = a > 0 ? borrarTramo(corta, 0, a) : corta
+  const dentro = <T extends { inicio: number; duracion: number }>(x: T): T | null => {
+    const ini = Math.max(x.inicio, a)
+    const fin = Math.min(x.inicio + x.duracion, b)
+    return fin - ini > 0.01 ? { ...x, inicio: ini - a, duracion: fin - ini } : null
+  }
+  const capas = (tl.capas ?? []).map((c) => {
+    const d = dentro(c)
+    // Si la capa ya venía de antes, su video sigue desde donde iba y su entrada ya pasó.
+    return d && c.inicio < a ? { ...d, desde: (c.desde ?? 0) + (a - c.inicio), entrada: undefined } : d
+  })
+  const { musica: _m, ...resto } = corta
+  return {
+    ...resto,
+    textos: tl.textos.map(dentro).filter((x): x is TextoTL => x !== null),
+    ...(tl.voces?.length ? { voces: tl.voces.map(dentro).filter((x): x is VozTL => x !== null) } : {}),
+    capas: capas.filter((x): x is CapaTL => x !== null),
+    ...(tl.sonidos?.length ? { sonidos: tl.sonidos.map(dentro).filter((x): x is SonidoTL => x !== null) } : {})
+  }
+}

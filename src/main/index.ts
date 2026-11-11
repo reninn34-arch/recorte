@@ -34,6 +34,7 @@ import { recetaLocal } from './receta'
 import { crearVideo } from './crear'
 import { renderClip, renderReceta } from './render'
 import { exportarTimeline } from './exportar'
+import { iniciarMcpRecorte } from './mcpapp'
 import { Creaciones, EXTENSIONES_ADJUNTOS, pasoGuion, pasoVideo, type ConfigAgente } from './creaciones'
 import { convertirAVoz, generarVozGemini, prepararVoz } from './voz'
 import { montarVozEnVideo } from './montajevoz'
@@ -1102,7 +1103,16 @@ app.whenReady().then(() => {
         // Con una receta que no se puede leer, el editor abre el video entero, como antes.
       }
     }
-    return proyectos.abrir(ingesta.project.id) ?? ingesta.project
+    // Sin frases de voz sueltas, el chat no sabría qué se dice: se transcribe solo, sin esperar.
+    const abierto = proyectos.abrir(ingesta.project.id) ?? ingesta.project
+    if (!abierto.timeline?.voces?.length) {
+      void transcribirProyecto(abierto.id).then((r) => {
+        if (!r.ok || !r.project) return
+        const { transcript: _t, ...ligero } = r.project
+        for (const w of BrowserWindow.getAllWindows()) w.webContents.send('proyecto:externo', { proyecto: ligero, quien: 'recorte', conTimeline: false })
+      })
+    }
+    return abierto
   })
   // ===== Voz de las creaciones =====
   ipcMain.handle('voz:estado', async () => ({ ...(await ajustes.estadoVoz()), google: estadoVozGoogle() }))
@@ -1243,11 +1253,15 @@ app.whenReady().then(() => {
       filters: [{ name: 'Videos e imágenes', extensions: ['mp4', 'mov', 'mkv', 'webm', 'm4v', 'jpg', 'jpeg', 'png', 'webp'] }]
     })
     if (r.canceled || !r.filePaths.length) return null
+    return agregarRutas(id, r.filePaths)
+  })
+  /** Agrega archivos a la biblioteca del proyecto (los copia no: se usan desde su ruta). */
+  async function agregarRutas(id: string, rutas: string[]): Promise<{ project: Project; agregados: string[]; fallos: string[] }> {
     const carpeta = join(proyectos.carpeta(id), 'medios')
     mkdirSync(carpeta, { recursive: true })
     const nuevos: NonNullable<Project['medios']> = []
     const fallos: string[] = []
-    for (const ruta of r.filePaths.slice(0, 50)) {
+    for (const ruta of rutas.slice(0, 50)) {
       const ext = extname(ruta).toLowerCase()
       const imagen = ['.jpg', '.jpeg', '.png', '.webp'].includes(ext)
       try {
@@ -1279,7 +1293,7 @@ app.whenReady().then(() => {
     actual.medios = [...(actual.medios ?? []), ...nuevos]
     proyectos.save(actual)
     return { project: actual, agregados: nuevos.map((m) => m.id), fallos }
-  })
+  }
   // Una frase de narración hecha a mano en el editor: con el texto y la voz que diga el usuario,
   // sin pasar por el agente (no gasta sus créditos). El audio queda en la carpeta del proyecto.
   ipcMain.handle('proyecto:voz-frase', async (_evento, id: unknown, pedido: unknown) => {
@@ -1348,7 +1362,8 @@ app.whenReady().then(() => {
     })
   })
 
-  ipcMain.handle('proyecto:transcribir', async (_evento, id: unknown): Promise<TranscripcionResultado> => {
+  ipcMain.handle('proyecto:transcribir', (_evento, id: unknown) => transcribirProyecto(id))
+  async function transcribirProyecto(id: unknown): Promise<TranscripcionResultado> {
     if (typeof id !== 'string') return { ok: false, error: 'Proyecto inválido.' }
 
     const proyecto = proyectos.get(id)
@@ -1383,7 +1398,7 @@ app.whenReady().then(() => {
       project: actual,
       transcript: resultado.transcript
     }
-  })
+  }
 
   ipcMain.handle('ajustes:cargar', () => ajustes.cargar())
 
@@ -1995,9 +2010,8 @@ app.whenReady().then(() => {
     return true
   })
 
-  ipcMain.handle(
-    'proyecto:exportar-timeline',
-    async (_evento, id: unknown, timeline: unknown, opciones: unknown): Promise<RenderResultado> => {
+  ipcMain.handle('proyecto:exportar-timeline', (_evento, id: unknown, timeline: unknown, opciones: unknown) => exportarProyecto(id, timeline, opciones))
+  async function exportarProyecto(id: unknown, timeline: unknown, opciones: unknown): Promise<RenderResultado> {
       if (typeof id !== 'string') return { ok: false, error: 'Proyecto inválido.' }
       if (enRender.has(id) || enLote.has(id)) {
         return { ok: false, error: 'Ya hay un render en marcha en este proyecto.' }
@@ -2039,8 +2053,7 @@ app.whenReady().then(() => {
       } finally {
         enRender.delete(id)
       }
-    }
-  )
+  }
 
   ipcMain.handle(
     'agente:chat',
@@ -2077,18 +2090,8 @@ app.whenReady().then(() => {
         if (turno.ok) {
           for (const o of turno.operaciones) {
             if (o.op !== 'anadir_sonido') continue
-            const s = SONIDOS_INCLUIDOS.find((x) => x.id === o.sonido)
-            const origen = s ? rutaScriptPython(join('sonidos', `${s.id}.wav`)) : ''
-            if (!s || !existsSync(origen)) continue
-            try {
-              const media = join(proyectos.carpeta(id), 'media')
-              mkdirSync(media, { recursive: true })
-              const nombre = `sonido-${s.id}-${randomUUID().slice(0, 8)}.wav`
-              copyFileSync(origen, join(media, nombre))
-              o.audio = { archivo: `media/${nombre}`, duracion: Math.round((await duracionMedio(join(media, nombre))) * 100) / 100 || 0.5, nombre: s.nombre }
-            } catch {
-              // Sin audio, la operación se informa como fallida al aplicarla.
-            }
+            const audio = await copiarSonidoIncluido(id, o.sonido)
+            if (audio) o.audio = audio
           }
         }
         // Solo se guarda lo nuevo; lo que ya sabía se confirma (suma una vez más).
@@ -2187,6 +2190,48 @@ app.whenReady().then(() => {
       return { ok: false, error: `No pude copiar la música: ${error instanceof Error ? error.message : String(error)}` }
     }
   })
+
+  /** Copia un efecto de sonido incluido a `media/` del proyecto. Sin audio, devuelve null. */
+  async function copiarSonidoIncluido(id: string, sonido: string): Promise<{ archivo: string; duracion: number; nombre: string } | null> {
+    const s = SONIDOS_INCLUIDOS.find((x) => x.id === sonido)
+    const origen = s ? rutaScriptPython(join('sonidos', `${s.id}.wav`)) : ''
+    if (!s || !existsSync(origen)) return null
+    try {
+      const media = join(proyectos.carpeta(id), 'media')
+      mkdirSync(media, { recursive: true })
+      const nombre = `sonido-${s.id}-${randomUUID().slice(0, 8)}.wav`
+      copyFileSync(origen, join(media, nombre))
+      return { archivo: `media/${nombre}`, duracion: Math.round((await duracionMedio(join(media, nombre))) * 100) / 100 || 0.5, nombre: s.nombre }
+    } catch {
+      return null
+    }
+  }
+
+  // ===== Recorte por MCP: que un agente de fuera vea y edite los proyectos =====
+  const mcp = iniciarMcpRecorte({
+    proyectos,
+    listarCreaciones: () => creaciones.listar(),
+    ingerir: (ruta) => ingerir(ruta),
+    agregarRutas,
+    transcribir: (id) => transcribirProyecto(id),
+    exportar: (id, timeline, opciones) => exportarProyecto(id, timeline, opciones),
+    copiarSonido: copiarSonidoIncluido,
+    avisarCambio: (proyecto, quien, conTimeline) => {
+      const { transcript: _t, ...ligero } = proyecto
+      for (const w of BrowserWindow.getAllWindows()) w.webContents.send('proyecto:externo', { proyecto: ligero, quien, conTimeline: Boolean(conTimeline) })
+    },
+    abrirEnApp: (id) => {
+      const w = BrowserWindow.getAllWindows()[0]
+      if (!w) return
+      if (w.isMinimized()) w.restore()
+      w.show()
+      w.focus()
+      w.webContents.send('proyecto:abrir', id)
+    }
+  })
+  ipcMain.handle('mcp:estado', () => mcp.estado())
+  ipcMain.handle('mcp:conectar-claude', () => mcp.conectarClaude())
+  ipcMain.handle('mcp:nueva-contrasena', () => mcp.nuevaContrasena())
 
   // Un efecto de sonido para la pista de sonidos: uno de los incluidos o uno del equipo.
   ipcMain.handle('proyecto:poner-sonido', async (_evento, id: unknown, incluido: unknown) => {

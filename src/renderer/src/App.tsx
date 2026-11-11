@@ -137,6 +137,47 @@ export default function App() {
     guardado.current = huella(p)
   }
 
+  // Un agente de fuera (por MCP) cambió un proyecto: si está abierto, sus pistas entran como un paso
+  // de deshacer (timeline pendiente); sus medios, su transcripción y su último MP4, tal cual.
+  useEffect(() => {
+    const quitar = window.recorte.onProyectoExterno(({ proyecto: nuevo, conTimeline }) => {
+      setProyecto((p) =>
+        p && p.id === nuevo.id
+          ? {
+              ...p,
+              name: nuevo.name,
+              medios: nuevo.medios,
+              transcription: nuevo.transcription,
+              language: nuevo.language,
+              timelineSalida: nuevo.timelineSalida,
+              ...(conTimeline && nuevo.timeline ? { timelinePendiente: nuevo.timeline } : {})
+            }
+          : p
+      )
+      if (nuevo.transcription === 'lista') {
+        void window.recorte.abrirProyecto(nuevo.id).then((completo) => {
+          if (completo?.transcript) setProyecto((p) => (p && p.id === nuevo.id ? { ...p, transcript: completo.transcript } : p))
+        })
+      }
+      void recargarProyectos()
+    })
+    const quitarAbrir = window.recorte.onAbrirProyecto((id) => {
+      void (async () => {
+        setVista('proyectos')
+        if (proyectoRef.current?.id === id) return
+        const p = await window.recorte.abrirProyecto(id)
+        if (p) abrir(p)
+      })()
+    })
+    return () => {
+      quitar()
+      quitarAbrir()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const proyectoRef = useRef(proyecto)
+  proyectoRef.current = proyecto
+
   async function recargarProyectos() {
     try {
       setProyectos(await window.recorte.listarProyectos())

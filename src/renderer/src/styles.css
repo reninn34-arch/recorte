@@ -2828,3 +2828,4 @@ button { cursor: pointer; }
 .tl-menu-item { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border: none; border-radius: 6px; background: none; color: var(--text); font-size: 12px; text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tl-menu-item:hover { background: var(--panel-3); }
 .monitor.is-destino { outline: 2px dashed var(--accent); outline-offset: -4px; }
+.op-codigo { margin: 8px 0 0; padding: 10px 12px; max-width: 100%; overflow-x: auto; font-size: 11px; line-height: 1.5; color: var(--muted); background: var(--panel-3); border: 1px solid var(--line); border-radius: 8px; white-space: pre; }
