@@ -29,7 +29,7 @@ except ImportError:  # El Python de Recorte trae NumPy y OpenCV; Pillow se insta
 def _rutas():
     # Recorte deja junto al kit las rutas de su FFmpeg (puede no estar en el PATH del agente).
     try:
-        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rutas.json'), encoding='utf-8') as f:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rutas.json'), encoding='utf-8-sig') as f:
             return json.load(f)
     except (OSError, ValueError):
         return {}
@@ -509,7 +509,7 @@ PIEZAS = {'foto': Foto, 'video': Video, 'comparar': Comparar, 'collage': Collage
 # ---------------------------------------------------------------------------
 
 def cargar(ruta):
-    with open(ruta, encoding='utf-8') as f:
+    with open(ruta, encoding='utf-8-sig') as f:
         r = json.load(f)
     r['_ruta'] = ruta
     L = Lienzo(r)
@@ -690,7 +690,7 @@ def pedir_a_recorte(buzon, datos, espera, que):
     while time.time() < limite:
         if os.path.exists(respuesta):
             time.sleep(0.2)
-            with open(respuesta, encoding='utf-8') as f:
+            with open(respuesta, encoding='utf-8-sig') as f:
                 r = json.load(f)
             print(json.dumps(r, ensure_ascii=False))
             if not r.get('ok'):
@@ -705,7 +705,7 @@ def voz(archivo, espera=900):
 
     Devuelve cada frase con su archivo y lo que dura, para poner cada momento en su frase.
     """
-    with open(archivo, encoding='utf-8') as f:
+    with open(archivo, encoding='utf-8-sig') as f:
         frases = [l.strip() for l in f if l.strip()]
     if not frases:
         raise SystemExit('El archivo no tiene frases (una por línea).')

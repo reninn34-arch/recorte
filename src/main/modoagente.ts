@@ -254,6 +254,9 @@ ${(() => {
 - No salgas de esta carpeta, no borres nada de \`entrada/\` y no toques archivos del sistema.
 - No bajes material de internet con derechos de terceros ni uses servicios de pago por tu cuenta: lo generado se pide a Recorte (arriba).
 - Si algo del pedido es ambiguo, elige lo más sensato para el objetivo y dilo en el resumen.
+- Guarda los archivos de texto (receta.json, resultado.json, notas.md) en UTF-8 SIN BOM, con sus tildes y «comillas»:
+  en PowerShell no uses Set-Content ni Out-File (agregan BOM o pierden las tildes); escríbelos con Python o con
+  \`[IO.File]::WriteAllText(ruta, texto, (New-Object Text.UTF8Encoding $false))\`.
 - Textos en pantalla solo si el pedido los pide o el tipo de video claramente los necesita.
 `
   writeFileSync(join(trabajo, 'AGENTS.md'), manual, 'utf8')
@@ -498,7 +501,7 @@ export async function prepararVistazo(c: Creacion, carpeta: string): Promise<str
     let dura = ''
     if (r.ok && existsSync(json)) {
       try {
-        const t = JSON.parse(readFileSync(json, 'utf8')) as { duration?: number; segments?: { start: number; end: number; text: string }[] }
+        const t = JSON.parse(readFileSync(json, 'utf8').replace(/^\uFEFF/, '')) as { duration?: number; segments?: { start: number; end: number; text: string }[] }
         dura = t.duration ? `, dura ${t.duration.toFixed(2)} s` : ''
         frases = (t.segments ?? []).map((s) => `  [${s.start.toFixed(2)}–${s.end.toFixed(2)}] ${s.text.trim()}`).join('\n')
         writeFileSync(join(dir, `narracion-${n}.txt`), frases + '\n', 'utf8')
@@ -819,7 +822,7 @@ export function archivoEntregado(
     dentroDe(trabajo, ruta) && esArchivo(ruta) && [...EXT_VIDEO, ...EXT_IMAGEN].includes(extname(ruta).toLowerCase())
   let entrega = validarEntrega({})
   try {
-    entrega = validarEntrega(JSON.parse(readFileSync(join(trabajo, 'resultado.json'), 'utf8')))
+    entrega = validarEntrega(JSON.parse(readFileSync(join(trabajo, 'resultado.json'), 'utf8').replace(/^\uFEFF/, '')))
   } catch {
     // Sin resultado.json: se busca en salida/.
   }
@@ -853,7 +856,7 @@ function recetaEntregada(carpeta: string, dicha?: string): string | null {
     const ruta = resolve(trabajo, candidata.replace(/\\/g, '/').replace(/^trabajo\//i, ''))
     if (!dentroDe(trabajo, ruta) || !esArchivo(ruta) || extname(ruta).toLowerCase() !== '.json') continue
     try {
-      const r = JSON.parse(readFileSync(ruta, 'utf8')) as { momentos?: unknown }
+      const r = JSON.parse(readFileSync(ruta, 'utf8').replace(/^\uFEFF/, '')) as { momentos?: unknown }
       if (Array.isArray(r.momentos) && r.momentos.length) return ruta
     } catch {
       // No es una receta: se prueba la siguiente.
@@ -970,7 +973,7 @@ export async function revisarYPublicar(
 function subtitulosQueFaltan(rutaReceta: string, c: Creacion, duracion?: number): string | null {
   let r: { voz?: unknown[]; subtitulos?: { frases?: { hasta?: unknown }[] } }
   try {
-    r = JSON.parse(readFileSync(rutaReceta, 'utf8'))
+    r = JSON.parse(readFileSync(rutaReceta, 'utf8').replace(/^\uFEFF/, ''))
   } catch {
     return null
   }
@@ -994,7 +997,7 @@ function subtitulosQueFaltan(rutaReceta: string, c: Creacion, duracion?: number)
  */
 async function renderLimpio(rutaReceta: string, carpeta: string, version: number): Promise<string | null> {
   try {
-    const r = JSON.parse(readFileSync(rutaReceta, 'utf8')) as Record<string, unknown> & { momentos?: Record<string, unknown>[] }
+    const r = JSON.parse(readFileSync(rutaReceta, 'utf8').replace(/^\uFEFF/, '')) as Record<string, unknown> & { momentos?: Record<string, unknown>[] }
     const momentos = Array.isArray(r.momentos) ? r.momentos : []
     const conTextos =
       Boolean((r.subtitulos as { frases?: unknown[] } | undefined)?.frases?.length) ||

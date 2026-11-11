@@ -42,9 +42,11 @@ const de = (evs, t) => evs.filter((e) => e.t === t)
   const fallo = leer('codex', ['{"type":"turn.failed","error":{"message":"usage limit reached"}}'])
   assert.equal(de(fallo, 'fin')[0].ok, false)
   const nueva = ADAPTADORES.codex.orden('codex exec -m gpt-5', 'C:\\t')
-  assert.equal(nueva, 'codex exec -m gpt-5 --json --skip-git-repo-check -s workspace-write -C "C:\\t" -')
+  // En Windows, sin sandbox (el suyo rechaza todo comando); en Mac y Linux, con su sandbox.
+  const permisos = process.platform === 'win32' ? '--dangerously-bypass-approvals-and-sandbox' : null
+  assert.equal(nueva, `codex exec -m gpt-5 --json --skip-git-repo-check ${permisos ?? '-s workspace-write'} -C "C:\\t" -`)
   const retoma = ADAPTADORES.codex.orden('codex exec -m gpt-5', 'C:\\t', 'abc')
-  assert.equal(retoma, 'codex exec resume -m gpt-5 --json --skip-git-repo-check -c sandbox_mode=workspace-write abc -')
+  assert.equal(retoma, `codex exec resume -m gpt-5 --json --skip-git-repo-check ${permisos ?? '-c sandbox_mode=workspace-write'} abc -`)
 }
 
 // OpenCode 1.19: `run --format json` (grabado) y `-s <id>` para seguir la sesión.

@@ -94,20 +94,25 @@ const CLAUDE: Adaptador = {
 }
 
 // ---------------------------------------------------------------------------
-// Codex: `exec --json` (JSONL) y `exec resume <id>`. El sandbox de Codex solo deja escribir
-// en la carpeta donde se lanza.
+// Codex: `exec --json` (JSONL) y `exec resume <id>`. En Mac y Linux, con su sandbox (solo
+// escribe en la carpeta donde se lanza). En Windows su sandbox rechaza TODO comando, hasta leer
+// un archivo («blocked by policy»): ahí va sin sandbox, como Claude Code (el usuario lo eligió el
+// 2026-11-10; el manual le pide no salir de su carpeta).
 // ---------------------------------------------------------------------------
+
+export const SIN_SANDBOX_CODEX = process.platform === 'win32'
 
 const CODEX: Adaptador = {
   conSesion: true,
   stderrEsAvance: false,
   orden(base, cwd, sesion) {
     const b = base.trim()
-    if (!sesion) return `${b} --json --skip-git-repo-check -s workspace-write -C "${cwd}" -`
+    const permisos = SIN_SANDBOX_CODEX ? '--dangerously-bypass-approvals-and-sandbox' : null
+    if (!sesion) return `${b} --json --skip-git-repo-check ${permisos ?? '-s workspace-write'} -C "${cwd}" -`
     // `resume` no lleva -s ni -C: el sandbox va por configuración y la carpeta es donde se lanza
     // (Codex busca la sesión por carpeta). El modelo elegido (`-m`) se conserva.
     const resto = b.replace(/^codex\s+exec\b/, '').trim()
-    return `codex exec resume ${resto ? `${resto} ` : ''}--json --skip-git-repo-check -c sandbox_mode=workspace-write ${sesion} -`
+    return `codex exec resume ${resto ? `${resto} ` : ''}--json --skip-git-repo-check ${permisos ?? '-c sandbox_mode=workspace-write'} ${sesion} -`
   },
   leer(linea) {
     const ev = json(linea)

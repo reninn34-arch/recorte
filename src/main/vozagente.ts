@@ -56,7 +56,7 @@ export function atenderVoz(
   const atender = async (id: string): Promise<void> => {
     let pedido: { frases?: unknown; voz?: unknown }
     try {
-      pedido = JSON.parse(readFileSync(join(dir, `pedido-${id}.json`), 'utf8')) as typeof pedido
+      pedido = JSON.parse(readFileSync(join(dir, `pedido-${id}.json`), 'utf8').replace(/^\uFEFF/, '')) as typeof pedido
     } catch {
       // Puede estar a medio escribir: se reintenta en la siguiente vuelta.
       atendidos.delete(id)

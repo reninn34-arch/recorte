@@ -62,7 +62,7 @@ function textosDeVoz(trabajo: string): Map<string, { texto: string; voz?: string
   for (const n of readdirSync(dir)) {
     if (!/^respuesta-[\w-]+\.json$/.test(n)) continue
     try {
-      const r = JSON.parse(readFileSync(join(dir, n), 'utf8')) as { voz?: string; frases?: { texto?: string; archivo?: string }[] }
+      const r = JSON.parse(readFileSync(join(dir, n), 'utf8').replace(/^\uFEFF/, '')) as { voz?: string; frases?: { texto?: string; archivo?: string }[] }
       for (const f of r.frases ?? []) {
         if (typeof f.archivo === 'string' && typeof f.texto === 'string') mapa.set(f.archivo.replace(/\\/g, '/'), { texto: f.texto, ...(r.voz ? { voz: r.voz } : {}) })
       }
@@ -86,7 +86,7 @@ export async function proyectoDesdeReceta(
 ): Promise<ProyectoDeReceta | null> {
   let receta: Record<string, unknown>
   try {
-    receta = JSON.parse(readFileSync(rutaReceta, 'utf8')) as Record<string, unknown>
+    receta = JSON.parse(readFileSync(rutaReceta, 'utf8').replace(/^\uFEFF/, '')) as Record<string, unknown>
   } catch {
     return null
   }

@@ -77,7 +77,7 @@ export function atenderMedios(
   const atender = async (id: string): Promise<void> => {
     let pedido: { tipo?: unknown; prompt?: unknown; referencias?: unknown }
     try {
-      pedido = JSON.parse(readFileSync(join(dir, `pedido-${id}.json`), 'utf8')) as typeof pedido
+      pedido = JSON.parse(readFileSync(join(dir, `pedido-${id}.json`), 'utf8').replace(/^\uFEFF/, '')) as typeof pedido
     } catch {
       atendidos.delete(id)
       return
