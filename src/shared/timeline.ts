@@ -79,6 +79,13 @@ export interface AjustesClip {
   cy?: number
   /** Acercamiento lento durante el clip (Ken Burns): cuánto crece al final, 0 a 0.3; 0 quieto. */
   acercar?: number
+  /**
+   * Paneo: cuánto se desplaza el centro del encuadre al acabar el clip, -0.5 (izquierda) a 0.5 (derecha);
+   * 0 quieto. Solo se nota con zoom (hace falta imagen de sobra para moverse).
+   */
+  panx?: number
+  /** Lo mismo en vertical: -0.5 (sube) a 0.5 (baja). */
+  pany?: number
 }
 
 export const LIMITES_AJUSTES = {
@@ -88,7 +95,9 @@ export const LIMITES_AJUSTES = {
   saturacion: [0, 2, 1],
   cx: [0, 1, 0.5],
   cy: [0, 1, 0.5],
-  acercar: [0, 0.3, 0]
+  acercar: [0, 0.3, 0],
+  panx: [-0.5, 0.5, 0],
+  pany: [-0.5, 0.5, 0]
 } as const satisfies Record<keyof AjustesClip, readonly [number, number, number]>
 
 /** Una pista de música bajo toda la edición (se repite si es corta y se funde al final). */
@@ -242,6 +251,13 @@ export interface CapaTL {
    * bucle (un WebM con transparencia) y `base` la imagen de la que sale, para cambiarla o volver a ella.
    */
   animada?: { tipo: TipoAnimar; base: FuenteId }
+  /**
+   * Escena 2.5D: a qué distancia está la capa, 0 (pegada al fondo: se mueve con él) a 1 (muy cerca de la
+   * cámara: se mueve y crece 2,5 veces más que el fondo). Sin ella, la capa no sigue a la cámara.
+   */
+  profundidad?: number
+  /** Desenfoque (como lo que está fuera de foco, muy cerca o muy lejos), 0 a 1; 0 nítida. */
+  desenfoque?: number
 }
 
 export type TipoAnimar = 'respirar' | 'balanceo' | 'ondear' | 'flotar' | 'humo'
@@ -473,7 +489,7 @@ export function normalizarCapas(entrada: unknown, total: number, medios: Record<
       duracion: pinza(c.duracion, DURACION_MINIMA, Math.max(DURACION_MINIMA, total - inicio)),
       x: Math.round(pinza(num(c.x, 0.5), 0, 1) * 1000) / 1000,
       y: Math.round(pinza(num(c.y, 0.5), 0, 1) * 1000) / 1000,
-      ancho: Math.round(pinza(num(c.ancho, 0.3), 0.05, 1) * 1000) / 1000,
+      ancho: Math.round(pinza(num(c.ancho, 0.3), 0.05, 2) * 1000) / 1000,
       ...(c.entrada && ENTRADAS_CAPA.includes(c.entrada) ? { entrada: c.entrada } : {}),
       ...(typeof c.desde === 'number' && c.desde > 0 ? { desde: Math.min(c.desde, Math.max(0, medios[c.fuente] - DURACION_MINIMA)) } : {}),
       ...(Math.abs(num(c.giro, 0)) > 0.05 ? { giro: Math.round(pinza(num(c.giro, 0), -720, 720) * 10) / 10 } : {}),
@@ -483,12 +499,14 @@ export function normalizarCapas(entrada: unknown, total: number, medios: Record<
               // Fuera del cuadro se puede (entrar o salir volando), hasta media pantalla.
               x: Math.round(pinza(num(c.fin.x, num(c.x, 0.5)), -0.5, 1.5) * 1000) / 1000,
               y: Math.round(pinza(num(c.fin.y, num(c.y, 0.5)), -0.5, 1.5) * 1000) / 1000,
-              ancho: Math.round(pinza(num(c.fin.ancho, num(c.ancho, 0.3)), 0.05, 1.5) * 1000) / 1000,
+              ancho: Math.round(pinza(num(c.fin.ancho, num(c.ancho, 0.3)), 0.05, 2) * 1000) / 1000,
               giro: Math.round(pinza(num(c.fin.giro, num(c.giro, 0)), -720, 720) * 10) / 10
             }
           }
         : {}),
-      ...(c.animada && medios[c.animada.base] !== undefined && ANIMAR_CAPA.some((a) => a.id === c.animada!.tipo) ? { animada: c.animada } : {})
+      ...(c.animada && medios[c.animada.base] !== undefined && ANIMAR_CAPA.some((a) => a.id === c.animada!.tipo) ? { animada: c.animada } : {}),
+      ...(typeof c.profundidad === 'number' && Number.isFinite(c.profundidad) ? { profundidad: Math.round(pinza(c.profundidad, 0, 1) * 100) / 100 } : {}),
+      ...(num(c.desenfoque, 0) > 0.005 ? { desenfoque: Math.round(pinza(num(c.desenfoque, 0), 0, 1) * 100) / 100 } : {})
     })
   }
   return capas.sort((a, b) => a.inicio - b.inicio)
@@ -595,8 +613,20 @@ export function ajustesDe(clip: ClipTL | undefined): Required<AjustesClip> {
     saturacion: clip?.ajustes?.saturacion ?? 1,
     cx: clip?.ajustes?.cx ?? 0.5,
     cy: clip?.ajustes?.cy ?? 0.5,
-    acercar: clip?.ajustes?.acercar ?? 0
+    acercar: clip?.ajustes?.acercar ?? 0,
+    panx: clip?.ajustes?.panx ?? 0,
+    pany: clip?.ajustes?.pany ?? 0
   }
+}
+
+/**
+ * La cámara de un clip en un punto de su recorrido (0 al empezar, 1 al acabar): el zoom y el punto
+ * hacia el que se acerca (cx, cy), con el paneo suave (empieza y acaba despacio). Igual en el MP4.
+ */
+export function camaraEn(a: Required<AjustesClip>, avance: number): { z: number; cx: number; cy: number } {
+  const q = Math.min(1, Math.max(0, avance))
+  const e = 3 * q * q - 2 * q * q * q
+  return { z: zoomEn(a, q), cx: Math.min(1, Math.max(0, a.cx + a.panx * e)), cy: Math.min(1, Math.max(0, a.cy + a.pany * e)) }
 }
 
 /** Cuánto zoom lleva el clip en un punto de su recorrido (0 al empezar, 1 al acabar). */
@@ -1009,6 +1039,7 @@ export function cambiarCapa(tl: Timeline, id: string, cambio: Partial<Omit<CapaT
       if ('entrada' in cambio && !cambio.entrada) delete nueva.entrada
       if ('fin' in cambio && !cambio.fin) delete nueva.fin
       if ('animada' in cambio && !cambio.animada) delete nueva.animada
+      if ('profundidad' in cambio && cambio.profundidad == null) delete nueva.profundidad
       return nueva
     }),
     duracionTimeline(tl),
@@ -1058,6 +1089,45 @@ export function estadoCapa(c: CapaTL, dt: number, conEntrada = true): { x: numbe
   }
   const { escala, opacidad } = animacionCapa(c, dt)
   return { x, y, ancho, giro, escala, opacidad }
+}
+
+// ===== Escena 2.5D =====
+
+/** Cuánto más que el fondo se mueve una capa muy cercana (profundidad 1): 1 + PARALAJE veces. */
+export const PARALAJE = 1.5
+/** El desenfoque más fuerte (1), en fracción del ancho del cuadro (es la desviación del desenfoque gaussiano). */
+export const DESENFOQUE_MAX = 0.012
+
+/**
+ * El clip sobre el que está una capa con profundidad (el que hay bajo ella cuando aparece): su cámara
+ * es la de la escena. La capa sigue a ese clip aunque dure más que él (se queda en su último encuadre).
+ */
+export function referenciaParalaje(tl: Timeline, c: CapaTL): { inicio: number; largo: number; ajustes: Required<AjustesClip> } | null {
+  if (c.profundidad == null) return null
+  const base = ubicar(tl, c.inicio + 1e-3)
+  if (!base) return null
+  return { inicio: base.inicio, largo: Math.max(0.01, base.fin - base.inicio), ajustes: ajustesDe(base.clip) }
+}
+
+/**
+ * Dónde se ve una capa con profundidad en el segundo `t`: el fondo pasa de su encuadre al aparecer la
+ * capa al de ahora (escala A y desplazamiento B), y la capa hace lo mismo multiplicado por su cercanía.
+ * Un punto u del cuadro se ve en z·u_img − (z−1)·cx (el zoom hacia cx, como el crop y el CSS).
+ */
+export function aplicarParalaje(
+  ref: { inicio: number; largo: number; ajustes: Required<AjustesClip> },
+  profundidad: number,
+  inicioCapa: number,
+  t: number,
+  e: { x: number; y: number; ancho: number }
+): { x: number; y: number; ancho: number } {
+  const r = camaraEn(ref.ajustes, (inicioCapa - ref.inicio) / ref.largo)
+  const k = camaraEn(ref.ajustes, (t - ref.inicio) / ref.largo)
+  const A = k.z / r.z
+  const bx = A * (r.z - 1) * r.cx - (k.z - 1) * k.cx
+  const by = A * (r.z - 1) * r.cy - (k.z - 1) * k.cy
+  const m = 1 + PARALAJE * Math.min(1, Math.max(0, profundidad))
+  return { x: e.x + m * (A * e.x + bx - e.x), y: e.y + m * (A * e.y + by - e.y), ancho: e.ancho * Math.pow(A, m) }
 }
 
 /** Movimientos de una capa listos para usar (desde su sitio actual). */

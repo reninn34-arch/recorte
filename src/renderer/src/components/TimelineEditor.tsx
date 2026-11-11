@@ -1026,7 +1026,9 @@ export function TimelineEditor({
                   ['saturacion', 'Saturación', 0, 2, 0.01, (v: number) => `${Math.round(v * 100)} %`],
                   ['cx', 'Centro ↔', 0, 1, 0.01, (v: number) => `${Math.round(v * 100)} %`],
                   ['cy', 'Centro ↕', 0, 1, 0.01, (v: number) => `${Math.round(v * 100)} %`],
-                  ['acercar', 'Acercar despacio', 0, 0.3, 0.01, (v: number) => (v ? `+${Math.round(v * 100)} %` : 'no')]
+                  ['acercar', 'Acercar despacio', 0, 0.3, 0.01, (v: number) => (v ? `+${Math.round(v * 100)} %` : 'no')],
+                  ['panx', 'Paneo ↔', -0.5, 0.5, 0.01, (v: number) => (v ? `${v > 0 ? '→' : '←'} ${Math.round(Math.abs(v) * 100)} %` : 'no')],
+                  ['pany', 'Paneo ↕', -0.5, 0.5, 0.01, (v: number) => (v ? `${v > 0 ? '↓' : '↑'} ${Math.round(Math.abs(v) * 100)} %` : 'no')]
                 ] as const
               ).map(([clave, nombre, min, max, paso, formato]) => {
                 const valor = ajustesDe(clipElegido.clip)[clave]
@@ -1058,7 +1060,7 @@ export function TimelineEditor({
                 className="btn small ghost"
                 disabled={!clipElegido.clip.ajustes}
                 onClick={() =>
-                  historial.aplicar(ajustarClip(timeline, clipElegido.clip.id, { zoom: 1, brillo: 0, contraste: 1, saturacion: 1, cx: 0.5, cy: 0.5, acercar: 0 }))
+                  historial.aplicar(ajustarClip(timeline, clipElegido.clip.id, { zoom: 1, brillo: 0, contraste: 1, saturacion: 1, cx: 0.5, cy: 0.5, acercar: 0, panx: 0, pany: 0 }))
                 }
               >
                 Restablecer
@@ -1192,6 +1194,42 @@ export function TimelineEditor({
             <button className="btn small ghost" onClick={() => historial.aplicar(cambiarCapa(timeline, capaElegida.id, { x: 0.5, y: 0.5 }, medidas))}>
               Centrar
             </button>
+            <label
+              className="tl-ajuste en-linea"
+              title="Escena 2.5D: la capa sigue a la cámara del clip de debajo (zoom, acercar y paneo). Lejos se mueve con el fondo; cerca, mucho más: así se nota la distancia."
+            >
+              <span>
+                Profundidad <b>{capaElegida.profundidad == null ? 'fija' : capaElegida.profundidad < 0.2 ? 'lejos' : capaElegida.profundidad < 0.6 ? 'media' : 'cerca'}</b>
+              </span>
+              <input
+                type="range"
+                min={-0.05}
+                max={1}
+                step={0.05}
+                value={capaElegida.profundidad ?? -0.05}
+                onPointerDown={empezarAjuste}
+                onFocus={empezarAjuste}
+                onChange={(e) => {
+                  const v = Number(e.target.value)
+                  deslizar(cambiarCapa(timeline, capaElegida.id, { profundidad: v < 0 ? undefined : v }, medidas))
+                }}
+              />
+            </label>
+            <label className="tl-ajuste en-linea" title="Fuera de foco: para lo que está muy cerca de la cámara (o muy lejos)">
+              <span>
+                Desenfoque <b>{capaElegida.desenfoque ? `${Math.round(capaElegida.desenfoque * 100)} %` : 'no'}</b>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={capaElegida.desenfoque ?? 0}
+                onPointerDown={empezarAjuste}
+                onFocus={empezarAjuste}
+                onChange={(e) => deslizar(cambiarCapa(timeline, capaElegida.id, { desenfoque: Number(e.target.value) }, medidas))}
+              />
+            </label>
             {onAnimarCapa && (capaElegida.animada || medios?.find((m) => m.id === capaElegida.fuente)?.tipo === 'imagen') && (
               <select
                 value={capaElegida.animada?.tipo ?? 'quieta'}

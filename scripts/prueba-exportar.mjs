@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { exportarTimeline } from '../src/main/exportar.ts'
-import { estadoCapa, normalizarTimeline } from '../src/shared/timeline.ts'
+import { aplicarParalaje, estadoCapa, normalizarTimeline, referenciaParalaje } from '../src/shared/timeline.ts'
 
 const dir = mkdtempSync(join(tmpdir(), 'recorte-exportar-'))
 const ff = (args) => {
@@ -170,6 +170,50 @@ for (const t of [0.5, 2.5]) {
   const rojos = px.filter((p) => rojo(p)).length
   assert.ok(verdes === 0 && rojos > 20, `en ${t} s el clip sin fondo se ve sin verde (${verdes} verdes, ${rojos} rojos)`)
 }
+
+// Escena 2.5D: un fondo (imagen) con zoom y paneo a la derecha; una capa pegada al fondo, una fija y una
+// muy cercana y desenfocada. En el MP4 cada una está donde dice el monitor (aplicarParalaje).
+const rejilla = join(dir, 'media', 'rejilla.png')
+ff(['-f', 'lavfi', '-i', 'color=c=0x224466:s=1280x720,drawgrid=w=40:h=40:c=white', '-frames:v', '1', rejilla])
+const escena = normalizarTimeline(
+  {
+    clips: [{ id: 'c1', fuente: 'm5', entrada: 0, salida: 3, ajustes: { zoom: 1.4, cx: 0.4, panx: 0.2 } }],
+    textos: [],
+    capas: [
+      { id: 'k1', fuente: 'm1', inicio: 0, duracion: 3, x: 0.5, y: 0.25, ancho: 0.08, profundidad: 0 },
+      { id: 'k2', fuente: 'm1', inicio: 0, duracion: 3, x: 0.5, y: 0.5, ancho: 0.08 },
+      { id: 'k3', fuente: 'm1', inicio: 0, duracion: 3, x: 0.5, y: 0.75, ancho: 0.08, profundidad: 1, desenfoque: 0.4 }
+    ]
+  },
+  3,
+  { m1: 5, m5: 3 }
+)
+assert.equal(escena.capas[2].profundidad, 1, 'la profundidad sobrevive a normalizar')
+assert.equal(escena.clips[0].ajustes.panx, 0.2, 'el paneo sobrevive a normalizar')
+const otro5 = { ...otro, medios: [...proyecto.medios, { id: 'm5', ruta: rejilla, tipo: 'imagen', conAudio: false, nombre: 'rejilla.png', duracion: 3, ancho: 1280, alto: 720 }] }
+const r5 = await exportarTimeline(otro5, escena, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas5'))
+assert.equal(r5.ok, true, r5.error)
+const mp45 = join(dir, 'salidas5', 'timeline-prueba-original.mp4')
+const centroRojo = (t, y) => {
+  const r = spawnSync('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', mp45, '-frames:v', '1', '-vf', `crop=640:2:0:${y},scale=640:1`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'])
+  let suma = 0
+  let n = 0
+  for (let i = 0; i < r.stdout.length; i += 3) if (r.stdout[i] > 150 && r.stdout[i + 1] < 90 && r.stdout[i + 2] < 90) (suma += i / 3), n++
+  return n ? suma / n : NaN
+}
+const movido = {}
+for (const [i, y] of [[0, 90], [1, 180], [2, 270]]) {
+  const c = escena.capas[i]
+  const ref = referenciaParalaje(escena, c)
+  for (const t of [0.5, 2.5]) {
+    const e = estadoCapa(c, t)
+    const x = (ref ? aplicarParalaje(ref, c.profundidad, c.inicio, t, e) : e).x * 640
+    const visto = centroRojo(t, y)
+    assert.ok(Math.abs(visto - x) < 6, `capa ${i + 1} en ${t} s: el MP4 la pone en ${visto.toFixed(1)}, el monitor en ${x.toFixed(1)}`)
+  }
+  movido[i] = centroRojo(2.5, y) - centroRojo(0.5, y)
+}
+assert.ok(movido[0] < -10 && Math.abs(movido[1]) < 2 && movido[2] < movido[0] * 2, `paralaje: ${JSON.stringify(movido)}`)
 
 rmSync(dir, { recursive: true, force: true })
 console.log('exportar: ok')

@@ -99,7 +99,9 @@ function capas(antes: CapaTL[] | undefined, ahora: CapaTL[] | undefined, ctx: Co
   const b = porId(ahora)
   const donde = (c: CapaTL) =>
     `de ${s(c.inicio)} a ${s(c.inicio + c.duracion)}, centro en x ${c.x.toFixed(2)}, y ${c.y.toFixed(2)}, ancho ${c.ancho.toFixed(2)}${c.giro ? `, giro ${c.giro}°` : ''}${c.entrada ? `, entrada ${c.entrada}` : ''}` +
-    (c.fin ? `, y se mueve hasta x ${c.fin.x.toFixed(2)}, y ${c.fin.y.toFixed(2)}, ancho ${c.fin.ancho.toFixed(2)}${c.fin.giro ? `, giro ${c.fin.giro}°` : ''}` : '')
+    (c.fin ? `, y se mueve hasta x ${c.fin.x.toFixed(2)}, y ${c.fin.y.toFixed(2)}, ancho ${c.fin.ancho.toFixed(2)}${c.fin.giro ? `, giro ${c.fin.giro}°` : ''}` : '') +
+    (c.profundidad != null ? `, a profundidad ${c.profundidad.toFixed(2)} (sigue a la cámara)` : '') +
+    (c.desenfoque ? `, desenfocada ${Math.round(c.desenfoque * 100)} %` : '')
   for (const x of antes ?? []) {
     const y = b.get(x.id)
     if (!y) out.push(`Quitó la capa ${ctx.medio(x.fuente)} (${s(x.inicio)}).`)
@@ -136,6 +138,7 @@ function clips(antes: Timeline, ahora: Timeline, ctx: ContextoRetoques): string[
     const que = clip.fuente === FUENTE_PRINCIPAL ? `tu video entregado, del ${s(clip.entrada)} al ${s(clip.salida)}` : `${ctx.medio(clip.fuente)}${clip.entrada > 0.05 ? ` desde su ${s(clip.entrada)}` : ''}`
     const extra = [
       clip.ajustes?.zoom && clip.ajustes.zoom !== 1 ? `zoom ${clip.ajustes.zoom.toFixed(2)}` : '',
+      clip.ajustes?.panx || clip.ajustes?.pany ? `paneo ${(clip.ajustes.panx ?? 0).toFixed(2)}, ${(clip.ajustes.pany ?? 0).toFixed(2)}` : '',
       clip.fundido ? `entra con ${clip.transicion ?? 'fundido'} de ${s(clip.fundido)}` : ''
     ].filter(Boolean)
     return `  ${i + 1}. ${s(inicio)}–${s(fin)}: ${que}${extra.length ? ` (${extra.join(', ')})` : ''}`

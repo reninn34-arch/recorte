@@ -193,7 +193,7 @@ export async function proyectoDesdeReceta(
         fuente: medio.id,
         entrada: 0,
         salida: largo,
-        ajustes: { ...encuadre, ...(m.acercar === false ? {} : { acercar: 0.06 }) },
+        ajustes: camaraFoto(m, encuadre),
         ...fundido
       })
       editables += 1
@@ -409,13 +409,16 @@ export async function proyectoDesdeReceta(
       duracion: b - a,
       x: pinza(num(x.x, 0.5), 0, 1),
       y: pinza(num(x.y, 0.5), 0, 1),
-      ancho: pinza(num(x.ancho, 0.3) * (medioAnimado ? MARGEN_ANIMAR : 1), 0.05, 1.5),
+      ancho: pinza(num(x.ancho, 0.3) * (medioAnimado ? MARGEN_ANIMAR : 1), 0.05, 2),
       ...(typeof x.entrada === 'string' && ENTRADAS_CAPA.includes(x.entrada as EntradaCapa)
         ? { entrada: x.entrada as EntradaCapa }
         : x.entrada === 'ninguna'
           ? {}
           : { entrada: 'pop' as const }),
       ...(num(x.giro, 0) ? { giro: num(x.giro, 0) } : {}),
+      // Escena 2.5D: la capa sigue a la cámara de la foto de debajo; y su desenfoque.
+      ...(typeof x.profundidad === 'number' && Number.isFinite(x.profundidad) ? { profundidad: pinza(x.profundidad, 0, 1) } : {}),
+      ...(num(x.desenfoque, 0) > 0 ? { desenfoque: pinza(num(x.desenfoque, 0), 0, 1) } : {}),
       ...(x.fin && typeof x.fin === 'object'
         ? (() => {
             const f = x.fin as Record<string, unknown>
@@ -468,6 +471,28 @@ export async function proyectoDesdeReceta(
 }
 
 /** La animación en bucle de una imagen (con el kit de la carpeta de trabajo): la ruta del WebM, o null si no salió. */
+/**
+ * La cámara de una foto del kit como la de un clip del editor. En el kit, cx/cy es el punto de la foto que
+ * queda al centro; en el editor, hacia dónde se recorta el zoom (0 = borde izquierdo, 1 = derecho). Con
+ * «camara» (de un encuadre a otro): el zoom crece con «acercar» y el centro se desplaza con el paneo.
+ */
+function camaraFoto(m: Record<string, unknown>, encuadre: { zoom: number; cx: number; cy: number }): Record<string, number> {
+  const haciaEditor = (c: number, z: number) => (z > 1.001 ? pinza((c - 1 / (2 * z)) / (1 - 1 / z), 0, 1) : 0.5)
+  const z0 = encuadre.zoom
+  const inicio = { zoom: z0, cx: haciaEditor(encuadre.cx, z0), cy: haciaEditor(encuadre.cy, z0) }
+  const cam = m.camara && typeof m.camara === 'object' ? (m.camara as Record<string, unknown>) : null
+  if (!cam) return { ...inicio, ...(m.acercar === false ? {} : { acercar: 0.06 }) }
+  const z1 = Math.max(1, num(cam.zoom, z0))
+  const acercar = pinza(z1 / z0 - 1, 0, 0.3)
+  const zFin = z0 * (1 + acercar)
+  return {
+    ...inicio,
+    acercar,
+    panx: pinza(haciaEditor(num(cam.cx, encuadre.cx), zFin) - inicio.cx, -0.5, 0.5),
+    pany: pinza(haciaEditor(num(cam.cy, encuadre.cy), zFin) - inicio.cy, -0.5, 0.5)
+  }
+}
+
 async function animarConKit(trabajo: string, imagen: string, tipo: string, carpetaProyecto: string): Promise<string | null> {
   const kit = join(trabajo, 'kit', 'kit.py')
   const py = await buscarPython()

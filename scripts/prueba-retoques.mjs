@@ -27,9 +27,9 @@ try {
     join(trabajo, 'receta.json'),
     JSON.stringify({
       ancho: 540, alto: 960, duracion: 4,
-      momentos: [{ tipo: 'foto', archivo: 'entrada/foto.jpg', desde: 0, hasta: 4, rotulo: 'Hola' }],
+      momentos: [{ tipo: 'foto', archivo: 'entrada/foto.jpg', desde: 0, hasta: 4, rotulo: 'Hola', encuadre: { zoom: 1.2, cx: 0.5 }, camara: { zoom: 1.32, cx: 0.6 } }],
       capas: [
-        { archivo: 'entrada/logo.png', desde: 1, hasta: 3, x: 0.3, y: 0.2, ancho: 0.25, entrada: 'pop' },
+        { archivo: 'entrada/logo.png', desde: 1, hasta: 3, x: 0.3, y: 0.2, ancho: 0.25, entrada: 'pop', profundidad: 0.5, desenfoque: 0.3 },
         { archivo: 'entrada/logo.png', desde: 0, hasta: 4, x: 0.6, y: 0.5, ancho: 0.4, entrada: 'ninguna', animar: 'balanceo' }
       ],
       filtros: { grano: 0.3, vineta: 0.5 },
@@ -49,6 +49,9 @@ try {
   tl.capas = tl.capas.filter((x) => !x.animada)
   assert.deepEqual([tl.capas[0].x, tl.capas[0].y, tl.capas[0].ancho, tl.capas[0].entrada, tl.capas[0].inicio, tl.capas[0].duracion], [0.3, 0.2, 0.25, 'pop', 1, 2])
   assert.ok(armado.medios.some((m) => m.id === tl.capas[0].fuente && m.tipo === 'imagen'), 'su imagen queda en la biblioteca')
+  assert.deepEqual([tl.capas[0].profundidad, tl.capas[0].desenfoque], [0.5, 0.3], 'la escena 2.5D llega: profundidad y desenfoque')
+  const aj = tl.clips[0].ajustes
+  assert.ok(aj.zoom === 1.2 && Math.abs(aj.acercar - 0.1) < 0.01 && aj.panx > 0.05 && !aj.pany, `la cámara de la foto llega como zoom, acercar y paneo: ${JSON.stringify(aj)}`)
   assert.equal(tl.sonidos?.length, 1, 'el «pop» entra en «Sonidos» (el que no existe, no)')
   assert.equal(tl.sonidos[0].nombre, 'pop')
   assert.deepEqual(tl.filtros, { grano: 0.3, vineta: 0.5 }, 'los filtros de la receta son los filtros del editor')

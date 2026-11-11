@@ -90,7 +90,7 @@ export type OperacionTL =
   | { op: 'cambiar_sonido'; sonido_n: number; inicio?: number; volumen?: number }
   | { op: 'borrar_sonido'; sonido_n: number }
   | { op: 'reconstruir'; cortes: { entrada: number; salida: number }[] }
-  | { op: 'zoom'; clip?: number; zoom: number }
+  | { op: 'zoom'; clip?: number; zoom?: number; acercar?: number; cx?: number; cy?: number; panx?: number; pany?: number }
   | { op: 'color'; clip?: number; brillo?: number; contraste?: number; saturacion?: number }
   | { op: 'musica'; volumen?: number; ducking?: boolean }
   | { op: 'quitar_musica' }
@@ -176,7 +176,18 @@ export function pausasEnTimeline(tl: Timeline, transcript: TranscriptSegment[] |
   return pausas
 }
 
-type CamposCapa = { duracion?: number; x?: number; y?: number; ancho?: number; entrada?: EntradaCapa | 'corte'; giro?: number; fin?: Partial<FinCapa> | null }
+type CamposCapa = {
+  duracion?: number
+  x?: number
+  y?: number
+  ancho?: number
+  entrada?: EntradaCapa | 'corte'
+  giro?: number
+  fin?: Partial<FinCapa> | null
+  /** null: deja de seguir a la cámara (fija en la pantalla). */
+  profundidad?: number | null
+  desenfoque?: number
+}
 
 /** Lo que se puede cambiar de una capa, validado (sin `inicio`). `fin: null` quita el movimiento. */
 function camposCapa(x: Record<string, unknown>): CamposCapa {
@@ -192,6 +203,8 @@ function camposCapa(x: Record<string, unknown>): CamposCapa {
     ...(num(x.y) !== null ? { y: num(x.y)! } : {}),
     ...(num(x.ancho) !== null ? { ancho: num(x.ancho)! } : {}),
     ...(num(x.giro) !== null ? { giro: num(x.giro)! } : {}),
+    ...(x.profundidad === null || x.profundidad === 'fija' ? { profundidad: null } : num(x.profundidad) !== null ? { profundidad: num(x.profundidad)! } : {}),
+    ...(num(x.desenfoque) !== null ? { desenfoque: num(x.desenfoque)! } : {}),
     ...(x.entrada === 'corte' || (typeof x.entrada === 'string' && ENTRADAS_CAPA.includes(x.entrada as EntradaCapa)) ? { entrada: x.entrada as EntradaCapa | 'corte' } : {}),
     ...(x.fin === null || x.quieta === true
       ? { fin: null }
@@ -324,8 +337,9 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
         break
       }
       case 'zoom': {
-        const z = num(x.zoom)
-        if (z !== null) ops.push({ op: 'zoom', clip: num(x.clip) ?? undefined, zoom: z })
+        // La cámara del clip: zoom, acercamiento lento, hacia dónde y paneo (lo que no venga no cambia).
+        const campos = (['zoom', 'acercar', 'cx', 'cy', 'panx', 'pany'] as const).filter((k) => num(x[k]) !== null)
+        if (campos.length) ops.push({ op: 'zoom', clip: num(x.clip) ?? undefined, ...Object.fromEntries(campos.map((k) => [k, num(x[k])!])) })
         break
       }
       case 'color': {
@@ -614,7 +628,7 @@ export function aplicarOperaciones(
         }
         const cambio =
           o.op === 'zoom'
-            ? { zoom: o.zoom }
+            ? Object.fromEntries((['zoom', 'acercar', 'cx', 'cy', 'panx', 'pany'] as const).filter((k) => o[k] !== undefined).map((k) => [k, o[k]]))
             : {
                 ...(o.brillo !== undefined ? { brillo: o.brillo } : {}),
                 ...(o.contraste !== undefined ? { contraste: o.contraste } : {}),
@@ -622,7 +636,12 @@ export function aplicarOperaciones(
               }
         tl = ajustarClip(tl, destino ? destino.id : null, cambio)
         const donde = destino ? `al clip ${o.clip}` : 'a todos los clips'
-        if (o.op === 'zoom') cambios.push(`Puse zoom ${Math.round(Math.min(2, Math.max(1, o.zoom)) * 100)} % ${donde}`)
+        if (o.op === 'zoom')
+          cambios.push(
+            o.zoom !== undefined && o.panx === undefined && o.pany === undefined && o.acercar === undefined
+              ? `Puse zoom ${Math.round(Math.min(2, Math.max(1, o.zoom)) * 100)} % ${donde}`
+              : `Moví la cámara ${donde}`
+          )
         else cambios.push(o.saturacion === 0 ? `Pasé a blanco y negro ${donde.replace('al ', 'el ').replace('a todos', 'todos')}` : `Ajusté el color ${donde}`)
         break
       }
@@ -727,6 +746,8 @@ function cambioDeCapa(o: CamposCapa, actual?: CapaTL): Partial<Omit<CapaTL, 'id'
     ...(o.y !== undefined ? { y: o.y } : {}),
     ...(o.ancho !== undefined ? { ancho: o.ancho } : {}),
     ...(o.giro !== undefined ? { giro: o.giro } : {}),
+    ...(o.profundidad !== undefined ? { profundidad: o.profundidad ?? undefined } : {}),
+    ...(o.desenfoque !== undefined ? { desenfoque: o.desenfoque } : {}),
     ...(o.entrada !== undefined ? { entrada: o.entrada === 'corte' ? undefined : o.entrada } : {}),
     ...(o.fin === null ? { fin: undefined } : o.fin ? { fin: { ...base, ...o.fin } } : {})
   }
@@ -777,6 +798,8 @@ export function describirTimelineParaAgente(
     tl.capas.forEach((c, i) =>
       lineas.push(
         `  ${i + 1}. ${c.inicio.toFixed(2)}–${(c.inicio + c.duracion).toFixed(2)} ${nombres[c.fuente] ?? c.fuente} (${c.fuente}) en x ${c.x} y ${c.y}, ancho ${c.ancho}${c.giro ? `, giro ${c.giro}°` : ''}, ${c.entrada ?? 'sin entrada'}` +
+          (c.profundidad != null ? `, profundidad ${c.profundidad}` : '') +
+          (c.desenfoque ? `, desenfoque ${c.desenfoque}` : '') +
           (c.fin ? ` → termina en x ${c.fin.x} y ${c.fin.y}, ancho ${c.fin.ancho}${c.fin.giro ? `, giro ${c.fin.giro}°` : ''}` : '')
       )
     )
@@ -850,6 +873,7 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
 - {"op":"borrar_texto","texto_n":N}
 - {"op":"reconstruir","cortes":[{"entrada":F,"salida":F}, …]}  rehace la pista de video con estos tramos de la FUENTE, en este orden (para resúmenes, versiones cortas o reordenar por contenido). Los clips nuevos salen sin zoom ni color.
 - {"op":"zoom","clip":N,"zoom":Z}  acercamiento centrado del clip N, de 1 (nada) a 2 (el doble). Sin "clip", a todos. Para enfatizar una frase: divide antes y después y pon zoom 1.15–1.3 a ese clip (punch-in).
+  La misma op mueve la CÁMARA del clip (lo que no pongas no cambia): "acercar" (acercamiento lento durante el clip, 0 a 0.3), "cx","cy" (hacia qué punto, 0 a 1) y "panx","pany" (paneo: cuánto se desplaza ese punto al acabar, -0.5 a 0.5; necesita zoom 1.15 o más para tener imagen de sobra). Ej.: {"op":"zoom","clip":3,"zoom":1.2,"acercar":0.06,"panx":0.2}.
 - {"op":"color","clip":N,"brillo":B,"contraste":C,"saturacion":S}  brillo -0.3 a 0.3 (0 neutro), contraste 0.5 a 1.8 (1 neutro), saturación 0 (blanco y negro) a 2 (1 neutro). Sin "clip", a todos. Pon solo lo que cambies.
 - {"op":"musica","volumen":V,"ducking":true|false}  volumen 0 a 1 de la música ya puesta (bajo la voz suele ir bien 0.2–0.4); ducking hace que baje sola cuando hay voz.
 - {"op":"quitar_musica"}
@@ -861,6 +885,7 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
 - {"op":"cambiar_texto","texto_n":N,"x":0.5,"y":0.3}  pone el rótulo donde quieras: x, y son su centro en fracción del cuadro (0 izquierda/arriba, 1 derecha/abajo). Para volver a arriba, centro o abajo, usa "posicion".
 - {"op":"anadir_capa","medio":"ID","inicio":T,"duracion":S,"x":0.5,"y":0.5,"ancho":0.25,"giro":0,"entrada":"pop|fundido|izquierda|derecha|arriba|abajo|corte"}  pone encima del video un medio de la biblioteca (un logo, un ícono, una foto, una toma de apoyo), por su id. x, y = su centro y ancho = su ancho, en fracción del cuadro; giro en grados. "pop" (por defecto) entra rebotando; úsalo para logos e íconos que aparecen cuando se nombran. "izquierda/derecha/arriba/abajo" entra deslizándose desde fuera. No tapes caras ni manos que importan.
   Para que SE MUEVA mientras está, di dónde termina: "fin_x","fin_y","fin_ancho","fin_giro" (lo que no pongas, igual que al empezar; se puede terminar fuera del cuadro, de -0.5 a 1.5). Va suave de un sitio al otro durante toda su duración. Ejemplos: un avión que cruza ("x":-0.2 → "fin_x":1.2), paralaje (un fondo que se desliza 0.04 y crece 1.05), una foto que se acerca ("fin_ancho" 1.3 veces el ancho), algo que gira ("fin_giro":15). Con "quieta":true deja de moverse.
+  ESCENA 2.5D: "profundidad" de 0 a 1 hace que la capa siga a la cámara del clip de debajo (su zoom, acercamiento y paneo): 0 se mueve pegada al fondo, 1 (muy cerca) se mueve y crece 2,5 veces más. Así un paisaje armado con recortes (montañas 0.2, una casa 0.5, una bandera 0.6, la persona 0.4) se siente con distancia cuando la cámara se mueve. "profundidad":"fija" la vuelve a pegar a la pantalla (para logos y textos). "desenfoque" de 0 a 1: fuera de foco, para lo que está muy cerca (un primer plano) o muy lejos.
 - {"op":"cambiar_capa","capa_n":N, …los mismos campos…}  y {"op":"borrar_capa","capa_n":N}
 - {"op":"transicion","clip":N,"tipo":"fundido|barrido-izquierda|barrido-derecha|barrido-arriba|barrido-abajo|zoom|desenfoque|destello|circulo|corte","duracion":0.45}  cómo entra el clip N sobre el anterior (sin "clip": en todos los cortes). Los barridos empujan la imagen hacia ese lado (como un paneo rápido); destello pasa por blanco; corte = sin transición. Con medida: un documental rápido usa cortes secos y alguna transición en los cambios de tema.
 - {"op":"filtros","grano":0.3,"polvo":0.2,"trama":0.4,"vineta":0.5,"parpadeo":0.1}  filtros para TODO el video, de 0 (nada) a 1 (fuerte): grano de película, polvo y rayas, trama de puntos de imprenta, viñeta (bordes oscuros) y parpadeo de proyector. Un 0 quita ese filtro. Para un aire de documental o de archivo: grano 0.3, polvo 0.2, viñeta 0.5; trama 0.4 para un aire de revista.

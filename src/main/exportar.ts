@@ -4,6 +4,11 @@ import { rutaScriptPython } from './transcribir'
 import { join } from 'node:path'
 import {
   ajustesDe,
+  camaraEn,
+  DESENFOQUE_MAX,
+  PARALAJE,
+  referenciaParalaje,
+  type AjustesClip,
   duracionTimeline,
   ENTRADA_LADO_S,
   FUENTE_PRINCIPAL,
@@ -258,14 +263,18 @@ export async function exportarTimeline(
     const iv = n++
     // Zoom: recorte hacia el punto (cx, cy) antes de encuadrar. Color: eq. Lo mismo que el monitor.
     const a = ajustesDe(t.clip)
+    // Con paneo, todo (zoom, acercamiento y desplazamiento) va en el zoompan: el centro se mueve en cada cuadro.
+    const paneo = Math.abs(a.panx) > 0.001 || Math.abs(a.pany) > 0.001
     const zoom =
-      a.zoom > 1.001
+      a.zoom > 1.001 && !paneo
         ? `crop=trunc(iw/${a.zoom}/2)*2:trunc(ih/${a.zoom}/2)*2:(iw-ow)*${a.cx.toFixed(3)}:(ih-oh)*${a.cy.toFixed(3)},`
         : ''
     // Acercamiento lento: zoompan cuadro a cuadro, al doble de tamaño para que no tiemble.
     const cuadros = Math.max(1, Math.round(largo * fps))
-    const lento =
-      a.acercar > 0.001
+    const E = `(3*pow(on/${cuadros},2)-2*pow(on/${cuadros},3))`
+    const lento = paneo
+      ? `,scale=${ancho * 2}:${alto * 2},zoompan=z='${a.zoom.toFixed(4)}*(1+${a.acercar.toFixed(4)}*on/${cuadros})':x='(iw-iw/zoom)*clip(${a.cx.toFixed(4)}+(${a.panx.toFixed(4)})*${E},0,1)':y='(ih-ih/zoom)*clip(${a.cy.toFixed(4)}+(${a.pany.toFixed(4)})*${E},0,1)':d=1:s=${ancho}x${alto}:fps=${fps}`
+      : a.acercar > 0.001
         ? `,scale=${ancho * 2}:${alto * 2},zoompan=z='1+${a.acercar.toFixed(4)}*on/${cuadros}':x='(iw-iw/zoom)*${a.cx.toFixed(3)}':y='(ih-ih/zoom)*${a.cy.toFixed(3)}':d=1:s=${ancho}x${alto}:fps=${fps}`
         : ''
     const color =
@@ -335,7 +344,7 @@ export async function exportarTimeline(
   const capas = (timeline.capas ?? []).filter((c) => fuenteDe(c.fuente))
   // FFmpeg pone las capas en píxeles enteros: una que se mueve o crece despacio temblaría. Con alguna así,
   // se compone al doble de tamaño y luego se reduce (medio píxel de paso, imperceptible).
-  const sup = capas.some((c) => c.fin || c.giro || (c.entrada && !['pop', 'fundido'].includes(c.entrada))) ? 2 : 1
+  const sup = capas.some((c) => c.fin || c.giro || c.profundidad != null || (c.entrada && !['pop', 'fundido'].includes(c.entrada))) ? 2 : 1
   const anchoC = ancho * sup
   const altoC = alto * sup
   if (sup > 1) {
@@ -349,7 +358,7 @@ export async function exportarTimeline(
     else entradas.push('-stream_loop', '-1', ...(/\.webm$/i.test(f.ruta) ? ['-c:v', 'libvpx-vp9'] : []), '-ss', (c.desde ?? 0).toFixed(3), '-t', c.duracion.toFixed(3), '-i', f.ruta)
     const k = n++
     // Lo mismo que estadoCapa (el monitor), en expresiones de FFmpeg: `T` es el segundo de la capa.
-    const ex = expresionesCapa(c)
+    const ex = expresionesCapa(c, referenciaParalaje(timeline, c))
     const en = (expr: string, T: string) => expr.replace(/T/g, T)
     const fundido = c.entrada === 'fundido' ? ',fade=t=in:st=0:d=0.35:alpha=1' : c.entrada === 'pop' ? ',fade=t=in:st=0:d=0.08:alpha=1' : ''
     // Con giro, la capa va en un lienzo cuadrado fijo (lo que ocupa en su punto más grande y girada).
@@ -359,7 +368,7 @@ export async function exportarTimeline(
       ? `,pad=w=${lado}:h=${lado}:x='(ow-iw)/2':y='(oh-ih)/2':color=black@0:eval=frame,rotate=a='(${en(ex.giro, 't')})*PI/180':c=none:ow=${lado}:oh=${lado}`
       : ''
     partes.push(
-      `[${k}:v]setpts=PTS-STARTPTS,fps=${fps},format=rgba,scale=w='max(2,trunc(${anchoC}*${en(ex.ancho, 't')}*${en(ex.escala, 't')}/2)*2)':h=-2:eval=frame:flags=bicubic${giro}${fundido},setpts=PTS+${c.inicio.toFixed(3)}/TB[capa${i}]`
+      `[${k}:v]setpts=PTS-STARTPTS,fps=${fps},format=rgba,scale=w='max(2,trunc(${anchoC}*${en(ex.ancho, 't')}*${en(ex.escala, 't')}/2)*2)':h=-2:eval=frame:flags=bicubic${giro}${desenfoque(c, anchoC)}${fundido},setpts=PTS+${c.inicio.toFixed(3)}/TB[capa${i}]`
     )
     const salida = `[conCapa${i}]`
     const T = `(t-${c.inicio.toFixed(3)})`
@@ -479,11 +488,22 @@ export async function exportarTimeline(
 
 const n3 = (v: number) => (Math.round(v * 1000) / 1000).toString()
 
+/** El desenfoque de una capa: con margen transparente alrededor, para que el borde se difumine sin cortarse. */
+function desenfoque(c: CapaTL, anchoC: number): string {
+  if (!c.desenfoque) return ''
+  const sigma = c.desenfoque * DESENFOQUE_MAX * anchoC
+  const m = Math.ceil(sigma * 3 / 2) * 2
+  return `,pad=w=iw+${2 * m}:h=ih+${2 * m}:x=${m}:y=${m}:color=black@0:eval=frame,gblur=sigma=${sigma.toFixed(2)}`
+}
+
 /**
  * El recorrido de una capa en expresiones de FFmpeg (con `T` = segundos desde que aparece), igual
  * que `estadoCapa`: de su sitio a `fin` suavemente, la entrada desde un lado y el rebote del «pop».
  */
-export function expresionesCapa(c: CapaTL): { x: string; y: string; ancho: string; giro: string; escala: string } {
+export function expresionesCapa(
+  c: CapaTL,
+  ref: { inicio: number; largo: number; ajustes: Required<AjustesClip> } | null = null
+): { x: string; y: string; ancho: string; giro: string; escala: string } {
   const f = c.fin
   const E = f ? `(3*pow(clip(T/${n3(Math.max(0.1, c.duracion))},0,1),2)-2*pow(clip(T/${n3(Math.max(0.1, c.duracion))},0,1),3))` : '0'
   const lerp = (a: number, b: number) => (f && Math.abs(b - a) > 1e-4 ? `(${n3(a)}+(${n3(b - a)})*${E})` : `(${n3(a)})`)
@@ -493,10 +513,29 @@ export function expresionesCapa(c: CapaTL): { x: string; y: string; ancho: strin
   const K = `(1-pow(1-clip(T/${ENTRADA_LADO_S},0,1),3))`
   if (lado.x !== undefined) x = `(${n3(lado.x)}+(${x}-(${n3(lado.x)}))*${K})`
   if (lado.y !== undefined) y = `(${n3(lado.y)}+(${y}-(${n3(lado.y)}))*${K})`
+  let ancho = lerp(c.ancho, f?.ancho ?? c.ancho)
+  if (ref) {
+    // Escena 2.5D (aplicarParalaje): la cámara del clip de debajo, de cuando aparece la capa a ahora.
+    const a = ref.ajustes
+    const n6 = (v: number) => (Math.round(v * 1e6) / 1e6).toString()
+    const r = camaraEn(a, (c.inicio - ref.inicio) / ref.largo)
+    const q = `clip((${n6(c.inicio - ref.inicio)}+T)/${n6(ref.largo)},0,1)`
+    const e = `(3*pow(${q},2)-2*pow(${q},3))`
+    const z = `(${n6(a.zoom)}*(1+${n6(a.acercar)}*${q}))`
+    const cx = `clip(${n6(a.cx)}+(${n6(a.panx)})*${e},0,1)`
+    const cy = `clip(${n6(a.cy)}+(${n6(a.pany)})*${e},0,1)`
+    const A = `(${z}/${n6(r.z)})`
+    const m = 1 + PARALAJE * Math.min(1, Math.max(0, c.profundidad ?? 0))
+    const bx = `(${A}*${n6((r.z - 1) * r.cx)}-(${z}-1)*${cx})`
+    const by = `(${A}*${n6((r.z - 1) * r.cy)}-(${z}-1)*${cy})`
+    x = `(${x}+${n6(m)}*(${A}*${x}+${bx}-${x}))`
+    y = `(${y}+${n6(m)}*(${A}*${y}+${by}-${y}))`
+    ancho = `(${ancho}*pow(${A},${n6(m)}))`
+  }
   return {
     x,
     y,
-    ancho: lerp(c.ancho, f?.ancho ?? c.ancho),
+    ancho,
     giro: lerp(c.giro ?? 0, f?.giro ?? c.giro ?? 0),
     // El rebote del «pop»: entra al 45 %, se pasa al 117 % y se asienta en 0,24 s (animacionCapa).
     escala: c.entrada === 'pop' ? 'if(lt(T,0.13),0.45+T/0.13*0.72,if(lt(T,0.24),1.17-(T-0.13)/0.11*0.17,1))' : '1'

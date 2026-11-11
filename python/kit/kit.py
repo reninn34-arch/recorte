@@ -302,7 +302,7 @@ def leer_capas(lista, L):
             continue
         video = VideoCapa(ruta, L) if ext in ('.webm', '.mp4', '.mov') else None
         im = video.cuadro(0) if video else Image.open(ruta).convert('RGBA')
-        ancho = min(1.0, max(0.05, float(c.get('ancho', 0.3))))
+        ancho = min(2.0, max(0.05, float(c.get('ancho', 0.3))))
         w = max(1, round(L.W * ancho))
         h = max(1, round(im.height * w / im.width))
         entrada = c.get('entrada', 'pop')
@@ -322,6 +322,10 @@ def leer_capas(lista, L):
                                            max(1, round(im.height * (max(w, round(L.W * float(fin.get('ancho', ancho)))) if fin else w) / im.width))), Image.LANCZOS),
                                 *((c['animar'], 0.5) if isinstance(c.get('animar'), str) else (c['animar'].get('tipo'), c['animar'].get('fuerza', 0.5))))
                         if c.get('animar') and not video else None),
+            # Escena 2.5D: a qué distancia está (0 pegada al fondo, 1 muy cerca); sin ella, fija en la pantalla.
+            'profundidad': min(1.0, max(0.0, float(c['profundidad']))) if isinstance(c.get('profundidad'), (int, float)) else None,
+            'desenfoque': min(1.0, max(0.0, float(c.get('desenfoque') or 0))),
+            'base': None,
         })
     return capas
 
@@ -488,6 +492,59 @@ def pegar_suave(lienzo, im, cx, cy, ancho, giro=0.0, alfa=1.0):
     lienzo.alpha_composite(pieza, (x0 + ix, y0 + iy))
 
 
+# Escena 2.5D (igual que en el editor): una capa muy cercana (profundidad 1) se mueve 1 + PARALAJE veces
+# lo que el fondo; el desenfoque más fuerte es esta fracción del ancho del cuadro.
+PARALAJE = 1.5
+DESENFOQUE_MAX = 0.012
+
+
+def paralaje(c, t, x, y, ancho):
+    """Dónde se ve una capa con profundidad: la cámara de la foto de debajo (su encuadre, acercamiento y
+    paneo) va del encuadre de cuando apareció la capa al de ahora, y la capa hace lo mismo multiplicado
+    por su cercanía. Así un paisaje hecho de recortes se siente con distancia."""
+    base = c.get('base')
+    if c.get('profundidad') is None or base is None:
+        return x, y, ancho
+    x0r, y0r, cwr, chr_ = base.ventana_en(c['desde'])
+    x0, y0, cw, ch = base.ventana_en(t)
+    A = cwr / cw
+    bx, by = (x0r - x0) / cw, (y0r - y0) / ch
+    m = 1 + PARALAJE * c['profundidad']
+    return x + m * (A * x + bx - x), y + m * (A * y + by - y), ancho * A ** m
+
+
+def desenfocar(c, im, ancho_px, L, fija):
+    """La capa fuera de foco, con margen transparente para que el borde se difumine sin cortarse."""
+    if not c.get('desenfoque'):
+        return im, ancho_px
+    if fija and c.get('_borrosa'):
+        return c['_borrosa']
+    sigma = c['desenfoque'] * DESENFOQUE_MAX * L.W * im.width / max(1.0, ancho_px)
+    mg = max(1, math.ceil(sigma * 3))
+    lienzo = Image.new('RGBA', (im.width + 2 * mg, im.height + 2 * mg), (0, 0, 0, 0))
+    lienzo.paste(im, (mg, mg))
+    # Con el color premultiplicado, para que el borde no se ensucie de negro.
+    a = np.asarray(lienzo, dtype=np.float32)
+    al = a[..., 3:4] / 255
+    pre = Image.fromarray(np.clip(np.dstack([a[..., :3] * al, a[..., 3:4]]), 0, 255).astype(np.uint8), 'RGBA').filter(ImageFilter.GaussianBlur(sigma))
+    b = np.asarray(pre, dtype=np.float32)
+    rgb = b[..., :3] / np.maximum(b[..., 3:4] / 255, 1e-3)
+    sale = Image.fromarray(np.clip(np.dstack([rgb, b[..., 3:4]]), 0, 255).astype(np.uint8), 'RGBA')
+    r = (sale, ancho_px * lienzo.width / im.width)
+    if fija:
+        c['_borrosa'] = r
+    return r
+
+
+def foto_de_fondo(momentos, t):
+    """La foto que se ve de fondo en `t` (la última que empezó): su cámara es la de la escena."""
+    base = None
+    for m in momentos:
+        if isinstance(m, Foto) and m.desde <= t + 1e-3:
+            base = m
+    return base
+
+
 def estado_capa(c, dt):
     """Dónde está una capa `dt` s después de aparecer: igual que estadoCapa del editor (recorrido suave
     hasta `fin` y entrada desde un lado en 0,45 s)."""
@@ -557,6 +614,7 @@ def capas_encima(lienzo, L, t):
             continue
         dt = t - c['desde']
         x, y, ancho, giro = estado_capa(c, dt)
+        x, y, ancho = paralaje(c, t, x, y, ancho)
         escala, alfa = ancho / c['ancho'], 1.0
         if c['entrada'] == 'pop':
             escala *= pop(dt)
@@ -574,6 +632,10 @@ def capas_encima(lienzo, L, t):
             im, ancho_px = an.cuadro(dt), L.W * c['ancho'] * escala * an.W / an.w
         else:
             im, ancho_px = c['im'], L.W * c['ancho'] * escala
+        if c.get('desenfoque'):
+            fija = not c['video'] and not c['animada']
+            im, factor = desenfocar(c, im, L.W * c['ancho'], L, fija)
+            ancho_px *= factor / (L.W * c['ancho'])
         pegar_suave(lienzo, im, L.W * x, L.H * y, ancho_px, giro, alfa)
     return lienzo
 
@@ -649,7 +711,8 @@ class Foto(Momento):
             im = im.resize((max(1, round(im.width * esc)), max(1, round(im.height * esc))), Image.LANCZOS)
         self.img = im
 
-    def cuadro(self, t):
+    def ventana_en(self, t):
+        """La parte de la foto que se ve en `t` (x0, y0, ancho, alto en píxeles de la foto, con decimales)."""
         L = self.L
         p = tramo(t, self.desde, self.hasta)
         if self.fin:
@@ -658,7 +721,11 @@ class Foto(Momento):
         else:
             zoom, cx, cy = self.ini
             zoom *= 1 + (self.margen - 1) * ease_out(p)
-        im = recorte_suave(self.img, L.W, L.H, *ventana(self.img.width, self.img.height, L.W, L.H, zoom, cx, cy))
+        return ventana(self.img.width, self.img.height, L.W, L.H, zoom, cx, cy)
+
+    def cuadro(self, t):
+        L = self.L
+        im = recorte_suave(self.img, L.W, L.H, *self.ventana_en(t))
         a = np.asarray(im, dtype=np.float32)
         if self.m.get('brillo'):
             a = barrido(a, (t - self.desde - 0.15) / 0.8 * 1.4 - 0.2)
@@ -1247,6 +1314,10 @@ def cargar(ruta):
             if not os.path.isfile(L.ruta(f)):
                 raise SystemExit(f'Momento {i + 1}: no encuentro «{f}».')
         momentos.append(PIEZAS[tipo](m, L))
+    # Las capas con profundidad siguen a la cámara de la foto que tienen debajo al aparecer.
+    for c in L.capas:
+        if c['profundidad'] is not None:
+            c['base'] = foto_de_fondo(momentos, c['desde'])
     fin = max([m.hasta for m in momentos] or [1.0])
     dur = float(r.get('duracion', fin))
     return r, L, momentos, dur
@@ -1540,19 +1611,29 @@ def carpeta_modelos():
 
 def modelo_fondo():
     """La sesión del modelo de fondos (lo baja y prepara onnxruntime la primera vez)."""
+    return sesion_modelo(MODELO_FONDO, 'para quitar fondos')
+
+
+# Depth Anything V2 (pequeño): cuánto de cerca está cada píxel de una foto, sin gastar créditos.
+MODELO_PROFUNDIDAD = ('depth-anything-v2-small.onnx',
+                      'https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main/onnx/model.onnx', 99060839)
+
+
+def sesion_modelo(modelo, para):
+    """La sesión de un modelo ONNX del kit: lo baja la primera vez (y prepara onnxruntime)."""
     try:
         import onnxruntime as ort
     except ImportError:
         print('Preparando el quitafondos (una vez)…', file=sys.stderr, flush=True)
         subprocess.run([sys.executable, '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check', 'onnxruntime'], check=True)
         import onnxruntime as ort
-    nombre, url, tam = MODELO_FONDO
+    nombre, url, tam = modelo
     ruta = os.path.join(carpeta_modelos(), nombre)
     if not os.path.isfile(ruta) or os.path.getsize(ruta) != tam:
         import urllib.request
         os.makedirs(os.path.dirname(ruta), exist_ok=True)
         temporal = ruta + '.bajando'
-        print(f'Bajando el modelo para quitar fondos ({tam // 1_000_000} MB, una sola vez)…', file=sys.stderr, flush=True)
+        print(f'Bajando el modelo {para} ({tam // 1_000_000} MB, una sola vez)…', file=sys.stderr, flush=True)
         with urllib.request.urlopen(url, timeout=60) as r, open(temporal, 'wb') as f:
             hecho, aviso = 0, 0
             while True:
@@ -1566,7 +1647,7 @@ def modelo_fondo():
                     print(f'  {hecho * 100 // tam} %', file=sys.stderr, flush=True)
         if os.path.getsize(temporal) != tam:
             os.remove(temporal)
-            raise SystemExit('El modelo para quitar fondos no se bajó entero. Revisa la conexión y vuelve a probar.')
+            raise SystemExit(f'El modelo {para} no se bajó entero. Revisa la conexión y vuelve a probar.')
         os.replace(temporal, ruta)
     return ort.InferenceSession(ruta, providers=['CPUExecutionProvider'])
 
@@ -1588,6 +1669,80 @@ def mascara_modelo(im):
     import cv2
     r = max(1, round(min(im.size) / 600))
     return cv2.GaussianBlur(duro.astype(np.float32), (2 * r + 1, 2 * r + 1), 0)
+
+
+def profundidad_foto(im):
+    """Lo cerca que está cada píxel de la foto, de 0 (lo más lejano) a 1 (lo más cercano)."""
+    sesion = sesion_modelo(MODELO_PROFUNDIDAD, 'para ver la profundidad de las fotos')
+    w, h = im.size
+    k = 518 / min(w, h)
+    # El modelo trabaja en múltiplos de 14 (sus parches).
+    tw, th = max(14, round(w * k / 14) * 14), max(14, round(h * k / 14) * 14)
+    a = np.asarray(im.convert('RGB').resize((tw, th), Image.BICUBIC), dtype=np.float32) / 255
+    a = (a - np.array([0.485, 0.456, 0.406], dtype=np.float32)) / np.array([0.229, 0.224, 0.225], dtype=np.float32)
+    salida = sesion.run(None, {sesion.get_inputs()[0].name: a.transpose(2, 0, 1)[None].astype(np.float32)})[0]
+    d = np.asarray(salida, dtype=np.float32).reshape(salida.shape[-2], salida.shape[-1])
+    lo, hi = np.percentile(d, 1), np.percentile(d, 99)
+    d = np.clip((d - lo) / max(float(hi - lo), 1e-6), 0, 1)
+    import cv2
+    return cv2.resize(d, (w, h), interpolation=cv2.INTER_CUBIC).clip(0, 1)
+
+
+def rellenar(rgb, hueco):
+    """Rellena lo que queda tapado (`hueco`, 0/1) con lo que hay alrededor: lo que se descubre al moverse la cámara."""
+    import cv2
+    h, w = hueco.shape
+    k = min(1.0, 640 / max(w, h))
+    chico = cv2.resize(rgb, (max(1, round(w * k)), max(1, round(h * k))), interpolation=cv2.INTER_AREA)
+    m = cv2.resize((hueco * 255).astype(np.uint8), (chico.shape[1], chico.shape[0]), interpolation=cv2.INTER_NEAREST)
+    m = cv2.dilate(m, np.ones((5, 5), np.uint8))
+    lleno = cv2.inpaint(chico, m, 9, cv2.INPAINT_TELEA)
+    lleno = cv2.resize(lleno, (w, h), interpolation=cv2.INTER_CUBIC)
+    suave = cv2.GaussianBlur(cv2.dilate((hueco * 255).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(np.float32) / 255, (9, 9), 0)[..., None]
+    return (rgb * (1 - suave) + lleno * suave).astype(np.uint8)
+
+
+def separar(ruta, planos=3, salida=None):
+    """Parte una foto en planos por distancia (escena 2.5D): el más lejano entero (con lo de delante
+    rellenado) para usarlo de fondo y cada plano más cercano como PNG sin fondo, con su profundidad."""
+    import cv2
+    planos = max(2, min(5, int(planos)))
+    im = Image.open(ruta).convert('RGB')
+    if max(im.size) > 2048:
+        im.thumbnail((2048, 2048), Image.LANCZOS)
+    rgb = np.asarray(im, dtype=np.uint8)
+    d = profundidad_foto(im)
+    # Los cortes entre planos: agrupa las distancias (k-medias) y corta a medio camino entre grupos. Por partes
+    # iguales no sirve: el cielo, todo a la misma distancia, se queda con medio plano y los demás vacíos.
+    import cv2
+    muestra = d.reshape(-1, 1)[:: max(1, d.size // 60000)].astype(np.float32)
+    _, _, centros = cv2.kmeans(muestra, planos, None, (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 50, 1e-4), 4,
+                               cv2.KMEANS_PP_CENTERS)
+    c = sorted(float(x) for x in centros.ravel())
+    cortes = [(c[i] + c[i + 1]) / 2 for i in range(planos - 1)]
+    base = salida or os.path.splitext(ruta)[0]
+    r = max(1, round(min(im.size) / 400))
+    hechos = []
+    for i in range(planos):
+        cerca = d >= cortes[i] if i < planos - 1 else np.zeros_like(d, dtype=bool)
+        # Lo que tapa este plano (lo más cercano), rellenado: es lo que se descubre al moverse.
+        color = rellenar(rgb, cerca.astype(np.float32)) if cerca.any() else rgb
+        if i == 0:
+            alfa = np.ones_like(d, dtype=np.float32)
+        else:
+            dentro = (d >= cortes[i - 1]).astype(np.float32)
+            # Un poco más ancho que su silueta (con el color rellenado), para que al moverse no deje rendija.
+            dentro = cv2.dilate(dentro, np.ones((2 * r + 1, 2 * r + 1), np.uint8))
+            alfa = cv2.GaussianBlur(dentro, (2 * r + 1, 2 * r + 1), 0)
+        archivo = f'{base}-plano{i + 1}.png'
+        Image.fromarray(np.dstack([color, (alfa * 255).astype(np.uint8)]), 'RGBA').save(archivo)
+        # La profundidad que se le sugiere: el más lejano es el fondo (0); el más cercano, 0.6.
+        hechos.append({'archivo': archivo, 'profundidad': round(0.6 * i / (planos - 1), 2)})
+    mapa = f'{base}-profundidad.png'
+    Image.fromarray((d * 255).astype(np.uint8), 'L').save(mapa)
+    return {'fondo': hechos[0]['archivo'], 'planos': hechos[1:], 'mapa': mapa, 'ancho': im.width, 'alto': im.height,
+            'uso': 'el fondo como foto con "encuadre" {"zoom": Z, "cx": 0.5, "cy": 0.5} y su "camara"; cada plano como capa '
+                   'x 0.5, y 0.5, ancho Z (la foto en vertical como el video), con su profundidad y "entrada": "ninguna"'}
 
 
 def guardar_recorte(rgb, alfa, salida, extra):
@@ -1869,6 +2024,10 @@ def main():
     rv = sub.add_parser('recortar-video')
     rv.add_argument('clip')
     rv.add_argument('--salida')
+    sp = sub.add_parser('separar')
+    sp.add_argument('imagen')
+    sp.add_argument('--planos', type=int, default=3)
+    sp.add_argument('--salida')
     rc = sub.add_parser('recortar')
     rc.add_argument('imagen')
     rc.add_argument('--salida')
@@ -1885,6 +2044,8 @@ def main():
         print(json.dumps(animar_imagen(x.imagen, x.tipo, x.fuerza, x.salida, x.duracion), ensure_ascii=False))
     elif x.orden == 'recortar-video':
         print(json.dumps(recortar_video(x.clip, x.salida), ensure_ascii=False))
+    elif x.orden == 'separar':
+        print(json.dumps(separar(x.imagen, x.planos, x.salida), ensure_ascii=False))
     elif x.orden == 'recortar':
         print(json.dumps(recortar(x.imagen, x.salida, x.tolerancia, x.modo), ensure_ascii=False))
     elif x.orden == 'golpes':

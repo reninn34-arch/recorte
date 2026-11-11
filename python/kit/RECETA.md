@@ -113,7 +113,7 @@ NUNCA los pegues con un script aparte: así quedan en las pistas «Encima» y «
 "capas": [{ "archivo": "entrada/logo.png", "desde": 2.0, "hasta": 4.5, "x": 0.5, "y": 0.32, "ancho": 0.3, "entrada": "pop" }],
 "sonidos": [{ "sonido": "pop", "en": 2.0 }, { "sonido": "whoosh", "en": 6.0, "volumen": 0.5 }, { "archivo": "entrada/campana.wav", "en": 9 }]
 ```
-- `x`, `y`: el centro de la capa (0–1 del cuadro). `ancho`: fracción del ancho (0.05–1). `giro`: grados.
+- `x`, `y`: el centro de la capa (0–1 del cuadro). `ancho`: fracción del ancho (0.05–2; más de 1 sobresale del cuadro). `giro`: grados.
   `entrada`: `pop`, `fundido`, `izquierda`, `derecha`, `arriba`, `abajo` (entra deslizándose desde fuera) o `ninguna`.
 - **Que se mueva**: `"fin": {"x": 1.2, "y": 0.3, "ancho": 0.3, "giro": 10}` es dónde termina (puede ser fuera del cuadro, de
   -0.5 a 1.5); va suave de un sitio al otro durante toda la capa. Así se hace el **paralaje** (varias capas recortadas, cada
@@ -124,6 +124,43 @@ NUNCA los pegues con un script aparte: así quedan en las pistas «Encima» y «
 - `sonido`: uno de los que trae Recorte: `whoosh` (un cambio rápido), `pop` (algo que aparece), `pop-alto` (el siguiente
   de una serie), `ding` (un dato, un acierto), `caching` (una oferta). O `archivo` con uno propio. `volumen` por defecto 0.6.
 - Un «pop» cuando entra cada logo o ícono, un «whoosh» en los cortes fuertes; sin abusar (uno cada pocos segundos).
+
+## Escena 2.5D (un paisaje por capas, con distancia)
+En la referencia los escenarios no son una foto: son 4–5 recortes a distintas distancias (cielo, montañas, el lago con la
+casa, la bandera, la persona). Cada uno entra a su momento y, cuando la cámara se mueve, lo cercano se desplaza más que lo
+lejano. Así se arma:
+1. **El fondo, lo más lejano** (el cielo con nubes, una pared): una `foto` a pantalla completa con su cámara. Para que se
+   note la distancia la cámara TIENE que moverse: `"encuadre": {"zoom": 1.25, "cx": 0.45}` y `"camara": {"zoom": 1.35,
+   "cx": 0.55}` (un paneo lento con un poco de acercamiento, en una dirección).
+2. **Cada plano, por separado y sin fondo**: `kit.py imagen "montañas nevadas, solas" --recorte`, otra para la casa, la
+   bandera y la persona (Nano Banana no gasta créditos). Pide cada pieza entera y sola, con el mismo estilo y la misma luz.
+   Si solo tienes una foto del paisaje entero (en vertical, como el video), `python kit/kit.py separar <foto> --planos 3`
+   la parte en planos por distancia (un modelo local de 99 MB que se baja una vez; rellena lo que queda detrás): devuelve
+   `fondo` (úsalo como la `foto`, con `"encuadre": {"zoom": Z, "cx": 0.5, "cy": 0.5}` y su `camara`) y `planos`, cada uno
+   un PNG para una capa en `x` 0.5, `y` 0.5, `ancho` Z (el mismo zoom que la foto, así calza encima), `"entrada": "ninguna"`
+   y la `profundidad` que trae. Mira `mapa` (claro = cerca) y los planos antes de usarlos: con dibujos o con niebla el
+   modelo se equivoca; si un plano sale mal, mejor genera esa pieza por separado. Movimientos de cámara cortos (el relleno
+   de detrás es borroso: que solo asome por los bordes).
+3. **Cada pieza como capa con `"profundidad"`** (0 a 1): sigue a la cámara de la foto de debajo; 0 se mueve pegada al fondo,
+   1 (muy cerca) se mueve y crece 2,5 veces más. Una guía: montañas 0.1–0.2, una casa o un árbol a media distancia 0.4–0.5,
+   la persona 0.4–0.6, algo en primer plano (una rama, una barandilla, hierba) 0.8–1 con `"desenfoque": 0.4`. Sin
+   `profundidad`, la capa queda fija en la pantalla (logos, sellos, textos): no la pongas en esos.
+4. **Que se arme ante los ojos**: cada pieza entra en su momento (la bandera `"entrada": "izquierda"`, la casa `"abajo"`, la
+   persona con `"fundido"`), con unas décimas entre una y otra, y un «whoosh» suave en las que llegan de un lado. Anímalas
+   (`"animar": "ondear"` la bandera, `"balanceo"` la persona). `"desenfoque"` (0 a 1) deja fuera de foco lo que está muy cerca.
+```json
+"momentos": [{ "tipo": "foto", "archivo": "medios/cielo.png", "desde": 4.0, "hasta": 7.5,
+               "encuadre": { "zoom": 1.2, "cx": 0.42 }, "camara": { "zoom": 1.32, "cx": 0.58 } }],
+"capas": [
+  { "archivo": "medios/montanas-recorte.png", "desde": 4.0, "hasta": 7.5, "x": 0.5, "y": 0.62, "ancho": 1.0, "entrada": "fundido", "profundidad": 0.15 },
+  { "archivo": "medios/casa-recorte.png", "desde": 4.3, "hasta": 7.5, "x": 0.25, "y": 0.8, "ancho": 0.45, "entrada": "abajo", "profundidad": 0.45 },
+  { "archivo": "medios/bandera-recorte.png", "desde": 4.5, "hasta": 7.5, "x": 0.15, "y": 0.5, "ancho": 0.3, "entrada": "izquierda", "profundidad": 0.5, "animar": "ondear" },
+  { "archivo": "medios/persona-recorte.png", "desde": 4.2, "hasta": 7.5, "x": 0.55, "y": 0.62, "ancho": 0.7, "entrada": "fundido", "profundidad": 0.6, "animar": "balanceo" }
+]
+```
+- Lo que va después en `capas` se dibuja encima: de lo lejano a lo cercano.
+- Usa la escena 2.5D en los momentos clave (la presentación del protagonista, el lugar donde pasa todo), no en cada foto.
+- En el editor llega igual: la foto con su paneo y cada pieza en «Encima» con su profundidad (el usuario la cambia).
 
 ## Filtros de todo el video
 `"filtros": {"grano": 0.3, "polvo": 0.2, "trama": 0.4, "vineta": 0.5, "parpadeo": 0.1}` (0 a 1): grano de película, polvo

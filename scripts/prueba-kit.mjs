@@ -249,6 +249,34 @@ try {
   if (!existsSync(join(trabajo, anim.archivo)) || anim.margen !== 0.08) throw new Error(`La animación no salió: ${JSON.stringify(anim)}`)
   console.log('animar una imagen (ondear, balanceo) sin créditos ✓')
 
+  // Escena 2.5D: la cámara panea a la derecha; una capa pegada al fondo (profundidad 0) se va a la
+  // izquierda con él, una muy cercana (1) se va 2,5 veces más y una sin profundidad no se mueve.
+  correr('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=0x224466:s=600x1066,drawgrid=w=40:h=40:c=white', '-frames:v', '1', 'cielo.jpg'], trabajo)
+  writeFileSync(
+    join(trabajo, 'receta-escena.json'),
+    JSON.stringify({
+      ancho: 270, alto: 480, fps: 12, duracion: 3, fundido_final: 0,
+      momentos: [{ tipo: 'foto', archivo: 'cielo.jpg', desde: 0, hasta: 3, encuadre: { zoom: 1.4, cx: 0.45, cy: 0.5 }, camara: { zoom: 1.4, cx: 0.55, cy: 0.5 } }],
+      capas: [
+        { archivo: 'logo.png', desde: 0, hasta: 3, x: 0.5, y: 0.25, ancho: 0.12, entrada: 'ninguna', profundidad: 0 },
+        { archivo: 'logo.png', desde: 0, hasta: 3, x: 0.5, y: 0.5, ancho: 0.12, entrada: 'ninguna' },
+        { archivo: 'logo.png', desde: 0, hasta: 3, x: 0.5, y: 0.75, ancho: 0.12, entrada: 'ninguna', profundidad: 1, desenfoque: 0.5 }
+      ]
+    })
+  )
+  json(correr(python, ['kit/kit.py', 'armar', 'receta-escena.json', '--prueba', '0.5,2.9'], trabajo))
+  const centroRojo = (t, y) => {
+    const r = spawnSync('ffmpeg', ['-v', 'error', '-i', `revision/prueba-${t}.jpg`, '-vf', `crop=270:2:0:${y},scale=270:1`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { cwd: trabajo })
+    let suma = 0
+    let n = 0
+    for (let i = 0; i < r.stdout.length; i += 3) if (r.stdout[i] > 170 && r.stdout[i + 1] < 70 && r.stdout[i + 2] < 70) (suma += i / 3), n++
+    return n ? suma / n : NaN
+  }
+  const mueve = (y) => centroRojo('02.90', y) - centroRojo('00.50', y)
+  const [lejos, fija, cerca] = [mueve(120), mueve(240), mueve(360)]
+  if (!(lejos < -15 && Math.abs(fija) < 2 && cerca < lejos * 2)) throw new Error(`El paralaje no va bien: lejos ${lejos}, fija ${fija}, cerca ${cerca} px`)
+  console.log(`escena 2.5D en el kit: el fondo y lo lejano se mueven ${Math.round(lejos)} px, lo cercano ${Math.round(cerca)} px, lo fijo ${Math.round(fija)} ✓`)
+
   // Recortes: un sujeto sobre verde croma (con un hueco por dentro) queda sin fondo, y el hueco también.
   correr('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=0x00B140:s=400x500', '-vf', "drawbox=x=100:y=80:w=200:h=340:color=0x3C2814:t=fill,drawbox=x=180:y=230:w=40:h=40:color=0x00B140:t=fill", '-frames:v', '1', 'croma.png'], trabajo)
   const rec = json(correr(python, ['kit/kit.py', 'recortar', 'croma.png'], trabajo))

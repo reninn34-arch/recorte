@@ -9,6 +9,10 @@ import {
   vistaTransicion,
   capaNueva,
   estadoCapa,
+  aplicarParalaje,
+  camaraEn,
+  referenciaParalaje,
+  DESENFOQUE_MAX,
   TIPO_ARRASTRE_MEDIO,
   cambiarCapa,
   cambiarTexto,
@@ -17,7 +21,6 @@ import {
   textosEn,
   ubicar,
   VOLUMEN_SONIDO,
-  zoomEn,
   type CapaTL,
   type FiltrosTL,
   type SonidoTL,
@@ -76,7 +79,9 @@ export function Monitor({
   const a = ajustesDe(clipActual)
   const largoClip = ubicado ? ubicado.fin - ubicado.inicio : 1
   const enClip = ubicado ? reproductor.tiempo - ubicado.inicio : 0
-  const z = zoomEn(a, enClip / Math.max(0.01, largoClip))
+  // La cámara del clip: zoom, acercamiento lento y paneo (el punto hacia el que se acerca se desplaza).
+  const cam = camaraEn(a, enClip / Math.max(0.01, largoClip))
+  const z = cam.z
   // La transición de entrada: el clip entra sobre negro (en el render, sobre el clip anterior), con su tipo
   // (fundido, barrido, zoom, desenfoque, destello, círculo).
   const tr = clipActual?.fundido && ubicado && ubicado.indice > 0 && enClip < clipActual.fundido ? vistaTransicion(clipActual.transicion, enClip / clipActual.fundido) : null
@@ -90,7 +95,7 @@ export function Monitor({
         ? `${tr && (tr.x || tr.y) ? `translate(${(tr.x * 100).toFixed(2)}%, ${(tr.y * 100).toFixed(2)}%) ` : ''}scale(${(z * (tr?.escala ?? 1)).toFixed(4)})`
         : undefined,
     clipPath: tr?.circulo != null ? `circle(${(tr.circulo * 75).toFixed(2)}% at 50% 50%)` : undefined,
-    transformOrigin: a.cx !== 0.5 || a.cy !== 0.5 ? `${a.cx * 100}% ${a.cy * 100}%` : undefined,
+    transformOrigin: cam.cx !== 0.5 || cam.cy !== 0.5 ? `${(cam.cx * 100).toFixed(3)}% ${(cam.cy * 100).toFixed(3)}%` : undefined,
     opacity: fundido < 1 ? fundido : undefined,
     filter:
       tr?.desenfoque
@@ -254,7 +259,10 @@ export function Monitor({
             // de FIN (silueta punteada), las dos para arrastrarlas. Si no, donde va en este momento.
             const editando = elegida && !reproductor.reproduciendo
             const b = borrador?.tipo === 'capa' && borrador.id === c.id ? borrador : null
-            const e = editando ? estadoCapa(c, 0, false) : estadoCapa(c, reproductor.tiempo - c.inicio, reproductor.reproduciendo)
+            const e0 = editando ? estadoCapa(c, 0, false) : estadoCapa(c, reproductor.tiempo - c.inicio, reproductor.reproduciendo)
+            // Escena 2.5D: con profundidad, la capa sigue a la cámara del clip de debajo (más cuanto más cerca).
+            const ref = editando ? null : referenciaParalaje(timeline, c)
+            const e = ref ? { ...e0, ...aplicarParalaje(ref, c.profundidad ?? 0, c.inicio, reproductor.tiempo, e0) } : e0
             const x = b && !b.fin ? b.x : e.x
             const y = b && !b.fin ? b.y : e.y
             const ancho = b && !b.fin ? (b.ancho ?? e.ancho) : e.ancho
@@ -289,7 +297,8 @@ export function Monitor({
                   top: `${y * 100}%`,
                   width: `${ancho * 100}%`,
                   transform: `translate(-50%, -50%) rotate(${e.giro}deg) scale(${e.escala})`,
-                  opacity: e.opacidad
+                  opacity: e.opacidad,
+                  filter: c.desenfoque ? `blur(${(c.desenfoque * DESENFOQUE_MAX * cw).toFixed(2)}px)` : undefined
                 }}
                 onClick={(ev) => ev.stopPropagation()}
                 onPointerDown={(ev) => arrastrar(ev, 'capa', c.id, { x: c.x, y: c.y, ancho: c.ancho })}

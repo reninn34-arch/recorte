@@ -176,6 +176,9 @@ de museo bajo un foco que entra girando en 3D y fotos de archivo que caen apilad
   cómo entra cada cosa, cada cuánto cambia la imagen) y pon al lado la pieza del kit que hace cada uno: casi todo está.
   Respeta su ritmo (en estos documentales, un cambio cada 1–1,5 s: parte una escena en dos o tres momentos con otro
   encuadre o con un título encima) y su jerarquía de letras. Lo que el kit no tenga, dilo en el resumen.
+  Fíjate si sus escenarios están hechos de capas (el cielo, las montañas, una casa y la persona se mueven a distinta
+  velocidad): eso es la **escena 2.5D** de RECETA.md (cada pieza recortada como capa con \`profundidad\` sobre una foto
+  con la cámara en movimiento). Úsala en los momentos clave.
 - \`python kit/kit.py golpes <audio-o-video>\`: los golpes de la música y el tempo, para poner cada momento en su golpe.
 - \`python kit/kit.py encuadre <foto> --zoom 1.3 --cx .5 --cy .5\`: cómo queda una foto a pantalla completa.
 - \`python kit/kit.py armar receta.json --prueba 0.5,3,8\`: solo esos fotogramas, en segundos, para corregir antes.
