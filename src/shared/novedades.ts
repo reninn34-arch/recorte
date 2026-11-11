@@ -24,6 +24,28 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.29',
+    fecha: '2026-11-11',
+    resumen: 'El monitor ya reproduce sin saltos y el botón Exportar vuelve a estar a la vista.',
+    novedades: [
+      {
+        icono: 'play',
+        titulo: 'Reproducir sin saltos',
+        texto: 'Las transiciones se ven como en el video final: la imagen anterior sale empujada o se funde, sin parpadeos a negro ni imágenes que se salen del cuadro.'
+      },
+      {
+        icono: 'type',
+        titulo: 'Subtítulos enteros',
+        texto: 'Los rótulos y subtítulos del monitor usan su ancho y ya no se parten en dos líneas cortas.'
+      },
+      {
+        icono: 'download',
+        titulo: 'Exportar siempre a la vista',
+        texto: 'Si la barra de la timeline no cabe, el zoom y Exportar pasan a una segunda línea en vez de esconderse.'
+      }
+    ]
+  },
+  {
     version: '0.1.28',
     fecha: '2026-11-10',
     resumen: 'Videos mucho más vivos: capas que se mueven, fondos que se quitan solos, filtros de película y transiciones con movimiento.',
