@@ -310,6 +310,7 @@ def leer_capas(lista, L):
         fin = c.get('fin') if isinstance(c.get('fin'), dict) else None
         x, y, giro = min(1.0, max(0.0, float(c.get('x', 0.5)))), min(1.0, max(0.0, float(c.get('y', 0.5)))), float(c.get('giro', 0))
         capas.append({
+            'archivo': c['archivo'],
             # La imagen al tamaño más grande que llegue a tener (crece sin perder nitidez).
             'im': im.resize((max(w, round(L.W * float(fin.get('ancho', ancho)))) if fin else w,
                              max(1, round(im.height * (max(w, round(L.W * float(fin.get('ancho', ancho)))) if fin else w) / im.width))), Image.LANCZOS),
@@ -321,7 +322,7 @@ def leer_capas(lista, L):
             # Animar una imagen recortada (respirar, balanceo, ondear, flotar, humo), sin gastar créditos.
             'animada': (animacion_capa(im.resize((max(w, round(L.W * float(fin.get('ancho', ancho)))) if fin else w,
                                            max(1, round(im.height * (max(w, round(L.W * float(fin.get('ancho', ancho)))) if fin else w) / im.width))), Image.LANCZOS),
-                                *((c['animar'], 0.5) if isinstance(c.get('animar'), str) else (c['animar'].get('tipo'), c['animar'].get('fuerza', 0.5))),
+                                *((c['animar'], 0.5) if isinstance(c.get('animar'), (str, list)) else (c['animar'].get('tipo'), c['animar'].get('fuerza', 0.5))),
                                 c['animar'] if isinstance(c.get('animar'), dict) else None)
                         if c.get('animar') and not video else None),
             # Escena 2.5D: a qué distancia está (0 pegada al fondo, 1 muy cerca); sin ella, fija en la pantalla.
@@ -404,7 +405,7 @@ class Animada:
 
 def animacion_capa(im, tipo, fuerza=0.5, extra=None):
     """La animación de una capa: deformación (respirar, ondear…) o marioneta por huesos (hablar, saludar…)."""
-    if tipo in GESTOS:
+    if isinstance(tipo, list) or tipo in GESTOS:
         e = extra or {}
         return Marioneta(im, tipo, fuerza, e.get('puntos'), e.get('lado'))
     return Animada(im, tipo, fuerza)
@@ -416,10 +417,10 @@ def animar_imagen(ruta, tipo, fuerza=0.5, salida=None, duracion=CICLO_S, fps=30,
     # Hasta 1080 de lado: suficiente para una capa y rápido de animar.
     if max(im.size) > 1080:
         im.thumbnail((1080, 1080), Image.LANCZOS)
-    marioneta = tipo in GESTOS
+    marioneta = isinstance(tipo, list) or tipo in GESTOS
     an = Marioneta(im, tipo, fuerza, puntos, lado) if marioneta else Animada(im, tipo, fuerza)
     W, H = an.W - an.W % 2, an.H - an.H % 2
-    salida = salida or os.path.splitext(ruta)[0] + f'-{an.gesto if marioneta else an.tipo}.webm'
+    salida = salida or os.path.splitext(ruta)[0] + f'-{an.gesto if marioneta else an.tipo}{"-secuencia" if isinstance(tipo, list) else ""}.webm'
     escribe = subprocess.Popen([FFMPEG, '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', f'{W}x{H}', '-r', str(fps), '-i', '-',
                                 '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-b:v', '0', '-crf', '26', '-row-mt', '1', '-auto-alt-ref', '0',
                                 salida], stdin=subprocess.PIPE)
@@ -487,6 +488,19 @@ def esqueleto(im):
     return puntos
 
 
+def _mezclar_poses(a, b, k):
+    """Una pose entre dos (k de 0 = la primera a 1 = la segunda): giros y ajustes de cada hueso."""
+    ga, ea = a
+    gb, eb = b
+    g = {n: ga.get(n, 0.0) + (gb.get(n, 0.0) - ga.get(n, 0.0)) * k for n in set(ga) | set(gb)}
+    neutro = {'sx': 1.0, 'sy': 1.0, 'dx': 0.0, 'dy': 0.0}
+    e = {}
+    for n in set(ea) | set(eb):
+        x, y = ea.get(n, {}), eb.get(n, {})
+        e[n] = {c: x.get(c, v) + (y.get(c, v) - x.get(c, v)) * k for c, v in neutro.items()}
+    return g, e
+
+
 def _rot(ang, px, py, sx=1.0, sy=1.0, dx=0.0, dy=0.0):
     """Matriz 3×3: escala y giro (grados, a favor del reloj en pantalla) alrededor de (px, py), y luego un desplazamiento."""
     a = math.radians(ang)
@@ -511,8 +525,19 @@ class Marioneta:
     def __init__(self, im, gesto='hablar', fuerza=0.5, puntos=None, lado=None):
         import cv2
         self.cv2 = cv2
-        self.gesto = gesto if gesto in GESTOS else 'hablar'
-        self.f = max(0.0, min(1.5, float(fuerza)))
+        # Un gesto, o una secuencia de gestos en la misma capa: [{"tipo": "hablar", "hasta": 1.2}, {"tipo": "senalar"}]
+        # («hasta», en segundos desde que aparece la capa; el último sigue hasta el final). Pasa de uno a otro suave.
+        lista = gesto if isinstance(gesto, list) else [{'tipo': gesto}]
+        self.secuencia = []
+        for x in lista:
+            x = x if isinstance(x, dict) else {'tipo': x}
+            self.secuencia.append({'tipo': x.get('tipo') if x.get('tipo') in GESTOS else 'hablar',
+                                   'hasta': float(x['hasta']) if isinstance(x.get('hasta'), (int, float)) else None,
+                                   'fuerza': max(0.0, min(1.5, float(x.get('fuerza', fuerza)))), 'lado': x.get('lado', lado)})
+        if not self.secuencia:
+            self.secuencia = [{'tipo': 'hablar', 'hasta': None, 'fuerza': float(fuerza), 'lado': lado}]
+        self.gesto = self.secuencia[0]['tipo']
+        self.f = self.secuencia[0]['fuerza']
         w, h = im.size
         # El esqueleto, en píxeles de la imagen.
         det = esqueleto(im) if not puntos or len(puntos) < 8 else {}
@@ -523,7 +548,7 @@ class Marioneta:
         # El margen alrededor: con un gesto de brazo, lo que mide el brazo (estirado no se sale); si no, poco.
         brazo = max([np.linalg.norm(P0[f'mano_{l}' if f'mano_{l}' in P0 else f'muneca_{l}'] - P0[f'hombro_{l}'])
                      for l in ('i', 'd') if f'hombro_{l}' in P0 and (f'mano_{l}' in P0 or f'muneca_{l}' in P0)] or [0.3 * h])
-        if self.gesto in GESTOS_BRAZO:
+        if any(x['tipo'] in GESTOS_BRAZO for x in self.secuencia):
             hombros_x = [P0[f'hombro_{l}'][0] for l in ('i', 'd') if f'hombro_{l}' in P0] or [w / 2]
             sobra = max(brazo * 1.12 - min(hombros_x), brazo * 1.12 - (w - max(hombros_x)), 0.1 * w)
             hombro_y = min([P0[f'hombro_{l}'][1] for l in ('i', 'd') if f'hombro_{l}' in P0] or [0.25 * h])
@@ -590,12 +615,17 @@ class Marioneta:
                     self.libres.append(l)
         # El lado que hace el gesto: el que se pida, si no el de la derecha de la pantalla (si está libre).
         derecha_pantalla = 'i' if P['hombro_i'][0] > P['hombro_d'][0] else 'd'
-        quiero = {'izquierda': 'd' if derecha_pantalla == 'i' else 'i', 'derecha': derecha_pantalla}.get(lado or '', derecha_pantalla)
-        self.lado = quiero if quiero in self.libres else (self.libres[0] if self.libres else None)
+        def elegir(lado_):
+            quiero = {'izquierda': 'd' if derecha_pantalla == 'i' else 'i', 'derecha': derecha_pantalla}.get(lado_ or '', derecha_pantalla)
+            return quiero if quiero in self.libres else (self.libres[0] if self.libres else None)
+        self.lado = elegir(lado)
         self.avisos = []
-        if self.gesto in ('saludar', 'senalar', 'explicar') and not self.lado:
-            self.avisos.append(f'Con los brazos pegados o cruzados delante del cuerpo no puede «{self.gesto}»: hace «hablar».')
-            self.gesto = 'hablar'
+        for x in self.secuencia:
+            x['lado'] = elegir(x['lado'])
+            if x['tipo'] in GESTOS_BRAZO and not x['lado']:
+                self.avisos.append(f'Con los brazos pegados o cruzados delante del cuerpo no puede «{x["tipo"]}»: hace «hablar».')
+                x['tipo'] = 'hablar'
+        self.gesto = self.secuencia[0]['tipo']
         self._pesos()
 
     def _pesos(self):
@@ -670,8 +700,27 @@ class Marioneta:
         return (g + 180) % 360 - 180
 
     def poses(self, t):
-        """Los giros (grados) y ajustes de cada hueso en el segundo t del ciclo."""
-        f = self.f
+        """Los giros (grados) y ajustes de cada hueso en el segundo t. Con una secuencia de gestos, el de ese
+        momento; al cambiar de gesto, 0,4 s de paso suave del anterior al siguiente."""
+        sec = self.secuencia
+        if len(sec) == 1 and sec[0]['hasta'] is None:
+            return self._pose(sec[0]['tipo'], t, None, sec[0]['lado'], sec[0]['fuerza'])
+        inicio = 0.0
+        for i, x in enumerate(sec):
+            fin = x['hasta'] if x['hasta'] is not None and i < len(sec) - 1 else float('inf')
+            if t < fin or i == len(sec) - 1:
+                ahora = self._pose(x['tipo'], t, t - inicio, x['lado'], x['fuerza'])
+                if i == 0 or t - inicio >= 0.4:
+                    return ahora
+                p = sec[i - 1]
+                antes = self._pose(p['tipo'], t, t - inicio_previo, p['lado'], p['fuerza'])
+                return _mezclar_poses(antes, ahora, ease_in_out((t - inicio) / 0.4))
+            inicio_previo, inicio = inicio, fin
+        return self._pose(sec[-1]['tipo'], t, t - inicio, sec[-1]['lado'], sec[-1]['fuerza'])
+
+    def _pose(self, gesto, t, local, lado, f):
+        """La pose de un gesto en el segundo t (`local`: segundos desde que empezó ese gesto en una secuencia; sin
+        él, el gesto va en bucle de CICLO_S)."""
         fase = 2 * math.pi * (t % CICLO_S) / CICLO_S
         g = {}
         extra = {}
@@ -681,7 +730,6 @@ class Marioneta:
         g['cabeza'] = 1.2 * f * math.sin(fase + 0.7)
         for l in ('i', 'd'):
             g[f'brazo_{l}'] = 0.8 * f * resp * (1 if l == 'i' else -1)
-        gesto = self.gesto
         # Hacia fuera para cada brazo (en pantalla): el de la izquierda gira a favor del reloj.
         fuera = {l: (1 if self.P[f'hombro_{l}'][0] < self.P['cuello'][0] else -1) for l in ('i', 'd')}
         if gesto == 'hablar':
@@ -708,11 +756,15 @@ class Marioneta:
             g['cabeza'] -= 2.2 * f * math.sin(fase)
             extra['torso']['dx'] = 0.03 * f * self.ancho_hombros * math.sin(fase)
         elif gesto in ('saludar', 'senalar', 'explicar'):
-            l = self.lado
+            l = lado or self.lado
             fu = fuera[l]
-            # Sube en 0,7 s, aguanta y baja al final del ciclo (el bucle vuelve a empezar quieto).
-            ct = t % CICLO_S
-            sube = ease_in_out(tramo(ct, 0.15, 0.85)) * (1 - ease_in_out(tramo(ct, CICLO_S - 0.9, CICLO_S - 0.15)))
+            if local is None:
+                # En bucle: sube en 0,7 s, aguanta y baja al final del ciclo (vuelve a empezar quieto).
+                ct = t % CICLO_S
+                sube = ease_in_out(tramo(ct, 0.15, 0.85)) * (1 - ease_in_out(tramo(ct, CICLO_S - 0.9, CICLO_S - 0.15)))
+            else:
+                # En una secuencia: sube nada más empezar el gesto (0,5 s) y se queda arriba.
+                sube = ease_in_out(tramo(local, 0.05, 0.55))
             if gesto == 'saludar':
                 brazo = self._hacia(f'brazo_{l}', fu * (40 + 25 * f))
                 g[f'brazo_{l}'] = g.get(f'brazo_{l}', 0) + brazo * sube
@@ -1878,6 +1930,11 @@ def avisos_escena(r, L, momentos):
         a_x = lambda px: (L.W * c['x'] + (px - an.W / 2) * k) / L.W
         a_y = lambda py: (L.H * c['y'] + (py - an.H / 2) * k) / L.H
         zona = (a_x(np.percentile(xs, 1)) - 0.05, a_y(np.percentile(ys, 1)) - 0.04, a_x(np.percentile(xs, 99)) + 0.05, a_y(np.percentile(ys, 99)) + 0.04)
+        # El brazo que sale del cuadro (la persona está muy a un lado para su gesto).
+        fuera_x = a_x(np.percentile(xs, 99.5)) > 1.0 or a_x(np.percentile(xs, 0.5)) < 0.0
+        if fuera_x or a_y(np.percentile(ys, 0.5)) < 0.0:
+            avisos.append(f'Capa {j + 1} («{an.gesto}»): el brazo sale del cuadro al hacer el gesto. Acerca la persona al centro '
+                          '(su "x"), hazla un poco más pequeña o que el gesto vaya hacia el otro lado ("lado").')
         for i, m in enumerate(momentos):
             d = m.m
             if m.hasta <= c['desde'] or m.desde >= c['hasta']:
@@ -1893,6 +1950,62 @@ def avisos_escena(r, L, momentos):
                     avisos.append(f'Momento {i + 1}: «{str(texto)[:30]}» (x {x:.2f}, y {y:.2f}) cae donde se mueven los brazos de la '
                                   f'persona de la capa {j + 1} («{an.gesto}»): el brazo lo tapa. Ponlo por encima de su cabeza o '
                                   f'fuera de x {zona[0]:.2f}–{zona[2]:.2f}.')
+    avisos += avisos_tapados(L, momentos)
+    # La misma imagen en dos capas seguidas que vuelve a entrar con fundido o pop: parpadea en el corte.
+    for j, c in enumerate(L.capas):
+        for k2, d in enumerate(L.capas):
+            if (k2 != j and d['archivo'] == c['archivo'] and abs(d['desde'] - c['hasta']) < 0.08 and d['entrada'] in ('fundido', 'pop')):
+                avisos.append(f'Capas {j + 1} y {k2 + 1}: la misma imagen sigue en otra capa que vuelve a entrar con «{d["entrada"]}» a los '
+                              f'{d["desde"]:.1f} s: parpadea. Si es para cambiar de gesto, usa UNA capa con "animar": [{{"tipo": "hablar", '
+                              '"hasta": 1.2}, {"tipo": "senalar"}] (pasa de un gesto a otro sin cortar); si no, "entrada": "ninguna".')
+    return avisos
+
+
+def avisos_tapados(L, momentos):
+    """Una capa que en algún momento tapa un texto (una etiqueta, un título, una palabra): con la cámara, el paralaje o
+    su recorrido se mueve y puede acabar encima. Se mira cada 0,2 s si la parte visible de la capa cae sobre el texto."""
+    avisos = []
+    textos = []
+    for i, m in enumerate(momentos):
+        d = m.m
+        if d.get('tipo') == 'palabras':
+            for p, (x, y) in zip(d.get('palabras') or [], sitios_palabras(d)):
+                textos.append((i, str(p), x, y, m.desde, m.hasta))
+        elif d.get('tipo') in ('titulo', 'etiqueta'):
+            t = d.get('texto') or ' '.join(str(x if isinstance(x, str) else x.get('texto', '')) for x in d.get('lineas') or [])
+            textos.append((i, t, float(d.get('x', 0.5)), float(d.get('y', 0.5)), m.desde, m.hasta))
+    if not textos:
+        return avisos
+    vistos = set()
+    for j, c in enumerate(L.capas):
+        an = c.get('animada')
+        im = c['im'] if not c['video'] else None
+        if im is None:
+            continue
+        alfa = np.asarray(im.getchannel('A'))
+        ih, iw = alfa.shape
+        for (i, texto, x, y, a, b) in textos:
+            if (i, j) in vistos:
+                continue
+            for t in np.arange(max(a, c['desde']) + 0.3, min(b, c['hasta']), 0.2):
+                cx, cy, ancho, giro = estado_capa(c, t - c['desde'])
+                cx, cy, ancho = paralaje(c, t, cx, cy, ancho, getattr(L, 'momentos', None))
+                # El punto del texto (y un poco a cada lado), en la imagen de la capa (sin contar su margen de animación).
+                k = iw / (L.W * ancho)
+                tocado = False
+                # El texto ocupa algo de alto y de ancho: se miran su centro, sus lados y su parte de arriba y de abajo.
+                for dx, dy in ((-0.06, 0.0), (0.0, 0.0), (0.06, 0.0), (-0.04, 0.018), (0.04, 0.018), (0.0, -0.018)):
+                    px = ((x + dx) - cx) * L.W * k + iw / 2
+                    py = ((y + dy) - cy) * L.H * k + ih / 2
+                    if 0 <= px < iw and 0 <= py < ih and alfa[int(py), int(px)] > 128:
+                        tocado = True
+                        break
+                if tocado:
+                    vistos.add((i, j))
+                    avisos.append(f'Capa {j + 1} ({os.path.basename(c.get("archivo", "") or "")}) tapa «{texto[:30]}» (momento {i + 1}) '
+                                  f'hacia los {t:.1f} s: con la cámara o su recorrido acaba encima. Aparta el texto o la capa, o '
+                                  'baja su profundidad.')
+                    break
     return avisos
 
 
@@ -2714,7 +2827,20 @@ def _cortes(video):
     return cortes
 
 
-def revisar(video, referencia=None, salida=None):
+def _a_proposito(receta):
+    """Los segundos de las transiciones de la receta (destellos, fundidos, barridos…): ahí un salto de luz o un cuadro
+    con poco detalle es lo que se quiso, no un fallo."""
+    try:
+        with open(receta, encoding='utf-8-sig') as f:
+            r = json.load(f)
+    except (OSError, ValueError):
+        return []
+    base = float(r.get('transicion', 0.3))
+    return [(float(m['desde']) - 0.15, float(m['desde']) + float(m.get('entra', base)) + 0.35)
+            for m in r.get('momentos') or [] if isinstance(m.get('desde'), (int, float))]
+
+
+def revisar(video, referencia=None, salida=None, receta=None):
     """Mira un video como lo haría un editor: hojas para el ritmo, la referencia al lado, tiras de cada corte para
     el movimiento y medidas (cortes por segundo, tramos vacíos, destellos). Deja las imágenes en revision/ y un
     informe con lo que hay que mirar en cada una."""
@@ -2769,6 +2895,14 @@ def revisar(video, referencia=None, salida=None):
                 i += 1
     luz = gris.mean(axis=(1, 2)) if len(gris) else np.zeros(0)
     destellos = [round(i / 4, 2) for i in range(1, len(luz) - 1) if abs(luz[i] - luz[i - 1]) > 55 and abs(luz[i] - luz[i + 1]) > 55]
+    # Lo que cae en una transición de la receta (un destello, un fundido) es a propósito: no se avisa.
+    if receta is None:
+        cerca = os.path.join(os.path.dirname(carpeta), 'receta.json')
+        receta = cerca if os.path.isfile(cerca) else None
+    intencion = _a_proposito(receta) if receta else []
+    if intencion:
+        destellos = [t for t in destellos if not any(a <= t <= b for a, b in intencion)]
+        vacios = [v for v in vacios if not any(a <= v[0] and v[1] <= b + 0.25 for a, b in intencion)]
     resumen = {'video': video, 'duracion': round(dur, 2), 'cortes': len(cortes),
                'cortes_por_segundo': round(len(cortes) / max(dur, 0.1), 2),
                'plano_mas_largo': round(max(np.diff([0.0] + cortes + [dur])) if dur else 0, 2),
@@ -2910,6 +3044,7 @@ def main():
     an.add_argument('--tipo', choices=TIPOS_ANIMAR + GESTOS, default='respirar')
     an.add_argument('--puntos', help='JSON con el esqueleto corregido: {"hombro_d": [x, y], …} en fracción de la imagen')
     an.add_argument('--lado', choices=['izquierda', 'derecha'], help='qué brazo hace el gesto (en pantalla)')
+    an.add_argument('--secuencia', help='JSON (o archivo) con gestos seguidos: [{"tipo": "hablar", "hasta": 1.2}, {"tipo": "senalar"}]')
     es = sub.add_parser('esqueleto')
     es.add_argument('imagen')
     es.add_argument('--salida')
@@ -2922,6 +3057,7 @@ def main():
     rv2 = sub.add_parser('revisar')
     rv2.add_argument('video')
     rv2.add_argument('--referencia', help='el video de referencia, para comparar ritmo y estilo')
+    rv2.add_argument('--receta', help='la receta del video (por defecto receta.json junto a salida/): sus transiciones no se avisan')
     dn = sub.add_parser('donde')
     dn.add_argument('consulta', help='lo que nombra el usuario: «la bandera», «el título 2002», «cuando dice órbita»')
     dn.add_argument('--receta', default='receta.json')
@@ -2944,13 +3080,14 @@ def main():
               nuevo=getattr(x, 'nuevo', False))
     elif x.orden == 'animar':
         puntos = json.loads(open(x.puntos, encoding='utf-8').read() if os.path.isfile(x.puntos) else x.puntos) if x.puntos else None
-        print(json.dumps(animar_imagen(x.imagen, x.tipo, x.fuerza, x.salida, x.duracion, puntos=puntos, lado=x.lado), ensure_ascii=False))
+        secuencia = json.loads(open(x.secuencia, encoding='utf-8').read() if os.path.isfile(x.secuencia) else x.secuencia) if x.secuencia else None
+        print(json.dumps(animar_imagen(x.imagen, secuencia or x.tipo, x.fuerza, x.salida, x.duracion, puntos=puntos, lado=x.lado), ensure_ascii=False))
     elif x.orden == 'esqueleto':
         print(json.dumps(info_esqueleto(x.imagen, x.salida), ensure_ascii=False))
     elif x.orden == 'recortar-video':
         print(json.dumps(recortar_video(x.clip, x.salida), ensure_ascii=False))
     elif x.orden == 'revisar':
-        print(json.dumps(revisar(x.video, x.referencia), ensure_ascii=False))
+        print(json.dumps(revisar(x.video, x.referencia, receta=x.receta), ensure_ascii=False))
     elif x.orden == 'donde':
         print(json.dumps(donde(x.receta, x.consulta), ensure_ascii=False))
     elif x.orden == 'separar':

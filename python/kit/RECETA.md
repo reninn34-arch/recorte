@@ -180,6 +180,8 @@ que cada toma se ve en 3D. Elige la toma por lo que cuenta la frase:
   más cercano) se ve nítido y lo demás se desenfoca según `campo` (0 a 1). Enfoca al protagonista (su `profundidad`): el
   fondo se va a bokeh y la escena gana distancia. Lo hace solo; no pongas además `desenfoque` en cada capa.
 - Una toma por momento, lenta y en una dirección; cambia de toma con el corte, como un operador de cámara.
+- **Nada tapa un texto**: una capa que se mueve (con su recorrido, su entrada o el paralaje de la cámara) puede acabar
+  encima de una etiqueta o un título. `armar` lo mira cada 0,2 s y avisa: aparta uno de los dos o baja su profundidad.
 - **Nunca un cuadro vacío**: una foto que es solo un fondo (una pared, un haz de luz, una sala oscura) necesita algo
   encima TODO el rato que se ve (un título, una pieza, una capa). `armar` avisa si queda vacía.
 
@@ -244,7 +246,12 @@ Si el usuario eligió generar imágenes o clips (lo dice AGENTS.md), Recorte los
      {"codo_d": [0.2, 0.41]}}` (en fracción de la imagen; los nombres son los de `puntos`).
   3. La capa animada es más ancha que la imagen (deja sitio a los brazos): el kit lo ajusta solo; tú pon el `ancho` de la
      persona como siempre.
-  4. Los textos, lejos de sus brazos: con `saludar`, `senalar` o `explicar`, `armar` avisa si una palabra o un título cae
+  4. **Varios gestos seguidos, en UNA capa** (nunca cortes la capa para cambiar de gesto: parpadea):
+     `"animar": [{"tipo": "hablar", "hasta": 1.2}, {"tipo": "senalar", "lado": "derecha"}]` (`hasta` en segundos desde que
+     aparece la capa; el último sigue hasta el final). Pasa de un gesto al otro suave (0,4 s) y el brazo sube y se queda.
+  5. Que el gesto quepa: con `senalar` o `saludar` hacia un lado, deja sitio a ese lado (la persona más al centro o el
+     gesto hacia el otro lado); `armar` avisa si el brazo sale del cuadro.
+  6. Los textos, lejos de sus brazos: con `saludar`, `senalar` o `explicar`, `armar` avisa si una palabra o un título cae
      donde se mueven (el brazo lo taparía). Ponlos por encima de la cabeza o a un lado, fuera de su alcance.
   Límites: la cabeza no gira de perfil ni los dedos se articulan. Para eso (y para caminar) hace falta un clip de Flow
   con créditos. Combina la marioneta con la escena 2.5D: la persona como capa con `profundidad` y su gesto.

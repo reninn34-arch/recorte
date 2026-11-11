@@ -354,6 +354,18 @@ try {
   }
   const [quieto, saluda] = [rojoArriba(0), rojoArriba(1.2)]
   if (!(quieto === 0 && saluda > 30)) throw new Error(`Al saludar, el brazo no sale: ${quieto} px rojos fuera al empezar y ${saluda} saludando`)
+  // Gestos seguidos en la misma capa: primero habla (el brazo abajo) y luego saluda (el brazo fuera), sin cortar.
+  writeFileSync(join(trabajo, 'secuencia.json'), JSON.stringify([{ tipo: 'hablar', hasta: 0.8 }, { tipo: 'saludar', lado: 'derecha' }]))
+  const sec = json(correr(python, ['kit/kit.py', 'animar', 'figura.png', '--secuencia', 'secuencia.json', '--puntos', 'puntos.json', '--duracion', '2', '--salida', 'secuencia.webm'], trabajo))
+  const fueraSec = (t) => {
+    const r = spawnSync('ffmpeg', ['-v', 'error', '-c:v', 'libvpx-vp9', '-ss', String(t), '-i', 'secuencia.webm', '-frames:v', '1', '-vf', `crop=iw-${Math.round(sec.margen * 200) + 206}:ih:${Math.round(sec.margen * 200) + 206}:0`, '-f', 'rawvideo', '-pix_fmt', 'rgba', '-'], { cwd: trabajo })
+    let n = 0
+    for (let i = 0; i < r.stdout.length; i += 4) if (r.stdout[i + 3] > 128 && r.stdout[i] > 170 && r.stdout[i + 1] < 80) n++
+    return n
+  }
+  const [hablando, saludando] = [fueraSec(0.4), fueraSec(1.8)]
+  if (!(hablando === 0 && saludando > 30)) throw new Error(`La secuencia de gestos no pasó de hablar a saludar: ${hablando} y ${saludando} px fuera`)
+  console.log(`secuencia de gestos en una capa: habla y luego saluda (${saludando} px fuera) ✓`)
   console.log(`marioneta: con el esqueleto dado, el brazo se levanta a saludar (${saluda} px fuera de la imagen), capa ${mar.escala}× más ancha ✓`)
 
   // Cámara en mano y profundidad de campo en el kit: el fondo se mueve solo (con la foto quieta) y se desenfoca.

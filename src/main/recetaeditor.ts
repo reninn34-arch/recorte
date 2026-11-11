@@ -395,10 +395,30 @@ export async function proyectoDesdeReceta(
     // Una imagen o un clip (un personaje que se mueve, en WebM con transparencia).
     if (!medio || b - a < MIN) continue
     // Una imagen animada por el kit («animar»): en el editor, su animación en bucle (un WebM), con la imagen de base.
-    const tipoAnimar = typeof x.animar === 'string' ? x.animar : x.animar && typeof x.animar === 'object' ? (x.animar as Record<string, unknown>).tipo : null
+    // Un gesto, o una secuencia de gestos de marioneta en la misma capa (el editor guarda el primero como su tipo).
+    const secuencia = Array.isArray(x.animar) ? (x.animar as unknown[]) : null
+    const primero = secuencia?.[0]
+    const tipoAnimar =
+      typeof x.animar === 'string'
+        ? x.animar
+        : secuencia
+          ? typeof primero === 'string'
+            ? primero
+            : primero && typeof primero === 'object'
+              ? (primero as Record<string, unknown>).tipo
+              : null
+          : x.animar && typeof x.animar === 'object'
+            ? (x.animar as Record<string, unknown>).tipo
+            : null
     const animada =
       medio.tipo === 'imagen' && typeof tipoAnimar === 'string' && ANIMAR_CAPA.some((t) => t.id === tipoAnimar) && ruta
-        ? await animarConKit(trabajo, ruta, tipoAnimar, carpetaProyecto, x.animar && typeof x.animar === 'object' ? (x.animar as Record<string, unknown>) : {})
+        ? await animarConKit(
+            trabajo,
+            ruta,
+            tipoAnimar,
+            carpetaProyecto,
+            secuencia ? { secuencia, duracion: b - a } : x.animar && typeof x.animar === 'object' ? (x.animar as Record<string, unknown>) : {}
+          )
         : null
     const medioAnimado = animada ? await medioDe(animada.ruta) : null
     capas.push({
@@ -519,6 +539,12 @@ async function animarConKit(
   const salida = join(carpeta, `${basename(imagen, extname(imagen)).slice(0, 40)}-${tipo}-${randomUUID().slice(0, 6)}.webm`)
   const cita = (v: string) => (/[\s"]/.test(v) ? `"${v}"` : v)
   const extra: string[] = []
+  if (Array.isArray(opciones.secuencia)) {
+    // Gestos seguidos en la misma capa: la animación dura lo que la capa (no va en bucle).
+    const archivo = join(carpeta, `secuencia-${randomUUID().slice(0, 6)}.json`)
+    writeFileSync(archivo, JSON.stringify(opciones.secuencia), 'utf8')
+    extra.push('--secuencia', cita(archivo), '--duracion', String(Math.max(0.5, num(opciones.duracion, 4))))
+  }
   if (typeof opciones.fuerza === 'number' && Number.isFinite(opciones.fuerza)) extra.push('--fuerza', String(pinza(opciones.fuerza, 0, 1.5)))
   if (opciones.lado === 'izquierda' || opciones.lado === 'derecha') extra.push('--lado', opciones.lado)
   if (opciones.puntos && typeof opciones.puntos === 'object') {
