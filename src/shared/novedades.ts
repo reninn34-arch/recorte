@@ -24,6 +24,38 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.26',
+    fecha: '2026-11-10',
+    resumen: 'Oye cada voz antes de elegirla, graba tu voz frase por frase y tus retoques ya no se pierden al rehacer un video.',
+    novedades: [
+      {
+        icono: 'play',
+        titulo: 'Oye la voz antes de elegirla',
+        texto: 'En el menú Voz de la caja, cada voz tiene su botón para oírla. La primera vez se genera una muestra corta y después suena al momento.'
+      },
+      {
+        icono: 'music',
+        titulo: 'Narra con tu voz',
+        texto: 'En el editor, elige una frase de la narración y dale a «Grabar» para decirla tú, o graba una nueva donde está el cabezal. El silencio del principio y del final se quita solo.'
+      },
+      {
+        icono: 'undo',
+        titulo: 'Tus retoques se quedan',
+        texto: 'Si le pides al agente otra versión, sabe lo que cambiaste a mano en el editor (rótulos, voz, logos, sonidos, música) y lo conserva.'
+      },
+      {
+        icono: 'layers',
+        titulo: 'Logos y sonidos sueltos',
+        texto: 'El agente ya pone logos e íconos encima y efectos de sonido (whoosh, pop, ding…). En el editor llegan en sus pistas, para moverlos o quitarlos.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Crear desde tu agente',
+        texto: 'Claude Code (u otro agente conectado) ya puede pedirle un video nuevo al agente de Recorte, conversar el plan y darle a «Hazlo». Antes de gastar en voz o clips te pregunta.'
+      }
+    ]
+  },
+  {
     version: '0.1.25',
     fecha: '2026-11-10',
     resumen: 'Claude Code (u otro agente) ya puede ver y editar tus proyectos de Recorte mientras la app está abierta.',
