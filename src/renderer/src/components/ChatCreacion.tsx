@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { aplicarOperaciones, type MensajeChat } from '../../../shared/chat'
+import { duracionesDeMedios } from '../../../shared/timeline'
 import type { AjustesCreacion, Creacion, MensajeCreacion } from '../../../shared/creacion'
 import { clipsDelPlan, type PlanAgente } from '../../../shared/modoagente'
 import { COSTO_CLIP } from '../../../shared/creacion'
@@ -243,7 +244,8 @@ export function ChatCreacion({
         const actual = ed.puente.current ?? p0
         const hecho = aplicarOperaciones(actual.timeline, r.operaciones, {
           duracionFuente: ed.proyecto.source.duration,
-          transcript: ed.proyecto.transcript
+          transcript: ed.proyecto.transcript,
+          medios: duracionesDeMedios(ed.proyecto.medios)
         })
         if (hecho.timeline !== actual.timeline && hecho.cambios.length) actual.aplicar(hecho.timeline)
         respuesta = {

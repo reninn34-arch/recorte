@@ -8,8 +8,9 @@ import { RenderQueue } from './RenderQueue'
 import { SourceCard } from './SourceCard'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
-import { ajustesDe, cambiarFuente, zoomEn, FUENTES_TEXTO, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, textosEn, ubicar, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, type Timeline } from '../../../shared/timeline'
-import { useHistorial, useMusica, useReproductor, useVoces, type FuentesVista, type Reproductor } from '../hooks/timeline'
+import { capaNueva, cambiarFuente, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, type Timeline } from '../../../shared/timeline'
+import { useHistorial, useReproductor, type FuentesVista } from '../hooks/timeline'
+import { Monitor } from './Monitor'
 import { MediosPanel } from './MediosPanel'
 import { TimelineEditor, type Elegido } from './TimelineEditor'
 import type { PuenteEditor } from './ChatAgente'
@@ -19,89 +20,6 @@ import type { PuenteEditor } from './ChatAgente'
  * Las funciones viejas (clips, edición con agente, cola) viven como
  * herramientas bajo la línea de tiempo; el video manda.
  */
-
-function Monitor({
-  proyecto,
-  timeline,
-  reproductor
-}: {
-  proyecto: Project
-  timeline: Timeline
-  reproductor: Reproductor
-}) {
-  const src = proyecto.demo ? undefined : mediaUrl(proyecto.id, proyecto.proxy ?? 'fuente')
-  const enImagen = Boolean(reproductor.imagen)
-  const rotulos = textosEn(timeline, reproductor.tiempo)
-  const vacia = timeline.clips.length === 0
-  const musicaRef = useMusica(timeline, reproductor, proyecto.transcript)
-  const urlDe = useCallback((archivo: string) => mediaUrl(proyecto.id, archivo), [proyecto.id])
-  const vocesRef = useVoces(timeline, reproductor, urlDe)
-  const ubicado = ubicar(timeline, reproductor.tiempo)
-  const clipActual = ubicado?.clip
-  // Un clip mudo solo aporta imagen: su sonido va en las pistas de voz y música.
-  useEffect(() => {
-    if (reproductor.videoRef.current) reproductor.videoRef.current.muted = Boolean(clipActual?.mudo)
-  }, [clipActual?.id, clipActual?.mudo, reproductor.videoRef])
-  // Zoom, encuadre, acercamiento y color del clip bajo el cabezal; en el render son crop,
-  // zoompan y eq de FFmpeg.
-  const a = ajustesDe(clipActual)
-  const largoClip = ubicado ? ubicado.fin - ubicado.inicio : 1
-  const enClip = ubicado ? reproductor.tiempo - ubicado.inicio : 0
-  const z = zoomEn(a, enClip / Math.max(0.01, largoClip))
-  // El fundido de entrada: el clip aparece sobre negro (en el render, sobre el clip anterior).
-  const fundido = clipActual?.fundido && ubicado && ubicado.indice > 0 ? Math.min(1, enClip / clipActual.fundido) : 1
-  const estiloImagen: React.CSSProperties = {
-    visibility: vacia ? 'hidden' : 'visible',
-    transform: z !== 1 ? `scale(${z})` : undefined,
-    transformOrigin: a.cx !== 0.5 || a.cy !== 0.5 ? `${a.cx * 100}% ${a.cy * 100}%` : undefined,
-    opacity: fundido < 1 ? fundido : undefined,
-    filter:
-      a.brillo !== 0 || a.contraste !== 1 || a.saturacion !== 1
-        ? `brightness(${(1 + a.brillo * 1.5).toFixed(3)}) contrast(${a.contraste}) saturate(${a.saturacion})`
-        : undefined
-  }
-
-  return (
-    <div className="monitor" onClick={reproductor.alternar}>
-      {src ? (
-        <>
-          <video
-            ref={reproductor.videoRef}
-            preload="auto"
-            style={{ ...estiloImagen, visibility: vacia || enImagen ? 'hidden' : 'visible' }}
-            {...reproductor.eventos}
-          />
-          {enImagen && <img className="monitor-imagen" src={reproductor.imagen!} alt="" style={estiloImagen} />}
-        </>
-      ) : (
-        <div className="monitor-vacio"><Icon name="play" size={28} /></div>
-      )}
-      {timeline.musica && !proyecto.demo && (
-        <audio ref={musicaRef} src={mediaUrl(proyecto.id, timeline.musica.archivo)} preload="auto" loop />
-      )}
-      {timeline.voces?.length && !proyecto.demo ? <audio ref={vocesRef} preload="auto" /> : null}
-      {rotulos.map((r) => (
-        <span
-          key={r.id}
-          className={`monitor-rotulo ${r.posicion} ${r.sinCaja ? 'sin-caja' : ''}`}
-          style={{
-            ...(r.tamano ? { fontSize: `calc(clamp(12px, 3.4cqw, 44px) * ${r.tamano})` } : {}),
-            ...(r.color ? { color: r.color } : {}),
-            ...(r.caja && !r.sinCaja ? { background: r.caja } : {}),
-            ...(r.fuente && FUENTES_TEXTO[r.fuente]
-              ? { fontFamily: `"${FUENTES_TEXTO[r.fuente].familia}", Arial, sans-serif`, fontWeight: FUENTES_TEXTO[r.fuente].negrita ? 700 : 400 }
-              : {})
-          }}
-        >
-          {r.texto}
-        </span>
-      ))}
-      {!reproductor.reproduciendo && src && !vacia && (
-        <span className="monitor-play"><Icon name="play" size={26} /></span>
-      )}
-    </div>
-  )
-}
 
 type Herramienta = 'edicion' | 'clips' | 'medios' | 'cola'
 
@@ -200,11 +118,23 @@ export function Editor({
     const m = proyecto.medios?.find((x) => x.id === fuente)
     return m ? (m.tipo === 'imagen' ? MAX_IMAGEN : m.duracion) : 0
   }
+  /** Lo que dura cada medio (una imagen, lo que se quiera): para validar capas y clips. */
+  const duraciones = useMemo(() => {
+    const d: Record<string, number> = { principal: proyecto.source.duration }
+    for (const m of proyecto.medios ?? []) d[m.id] = m.tipo === 'imagen' ? MAX_IMAGEN : m.duracion
+    return d
+  }, [proyecto.source.duration, proyecto.medios])
   const nombreDe = (fuente: string) => (fuente === 'principal' ? proyecto.source.name : (proyecto.medios?.find((x) => x.id === fuente)?.nombre ?? '?'))
 
-  /** Pone un medio en la timeline (entero; una imagen, 4 s). Se puede deshacer. */
-  function poner(fuente: string, donde: 'final' | 'cabezal', base = timeline) {
+  /** Pone un medio en la timeline (entero; una imagen, 4 s) o encima del video. Se puede deshacer. */
+  function poner(fuente: string, donde: 'final' | 'cabezal' | 'encima', base = timeline) {
     const m = proyecto.medios?.find((x) => x.id === fuente)
+    if (donde === 'encima') {
+      if (!m) return base
+      const r = capaNueva(base, m.id, m.tipo, reproductor.tiempo, duraciones)
+      if (r.timeline !== base) setElegido({ tipo: 'capa', id: r.id })
+      return r.timeline
+    }
     const salida = fuente === 'principal' ? proyecto.source.duration : m?.tipo === 'imagen' ? DURACION_IMAGEN : (m?.duracion ?? 0)
     if (salida <= 0) return base
     const r = insertarClip(base, { fuente, entrada: 0, salida }, donde === 'cabezal' ? reproductor.tiempo : undefined)
@@ -290,7 +220,16 @@ export function Editor({
 
   return (
     <div className="editor">
-      <Monitor proyecto={proyecto} timeline={timeline} reproductor={reproductor} />
+      <Monitor
+        proyecto={proyecto}
+        timeline={timeline}
+        reproductor={reproductor}
+        fuentes={fuentes}
+        medios={duraciones}
+        historial={historial}
+        elegido={elegido}
+        onElegir={elegir}
+      />
       <TimelineEditor
         key={proyecto.id}
         timeline={timeline}
@@ -320,6 +259,17 @@ export function Editor({
               }
         }
         onCambiarArchivo={proyecto.demo ? undefined : (clipId) => void cambiarArchivo(clipId)}
+        medios={proyecto.demo ? undefined : (proyecto.medios ?? []).map((m) => ({ id: m.id, nombre: m.nombre, tipo: m.tipo }))}
+        duraciones={duraciones}
+        ponerSonido={
+          proyecto.demo
+            ? undefined
+            : async (incluido) => {
+                const r = await window.recorte.ponerSonido(proyecto.id, incluido)
+                if (r && !r.ok) onAviso(r.error ?? 'No pude poner el sonido.')
+                return r?.ok && r.sonido ? r.sonido : null
+              }
+        }
         importarMusica={async () => {
           const r = await window.recorte.importarMusica(proyecto.id)
           if (r && !r.ok) onAviso(r.error ?? 'No pude añadir la música.')

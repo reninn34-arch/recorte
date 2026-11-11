@@ -272,6 +272,8 @@ export interface RecorteApi {
   /** Genera una frase de narración con una voz de Gemini y la deja en el proyecto (sin agente). */
   vozFrase: (id: string, pedido: { texto: string; voz?: string }) => Promise<{ archivo: string; duracion: number; texto: string; voz: string }>
   importarMusica: (id: string) => Promise<{ ok: boolean; musica?: MusicaTL; error?: string } | null>
+  /** Copia un efecto de sonido al proyecto: uno incluido (su id) o, sin id, uno que elija el usuario. */
+  ponerSonido: (id: string, incluido?: string) => Promise<{ ok: boolean; sonido?: { archivo: string; nombre: string; duracion: number }; error?: string } | null>
   /** Crear con IA: videos desde cero, sin material importado. */
   elegirAdjuntos: () => Promise<string[]>
   /** Una carpeta de material: el agente recibe todas sus fotos y videos. */

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { aplicarOperaciones, MAX_MENSAJES, type MensajeChat } from '../../../shared/chat'
-import { tramos, type Timeline } from '../../../shared/timeline'
+import { duracionesDeMedios, tramos, type Timeline } from '../../../shared/timeline'
 import type { Project } from '../../../shared/types'
 import { Icon } from '../Icons'
 import type { Elegido } from './TimelineEditor'
@@ -144,7 +144,8 @@ export function ChatAgente({
         const actual = puente.current ?? p
         const r = aplicarOperaciones(actual.timeline, r0.operaciones, {
           duracionFuente: proyecto.source.duration,
-          transcript: proyecto.transcript
+          transcript: proyecto.transcript,
+          medios: duracionesDeMedios(proyecto.medios)
         })
         respuesta = {
           id: crypto.randomUUID(),

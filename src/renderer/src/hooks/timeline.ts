@@ -351,3 +351,49 @@ export function useVoces(timeline: Timeline, reproductor: Reproductor, urlDe: (a
 
   return audioRef
 }
+
+/**
+ * Lleva un `<video>` o `<audio>` suelto (una capa encima, un efecto de sonido) al segundo que le
+ * toca mientras está en su tramo: `esperado` es su segundo propio, o null fuera de su tramo.
+ */
+export function useSincronizar(
+  ref: React.RefObject<HTMLMediaElement | null>,
+  esperado: number | null,
+  reproduciendo: boolean,
+  volumen = 1
+): void {
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    if (esperado === null) {
+      if (!el.paused) el.pause()
+      return
+    }
+    if (Math.abs(el.currentTime - esperado) > 0.25) {
+      try {
+        el.currentTime = esperado
+      } catch {
+        // Aún sin metadatos: se ajusta en la siguiente vuelta.
+      }
+    }
+    el.volume = Math.max(0, Math.min(1, volumen))
+    if (reproduciendo) {
+      if (el.paused) void el.play().catch(() => {})
+    } else if (!el.paused) el.pause()
+  }, [ref, esperado, reproduciendo, volumen])
+}
+
+/** El tamaño de un elemento, al día cuando cambia. */
+export function useTamano(ref: React.RefObject<HTMLElement | null>): { w: number; h: number } | null {
+  const [tam, setTam] = useState<{ w: number; h: number } | null>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const medir = () => setTam({ w: el.clientWidth, h: el.clientHeight })
+    medir()
+    const ro = new ResizeObserver(medir)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [ref])
+  return tam
+}

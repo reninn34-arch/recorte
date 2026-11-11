@@ -51,6 +51,7 @@ const api: RecorteApi = {
   abrirExportacion: (id) => ipcRenderer.invoke('proyecto:abrir-exportacion', id),
   vozFrase: (id, pedido) => ipcRenderer.invoke('proyecto:voz-frase', id, pedido),
   importarMusica: (id) => ipcRenderer.invoke('proyecto:importar-musica', id),
+  ponerSonido: (id, incluido) => ipcRenderer.invoke('proyecto:poner-sonido', id, incluido),
   elegirAdjuntos: () => ipcRenderer.invoke('dialog:open-adjuntos'),
   elegirCarpeta: () => ipcRenderer.invoke('dialog:open-carpeta'),
   elegirReferencia: () => ipcRenderer.invoke('dialog:open-referencia'),

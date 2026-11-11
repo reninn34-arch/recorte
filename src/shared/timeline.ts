@@ -8,6 +8,8 @@ import type { RecetaEdicion, TranscriptSegment } from './types'
  *   Su posición en la timeline sale del orden, así que borrar o recortar cierra el hueco
  *   solo (ripple), como en CapCut o en la pista principal de Final Cut.
  * - `textos` es una pista libre de rótulos con posición absoluta.
+ * - `capas` va encima del video: imágenes, logos, íconos o tomas de apoyo, cada una en su sitio.
+ * - `sonidos` son efectos sueltos (un «whoosh» en un corte, un «pop» al entrar un rótulo).
  *
  * Todo aquí es puro y sin dependencias de Node ni del DOM: cada operación devuelve una
  * timeline nueva y nunca muta la anterior (eso hace posible deshacer).
@@ -90,6 +92,12 @@ export interface TextoTL {
   sinCaja?: boolean
   /** El color de la caja (`#rrggbb`); sin él, negra semitransparente. */
   caja?: string
+  /**
+   * Posición libre: el centro del rótulo en fracción del cuadro (0 izquierda/arriba, 1 derecha/abajo).
+   * Con ella manda sobre `posicion`; sin ella, va arriba, al centro o abajo.
+   */
+  x?: number
+  y?: number
   /** La letra (una clave de FUENTES_TEXTO); sin ella, la normal. */
   fuente?: string
 }
@@ -143,6 +151,44 @@ export interface VozTL {
   voz?: string
 }
 
+/** Cómo entra una capa: con un pequeño rebote o fundiéndose; sin él, de golpe. */
+export type EntradaCapa = 'pop' | 'fundido'
+
+/**
+ * Algo encima del video (una pista apilada): una imagen, un logo, un ícono o una toma de apoyo
+ * de la biblioteca, en su sitio y su tamaño. Va suelta, como un rótulo.
+ */
+export interface CapaTL {
+  id: string
+  /** Un medio del proyecto (imagen o video). */
+  fuente: FuenteId
+  /** Segundo de la timeline donde aparece. */
+  inicio: number
+  duracion: number
+  /** El centro, en fracción del cuadro: 0 (izquierda/arriba) a 1 (derecha/abajo). */
+  x: number
+  y: number
+  /** El ancho, en fracción del ancho del cuadro: 0.05 a 1 (1 = de borde a borde). */
+  ancho: number
+  entrada?: EntradaCapa
+  /** Si es un video: el segundo del medio desde donde se ve. */
+  desde?: number
+}
+
+/** Un efecto de sonido suelto en su segundo (su audio está en `media/`). */
+export interface SonidoTL {
+  id: string
+  inicio: number
+  duracion: number
+  /** Ruta relativa dentro de la carpeta del proyecto (`media/…`). */
+  archivo: string
+  nombre: string
+  /** 0 a 1.5; sin él, 0.6 (por debajo de la voz). */
+  volumen?: number
+}
+
+export const VOLUMEN_SONIDO = 0.6
+
 export interface Timeline {
   version: 1
   clips: ClipTL[]
@@ -150,6 +196,10 @@ export interface Timeline {
   musica?: MusicaTL
   /** La narración, frase a frase. */
   voces?: VozTL[]
+  /** Lo que va encima del video (imágenes, logos, íconos, tomas de apoyo). */
+  capas?: CapaTL[]
+  /** Efectos de sonido sueltos. */
+  sonidos?: SonidoTL[]
 }
 
 /** Un clip con su lugar en la timeline ya calculado. */
@@ -252,12 +302,71 @@ export function normalizarTimeline(entrada: unknown, duracionFuente: number, otr
       duracion,
       texto: typeof t.texto === 'string' ? t.texto : '',
       posicion: t.posicion === 'arriba' || t.posicion === 'centro' ? t.posicion : 'abajo',
-      ...estiloTexto(t)
+      ...estiloTexto(t),
+      ...posicionLibre(t)
     })
   }
   const musica = normalizarMusica(crudo.musica)
   const voces = normalizarVoces(crudo.voces, total)
-  return { version: 1, clips, textos, ...(musica ? { musica } : {}), ...(voces.length ? { voces } : {}) }
+  const capas = normalizarCapas(crudo.capas, total, { [FUENTE_PRINCIPAL]: duracionFuente, ...otras })
+  const sonidos = normalizarSonidos(crudo.sonidos, total)
+  return {
+    version: 1,
+    clips,
+    textos,
+    ...(musica ? { musica } : {}),
+    ...(voces.length ? { voces } : {}),
+    ...(capas.length ? { capas } : {}),
+    ...(sonidos.length ? { sonidos } : {})
+  }
+}
+
+/** La posición libre de un rótulo, si la tiene y es válida. */
+function posicionLibre(t: Partial<TextoTL>): Pick<TextoTL, 'x' | 'y'> {
+  const ok = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+  return ok(t.x) && ok(t.y) ? { x: Math.round(pinza(t.x, 0, 1) * 1000) / 1000, y: Math.round(pinza(t.y, 0, 1) * 1000) / 1000 } : {}
+}
+
+/** Las capas válidas: de un medio que existe, dentro de la timeline y del cuadro. */
+export function normalizarCapas(entrada: unknown, total: number, medios: Record<string, number>): CapaTL[] {
+  const capas: CapaTL[] = []
+  for (const c of Array.isArray(entrada) ? (entrada as Partial<CapaTL>[]) : []) {
+    if (!c || typeof c.inicio !== 'number' || typeof c.duracion !== 'number' || typeof c.fuente !== 'string') continue
+    if (medios[c.fuente] === undefined || c.inicio >= total - DURACION_MINIMA / 2) continue
+    const inicio = pinza(c.inicio, 0, Math.max(0, total - DURACION_MINIMA))
+    const num = (v: unknown, def: number) => (typeof v === 'number' && Number.isFinite(v) ? v : def)
+    capas.push({
+      id: typeof c.id === 'string' && c.id ? c.id : nuevoId('capa'),
+      fuente: c.fuente,
+      inicio,
+      duracion: pinza(c.duracion, DURACION_MINIMA, Math.max(DURACION_MINIMA, total - inicio)),
+      x: Math.round(pinza(num(c.x, 0.5), 0, 1) * 1000) / 1000,
+      y: Math.round(pinza(num(c.y, 0.5), 0, 1) * 1000) / 1000,
+      ancho: Math.round(pinza(num(c.ancho, 0.3), 0.05, 1) * 1000) / 1000,
+      ...(c.entrada === 'pop' || c.entrada === 'fundido' ? { entrada: c.entrada } : {}),
+      ...(typeof c.desde === 'number' && c.desde > 0 ? { desde: Math.min(c.desde, Math.max(0, medios[c.fuente] - DURACION_MINIMA)) } : {})
+    })
+  }
+  return capas.sort((a, b) => a.inicio - b.inicio)
+}
+
+/** Los sonidos válidos: con su audio dentro de `media/` y que empiecen dentro de la timeline. */
+export function normalizarSonidos(entrada: unknown, total: number): SonidoTL[] {
+  const sonidos: SonidoTL[] = []
+  for (const s of Array.isArray(entrada) ? (entrada as Partial<SonidoTL>[]) : []) {
+    if (!s || typeof s.inicio !== 'number' || typeof s.duracion !== 'number' || typeof s.archivo !== 'string') continue
+    if (!/^media\/[\w.-]+$/.test(s.archivo) || s.archivo.includes('..')) continue
+    if (!(s.duracion > 0) || s.inicio >= total - DURACION_MINIMA / 2) continue
+    sonidos.push({
+      id: typeof s.id === 'string' && s.id ? s.id : nuevoId('sonido'),
+      inicio: Math.max(0, s.inicio),
+      duracion: s.duracion,
+      archivo: s.archivo,
+      nombre: typeof s.nombre === 'string' && s.nombre ? s.nombre.slice(0, 60) : 'Sonido',
+      ...(typeof s.volumen === 'number' && Number.isFinite(s.volumen) && Math.abs(s.volumen - VOLUMEN_SONIDO) > 1e-3 ? { volumen: pinza(s.volumen, 0, 1.5) } : {})
+    })
+  }
+  return sonidos.sort((a, b) => a.inicio - b.inicio)
 }
 
 /** Las frases de voz válidas: con su audio dentro de `media/` y que empiecen dentro de la timeline. */
@@ -421,8 +530,19 @@ function conClips(tl: Timeline, clips: ClipTL[]): Timeline {
   const total = clips.reduce((t, c) => t + largo(c), 0)
   // Las frases que quedan fuera al acortar se van, como los rótulos.
   const voces = tl.voces?.filter((v) => v.inicio < total - DURACION_MINIMA / 2)
-  const { voces: _antes, ...resto } = tl
-  return { ...resto, clips, textos: ajustarTextos(tl.textos, total), ...(voces?.length ? { voces } : {}) }
+  const capas = tl.capas
+    ?.filter((c) => c.inicio < total - DURACION_MINIMA / 2)
+    .map((c) => (c.inicio + c.duracion > total ? { ...c, duracion: Math.max(DURACION_MINIMA, total - c.inicio) } : c))
+  const sonidos = tl.sonidos?.filter((s) => s.inicio < total - DURACION_MINIMA / 2)
+  const { voces: _antes, capas: _c, sonidos: _s, ...resto } = tl
+  return {
+    ...resto,
+    clips,
+    textos: ajustarTextos(tl.textos, total),
+    ...(voces?.length ? { voces } : {}),
+    ...(capas?.length ? { capas } : {}),
+    ...(sonidos?.length ? { sonidos } : {})
+  }
 }
 
 /** Divide el clip que está bajo el segundo `t`. Devuelve la misma timeline si no cabe. */
@@ -562,7 +682,9 @@ export function duracionesDeMedios(medios?: { id: string; tipo: 'video' | 'image
 
 /** Quita de la timeline todos los clips de una fuente (al quitar un medio del proyecto). */
 export function quitarFuente(tl: Timeline, fuente: FuenteId): Timeline {
-  return conClips(tl, tl.clips.filter((c) => c.fuente !== fuente))
+  const sin = conClips(tl, tl.clips.filter((c) => c.fuente !== fuente))
+  // Sus capas encima también se van.
+  return sin.capas?.some((c) => c.fuente === fuente) ? sin.capas.filter((c) => c.fuente === fuente).reduce((t, c) => borrarCapa(t, c.id), sin) : sin
 }
 
 export function anadirTexto(tl: Timeline, inicio: number, texto = 'Texto'): { timeline: Timeline; id: string } {
@@ -587,8 +709,10 @@ export function cambiarTexto(tl: Timeline, id: string, cambio: Partial<Omit<Text
     ...tl,
     textos: tl.textos.map((x) => {
       if (x.id !== id) return x
-      const { tamano: _t, color: _c, sinCaja: _s, fuente: _f, caja: _k, ...base } = { ...x, ...cambio }
-      const nuevo: TextoTL = { ...base, ...estiloTexto({ ...x, ...cambio }) }
+      const { tamano: _t, color: _c, sinCaja: _s, fuente: _f, caja: _k, x: _x, y: _y, ...base } = { ...x, ...cambio }
+      // Elegir arriba, centro o abajo suelta la posición libre; mover el rótulo la fija.
+      const libre = cambio.posicion !== undefined && cambio.x === undefined ? {} : posicionLibre({ ...x, ...cambio })
+      const nuevo: TextoTL = { ...base, ...estiloTexto({ ...x, ...cambio }), ...libre }
       nuevo.inicio = pinza(nuevo.inicio, 0, Math.max(0, total - DURACION_MINIMA))
       nuevo.duracion = pinza(nuevo.duracion, DURACION_MINIMA, Math.max(DURACION_MINIMA, total - nuevo.inicio))
       return nuevo
@@ -645,6 +769,99 @@ export function anadirVoz(tl: Timeline, frase: Omit<VozTL, 'id'>): { timeline: T
   return { timeline: { ...tl, voces }, id }
 }
 
+// ===== Lo que va encima del video (capas) =====
+
+/** Las capas visibles en el segundo `t`, de abajo a arriba. */
+export function capasEn(tl: Timeline, t: number): CapaTL[] {
+  return (tl.capas ?? []).filter((c) => t >= c.inicio && t < c.inicio + c.duracion)
+}
+
+/** Pone un medio encima del video. `medios`: lo que dura cada uno (para validar). */
+export function anadirCapa(tl: Timeline, capa: Omit<CapaTL, 'id'>, medios: Record<string, number>): { timeline: Timeline; id: string } {
+  const id = nuevoId('capa')
+  const capas = normalizarCapas([...(tl.capas ?? []), { ...capa, id }], duracionTimeline(tl), medios)
+  if (!capas.some((c) => c.id === id)) return { timeline: tl, id }
+  return { timeline: { ...tl, capas }, id }
+}
+
+/**
+ * Una capa nueva con lo de siempre: una imagen 3 s y al 25 % del ancho, un video hasta 5 s y al
+ * 40 %, con «pop», en el segundo `t` y donde se suelte (`x`, `y`; por defecto, al centro).
+ */
+export function capaNueva(
+  tl: Timeline,
+  fuente: string,
+  tipo: 'video' | 'imagen',
+  t: number,
+  medios: Record<string, number>,
+  x = 0.5,
+  y = 0.5
+): { timeline: Timeline; id: string } {
+  const total = duracionTimeline(tl)
+  const inicio = Math.max(0, Math.min(t, total - DURACION_MINIMA))
+  const largo = tipo === 'imagen' ? 3 : Math.min(Math.max(DURACION_MINIMA, medios[fuente] ?? 3), 5)
+  return anadirCapa(
+    tl,
+    { fuente, inicio, duracion: Math.min(largo, Math.max(DURACION_MINIMA, total - inicio)), x, y, ancho: tipo === 'imagen' ? 0.25 : 0.4, entrada: 'pop' },
+    medios
+  )
+}
+
+export function cambiarCapa(tl: Timeline, id: string, cambio: Partial<Omit<CapaTL, 'id'>>, medios: Record<string, number>): Timeline {
+  if (!tl.capas?.some((c) => c.id === id)) return tl
+  const capas = normalizarCapas(
+    tl.capas.map((c) => {
+      if (c.id !== id) return c
+      const nueva = { ...c, ...cambio }
+      // `entrada: undefined` en el cambio la quita (entra de golpe).
+      if ('entrada' in cambio && !cambio.entrada) delete nueva.entrada
+      return nueva
+    }),
+    duracionTimeline(tl),
+    medios
+  )
+  return { ...tl, capas }
+}
+
+export function borrarCapa(tl: Timeline, id: string): Timeline {
+  if (!tl.capas?.some((c) => c.id === id)) return tl
+  const capas = tl.capas.filter((c) => c.id !== id)
+  const { capas: _antes, ...resto } = tl
+  return capas.length ? { ...resto, capas } : resto
+}
+
+/** Cuánto ha crecido una capa en su entrada (0 a 1) y su opacidad, `dt` segundos después de aparecer. */
+export function animacionCapa(c: CapaTL, dt: number): { escala: number; opacidad: number } {
+  if (c.entrada === 'pop') {
+    // Entra pequeña, se pasa un poco y se asienta (como un «pop»), en 0,24 s.
+    const escala = dt < 0.13 ? 0.45 + (dt / 0.13) * 0.72 : dt < 0.24 ? 1.17 - ((dt - 0.13) / 0.11) * 0.17 : 1
+    return { escala, opacidad: Math.min(1, dt / 0.08) }
+  }
+  if (c.entrada === 'fundido') return { escala: 1, opacidad: Math.min(1, dt / 0.35) }
+  return { escala: 1, opacidad: 1 }
+}
+
+// ===== Efectos de sonido =====
+
+export function anadirSonido(tl: Timeline, sonido: Omit<SonidoTL, 'id'>): { timeline: Timeline; id: string } {
+  const id = nuevoId('sonido')
+  const sonidos = normalizarSonidos([...(tl.sonidos ?? []), { ...sonido, id }], duracionTimeline(tl))
+  if (!sonidos.some((s) => s.id === id)) return { timeline: tl, id }
+  return { timeline: { ...tl, sonidos }, id }
+}
+
+export function cambiarSonido(tl: Timeline, id: string, cambio: Partial<Omit<SonidoTL, 'id'>>): Timeline {
+  if (!tl.sonidos?.some((s) => s.id === id)) return tl
+  return { ...tl, sonidos: normalizarSonidos(tl.sonidos.map((s) => (s.id === id ? { ...s, ...cambio } : s)), duracionTimeline(tl)) }
+}
+
+export function borrarSonido(tl: Timeline, id: string): Timeline {
+  if (!tl.sonidos?.some((s) => s.id === id)) return tl
+  const sonidos = tl.sonidos.filter((s) => s.id !== id)
+  const { sonidos: _antes, ...resto } = tl
+  return sonidos.length ? { ...resto, sonidos } : resto
+}
+
 /**
  * Cambia el archivo de un clip por otro medio del proyecto (otra foto, otro video) sin mover
  * nada: conserva su lugar y su duración. `duracionNueva` es lo que dura el medio nuevo
@@ -659,3 +876,16 @@ export function cambiarFuente(tl: Timeline, id: string, fuente: FuenteId, duraci
   })
   return conClips(tl, clips)
 }
+
+/** El tipo de dato con que un medio de la biblioteca se arrastra a la timeline o al monitor. */
+export const TIPO_ARRASTRE_MEDIO = 'application/x-recorte-medio'
+
+// ===== Efectos de sonido incluidos (python/sonidos/<id>.wav) =====
+
+export const SONIDOS_INCLUIDOS: { id: string; nombre: string; para: string }[] = [
+  { id: 'whoosh', nombre: 'Whoosh', para: 'un cambio rápido, algo que entra volando' },
+  { id: 'pop', nombre: 'Pop', para: 'un logo o un ícono que aparece' },
+  { id: 'pop-alto', nombre: 'Pop agudo', para: 'otro ícono, o el siguiente de una serie' },
+  { id: 'ding', nombre: 'Ding', para: 'un dato, un acierto, un precio' },
+  { id: 'caching', nombre: 'Caja registradora', para: 'una oferta, un descuento, una venta' }
+]

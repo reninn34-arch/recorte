@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { ajustesDe, duracionTimeline, FUENTE_PRINCIPAL, FUENTES_TEXTO, vozEnTimeline, tramos, tramosDeVoces, type PosicionTexto, type Timeline } from '../shared/timeline'
+import { ajustesDe, duracionTimeline, FUENTE_PRINCIPAL, FUENTES_TEXTO, vozEnTimeline, tramos, VOLUMEN_SONIDO, tramosDeVoces, type PosicionTexto, type Timeline } from '../shared/timeline'
 import type { OpcionesExport } from '../shared/api'
 import type { ClipSuggestion, Project } from '../shared/types'
 
@@ -116,8 +116,9 @@ function escribirAss(
     // Un rótulo abajo empuja los subtítulos hacia arriba al compartir alineación: van en otra capa.
     ...textos.map((t) => {
       // El tamaño y el color propios del rótulo van como etiquetas sobre el estilo de su posición.
+      const libre = typeof t.x === 'number' && typeof t.y === 'number'
       const etiquetas = [
-        `\\an${ALINEACION[t.posicion]}`,
+        libre ? `\\an5\\pos(${Math.round(t.x! * ancho)},${Math.round(t.y! * alto)})` : `\\an${ALINEACION[t.posicion]}`,
         ...(t.tamano ? [`\\fs${Math.round(tamRotulo * t.tamano)}`] : []),
         ...(t.color ? [`\\1c${colorAss(t.color).replace('&H00', '&H')}&`] : []),
         // La caja de su color (con caja, el borde del estilo es la caja), opaca como en el monitor.
@@ -183,8 +184,10 @@ export async function exportarTimeline(
   const conAudio = lista.some((t) => fuenteDe(t.clip.fuente)!.conAudio && !t.clip.mudo)
   // La narración: cada frase es un archivo de la carpeta del proyecto, en su segundo.
   const frases = (timeline.voces ?? []).filter((v) => existsSync(join(carpeta, v.archivo)))
-  /** Hay «voz» que mezclar con la música: el sonido de los clips, la narración o ambos. */
-  const hayBus = conAudio || frases.length > 0
+  // Los efectos de sonido (un «whoosh», un «pop»): suenan con la narración, a su volumen.
+  const efectos = (timeline.sonidos ?? []).filter((s) => existsSync(join(carpeta, s.archivo)))
+  /** Hay «voz» que mezclar con la música: el sonido de los clips, la narración, los efectos. */
+  const hayBus = conAudio || frases.length > 0 || efectos.length > 0
 
   // La música vive en la carpeta del proyecto; normalizarMusica ya validó la ruta.
   let musica: { ruta: string; volumen: number; ducking: boolean } | null = null
@@ -276,8 +279,9 @@ export async function exportarTimeline(
   } else {
     partes.push(`${lista.map((_, i) => `[v${i}]`).join('')}concat=n=${lista.length}:v=1:a=0[vcat]`)
   }
-  if (conAudio) partes.push(`${lista.map((_, i) => `[a${i}]`).join('')}concat=n=${lista.length}:v=0:a=1${frases.length ? '[clipsa]' : bus}`)
-  if (frases.length) {
+  const sueltos = frases.length + efectos.length
+  if (conAudio) partes.push(`${lista.map((_, i) => `[a${i}]`).join('')}concat=n=${lista.length}:v=0:a=1${sueltos ? '[clipsa]' : bus}`)
+  if (sueltos) {
     const etiquetas: string[] = conAudio ? ['[clipsa]'] : []
     frases.forEach((v, i) => {
       entradas.push('-i', join(carpeta, v.archivo))
@@ -286,9 +290,38 @@ export async function exportarTimeline(
       )
       etiquetas.push(`[fr${i}]`)
     })
+    efectos.forEach((s, i) => {
+      entradas.push('-i', join(carpeta, s.archivo))
+      partes.push(
+        `[${n++}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=${(s.volumen ?? VOLUMEN_SONIDO).toFixed(3)},adelay=${Math.round(s.inicio * 1000)}:all=1[ef${i}]`
+      )
+      etiquetas.push(`[ef${i}]`)
+    })
     partes.push(`${etiquetas.join('')}amix=inputs=${etiquetas.length}:duration=longest:normalize=0,apad,atrim=0:${duracion.toFixed(3)}${bus}`)
   }
-  partes.push(ass ? `[vcat]subtitles=${ass}[vout]` : '[vcat]null[vout]')
+  // Lo que va encima (imágenes, logos, íconos, tomas de apoyo): cada capa en su sitio, su tamaño y
+  // su entrada, igual que en el monitor. Va debajo de los rótulos.
+  let capaBase = '[vcat]'
+  const capas = (timeline.capas ?? []).filter((c) => fuenteDe(c.fuente))
+  capas.forEach((c, i) => {
+    const f = fuenteDe(c.fuente)!
+    if (f.tipo === 'imagen') entradas.push('-loop', '1', '-framerate', String(fps), '-t', c.duracion.toFixed(3), '-i', f.ruta)
+    else entradas.push('-ss', (c.desde ?? 0).toFixed(3), '-t', c.duracion.toFixed(3), '-i', f.ruta)
+    const k = n++
+    const w = (ancho * c.ancho).toFixed(1)
+    // El rebote del «pop»: entra al 45 %, se pasa al 117 % y se asienta en 0,24 s (animacionCapa).
+    const escala = c.entrada === 'pop' ? `if(lt(t,0.13),0.45+t/0.13*0.72,if(lt(t,0.24),1.17-(t-0.13)/0.11*0.17,1))` : '1'
+    const fundido = c.entrada === 'fundido' ? ',fade=t=in:st=0:d=0.35:alpha=1' : c.entrada === 'pop' ? ',fade=t=in:st=0:d=0.08:alpha=1' : ''
+    partes.push(
+      `[${k}:v]setpts=PTS-STARTPTS,fps=${fps},format=rgba,scale=w='trunc(${w}*${escala}/2)*2':h=-2:eval=frame${fundido},setpts=PTS+${c.inicio.toFixed(3)}/TB[capa${i}]`
+    )
+    const salida = `[conCapa${i}]`
+    partes.push(
+      `${capaBase}[capa${i}]overlay=x='${(ancho * c.x).toFixed(1)}-w/2':y='${(alto * c.y).toFixed(1)}-h/2':eval=frame:eof_action=pass:enable='between(t,${c.inicio.toFixed(3)},${(c.inicio + c.duracion).toFixed(3)})'${salida}`
+    )
+    capaBase = salida
+  })
+  partes.push(ass ? `${capaBase}subtitles=${ass}[vout]` : `${capaBase}null[vout]`)
 
   if (musica) {
     // La música se repite (-stream_loop) y se corta a la duración, con fundido de salida.

@@ -1,4 +1,4 @@
-import { DURACION_IMAGEN } from '../../../shared/timeline'
+import { DURACION_IMAGEN, TIPO_ARRASTRE_MEDIO } from '../../../shared/timeline'
 import type { MedioProyecto, Project } from '../../../shared/types'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
@@ -23,12 +23,22 @@ export function MediosPanel({
   proyecto: Project
   agregando: boolean
   onAgregar: () => void
-  /** Pone el medio (o el video principal, `principal`) en la timeline. */
-  onPoner: (fuente: string, donde: 'final' | 'cabezal') => void
+  /** Pone el medio (o el video principal, `principal`) en la timeline, o encima del video. */
+  onPoner: (fuente: string, donde: 'final' | 'cabezal' | 'encima') => void
   onQuitar: (medio: MedioProyecto) => void
 }) {
   const medios = proyecto.medios ?? []
-  const usos = (id: string) => (proyecto.timeline?.clips ?? []).filter((c) => c.fuente === id).length
+  const usos = (id: string) =>
+    (proyecto.timeline?.clips ?? []).filter((c) => c.fuente === id).length + (proyecto.timeline?.capas ?? []).filter((c) => c.fuente === id).length
+  /** Se arrastra a la pista de video, a la de «Encima» o al monitor. */
+  const arrastrable = (fuente: string) => ({
+    draggable: !proyecto.demo,
+    onDragStart: (e: React.DragEvent) => {
+      e.dataTransfer.setData(TIPO_ARRASTRE_MEDIO, fuente)
+      e.dataTransfer.effectAllowed = 'copy'
+    },
+    title: 'Arrástralo a la timeline o al monitor'
+  })
 
   return (
     <div className="medios">
@@ -45,9 +55,9 @@ export function MediosPanel({
       </div>
 
       <div className="medios-grid">
-        <div className="medio">
+        <div className="medio" {...arrastrable('principal')}>
           <span className="medio-mini">
-            {proyecto.thumbnail ? <img src={mediaUrl(proyecto.id, proyecto.thumbnail)} alt="" /> : <Icon name="film" size={20} />}
+            {proyecto.thumbnail ? <img src={mediaUrl(proyecto.id, proyecto.thumbnail)} alt="" draggable={false} /> : <Icon name="film" size={20} />}
             <span className="inicio-duracion">{mmss(proyecto.source.duration)}</span>
           </span>
           <span className="medio-nombre" title={proyecto.source.path}>
@@ -65,12 +75,12 @@ export function MediosPanel({
         </div>
 
         {medios.map((m) => (
-          <div key={m.id} className="medio">
+          <div key={m.id} className="medio" {...arrastrable(m.id)}>
             <span className="medio-mini">
               {m.tipo === 'imagen' ? (
-                <img src={mediaUrl(proyecto.id, `medio/${m.id}`)} alt="" />
+                <img src={mediaUrl(proyecto.id, `medio/${m.id}`)} alt="" draggable={false} />
               ) : m.miniatura ? (
-                <img src={mediaUrl(proyecto.id, m.miniatura)} alt="" />
+                <img src={mediaUrl(proyecto.id, m.miniatura)} alt="" draggable={false} />
               ) : (
                 <Icon name="film" size={20} />
               )}
@@ -89,6 +99,9 @@ export function MediosPanel({
               </button>
               <button className="btn small ghost" onClick={() => onPoner(m.id, 'cabezal')}>
                 En el cabezal
+              </button>
+              <button className="btn small ghost" onClick={() => onPoner(m.id, 'encima')} title="Encima del video, en el cabezal (un logo, un ícono, una toma de apoyo)">
+                Encima
               </button>
               <button className="btn small ghost medio-quitar" onClick={() => onQuitar(m)} title="Quitar del proyecto (el archivo no se borra)">
                 <Icon name="trash" size={13} />

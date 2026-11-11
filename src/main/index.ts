@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from 'electron'
-import { duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, timelineVacia, type Timeline } from '../shared/timeline'
+import { duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, SONIDOS_INCLUIDOS, timelineVacia, type Timeline } from '../shared/timeline'
 import { randomUUID } from 'node:crypto'
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, join, resolve, sep } from 'node:path'
@@ -55,7 +55,7 @@ import { turnoAgente } from './chat'
 import { buscarActualizacion, estadoActualizacion, instalarActualizacion, prepararActualizaciones } from './actualizar'
 import { activarGustos, agregarGustos, bloqueGustos, cargarGustos, olvidarGustos, quitarGusto, senalGusto, usoCreacion } from './gustos'
 import type { MensajeChat, OperacionTL } from '../shared/chat'
-import { transcribir } from './transcribir'
+import { rutaScriptPython, transcribir } from './transcribir'
 
 // El esquema tiene que declararse antes de que Electron esté listo.
 protocol.registerSchemesAsPrivileged([
@@ -2073,6 +2073,24 @@ app.whenReady().then(() => {
           const fallosVoz = await generarVocesDelChat(id, normalizarTimeline(timeline, proyecto.source.duration, duracionesDeMedios(proyecto.medios)), turno.operaciones)
           if (fallosVoz.length) turno.mensaje = `${turno.mensaje}\n\nNo pude generar la voz: ${fallosVoz.join(' ')}`
         }
+        // Los efectos de sonido que pidió: su audio se copia al proyecto antes de aplicar.
+        if (turno.ok) {
+          for (const o of turno.operaciones) {
+            if (o.op !== 'anadir_sonido') continue
+            const s = SONIDOS_INCLUIDOS.find((x) => x.id === o.sonido)
+            const origen = s ? rutaScriptPython(join('sonidos', `${s.id}.wav`)) : ''
+            if (!s || !existsSync(origen)) continue
+            try {
+              const media = join(proyectos.carpeta(id), 'media')
+              mkdirSync(media, { recursive: true })
+              const nombre = `sonido-${s.id}-${randomUUID().slice(0, 8)}.wav`
+              copyFileSync(origen, join(media, nombre))
+              o.audio = { archivo: `media/${nombre}`, duracion: Math.round((await duracionMedio(join(media, nombre))) * 100) / 100 || 0.5, nombre: s.nombre }
+            } catch {
+              // Sin audio, la operación se informa como fallida al aplicarla.
+            }
+          }
+        }
         // Solo se guarda lo nuevo; lo que ya sabía se confirma (suma una vez más).
         if (turno.aprendido?.length) turno.aprendido = agregarGustos(turno.aprendido, 'aprendido').map((g) => g.texto)
         return turno
@@ -2167,6 +2185,46 @@ app.whenReady().then(() => {
       }
     } catch (error) {
       return { ok: false, error: `No pude copiar la música: ${error instanceof Error ? error.message : String(error)}` }
+    }
+  })
+
+  // Un efecto de sonido para la pista de sonidos: uno de los incluidos o uno del equipo.
+  ipcMain.handle('proyecto:poner-sonido', async (_evento, id: unknown, incluido: unknown) => {
+    if (typeof id !== 'string') return { ok: false, error: 'Proyecto inválido.' }
+    if (!proyectos.get(id)) return { ok: false, error: 'El proyecto ya no existe.' }
+    let origen: string
+    let nombre: string
+    if (typeof incluido === 'string') {
+      const s = SONIDOS_INCLUIDOS.find((x) => x.id === incluido)
+      if (!s) return { ok: false, error: 'Ese sonido no existe.' }
+      origen = rutaScriptPython(join('sonidos', `${s.id}.wav`))
+      nombre = s.nombre
+    } else {
+      const eleccion = await dialog.showOpenDialog({
+        title: 'Elige el efecto de sonido',
+        properties: ['openFile'],
+        filters: [{ name: 'Audio', extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'opus', 'flac'] }]
+      })
+      if (eleccion.canceled || !eleccion.filePaths[0]) return null
+      origen = eleccion.filePaths[0]
+      nombre = basename(origen, extname(origen)).slice(0, 60)
+    }
+    try {
+      const duracion = await duracionMedio(origen)
+      if (!(duracion > 0)) return { ok: false, error: 'No pude leer ese audio.' }
+      const base = basename(origen, extname(origen))
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^\w-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 40) || 'sonido'
+      const nombreArchivo = `sonido-${base}-${Date.now().toString(36)}${extname(origen).toLowerCase()}`
+      const carpetaMedia = join(proyectos.carpeta(id), 'media')
+      mkdirSync(carpetaMedia, { recursive: true })
+      copyFileSync(origen, join(carpetaMedia, nombreArchivo))
+      return { ok: true, sonido: { archivo: `media/${nombreArchivo}`, nombre, duracion } }
+    } catch (error) {
+      return { ok: false, error: `No pude poner el sonido: ${error instanceof Error ? error.message : String(error)}` }
     }
   })
 

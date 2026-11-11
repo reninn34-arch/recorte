@@ -146,6 +146,12 @@ de los rótulos, pista de efectos de sonido y arrastrar de la biblioteca. Con es
 Cangrejal (carteles con ícono, logos de redes al nombrarlas, tomas de apoyo, efectos) se arma entero en el
 editor y no en un MP4 cerrado.
 
+*Hecho (2026-11-10):* pistas «Encima» y «Sonidos» en la timeline; capas y rótulos se mueven en el monitor
+(con imán al centro) y la capa cambia de tamaño por su esquina; entrada pop o fundido; cinco efectos incluidos
+(python/sonidos) o uno del equipo; soltar medios de la biblioteca en el monitor, en «Encima» o en la pista de
+video; la exportación los respeta (prueba:exportar) y el chat tiene anadir_capa, cambiar_capa, anadir_sonido y
+posición libre. Falta que el kit del modo agente entregue capas y sonidos en su receta (va con 6.4).
+
 **6.2 · Ver y editar por MCP.** Listar proyectos y creaciones, leer la timeline, aplicar cambios (las
 mismas operaciones del cambio rápido, más las de 6.1), añadir medios, transcribir y exportar. El cambio
 rápido usa la transcripción de la narración en los proyectos del agente.

@@ -12,6 +12,15 @@ import {
   cambiarVoz,
   anadirVoz,
   silenciarClip,
+  capaNueva,
+  cambiarCapa,
+  borrarCapa,
+  anadirSonido,
+  cambiarSonido,
+  borrarSonido,
+  MAX_IMAGEN,
+  SONIDOS_INCLUIDOS,
+  type EntradaCapa,
   FUENTES_TEXTO,
   dividir,
   duracionTimeline,
@@ -54,8 +63,19 @@ export type OperacionTL =
       sin_caja?: boolean
       caja?: string
       fuente?: string
+      /** Posición libre: el centro del rótulo, en fracción del cuadro (0–1). */
+      x?: number
+      y?: number
     }
   | { op: 'borrar_texto'; texto_n: number }
+  /** Lo que va encima del video: un medio de la biblioteca (por su id), en su sitio y su tamaño. */
+  | { op: 'anadir_capa'; medio: string; inicio: number; duracion?: number; x?: number; y?: number; ancho?: number; entrada?: EntradaCapa | 'corte' }
+  | { op: 'cambiar_capa'; capa_n: number; inicio?: number; duracion?: number; x?: number; y?: number; ancho?: number; entrada?: EntradaCapa | 'corte' }
+  | { op: 'borrar_capa'; capa_n: number }
+  /** Un efecto de sonido incluido. Recorte copia su audio ANTES de aplicarla y le pone `audio`. */
+  | { op: 'anadir_sonido'; sonido: string; inicio: number; volumen?: number; audio?: { archivo: string; duracion: number; nombre: string } }
+  | { op: 'cambiar_sonido'; sonido_n: number; inicio?: number; volumen?: number }
+  | { op: 'borrar_sonido'; sonido_n: number }
   | { op: 'reconstruir'; cortes: { entrada: number; salida: number }[] }
   | { op: 'zoom'; clip?: number; zoom: number }
   | { op: 'color'; clip?: number; brillo?: number; contraste?: number; saturacion?: number }
@@ -144,6 +164,17 @@ export function pausasEnTimeline(tl: Timeline, transcript: TranscriptSegment[] |
 }
 
 /** Valida la forma de lo que devolvió el agente. Lo que no encaja se descarta. */
+/** Lo que se puede cambiar de una capa, validado (sin `inicio`). */
+function camposCapa(x: Record<string, unknown>): { duracion?: number; x?: number; y?: number; ancho?: number; entrada?: EntradaCapa | 'corte' } {
+  return {
+    ...(num(x.duracion) !== null ? { duracion: num(x.duracion)! } : {}),
+    ...(num(x.x) !== null ? { x: num(x.x)! } : {}),
+    ...(num(x.y) !== null ? { y: num(x.y)! } : {}),
+    ...(num(x.ancho) !== null ? { ancho: num(x.ancho)! } : {}),
+    ...(x.entrada === 'pop' || x.entrada === 'fundido' || x.entrada === 'corte' ? { entrada: x.entrada } : {})
+  }
+}
+
 export function validarOperaciones(crudo: unknown): OperacionTL[] {
   if (!Array.isArray(crudo)) return []
   const ops: OperacionTL[] = []
@@ -201,9 +232,42 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
             color: typeof x.color === 'string' && /^#[0-9a-f]{6}$/i.test(x.color) ? x.color : undefined,
             sin_caja: typeof x.sin_caja === 'boolean' ? x.sin_caja : undefined,
             caja: typeof x.caja === 'string' && /^#[0-9a-f]{6}$/i.test(x.caja) ? x.caja : undefined,
-            fuente: typeof x.fuente === 'string' && x.fuente in FUENTES_TEXTO ? x.fuente : undefined
+            fuente: typeof x.fuente === 'string' && x.fuente in FUENTES_TEXTO ? x.fuente : undefined,
+            ...(num(x.x) !== null && num(x.y) !== null ? { x: num(x.x)!, y: num(x.y)! } : {})
           })
         }
+        break
+      }
+      case 'anadir_capa': {
+        const i = num(x.inicio)
+        if (i === null || typeof x.medio !== 'string' || !x.medio) break
+        ops.push({ op: 'anadir_capa', medio: x.medio, inicio: i, ...camposCapa(x) })
+        break
+      }
+      case 'cambiar_capa': {
+        const n = num(x.capa_n)
+        if (n !== null) ops.push({ op: 'cambiar_capa', capa_n: n, ...(num(x.inicio) !== null ? { inicio: num(x.inicio)! } : {}), ...camposCapa(x) })
+        break
+      }
+      case 'borrar_capa': {
+        const n = num(x.capa_n)
+        if (n !== null) ops.push({ op: 'borrar_capa', capa_n: n })
+        break
+      }
+      case 'anadir_sonido': {
+        const i = num(x.inicio)
+        if (i === null || typeof x.sonido !== 'string' || !SONIDOS_INCLUIDOS.some((s) => s.id === x.sonido)) break
+        ops.push({ op: 'anadir_sonido', sonido: x.sonido, inicio: i, ...(num(x.volumen) !== null ? { volumen: num(x.volumen)! } : {}) })
+        break
+      }
+      case 'cambiar_sonido': {
+        const n = num(x.sonido_n)
+        if (n !== null) ops.push({ op: 'cambiar_sonido', sonido_n: n, ...(num(x.inicio) !== null ? { inicio: num(x.inicio)! } : {}), ...(num(x.volumen) !== null ? { volumen: num(x.volumen)! } : {}) })
+        break
+      }
+      case 'borrar_sonido': {
+        const n = num(x.sonido_n)
+        if (n !== null) ops.push({ op: 'borrar_sonido', sonido_n: n })
         break
       }
       case 'borrar_texto': {
@@ -286,8 +350,9 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
 export function aplicarOperaciones(
   inicial: Timeline,
   ops: OperacionTL[],
-  contexto: { duracionFuente: number; transcript?: TranscriptSegment[] }
+  contexto: { duracionFuente: number; transcript?: TranscriptSegment[]; medios?: Record<string, number> }
 ): { timeline: Timeline; cambios: string[]; fallos: string[] } {
+  const medios = { [FUENTE_PRINCIPAL]: contexto.duracionFuente, ...(contexto.medios ?? {}) }
   let tl = inicial
   const cambios: string[] = []
   const fallos: string[] = []
@@ -391,6 +456,10 @@ export function aplicarOperaciones(
         if (o.sin_caja !== undefined) cambio.sinCaja = o.sin_caja
         if (o.caja !== undefined) cambio.caja = o.caja
         if (o.fuente !== undefined) cambio.fuente = o.fuente
+        if (o.x !== undefined && o.y !== undefined && o.posicion === undefined) {
+          cambio.x = o.x
+          cambio.y = o.y
+        }
         tl = cambiarTexto(tl, t.id, cambio)
         cambios.push(`Cambié el texto ${o.texto_n}`)
         break
@@ -401,6 +470,71 @@ export function aplicarOperaciones(
         else {
           tl = borrarTexto(tl, t.id)
           cambios.push(`Borré el texto «${t.texto}»`)
+        }
+        break
+      }
+      case 'anadir_capa': {
+        if (o.medio === FUENTE_PRINCIPAL || contexto.medios?.[o.medio] === undefined) {
+          fallos.push(`No hay ningún medio «${o.medio}» en la biblioteca.`)
+          break
+        }
+        const tipo = medios[o.medio] >= MAX_IMAGEN ? 'imagen' : 'video'
+        const r = capaNueva(tl, o.medio, tipo, o.inicio, medios, o.x ?? 0.5, o.y ?? 0.5)
+        if (r.timeline === tl) {
+          fallos.push('La capa nueva cae fuera del video.')
+          break
+        }
+        const { inicio: _i, ...resto } = o
+        tl = cambiarCapa(r.timeline, r.id, cambioDeCapa(resto), medios)
+        cambios.push(`Puse encima «${o.medio}» en ${mmss(o.inicio)}`)
+        break
+      }
+      case 'cambiar_capa': {
+        const c = tl.capas?.[Math.round(o.capa_n) - 1]
+        if (!c) {
+          fallos.push(`No existe la capa ${o.capa_n}.`)
+          break
+        }
+        tl = cambiarCapa(tl, c.id, { ...(o.inicio !== undefined ? { inicio: o.inicio } : {}), ...cambioDeCapa(o) }, medios)
+        cambios.push(`Cambié la capa ${o.capa_n}`)
+        break
+      }
+      case 'borrar_capa': {
+        const c = tl.capas?.[Math.round(o.capa_n) - 1]
+        if (!c) fallos.push(`No existe la capa ${o.capa_n}.`)
+        else {
+          tl = borrarCapa(tl, c.id)
+          cambios.push(`Quité la capa ${o.capa_n}`)
+        }
+        break
+      }
+      case 'anadir_sonido': {
+        if (!o.audio) {
+          fallos.push(`No pude poner el sonido «${o.sonido}».`)
+          break
+        }
+        const r = anadirSonido(tl, { inicio: o.inicio, duracion: o.audio.duracion, archivo: o.audio.archivo, nombre: o.audio.nombre, ...(o.volumen !== undefined ? { volumen: o.volumen } : {}) })
+        if (r.timeline === tl) fallos.push('El sonido cae fuera del video.')
+        else cambios.push(`Puse el sonido «${o.audio.nombre}» en ${mmss(o.inicio)}`)
+        tl = r.timeline
+        break
+      }
+      case 'cambiar_sonido': {
+        const s = tl.sonidos?.[Math.round(o.sonido_n) - 1]
+        if (!s) {
+          fallos.push(`No existe el sonido ${o.sonido_n}.`)
+          break
+        }
+        tl = cambiarSonido(tl, s.id, { ...(o.inicio !== undefined ? { inicio: o.inicio } : {}), ...(o.volumen !== undefined ? { volumen: o.volumen } : {}) })
+        cambios.push(`Ajusté el sonido ${o.sonido_n}`)
+        break
+      }
+      case 'borrar_sonido': {
+        const s = tl.sonidos?.[Math.round(o.sonido_n) - 1]
+        if (!s) fallos.push(`No existe el sonido ${o.sonido_n}.`)
+        else {
+          tl = borrarSonido(tl, s.id)
+          cambios.push(`Quité el sonido «${s.nombre}»`)
         }
         break
       }
@@ -510,6 +644,17 @@ export function aplicarOperaciones(
   return { timeline: tl, cambios, fallos }
 }
 
+/** Los campos de una operación de capa como cambio de `cambiarCapa` («corte» = sin entrada). */
+function cambioDeCapa(o: { duracion?: number; x?: number; y?: number; ancho?: number; entrada?: EntradaCapa | 'corte' }) {
+  return {
+    ...(o.duracion !== undefined ? { duracion: o.duracion } : {}),
+    ...(o.x !== undefined ? { x: o.x } : {}),
+    ...(o.y !== undefined ? { y: o.y } : {}),
+    ...(o.ancho !== undefined ? { ancho: o.ancho } : {}),
+    ...(o.entrada !== undefined ? { entrada: o.entrada === 'corte' ? undefined : o.entrada } : {})
+  }
+}
+
 /** Lo que el agente ve de la timeline: clips, textos y la voz en tiempo de timeline. */
 export function describirTimelineParaAgente(
   tl: Timeline,
@@ -541,9 +686,27 @@ export function describirTimelineParaAgente(
       t.sinCaja ? 'sin caja' : t.caja ? `caja ${t.caja}` : '',
       t.fuente ? `letra ${t.fuente}` : ''
     ].filter(Boolean)
-    lineas.push(`  ${i + 1}. ${t.inicio.toFixed(2)}–${(t.inicio + t.duracion).toFixed(2)} ${t.posicion}: «${t.texto.replace(/\n/g, ' / ')}»${estilo.length ? ` [${estilo.join(', ')}]` : ''}`)
+    const donde = typeof t.x === 'number' && typeof t.y === 'number' ? `en x ${t.x} y ${t.y}` : t.posicion
+    lineas.push(`  ${i + 1}. ${t.inicio.toFixed(2)}–${(t.inicio + t.duracion).toFixed(2)} ${donde}: «${t.texto.replace(/\n/g, ' / ')}»${estilo.length ? ` [${estilo.join(', ')}]` : ''}`)
   })
   if (tl.textos.length === 0) lineas.push('  (ninguno)')
+  const biblioteca = Object.entries(nombres)
+  if (biblioteca.length) {
+    lineas.push('Medios de la biblioteca (para «anadir_capa», por su id):')
+    for (const [id, nombre] of biblioteca) lineas.push(`  ${id}: ${nombre}`)
+  }
+  if (tl.capas?.length) {
+    lineas.push('Encima del video (capas, de abajo a arriba; x, y = su centro y ancho, en fracción del cuadro):')
+    tl.capas.forEach((c, i) =>
+      lineas.push(
+        `  ${i + 1}. ${c.inicio.toFixed(2)}–${(c.inicio + c.duracion).toFixed(2)} ${nombres[c.fuente] ?? c.fuente} (${c.fuente}) en x ${c.x} y ${c.y}, ancho ${c.ancho}, ${c.entrada ?? 'sin entrada'}`
+      )
+    )
+  }
+  if (tl.sonidos?.length) {
+    lineas.push('Efectos de sonido:')
+    tl.sonidos.forEach((s, i) => lineas.push(`  ${i + 1}. ${s.inicio.toFixed(2)} «${s.nombre}»${s.volumen !== undefined ? ` volumen ${s.volumen}` : ''}`))
+  }
   if (tl.voces?.length) {
     lineas.push('Narración (frases de voz generadas, cada una con su audio):')
     tl.voces.forEach((v, i) =>
@@ -610,12 +773,17 @@ Operaciones disponibles (los tiempos van en segundos con decimales):
 - {"op":"cambiar_voz","voz_n":N,"texto":"…","voz":"Kore","inicio":T,"volumen":V}  cambia la frase de narración N. Con "texto" o "voz", Recorte vuelve a generar SOLO esa frase (con la voz que ya tenía si no das otra). "inicio" la mueve, "volumen" 0–1.5.
 - {"op":"anadir_voz","inicio":T,"texto":"…","voz":"Kore"}  añade una frase de narración nueva en el segundo T (sin "voz", la de las demás frases).
 - {"op":"borrar_voz","voz_n":N}
+- {"op":"cambiar_texto","texto_n":N,"x":0.5,"y":0.3}  pone el rótulo donde quieras: x, y son su centro en fracción del cuadro (0 izquierda/arriba, 1 derecha/abajo). Para volver a arriba, centro o abajo, usa "posicion".
+- {"op":"anadir_capa","medio":"ID","inicio":T,"duracion":S,"x":0.5,"y":0.5,"ancho":0.25,"entrada":"pop|fundido|corte"}  pone encima del video un medio de la biblioteca (un logo, un ícono, una foto, una toma de apoyo), por su id. x, y = su centro y ancho = su ancho, en fracción del cuadro. "pop" (por defecto) entra rebotando; úsalo para logos e íconos que aparecen cuando se nombran. No tapes caras ni manos que importan.
+- {"op":"cambiar_capa","capa_n":N, …los mismos campos…}  y {"op":"borrar_capa","capa_n":N}
+- {"op":"anadir_sonido","sonido":"whoosh|pop|pop-alto|ding|caching","inicio":T,"volumen":0.6}  un efecto de sonido: whoosh (un cambio rápido), pop y pop-alto (algo que aparece), ding (un dato, un acierto), caching (una oferta, un precio). Úsalos con medida: en lo que aparece, no en cada corte.
+- {"op":"cambiar_sonido","sonido_n":N,"inicio":T,"volumen":V}  y {"op":"borrar_sonido","sonido_n":N}
 Las voces son de Gemini: Kore, Puck, Charon, Zephyr, Fenrir, Leda, Orus, Aoede, Callirrhoe, Autonoe, Enceladus, Iapetus, Umbriel, Algieba, Despina, Erinome, Algenib, Rasalgethi, Laomedeia, Achernar, Alnilam, Schedar, Gacrux, Pulcherrima, Achird, Zubenelgenubi, Vindemiatrix, Sadachbia, Sadaltager, Sulafat. Cambia solo las frases que el usuario pide: cada frase nueva gasta voz.
 
 Las operaciones se aplican en orden y cada una ve la timeline que dejó la anterior.
 Corta siempre en fronteras de frase: usa los tiempos de la voz. No inventes contenido que no está en la transcripción.
 Si el usuario solo pregunta algo, responde con "operaciones": [].
 No puedes elegir ni crear archivos de música: si no hay música y la piden, dile que la añada con el botón «Música» y que luego tú la ajustas.
-Si algo no se puede hacer con estas operaciones (transiciones, efectos, velocidad), dilo en el mensaje y no lo simules.
+Si algo no se puede hacer con estas operaciones (transiciones, velocidad, efectos de imagen), dilo en el mensaje y no lo simules.
 
 ${INSTRUCCIONES_CRITERIO}`
