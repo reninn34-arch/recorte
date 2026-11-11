@@ -66,7 +66,8 @@ const herramientas = herramientasRecorte({
       return c
     },
     get: (cid) => creadas.get(cid) ?? null,
-    carpeta: (cid) => join(dir, 'creaciones', cid)
+    carpeta: (cid) => join(dir, 'creaciones', cid),
+    guardar: (c) => creadas.set(c.id, c)
   },
   trabajando: (cid) => (ocupadas.has(cid) ? { desde: Date.now(), pct: 0.3, texto: 'Mirando tus archivos' } : null),
   charlar: (cid, texto) => {
@@ -180,6 +181,8 @@ try {
   ocupadas.delete('c-prueba')
   const hazlo = await llamar('hacer_video', { creacion: 'c-prueba' })
   assert.match(hazlo.content[0].text, /haciendo el video/)
+  // El gasto aceptado queda guardado con la creación: tras reiniciar Recorte no se vuelve a pedir en cada versión.
+  assert.ok(creadas.get('c-prueba').gastoAceptado, 'el permiso aceptado se guarda con la creación')
   assert.deepEqual(turnos.map((t) => t.que), ['charla', 'charla', 'hacer'])
   // Sin voz conectada y con una voz desconocida, no hace nada.
   assert.equal((await llamar('crear_video', { peticion: 'x', voz: 'Nadie' })).isError, true)

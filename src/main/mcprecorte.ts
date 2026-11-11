@@ -46,6 +46,8 @@ export interface ContextoMcp {
     nueva: (p: PeticionCreacion) => Promise<Creacion>
     get: (id: string) => Creacion | null
     carpeta: (id: string) => string
+    /** Guarda la creación (para recordar el gasto que el usuario ya aceptó). */
+    guardar?: (c: Creacion) => void
   }
   /** Si el agente de la creación está trabajando: desde cuándo y su último aviso. */
   trabajando: (id: string) => { desde: number; pct?: number; texto?: string } | null
@@ -601,7 +603,7 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
             ...(vozElegida ? { vozElegida } : {}),
             ...(args.directo === true ? { directo: true } : {})
           })
-          if (gasto) autorizadas.add(c.id)
+          if (gasto) recordarGasto(c, gasto)
           ctx.charlar(c.id)
           return ok(
             `Creación «${c.nombre}» empezada (id ${c.id}). El agente de Recorte está mirando el material y preparando ${args.directo === true ? 'el plan y luego el video' : 'el plan'}: ` +
@@ -760,13 +762,25 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
     ]
   }
 
-  /** Antes de un turno del agente de una creación que gasta (voz, clips): permiso una vez por creación. */
+  /** Recuerda con la creación el gasto que el usuario aceptó: no se le vuelve a preguntar en cada versión. */
+  function recordarGasto(c: Creacion, gasto: string) {
+    autorizadas.add(c.id)
+    if (c.gastoAceptado === gasto) return
+    const actual = ctx.creaciones.get(c.id) ?? c
+    ctx.creaciones.guardar?.({ ...actual, gastoAceptado: gasto })
+  }
+
+  /**
+   * Antes de un turno del agente de una creación que gasta (voz, clips): permiso UNA vez por creación. Queda guardado
+   * con ella (sobrevive a reiniciar Recorte); solo se vuelve a pedir si el gasto cambia (p. ej. si luego se eligen clips).
+   */
   function permisoDeCreacion(c: Creacion, que: string, args: Record<string, unknown>): ResultadoHerramienta | null {
     const gasto = gastoDeCreacion(c)
-    if (!gasto || autorizadas.has(c.id)) return null
+    if (!gasto || c.gastoAceptado === gasto) return null
+    if (autorizadas.has(c.id) && c.gastoAceptado === undefined) return null
     const clave = `creacion:${c.id}:${que}`
     if (confirmado(clave, args)) {
-      autorizadas.add(c.id)
+      recordarGasto(c, gasto)
       return null
     }
     return pedirPermiso(clave, `${gasto} (lo aceptas una vez para esta creación).`)

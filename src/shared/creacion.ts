@@ -254,6 +254,8 @@ export interface Creacion {
   agente?: EstadoModoAgente
   /** Modo agente: la voz de Gemini que el usuario eligió para narrar (sin ella, sin narración). */
   vozElegida?: string
+  /** El gasto que el usuario ya aceptó para esta creación (voz, clips): mientras no cambie, no se vuelve a preguntar. */
+  gastoAceptado?: string
   /** Modo agente: tras el plan, si no hay preguntas, se hace sin esperar el «Hazlo». */
   directo?: boolean
   /** Video de referencia cuyo estilo se copia (copiado a `analisis/`; no entra en el video). */

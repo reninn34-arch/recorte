@@ -2433,7 +2433,10 @@ app.whenReady().then(() => {
     creaciones: {
       nueva: (p) => creaciones.nueva(p),
       get: (id) => creaciones.get(id),
-      carpeta: (id) => creaciones.carpeta(id)
+      carpeta: (id) => creaciones.carpeta(id),
+      guardar: (c) => {
+        creaciones.guardar(c)
+      }
     },
     trabajando: (id) => (creandoAhora.has(id) ? { desde: inicioCreacion.get(id) ?? Date.now(), ...ultimoProgreso.get(id) } : null),
     charlar: (id, texto) => enSegundoPlano(id, texto, (c, senal) => charlaConAgente(c, senal)),
