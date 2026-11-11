@@ -24,6 +24,38 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.28',
+    fecha: '2026-11-10',
+    resumen: 'Videos mucho más vivos: capas que se mueven, fondos que se quitan solos, filtros de película y transiciones con movimiento.',
+    novedades: [
+      {
+        icono: 'layers',
+        titulo: 'Capas que se mueven',
+        texto: 'Una capa puede entrar desde un lado, cruzar volando, subir, acercarse o girar mientras está. En pausa ves dónde empieza y una silueta de dónde termina: arrastra cualquiera de las dos. Así se arman escenas por capas con efecto 3D.'
+      },
+      {
+        icono: 'image',
+        titulo: 'Quitar fondo',
+        texto: 'Elige una capa de imagen y dale a «Quitar fondo»: queda solo la persona o el objeto. Un fondo liso sale al momento; cualquier otra foto la resuelve un modelo que se baja la primera vez (178 MB).'
+      },
+      {
+        icono: 'sliders',
+        titulo: 'Filtros de película',
+        texto: 'En «Filtros»: grano, polvo y rayas, trama de puntos de revista, viñeta y parpadeo, para todo el video. Los rótulos siguen nítidos.'
+      },
+      {
+        icono: 'film',
+        titulo: 'Transiciones y texto que se arma',
+        texto: 'Cada corte puede entrar con un barrido, zoom, desenfoque, destello o círculo. Los rótulos pueden aparecer palabra a palabra, letra a letra, con rebote o subiendo.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'También para el agente',
+        texto: 'El agente de Recorte y Claude Code usan todo esto: piden imágenes ya recortadas, mueven capas, ponen filtros y transiciones, y te lo dejan editable.'
+      }
+    ]
+  },
+  {
     version: '0.1.27',
     fecha: '2026-11-10',
     resumen: 'El agente ya hace mini documentales con títulos de revista, objetos de museo en 3D y fotos de archivo, y los puedes retocar en el editor.',
