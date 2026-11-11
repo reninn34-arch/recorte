@@ -212,6 +212,8 @@ que cada toma se ve en 3D. Elige la toma por lo que cuenta la frase:
   lo que hay que mirar). Úsalo antes de entregar.
 - `python kit/kit.py donde "la bandera"` → las piezas de la receta que nombra el usuario, con sus segundos y su cuadro
   del último render en `revision/donde-N.jpg`. Úsalo en cada cambio para ubicar de qué habla.
+- **Render en paralelo**: `armar` dibuja varios cuadros a la vez (uno por núcleo libre, sin pasarse de la memoria) y va
+  diciendo cuánto falta; al final dice cuánto tardó. No lances dos `armar` a la vez: se quitan los núcleos el uno al otro.
 - **Render quirúrgico**: `armar` recuerda lo último que renderizó; si armas la receta cambiada a OTRO archivo de
   salida, solo vuelve a dibujar los segundos de las piezas que cambiaron y copia el resto de aquel video (dice cuántos
   cuadros dibujó). Si cambias algo de todo el video (tamaño, filtros, la letra de los subtítulos), lo hace entero.

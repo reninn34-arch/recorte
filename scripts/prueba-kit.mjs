@@ -373,6 +373,27 @@ try {
   if (!(existsSync(join(trabajo, viva.personaje)) && existsSync(join(trabajo, viva.fondo)) && viva.momento.tipo === 'foto' && capaPers.archivo === viva.personaje && Math.abs(capaPers.x - 0.5) < 0.1))
     throw new Error(`escena no separó la figura de su escenario: ${JSON.stringify(viva)}`)
   console.log(`escena viva: la figura (${capaPers.ancho} de ancho, x ${capaPers.x}) separada de su escenario ✓`)
+  // Velocidad: una escena 2.5D con cámara, capas y filtros a 1080×1920 no puede tardar más de 1,5 s por cuadro en un
+  // núcleo (antes de OpenCV tardaba más del doble). Si sube, algo volvió a hacerse lento.
+  writeFileSync(
+    join(trabajo, 'velocidad.py'),
+    [
+      'import json, sys, time',
+      "sys.path.insert(0, 'kit')",
+      'import kit',
+      "r = json.load(open('receta-escena.json'))",
+      "r.update(ancho=1080, alto=1920, filtros={'grano': 0.3, 'polvo': 0.2, 'vineta': 0.5, 'trama': 0.3})",
+      "json.dump(r, open('receta-velocidad.json', 'w'))",
+      "_, L, m, d = kit.cargar('receta-velocidad.json')",
+      'kit.cuadro(L, m, 0.5, d, 0)',
+      'a = time.time()',
+      'for k in range(6): kit.cuadro(L, m, 1 + k / 12, d, 0)',
+      "print(json.dumps({'por_cuadro': (time.time() - a) / 6}))"
+    ].join(String.fromCharCode(10))
+  )
+  const vel = json(correr(python, ['velocidad.py'], trabajo))
+  if (!(vel.por_cuadro < 1.5)) throw new Error(`El render se volvió lento: ${vel.por_cuadro.toFixed(2)} s por cuadro a 1080×1920`)
+  console.log(`velocidad: ${vel.por_cuadro.toFixed(2)} s por cuadro a 1080×1920 en un núcleo ✓`)
   console.log(`marioneta: con el esqueleto dado, el brazo se levanta a saludar (${saluda} px fuera de la imagen), capa ${mar.escala}× más ancha ✓`)
 
   // Cámara en mano y profundidad de campo en el kit: el fondo se mueve solo (con la foto quieta) y se desenfoca.

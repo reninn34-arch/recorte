@@ -385,6 +385,8 @@ export async function proyectoDesdeReceta(
 
   // Las capas encima (logos, íconos): cada imagen a la biblioteca y a la pista «Encima», con su sitio y su entrada.
   const capas: CapaTL[] = []
+  // La misma imagen con el mismo movimiento en varias capas (un personaje que sale en varias escenas) se anima UNA vez.
+  const animadas = new Map<string, Promise<{ ruta: string; escala: number } | null>>()
   for (const c of Array.isArray(receta.capas) ? receta.capas : []) {
     if (!c || typeof c !== 'object') continue
     const x = c as Record<string, unknown>
@@ -412,13 +414,12 @@ export async function proyectoDesdeReceta(
             : null
     const animada =
       medio.tipo === 'imagen' && typeof tipoAnimar === 'string' && ANIMAR_CAPA.some((t) => t.id === tipoAnimar) && ruta
-        ? await animarConKit(
-            trabajo,
-            ruta,
-            tipoAnimar,
-            carpetaProyecto,
-            secuencia ? { secuencia, duracion: b - a } : x.animar && typeof x.animar === 'object' ? (x.animar as Record<string, unknown>) : {}
-          )
+        ? await (() => {
+            const opciones = secuencia ? { secuencia, duracion: b - a } : x.animar && typeof x.animar === 'object' ? (x.animar as Record<string, unknown>) : {}
+            const clave = JSON.stringify([ruta, tipoAnimar, opciones])
+            if (!animadas.has(clave)) animadas.set(clave, animarConKit(trabajo, ruta, tipoAnimar, carpetaProyecto, opciones))
+            return animadas.get(clave)!
+          })()
         : null
     const medioAnimado = animada ? await medioDe(animada.ruta) : null
     capas.push({

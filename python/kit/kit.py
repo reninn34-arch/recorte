@@ -141,12 +141,12 @@ def tapar(im, zonas):
     if not zonas:
         return im
     w, h = im.size
-    borroso = im.filter(ImageFilter.GaussianBlur(max(w, h) / 40))
+    borroso = gauss(im, max(w, h) / 40)
     mascara = Image.new('L', im.size, 0)
     d = ImageDraw.Draw(mascara)
     for z in zonas:
         d.rounded_rectangle((z[0] * w, z[1] * h, z[2] * w, z[3] * h), radius=int(0.05 * w), fill=255)
-    return Image.composite(borroso, im, mascara.filter(ImageFilter.GaussianBlur(w / 60)))
+    return Image.composite(borroso, im, gauss(mascara, w / 60))
 
 
 def barrido(arr, p, fuerza=0.55, ancho=0.09, angulo=0.35):
@@ -686,6 +686,11 @@ class Marioneta:
         w /= w.sum(0, keepdims=True)
         # A tamaño completo, y por la transparencia: lo que cada hueso «lleva» de la imagen.
         self.peso = [cv2.resize(x.astype(np.float32), (self.W, self.H), interpolation=cv2.INTER_LINEAR) * self.alfa for x in w]
+        # La zona que ocupa cada hueso (donde pesa algo): al dibujar, cada uno se calcula solo ahí.
+        self.cajas = []
+        for p in self.peso:
+            ys, xs = np.nonzero(p > 1e-3)
+            self.cajas.append((int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1) if len(xs) else None)
         self.yy, self.xx = np.mgrid[0:self.H, 0:self.W].astype(np.float32)
 
     def _angulo_reposo(self, a, b):
@@ -806,21 +811,39 @@ class Marioneta:
         a_acc = np.zeros((self.H, self.W), np.float32)
         total = np.zeros((self.H, self.W), np.float32)
         capas = []
-        if quietos:
-            p = sum(self.peso[i] for i, _ in quietos)
-            capas.append((min(i for i, _ in quietos), self.rgb, p))
+        # Los huesos quietos, juntos y en su sitio (sin deformar): solo la zona que ocupan.
+        cq = [self.cajas[i] for i, _ in quietos if self.cajas[i]]
+        if cq:
+            x0, y0, x1, y1 = min(c[0] for c in cq), min(c[1] for c in cq), max(c[2] for c in cq), max(c[3] for c in cq)
+            p = sum(self.peso[i][y0:y1, x0:x1] for i, _ in quietos)
+            capas.append((min(i for i, _ in quietos), (x0, y0, x1, y1), self.rgb[y0:y1, x0:x1], p))
         for i, nombre in moviles:
+            caja = self.cajas[i]
+            if not caja:
+                continue
+            # Dónde cae su zona después de moverse (las cuatro esquinas, con margen), dentro del lienzo.
+            esq = T[nombre] @ np.array([[caja[0], caja[2], caja[0], caja[2]], [caja[1], caja[1], caja[3], caja[3]], [1, 1, 1, 1]], np.float64)
+            x0, y0 = max(0, int(esq[0].min()) - 3), max(0, int(esq[1].min()) - 3)
+            x1, y1 = min(self.W, int(esq[0].max()) + 4), min(self.H, int(esq[1].max()) + 4)
+            if x1 <= x0 or y1 <= y0:
+                continue
             inv = np.linalg.inv(T[nombre])
-            mx = (inv[0, 0] * self.xx + inv[0, 1] * self.yy + inv[0, 2]).astype(np.float32)
-            my = (inv[1, 0] * self.xx + inv[1, 1] * self.yy + inv[1, 2]).astype(np.float32)
-            col = cv2.remap(self.rgb, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-            p = cv2.remap(self.peso[i], mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-            capas.append((i, col, p))
+            M = np.float32([[inv[0, 0], inv[0, 1], inv[0, 0] * x0 + inv[0, 1] * y0 + inv[0, 2]],
+                            [inv[1, 0], inv[1, 1], inv[1, 0] * x0 + inv[1, 1] * y0 + inv[1, 2]]])
+            col = cv2.warpAffine(self.rgb, M, (x1 - x0, y1 - y0), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_REPLICATE)
+            p = cv2.warpAffine(self.peso[i], M, (x1 - x0, y1 - y0), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
+                               borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+            capas.append((i, (x0, y0, x1, y1), col, p))
         # Cada hueso es una capa: lo de delante (los brazos, al final) tapa lo de atrás; la opacidad es la suma.
-        for _, col, p in sorted(capas, key=lambda x: x[0]):
-            rgb_acc = col * p[..., None] + rgb_acc * (1 - p[..., None])
-            a_acc = p + a_acc * (1 - p)
-            total += p
+        for _, (x0, y0, x1, y1), col, p in sorted(capas, key=lambda x: x[0]):
+            pp = p[..., None]
+            r = rgb_acc[y0:y1, x0:x1]
+            r *= 1 - pp
+            r += col * pp
+            a = a_acc[y0:y1, x0:x1]
+            a *= 1 - p
+            a += p
+            total[y0:y1, x0:x1] += p
         rgb = rgb_acc / np.maximum(a_acc, 1e-4)[..., None]
         alfa = np.clip(total, 0, 1)
         return Image.fromarray(np.dstack([np.clip(rgb, 0, 255), alfa * 255]).astype(np.uint8), 'RGBA')
@@ -898,6 +921,44 @@ class VideoCapa:
         return self.ultimo or Image.new('RGBA', (self.w, self.h), (0, 0, 0, 0))
 
 
+def gauss(im, radio):
+    """Desenfoque gaussiano de una imagen de Pillow con OpenCV (varias veces más rápido; el mismo `radio`, que en Pillow es
+    la desviación del desenfoque)."""
+    import cv2
+    if radio <= 0.05:
+        return im
+    a = np.asarray(im)
+    return Image.fromarray(cv2.GaussianBlur(a, (0, 0), float(radio), borderType=cv2.BORDER_REPLICATE), im.mode)
+
+
+# Mover, escalar y girar imágenes con OpenCV (usa todos los núcleos y es mucho más rápido que Pillow), con decimales.
+_ARRAYS = {}
+
+
+def _arr(im):
+    """La imagen como array (sin copiarla cada cuadro si es la misma imagen)."""
+    clave = id(im)
+    hit = _ARRAYS.get(clave)
+    if hit is not None and hit[0] is im:
+        return hit[1]
+    a = np.asarray(im)
+    if len(_ARRAYS) > 256:
+        _ARRAYS.clear()
+    _ARRAYS[clave] = (im, a)
+    return a
+
+
+def afin(im, ancho, alto, datos):
+    """Como `im.transform((ancho, alto), Image.AFFINE, datos, BICUBIC)` de Pillow (`datos`: de cada píxel de la salida
+    al de la imagen), pero con OpenCV. Pillow mide desde el borde del píxel y OpenCV desde su centro: se corrige."""
+    import cv2
+    a, b, c, d, e, f = datos
+    M = np.float32([[a, b, a * 0.5 + b * 0.5 + c - 0.5], [d, e, d * 0.5 + e * 0.5 + f - 0.5]])
+    out = cv2.warpAffine(_arr(im), M, (int(ancho), int(alto)), flags=cv2.INTER_CUBIC | cv2.WARP_INVERSE_MAP,
+                         borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+    return out
+
+
 def pegar_suave(lienzo, im, cx, cy, ancho, giro=0.0, alfa=1.0):
     """Pega `im` (RGBA) centrada en (cx, cy), con `ancho` píxeles y girada `giro` grados (a favor del
     reloj), todo con decimales: una capa que se mueve o crece despacio no tiembla."""
@@ -910,19 +971,20 @@ def pegar_suave(lienzo, im, cx, cy, ancho, giro=0.0, alfa=1.0):
     ex, ey = abs(hw * co) + abs(hh * si), abs(hw * si) + abs(hh * co)
     x0, y0 = math.floor(cx - ex) - 1, math.floor(cy - ey) - 1
     bw, bh = math.ceil(cx + ex) + 2 - x0, math.ceil(cy + ey) + 2 - y0
-    # De cada píxel de la caja al de la imagen: deshacer el giro y la escala.
-    dx, dy = x0 - cx, y0 - cy
+    # Solo la parte de la caja que cae dentro del cuadro (una capa grande que sobresale no se calcula entera).
+    vx0, vy0 = max(x0, 0), max(y0, 0)
+    vx1, vy1 = min(x0 + bw, lienzo.width), min(y0 + bh, lienzo.height)
+    if vx1 <= vx0 or vy1 <= vy0:
+        return
+    # De cada píxel de esa zona al de la imagen: deshacer el giro y la escala.
+    dx, dy = vx0 - cx, vy0 - cy
     datos = (co / s, si / s, (dx * co + dy * si) / s + im.width / 2,
              -si / s, co / s, (-dx * si + dy * co) / s + im.height / 2)
-    pieza = im.transform((bw, bh), Image.AFFINE, datos, resample=Image.BICUBIC)
+    pieza = afin(im.convert('RGBA') if im.mode != 'RGBA' else im, vx1 - vx0, vy1 - vy0, datos)
     if alfa < 0.999:
-        pieza.putalpha(pieza.getchannel('A').point(lambda a: round(a * alfa)))
-    # Lo que cae fuera del cuadro se recorta (alpha_composite no acepta posiciones negativas).
-    ix, iy = max(0, -x0), max(0, -y0)
-    if ix >= bw or iy >= bh or x0 >= lienzo.width or y0 >= lienzo.height:
-        return
-    pieza = pieza.crop((ix, iy, min(bw, lienzo.width - x0), min(bh, lienzo.height - y0)))
-    lienzo.alpha_composite(pieza, (x0 + ix, y0 + iy))
+        pieza = pieza.copy()
+        pieza[..., 3] = (pieza[..., 3].astype(np.float32) * alfa + 0.5).astype(np.uint8)
+    lienzo.alpha_composite(Image.fromarray(pieza, 'RGBA'), (vx0, vy0))
 
 
 # Escena 2.5D (igual que en el editor): una capa muy cercana (profundidad 1) se mueve 1 + PARALAJE veces
@@ -996,7 +1058,7 @@ def desenfocar(c, im, ancho_px, L, fija):
     # Con el color premultiplicado, para que el borde no se ensucie de negro.
     a = np.asarray(lienzo, dtype=np.float32)
     al = a[..., 3:4] / 255
-    pre = Image.fromarray(np.clip(np.dstack([a[..., :3] * al, a[..., 3:4]]), 0, 255).astype(np.uint8), 'RGBA').filter(ImageFilter.GaussianBlur(sigma))
+    pre = gauss(Image.fromarray(np.clip(np.dstack([a[..., :3] * al, a[..., 3:4]]), 0, 255).astype(np.uint8), 'RGBA'), sigma)
     b = np.asarray(pre, dtype=np.float32)
     rgb = b[..., :3] / np.maximum(b[..., 3:4] / 255, 1e-3)
     sale = Image.fromarray(np.clip(np.dstack([rgb, b[..., 3:4]]), 0, 255).astype(np.uint8), 'RGBA')
@@ -1035,7 +1097,9 @@ def estado_capa(c, dt):
 
 def aplicar_filtros(lienzo, L, t):
     """Los filtros de todo el video (como los del editor): trama de imprenta, polvo, grano, viñeta y
-    parpadeo. Van encima de la escena y las capas, y debajo de los subtítulos."""
+    parpadeo. Van encima de la escena y las capas, y debajo de los subtítulos. Lo que no cambia de un cuadro a otro
+    (la trama, la viñeta) se calcula una vez; el resto, en float32 y sin copias de más."""
+    import cv2
     f = L.filtros
     if not f:
         return lienzo
@@ -1045,11 +1109,14 @@ def aplicar_filtros(lienzo, L, t):
         if 'trama' not in cache:
             k = 2 * math.pi / max(3, L.W / 180)
             yy, xx = np.mgrid[0:L.H, 0:L.W].astype(np.float32)
-            cache['trama'] = (0.5 + 0.5 * np.sin(xx * k) * np.sin(yy * k))[..., None]
-        b = cache['trama']
+            b = (0.5 + 0.5 * np.sin(xx * k) * np.sin(yy * k))[..., None]
+            cache['trama'] = (2 * b, 2 * (1 - b))
+        dos_b, dos_nb = cache['trama']
         # Mezcla «overlay», como en el MP4.
-        sup = np.where(a < 128, 2 * a * b, 255 - 2 * (255 - a) * (1 - b))
-        a = a + (sup - a) * 0.45 * f['trama']
+        sup = np.where(a < 128, a * dos_b, 255 - (255 - a) * dos_nb)
+        sup -= a
+        sup *= 0.45 * f['trama']
+        a += sup
     if f.get('polvo'):
         rng = np.random.default_rng(int(t * L.fps) + 3)
         w3, h3 = max(16, L.W // 3), max(16, L.H // 3)
@@ -1057,24 +1124,31 @@ def aplicar_filtros(lienzo, L, t):
         n = int(round(t * L.fps))
         if n % 7 > 4:
             motas[:, (n * 97) % w3] = np.maximum(motas[:, (n * 97) % w3], 170)
-        motas = np.asarray(Image.fromarray(motas.astype(np.uint8)).resize((L.W, L.H), Image.BILINEAR), dtype=np.float32)[..., None]
-        sup = 255 - (255 - a) * (255 - motas) / 255
-        a = a + (sup - a) * 0.7 * f['polvo']
+        motas = cv2.resize(motas.astype(np.uint8), (L.W, L.H), interpolation=cv2.INTER_LINEAR).astype(np.float32)[..., None]
+        # Mezcla «screen»: lo claro de las motas aclara.
+        sup = (255 - a) * (255 - motas)
+        sup *= -1 / 255
+        sup += 255 - a
+        sup *= 0.7 * f['polvo']
+        a += sup
     if f.get('grano'):
         rng = np.random.default_rng(int(t * L.fps) * 7 + 1)
         ruido = rng.standard_normal((L.H // 2 + 1, L.W // 2 + 1)).astype(np.float32)
-        ruido = np.repeat(np.repeat(ruido, 2, axis=0), 2, axis=1)[:L.H, :L.W, None]
-        a = a + ruido * 30 * f['grano'] * 0.6
+        ruido = cv2.resize(ruido, (ruido.shape[1] * 2, ruido.shape[0] * 2), interpolation=cv2.INTER_NEAREST)[:L.H, :L.W, None]
+        ruido *= 30 * f['grano'] * 0.6
+        a += ruido
     if f.get('vineta'):
-        if 'vineta' not in cache:
+        ang = 0.2 + 0.6 * f['vineta']
+        clave = ('vineta', round(ang, 4))
+        if clave not in cache:
             yy, xx = np.mgrid[0:L.H, 0:L.W].astype(np.float32)
             r = np.sqrt(((xx / L.W - 0.5) * 2) ** 2 + ((yy / L.H - 0.5) * 2) ** 2) / math.sqrt(2)
-            cache['vineta'] = r[..., None]
-        ang = 0.2 + 0.6 * f['vineta']
-        a = a * np.clip(1 - (cache['vineta'] * ang * 1.6) ** 2, 0, 1)
+            cache[clave] = np.clip(1 - (r * ang * 1.6) ** 2, 0, 1).astype(np.float32)[..., None]
+        a *= cache[clave]
     if f.get('parpadeo'):
-        a = a + 255 * 0.045 * f['parpadeo'] * math.sin(t * 31) * math.sin(t * 7.3)
-    return Image.fromarray(np.clip(a, 0, 255).astype(np.uint8)).convert('RGBA')
+        a += 255 * 0.045 * f['parpadeo'] * math.sin(t * 31) * math.sin(t * 7.3)
+    np.clip(a, 0, 255, out=a)
+    return Image.fromarray(cv2.cvtColor(a.astype(np.uint8), cv2.COLOR_RGB2RGBA), 'RGBA')
 
 
 def capas_encima(lienzo, L, t):
@@ -1142,7 +1216,7 @@ class Momento:
         # Primero una sombra suave (para leerse sobre cualquier foto) y encima el texto.
         sombra = Image.new('RGBA', capa.size, (0, 0, 0, 0))
         texto_centrado(ImageDraw.Draw(sombra), L.W / 2, y + 3, txt, f, (0, 0, 0, round(120 * k)))
-        capa.alpha_composite(sombra.filter(ImageFilter.GaussianBlur(8)))
+        capa.alpha_composite(gauss(sombra, 8))
         texto_centrado(ImageDraw.Draw(capa), L.W / 2, y, txt, f, col)
 
 
@@ -1158,7 +1232,7 @@ def ventana(iw, ih, W, H, zoom, cx, cy):
 def recorte_suave(im, W, H, x0, y0, cw, ch):
     """Esa parte de la imagen llevada a W×H con posición y escala con decimales: sin el temblor de
     redondear a píxeles enteros en cada cuadro (un acercamiento lento o un paneo quedan como de cámara)."""
-    return im.transform((W, H), Image.AFFINE, (cw / W, 0, x0, 0, ch / H, y0), resample=Image.BICUBIC)
+    return Image.fromarray(afin(im, W, H, (cw / W, 0, x0, 0, ch / H, y0)), im.mode)
 
 
 class Foto(Momento):
@@ -1207,7 +1281,7 @@ class Foto(Momento):
         L = self.L
         im = recorte_suave(self.img, L.W, L.H, *self.ventana_en(t))
         if self.borroso > 0.005:
-            im = im.filter(ImageFilter.GaussianBlur(self.borroso * DESENFOQUE_MAX * L.W))
+            im = gauss(im, self.borroso * DESENFOQUE_MAX * L.W)
         a = np.asarray(im, dtype=np.float32)
         if self.m.get('brillo'):
             a = barrido(a, (t - self.desde - 0.15) / 0.8 * 1.4 - 0.2)
@@ -1360,7 +1434,7 @@ class Texto(Momento):
             k = ease_in_out(tramo(t, self.desde, self.desde + 0.6))
             base = debajo.convert('RGB')
             if k > 0.02:
-                base = base.filter(ImageFilter.GaussianBlur(10 * k))
+                base = gauss(base, 10 * k)
             a = np.asarray(base, dtype=np.float32) * (1 - float(oscurecer) * k)
             capa = Image.fromarray(a.astype(np.uint8)).convert('RGBA')
         else:
@@ -1432,7 +1506,7 @@ def con_sombra(capa, texto, fuerza=140, radio=10, baja=4):
     if fuerza > 0:
         sombra = Image.new('RGBA', trozo.size, (0, 0, 0, 0))
         sombra.putalpha(trozo.getchannel('A').point(lambda a: round(a * fuerza / 255)))
-        capa.alpha_composite(sombra.filter(ImageFilter.GaussianBlur(radio)), (x0, min(capa.height - 1, y0 + baja)))
+        capa.alpha_composite(gauss(sombra, radio), (x0, min(capa.height - 1, y0 + baja)))
     capa.alpha_composite(trozo, (x0, y0))
 
 
@@ -1709,7 +1783,7 @@ class Objeto(Momento):
         pos = (math.floor(cx - (x1 - x0) / 2), math.floor(cy - (y1 - y0) / 2))
         sombra = Image.new('RGBA', (bw + 80, bh + 80), (0, 0, 0, 0))
         sombra.paste(Image.new('RGBA', (bw, bh), (0, 0, 0, 170)), (40, 40), pieza)
-        lienzo.alpha_composite(sombra.filter(ImageFilter.GaussianBlur(22)), (pos[0] - 40 + 10, pos[1] - 40 + 24))
+        lienzo.alpha_composite(gauss(sombra, 22), (pos[0] - 40 + 10, pos[1] - 40 + 24))
         lienzo.alpha_composite(pieza, pos)
         if self.luz is not None:
             a = np.asarray(lienzo.convert('RGB'), dtype=np.float32) * self.luz
@@ -1765,7 +1839,7 @@ class Apiladas(Momento):
             pos = (round(cx - im.width / 2), round(cy - im.height / 2))
             sombra = Image.new('RGBA', im.size, (0, 0, 0, 0))
             sombra.putalpha(im.getchannel('A').point(lambda a: round(a * 0.55)))
-            lienzo.alpha_composite(sombra.filter(ImageFilter.GaussianBlur(14)), (pos[0] + 8, pos[1] + 14))
+            lienzo.alpha_composite(gauss(sombra, 14), (pos[0] + 8, pos[1] + 14))
             lienzo.alpha_composite(im, pos)
         self.rotulo(lienzo, t)
         return lienzo
@@ -1850,7 +1924,7 @@ def transicion(lienzo, capa, tipo, k, L, dk=0.0):
     if tipo == 'desenfoque':
         r = 18 * (1 - abs(2 * k - 1))
         mezcla = Image.blend(lienzo, capa, k)
-        return mezcla.filter(ImageFilter.GaussianBlur(r)) if r > 0.5 else mezcla
+        return gauss(mezcla, r) if r > 0.5 else mezcla
     if tipo == 'destello':
         blanco = Image.new('RGBA', lienzo.size, (255, 255, 255, 255))
         return Image.blend(lienzo, blanco, min(1, k * 2)) if k < 0.5 else Image.blend(blanco, capa, (k - 0.5) * 2)
@@ -2130,6 +2204,61 @@ def tramos_cambiados(antes, ahora, transicion):
     return juntos
 
 
+# ---------------------------------------------------------------------------
+# Render en paralelo: varios cuadros a la vez, uno por núcleo
+# ---------------------------------------------------------------------------
+
+_TRABAJADOR = {}
+
+
+def _memoria_libre_gb():
+    """La memoria libre del equipo, en GB (None si no se puede saber)."""
+    try:
+        if os.name == 'nt':
+            import ctypes
+
+            class Estado(ctypes.Structure):
+                _fields_ = [('dwLength', ctypes.c_ulong), ('dwMemoryLoad', ctypes.c_ulong), ('ullTotalPhys', ctypes.c_ulonglong),
+                            ('ullAvailPhys', ctypes.c_ulonglong), ('ullTotalPageFile', ctypes.c_ulonglong),
+                            ('ullAvailPageFile', ctypes.c_ulonglong), ('ullTotalVirtual', ctypes.c_ulonglong),
+                            ('ullAvailVirtual', ctypes.c_ulonglong), ('ullAvailExtendedVirtual', ctypes.c_ulonglong)]
+            e = Estado()
+            e.dwLength = ctypes.sizeof(Estado)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(e))
+            return e.ullAvailPhys / 1e9
+        return os.sysconf('SC_AVPHYS_PAGES') * os.sysconf('SC_PAGE_SIZE') / 1e9
+    except Exception:
+        return None
+
+
+def hilos_render(receta_peso_gb=1.5):
+    """Cuántos cuadros dibujar a la vez: los núcleos menos uno (para el codificador y el equipo), sin pasarse de la
+    memoria libre (cada uno carga la receta entera). KIT_HILOS lo fija a mano."""
+    try:
+        fijo = int(os.environ.get('KIT_HILOS', '0'))
+    except ValueError:
+        fijo = 0
+    if fijo > 0:
+        return fijo
+    nucleos = max(1, (os.cpu_count() or 2) - 1)
+    libre = _memoria_libre_gb()
+    por_memoria = max(1, int((libre - 1.5) / receta_peso_gb)) if libre else nucleos
+    return max(1, min(nucleos, por_memoria, 12))
+
+
+def _iniciar_trabajador(ruta, fundido_final):
+    import cv2
+    # Cada trabajador usa un núcleo: el paralelismo está en los cuadros, no dentro de cada uno.
+    cv2.setNumThreads(1)
+    _r, L, momentos, dur = cargar(ruta)
+    _TRABAJADOR.update(L=L, momentos=momentos, dur=dur, ff=fundido_final)
+
+
+def _dibujar(i):
+    w = _TRABAJADOR
+    return np.asarray(cuadro(w['L'], w['momentos'], i / w['L'].fps, w['dur'], w['ff']), dtype=np.uint8).tobytes()
+
+
 def memoria_render(base, receta):
     """Dónde se recuerda el último render de una receta: una memoria por receta (la copia «limpia» que Recorte arma
     para el editor, con otra receta, no pisa la del video)."""
@@ -2231,17 +2360,62 @@ def armar(ruta, prueba=None, todo=False):
     ff = subprocess.Popen(orden, stdin=subprocess.PIPE)
     total = int(round(dur * L.fps))
     tam = L.W * L.H * 3
+    # Qué cuadros hay que dibujar: todos, o en un render quirúrgico solo los de los segundos que cambiaron (y los que
+    # el video anterior no tenga).
+    cuadros_viejos = int(round(probar(anterior)['duracion'] * L.fps)) - 1 if anterior else 0
+    hay_que = [i for i in range(total) if not anterior or i >= cuadros_viejos or any(a <= i / L.fps < b for a, b in rehacer)]
+    # Varios a la vez (uno por núcleo libre), en orden; con pocos cuadros no compensa arrancar los trabajadores.
+    hilos = hilos_render() if len(hay_que) >= 48 else 1
+    piscina = None
+    pendientes = None
+    if hilos > 1:
+        import multiprocessing
+        piscina = multiprocessing.get_context('spawn').Pool(hilos, _iniciar_trabajador, (os.path.abspath(ruta), fundido_final))
+        # Solo unos pocos cuadros por delante de lo que el codificador ya guardó: si los trabajadores van más rápido que
+        # él, no se acumulan en memoria (cada cuadro de 1080×1920 ocupa 6 MB).
+        from collections import deque
+        cola = deque()
+        siguiente = iter(hay_que)
+
+        def _rellenar():
+            while len(cola) < hilos * 3:
+                j = next(siguiente, None)
+                if j is None:
+                    return
+                cola.append(piscina.apply_async(_dibujar, (j,)))
+
+        def _proximo():
+            _rellenar()
+            r = cola.popleft().get()
+            _rellenar()
+            return r
+        pendientes = True
+        print(f'dibujando {len(hay_que)} cuadros con {hilos} núcleos a la vez', file=sys.stderr, flush=True)
+    import time as _tiempo
+    empezo = _tiempo.time()
+    dibujar = set(hay_que)
     dibujados = 0
-    for i in range(total):
-        t = i / L.fps
-        viejo = lector.stdout.read(tam) if lector else b''
-        if lector and len(viejo) == tam and not any(a <= t < b for a, b in rehacer):
-            ff.stdin.write(viejo)
-        else:
-            ff.stdin.write(np.asarray(cuadro(L, momentos, t, dur, fundido_final), dtype=np.uint8).tobytes())
-            dibujados += 1
-        if i % (L.fps * 2) == 0:
-            print(f'cuadro {i}/{total}', file=sys.stderr, flush=True)
+    try:
+        for i in range(total):
+            t = i / L.fps
+            viejo = lector.stdout.read(tam) if lector else b''
+            if i in dibujar:
+                ff.stdin.write(_proximo() if pendientes is not None else
+                               np.asarray(cuadro(L, momentos, t, dur, fundido_final), dtype=np.uint8).tobytes())
+                dibujados += 1
+            elif len(viejo) == tam:
+                ff.stdin.write(viejo)
+            else:
+                ff.stdin.write(np.asarray(cuadro(L, momentos, t, dur, fundido_final), dtype=np.uint8).tobytes())
+                dibujados += 1
+            if i % (L.fps * 2) == 0:
+                pasado = _tiempo.time() - empezo
+                falta = pasado / max(1, dibujados) * (len(hay_que) - dibujados) if dibujados else 0
+                print(f'cuadro {i}/{total}' + (f' (faltan ~{falta / 60:.1f} min)' if dibujados > 10 else ''), file=sys.stderr, flush=True)
+    finally:
+        if piscina is not None:
+            piscina.terminate()
+    segundos_render = round(_tiempo.time() - empezo, 1)
     if lector:
         lector.kill()
     ff.stdin.close()
@@ -2260,6 +2434,7 @@ def armar(ruta, prueba=None, todo=False):
     print(json.dumps({'salida': os.path.relpath(salida, L.base), 'duracion': round(info['duracion'], 2), 'ancho': info['ancho'],
                       'alto': info['alto'], 'audio': info['audio'], 'hoja': os.path.relpath(hoja_ruta, L.base),
                       'dibujados': f'{dibujados} de {total} cuadros' + (' (el resto, del render anterior)' if anterior else ''),
+                      'tardo': f'{segundos_render} s con {hilos} núcleo{"s" if hilos > 1 else ""}',
                       **({'avisos': avisos} if avisos else {})}, ensure_ascii=False))
 
 
