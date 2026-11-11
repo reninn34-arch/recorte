@@ -2190,7 +2190,9 @@ def armar(ruta, prueba=None, todo=False):
              '-movflags', '+faststart', salida]
     # Render quirúrgico: si hay un render anterior de esta misma receta con otros cambios, solo se vuelven a dibujar los
     # segundos que cambiaron; el resto se copia de aquel video (minutos en vez de media hora).
-    memoria = os.path.join(L.base, 'salida', '.ultimo-render.json')
+    # Una memoria por receta: la copia «limpia» que Recorte arma para el editor (otra receta) no pisa la del video.
+    nombre_receta = os.path.splitext(os.path.basename(ruta))[0]
+    memoria = os.path.join(L.base, 'salida', '.ultimo-render.json' if nombre_receta == 'receta' else f'.ultimo-render-{nombre_receta}.json')
     huella = huella_receta(r, L)
     anterior, rehacer = None, None
     if not todo:
