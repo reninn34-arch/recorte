@@ -181,7 +181,7 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
     if (plan?.pasos.length) {
       lineas.push('', `Plan: ${plan.entendi}`)
       plan.pasos.forEach((p, i) => lineas.push(`  ${i < (c.agente?.paso ?? 0) ? '[x]' : '[ ]'} ${i + 1}. ${p}`))
-      if (plan.preguntas.length) lineas.push(`  Preguntas: ${plan.preguntas.join(' ')}`)
+      if (plan.preguntas.length && c.fase === 'plan') lineas.push(`  Preguntas: ${plan.preguntas.join(' ')}`)
     }
     const recientes = c.mensajes.slice(-mensajes)
     if (recientes.length) {

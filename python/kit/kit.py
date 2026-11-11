@@ -76,11 +76,15 @@ FUENTES = {
     'negrita': ['segoeuib.ttf', 'arialbd.ttf', 'Helvetica.ttc', 'DejaVuSans-Bold.ttf'],
     'gruesa': ['seguibl.ttf', 'ariblk.ttf', 'segoeuib.ttf', 'DejaVuSans-Bold.ttf'],
     # Serif de revista: «serif» recta y «cursiva» inclinada (los títulos elegantes de un documental).
-    'serif': ['georgiab.ttf', 'palab.ttf', 'timesbd.ttf', 'DejaVuSerif-Bold.ttf'],
-    'cursiva': ['georgiaz.ttf', 'palabi.ttf', 'timesbi.ttf', 'DejaVuSerif-BoldItalic.ttf'],
+    # Las de documental vienen con Recorte (Playfair Display y Anton, licencia OFL): kit/fuentes.
+    'serif': ['PlayfairDisplay-Bold.ttf', 'georgiab.ttf', 'palab.ttf', 'timesbd.ttf', 'DejaVuSerif-Bold.ttf'],
+    'cursiva': ['PlayfairDisplay-BoldItalic.ttf', 'georgiaz.ttf', 'palabi.ttf', 'timesbi.ttf', 'DejaVuSerif-BoldItalic.ttf'],
+    'titular': ['Anton-Regular.ttf', 'impact.ttf', 'ariblk.ttf', 'DejaVuSans-Bold.ttf'],
     'impacto': ['impact.ttf', 'ariblk.ttf', 'DejaVuSans-Bold.ttf'],
 }
-CARPETAS_FUENTES = [os.path.join(os.environ.get('WINDIR', r'C:\Windows'), 'Fonts'), '/System/Library/Fonts', '/Library/Fonts',
+CARPETAS_FUENTES = [os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fuentes'),
+                    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'fuentes'),
+                    os.path.join(os.environ.get('WINDIR', r'C:\Windows'), 'Fonts'), '/System/Library/Fonts', '/Library/Fonts',
                     '/usr/share/fonts/truetype/dejavu', os.path.expanduser('~/.fonts')]
 _fuentes = {}
 
@@ -291,11 +295,13 @@ def leer_capas(lista, L):
             raise SystemExit(f'Capa {i + 1}: necesita "archivo", "desde" y "hasta".')
         if not os.path.isfile(ruta):
             raise SystemExit(f'Capa {i + 1}: no encuentro «{c["archivo"]}».')
-        if os.path.splitext(ruta)[1].lower() not in ('.png', '.jpg', '.jpeg', '.webp'):
-            raise SystemExit(f'Capa {i + 1}: solo imágenes (png, jpg, webp).')
+        ext = os.path.splitext(ruta)[1].lower()
+        if ext not in ('.png', '.jpg', '.jpeg', '.webp', '.webm', '.mp4', '.mov'):
+            raise SystemExit(f'Capa {i + 1}: una imagen (png, jpg, webp) o un video (webm con transparencia, mp4).')
         if hasta <= desde:
             continue
-        im = Image.open(ruta).convert('RGBA')
+        video = VideoCapa(ruta, L) if ext in ('.webm', '.mp4', '.mov') else None
+        im = video.cuadro(0) if video else Image.open(ruta).convert('RGBA')
         ancho = min(1.0, max(0.05, float(c.get('ancho', 0.3))))
         w = max(1, round(L.W * ancho))
         h = max(1, round(im.height * w / im.width))
@@ -310,8 +316,78 @@ def leer_capas(lista, L):
             'fin': {'x': float(fin.get('x', x)), 'y': float(fin.get('y', y)), 'ancho': float(fin.get('ancho', ancho)),
                     'giro': float(fin.get('giro', giro))} if fin else None,
             'entrada': entrada if entrada in ('pop', 'fundido', 'ninguna', 'izquierda', 'derecha', 'arriba', 'abajo') else 'pop',
+            'video': video, 'desde_video': float(c.get('inicio', 0)),
         })
     return capas
+
+
+class VideoCapa:
+    """Un video encima (un personaje recortado que se mueve): lee sus cuadros en orden, con su transparencia
+    si es un WebM con canal alfa, y vuelve a empezar si la capa dura más que el clip."""
+
+    def __init__(self, ruta, L):
+        self.ruta, self.L = ruta, L
+        r = subprocess.run([FFPROBE, '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,codec_name',
+                            '-show_entries', 'format=duration', '-of', 'json', ruta], capture_output=True, text=True)
+        d = json.loads(r.stdout or '{}')
+        st = (d.get('streams') or [{}])[0]
+        self.w, self.h = int(st.get('width', 0)), int(st.get('height', 0))
+        self.dur = max(0.1, float((d.get('format') or {}).get('duration') or 1))
+        self.vp9 = st.get('codec_name') == 'vp9'
+        # A lo más del ancho del cuadro (más grande no gana nada y gasta memoria).
+        if self.w > L.W:
+            self.h, self.w = round(self.h * L.W / self.w), L.W
+        self.h += self.h % 2
+        self.proc, self.leido, self.ultimo = None, -1, None
+
+    def _abrir(self, desde):
+        if self.proc:
+            self.proc.kill()
+        # El decodificador de libvpx es el que entrega el canal alfa de un WebM.
+        orden = [FFMPEG, '-v', 'error', *(['-c:v', 'libvpx-vp9'] if self.vp9 else []), '-ss', f'{desde:.3f}', '-i', self.ruta,
+                 '-vf', f'fps={self.L.fps},scale={self.w}:{self.h}', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-']
+        self.proc = subprocess.Popen(orden, stdout=subprocess.PIPE)
+        self.leido = round(desde * self.L.fps) - 1
+
+    def cuadro(self, t):
+        n = round((t % self.dur) * self.L.fps)
+        if self.proc is None or n < self.leido or n > self.leido + self.L.fps * 2:
+            self._abrir(n / self.L.fps)
+        tam = self.w * self.h * 4
+        while self.leido < n:
+            datos = self.proc.stdout.read(tam)
+            if len(datos) < tam:
+                break
+            self.ultimo = Image.frombytes('RGBA', (self.w, self.h), datos)
+            self.leido += 1
+        return self.ultimo or Image.new('RGBA', (self.w, self.h), (0, 0, 0, 0))
+
+
+def pegar_suave(lienzo, im, cx, cy, ancho, giro=0.0, alfa=1.0):
+    """Pega `im` (RGBA) centrada en (cx, cy), con `ancho` píxeles y girada `giro` grados (a favor del
+    reloj), todo con decimales: una capa que se mueve o crece despacio no tiembla."""
+    s = ancho / im.width
+    if s <= 0:
+        return
+    ang = math.radians(giro)
+    co, si = math.cos(ang), math.sin(ang)
+    hw, hh = ancho / 2, im.height * s / 2
+    ex, ey = abs(hw * co) + abs(hh * si), abs(hw * si) + abs(hh * co)
+    x0, y0 = math.floor(cx - ex) - 1, math.floor(cy - ey) - 1
+    bw, bh = math.ceil(cx + ex) + 2 - x0, math.ceil(cy + ey) + 2 - y0
+    # De cada píxel de la caja al de la imagen: deshacer el giro y la escala.
+    dx, dy = x0 - cx, y0 - cy
+    datos = (co / s, si / s, (dx * co + dy * si) / s + im.width / 2,
+             -si / s, co / s, (-dx * si + dy * co) / s + im.height / 2)
+    pieza = im.transform((bw, bh), Image.AFFINE, datos, resample=Image.BICUBIC)
+    if alfa < 0.999:
+        pieza.putalpha(pieza.getchannel('A').point(lambda a: round(a * alfa)))
+    # Lo que cae fuera del cuadro se recorta (alpha_composite no acepta posiciones negativas).
+    ix, iy = max(0, -x0), max(0, -y0)
+    if ix >= bw or iy >= bh or x0 >= lienzo.width or y0 >= lienzo.height:
+        return
+    pieza = pieza.crop((ix, iy, min(bw, lienzo.width - x0), min(bh, lienzo.height - y0)))
+    lienzo.alpha_composite(pieza, (x0 + ix, y0 + iy))
 
 
 def estado_capa(c, dt):
@@ -392,21 +468,8 @@ def capas_encima(lienzo, L, t):
         alfa *= 1 - tramo(t, c['hasta'] - 0.12, c['hasta'])
         if alfa <= 0.01:
             continue
-        im = c['im']
-        w = max(1, round(L.W * c['ancho'] * escala))
-        if w != im.width:
-            im = im.resize((w, max(1, round(im.height * w / im.width))), Image.BILINEAR)
-        if abs(giro) > 0.05:
-            # Positivo = a favor del reloj, como en el editor (PIL gira al revés).
-            im = im.rotate(-giro, resample=Image.BICUBIC, expand=True)
-        if alfa < 0.999:
-            im = im.copy()
-            im.putalpha(im.getchannel('A').point(lambda a: round(a * alfa)))
-        px = round(L.W * x - im.width / 2)
-        py = round(L.H * y - im.height / 2)
-        capa = Image.new('RGBA', lienzo.size, (0, 0, 0, 0))
-        capa.paste(im, (px, py), im)
-        lienzo.alpha_composite(capa)
+        im = c['video'].cuadro(c['desde_video'] + dt) if c['video'] else c['im']
+        pegar_suave(lienzo, im, L.W * x, L.H * y, L.W * c['ancho'] * escala, giro, alfa)
     return lienzo
 
 
@@ -446,22 +509,51 @@ class Momento:
         texto_centrado(ImageDraw.Draw(capa), L.W / 2, y, txt, f, col)
 
 
+def ventana(iw, ih, W, H, zoom, cx, cy):
+    """La parte de una imagen (x0, y0, ancho, alto, con decimales) que llena W×H con ese zoom y centro."""
+    esc = max(W / iw, H / ih) * max(1.0, zoom)
+    cw, ch = W / esc, H / esc
+    x0 = min(max(0.0, cx * iw - cw / 2), iw - cw)
+    y0 = min(max(0.0, cy * ih - ch / 2), ih - ch)
+    return x0, y0, cw, ch
+
+
+def recorte_suave(im, W, H, x0, y0, cw, ch):
+    """Esa parte de la imagen llevada a W×H con posición y escala con decimales: sin el temblor de
+    redondear a píxeles enteros en cada cuadro (un acercamiento lento o un paneo quedan como de cámara)."""
+    return im.transform((W, H), Image.AFFINE, (cw / W, 0, x0, 0, ch / H, y0), resample=Image.BICUBIC)
+
+
 class Foto(Momento):
-    """Una foto a pantalla completa, encuadrada, con acercamiento lento, rótulo y brillo opcional."""
+    """Una foto a pantalla completa, encuadrada, con acercamiento lento, rótulo y brillo opcional.
+    Con `camara` ({"zoom", "cx", "cy"}) la cámara va del `encuadre` a ese otro encuadre, suave: un paneo
+    o un acercamiento a un detalle. Todo con decimales, sin temblor."""
 
     def __init__(self, m, L):
         super().__init__(m, L)
         im = tapar(abrir_foto(L.ruta(m['archivo'])), m.get('tapar'))
         e = m.get('encuadre') or {}
-        self.margen = 1.06 if m.get('acercar', True) else 1.0
-        self.img = encuadrar(im, round(L.W * self.margen), round(L.H * self.margen), e.get('zoom', 1), e.get('cx', 0.5), e.get('cy', 0.5))
+        cam = m.get('camara') if isinstance(m.get('camara'), dict) else None
+        self.ini = (float(e.get('zoom', 1)), float(e.get('cx', 0.5)), float(e.get('cy', 0.5)))
+        self.fin = (float(cam.get('zoom', self.ini[0])), float(cam.get('cx', self.ini[1])), float(cam.get('cy', self.ini[2]))) if cam else None
+        self.margen = 1.06 if m.get('acercar', True) and not cam else 1.0
+        # La foto, al tamaño justo para el zoom más grande (más grande no gana nitidez y es más lenta).
+        zmax = max(self.ini[0], self.fin[0] if self.fin else 0) * self.margen
+        esc = max(L.W / im.width, L.H / im.height) * zmax
+        if esc < 1:
+            im = im.resize((max(1, round(im.width * esc)), max(1, round(im.height * esc))), Image.LANCZOS)
+        self.img = im
 
     def cuadro(self, t):
         L = self.L
-        s = self.margen - (self.margen - 1) * ease_out(tramo(t, self.desde, self.hasta))
-        cw, ch = L.W * s, L.H * s
-        x0, y0 = (self.img.width - cw) / 2, (self.img.height - ch) / 2
-        im = self.img.crop((round(x0), round(y0), round(x0 + cw), round(y0 + ch))).resize((L.W, L.H), Image.BICUBIC)
+        p = tramo(t, self.desde, self.hasta)
+        if self.fin:
+            k = ease_in_out(p)
+            zoom, cx, cy = (a + (b - a) * k for a, b in zip(self.ini, self.fin))
+        else:
+            zoom, cx, cy = self.ini
+            zoom *= 1 + (self.margen - 1) * ease_out(p)
+        im = recorte_suave(self.img, L.W, L.H, *ventana(self.img.width, self.img.height, L.W, L.H, zoom, cx, cy))
         a = np.asarray(im, dtype=np.float32)
         if self.m.get('brillo'):
             a = barrido(a, (t - self.desde - 0.15) / 0.8 * 1.4 - 0.2)
@@ -955,10 +1047,12 @@ class Objeto(Momento):
         bw, bh = max(1, int(x1 - x0) + 2), max(1, int(y1 - y0) + 2)
         destino = [(e[0] - x0, e[1] - y0) for e in esquinas]
         origen = [(0, 0), (self.pieza.width, 0), (self.pieza.width, self.pieza.height), (0, self.pieza.height)]
-        pieza = self.pieza.transform((bw, bh), Image.PERSPECTIVE, coef_perspectiva(destino, origen), Image.BICUBIC)
         lienzo = self.fondo.copy().convert('RGBA')
         cx, cy = L.W * float(m.get('x', 0.5)), L.H * float(m.get('y', 0.47))
-        pos = (round(cx - bw / 2), round(cy - bh / 2))
+        # La parte decimal de la posición va dentro de la deformación (así no salta de píxel en píxel).
+        fx, fy = (cx - (x1 - x0) / 2) % 1, (cy - (y1 - y0) / 2) % 1
+        pieza = self.pieza.transform((bw, bh), Image.PERSPECTIVE, coef_perspectiva([(d[0] + fx, d[1] + fy) for d in destino], origen), Image.BICUBIC)
+        pos = (math.floor(cx - (x1 - x0) / 2), math.floor(cy - (y1 - y0) / 2))
         sombra = Image.new('RGBA', (bw + 80, bh + 80), (0, 0, 0, 0))
         sombra.paste(Image.new('RGBA', (bw, bh), (0, 0, 0, 170)), (40, 40), pieza)
         lienzo.alpha_composite(sombra.filter(ImageFilter.GaussianBlur(22)), (pos[0] - 40 + 10, pos[1] - 40 + 24))
@@ -1057,19 +1151,33 @@ TRANSICIONES_KIT = ('fundido', 'barrido-izquierda', 'barrido-derecha', 'barrido-
                     'destello', 'circulo')
 
 
-def transicion(lienzo, capa, tipo, k, L):
-    """Cómo entra `capa` sobre `lienzo` (k de 0 a 1), igual que las transiciones del editor (xfade de FFmpeg)."""
+def transicion(lienzo, capa, tipo, k, L, dk=0.0):
+    """Cómo entra `capa` sobre `lienzo` (k de 0 a 1), igual que las transiciones del editor (xfade de FFmpeg).
+    `dk`: lo que avanza k en un cuadro (para el desenfoque de movimiento de los barridos)."""
     capa = capa if capa.mode == 'RGBA' else capa.convert('RGBA')
     e = 1 - (1 - k) ** 3
     if tipo and tipo.startswith('barrido-'):
-        # Empuja: lo de antes sale por un lado y lo nuevo entra por el otro.
+        # Empuja: lo de antes sale por un lado y lo nuevo entra por el otro. Como un paneo rápido de cámara,
+        # con desenfoque de movimiento: varias posiciones dentro del mismo cuadro, promediadas.
         dx = {'barrido-izquierda': -1, 'barrido-derecha': 1}.get(tipo, 0)
         dy = {'barrido-arriba': -1, 'barrido-abajo': 1}.get(tipo, 0)
-        out = Image.new('RGBA', lienzo.size, (0, 0, 0, 255))
-        ox, oy = round(dx * e * L.W), round(dy * e * L.H)
-        out.paste(lienzo, (ox, oy))
-        out.paste(capa, (ox - dx * L.W, oy - dy * L.H))
-        return out
+
+        def empuje(ee):
+            out = Image.new('RGBA', lienzo.size, (0, 0, 0, 255))
+            ox, oy = round(dx * ee * L.W), round(dy * ee * L.H)
+            out.paste(lienzo, (ox, oy))
+            out.paste(capa, (ox - dx * L.W, oy - dy * L.H))
+            return out
+
+        if dk <= 0:
+            return empuje(e)
+        muestras = [1 - (1 - max(0.0, k - dk * f)) ** 3 for f in (0.0, 0.25, 0.5, 0.75)]
+        if abs(muestras[0] - muestras[-1]) * max(L.W, L.H) < 3:
+            return empuje(e)
+        suma = np.zeros((L.H, L.W, 4), dtype=np.float32)
+        for ee in muestras:
+            suma += np.asarray(empuje(ee), dtype=np.float32)
+        return Image.fromarray((suma / len(muestras)).astype(np.uint8), 'RGBA')
     if tipo == 'zoom':
         # Lo de antes se acerca mientras se funde con lo nuevo.
         s = 1 + 0.35 * e
@@ -1102,7 +1210,7 @@ def cuadro(L, momentos, t, dur, fundido_final):
         if k >= 0.999:
             lienzo = capa if capa.mode == 'RGBA' else capa.convert('RGBA')
         elif k > 0.001:
-            lienzo = transicion(lienzo, capa, tipo, k, L) if tipo else Image.blend(lienzo, capa, k)
+            lienzo = transicion(lienzo, capa, tipo, k, L, 1 / (L.fps * max(0.05, m.entra))) if tipo else Image.blend(lienzo, capa, k)
     if lienzo.mode != 'RGBA':
         lienzo = lienzo.convert('RGBA')
     lienzo = capas_encima(lienzo, L, t)
@@ -1115,8 +1223,62 @@ def cuadro(L, momentos, t, dur, fundido_final):
     return lienzo.convert('RGB')
 
 
+def _palabras(t):
+    import re
+    return [w for w in re.findall(r"[a-záéíóúüñ0-9]+", str(t).lower()) if len(w) > 2]
+
+
+def avisos_receta(r, L, momentos):
+    """Lo que suele salir mal y se ve feo: un texto que repite lo que dice el subtítulo (dos veces lo
+    mismo, arriba y abajo) y algo encima en la franja de los subtítulos (una etiqueta tapada)."""
+    avisos = []
+    subs = (L.subs or {}).get('frases') or []
+    if not subs:
+        return avisos
+    pos = L.subs['pos']
+    # Dos líneas de subtítulo más media etiqueta o título por cada lado.
+    alto = 2 * L.subs['tam'] * 1.35 / L.H
+    franja = (pos - alto / 2 - 0.07, pos + alto / 2 + 0.08)
+
+    def frases_en(a, b):
+        return [f for f in subs if f['desde'] < b and f['hasta'] > a]
+
+    def repite(texto, a, b):
+        ws = _palabras(texto)
+        if len(ws) < 3:
+            return False
+        dichas = set(w for f in frases_en(a - 0.5, b + 0.5) for w in _palabras(f['texto']))
+        return sum(w in dichas for w in ws) / len(ws) >= 0.6
+
+    for i, m in enumerate(momentos):
+        d = m.m
+        textos = []
+        if d.get('rotulo'):
+            textos.append(d['rotulo'])
+        if d.get('tipo') == 'titulo':
+            textos += [x if isinstance(x, str) else x.get('texto', '') for x in d.get('lineas') or []]
+        if d.get('tipo') == 'texto':
+            textos += d.get('lineas') or []
+        for t in textos:
+            if repite(t, m.desde, m.hasta):
+                avisos.append(f'Momento {i + 1} ({m.desde:.1f} s): «{str(t)[:50]}» repite lo que dice el subtítulo. Quítalo o déjalo en 1–3 '
+                              'palabras clave con diseño: el mismo texto arriba y abajo se ve doble.')
+        y = None
+        if d.get('tipo') in ('etiqueta', 'titulo'):
+            y = float(d.get('y', 0.5))
+        if y is not None and franja[0] < y < franja[1] and frases_en(m.desde, m.hasta):
+            avisos.append(f'Momento {i + 1} ({m.desde:.1f} s): la {d.get("tipo")} está en la franja de los subtítulos (y {y:.2f}): '
+                          f'súbela por encima de y {franja[0] - 0.05:.2f} para que no se tapen.')
+    for j, c in enumerate(L.capas):
+        ys = [c['y']] + ([c['fin']['y']] if c['fin'] else [])
+        if any(franja[0] < y < franja[1] for y in ys) and c['ancho'] < 0.35 and frases_en(c['desde'], c['hasta']):
+            avisos.append(f'Capa {j + 1} ({c["desde"]:.1f} s): está en la franja de los subtítulos; muévela para que no se tapen.')
+    return avisos
+
+
 def armar(ruta, prueba=None):
     r, L, momentos, dur = cargar(ruta)
+    avisos = avisos_receta(r, L, momentos)
     fundido_final = float(r.get('fundido_final', 0.5))
     revision = os.path.join(L.base, 'revision')
     os.makedirs(revision, exist_ok=True)
@@ -1137,7 +1299,7 @@ def armar(ruta, prueba=None):
         for m in momentos:
             if isinstance(m, Video):
                 m.proc.kill()
-        print(json.dumps({'pruebas': rutas}, ensure_ascii=False))
+        print(json.dumps({'pruebas': rutas, **({'avisos': avisos} if avisos else {})}, ensure_ascii=False))
         return
     salida = L.ruta(r.get('salida', 'salida/final.mp4'))
     os.makedirs(os.path.dirname(salida), exist_ok=True)
@@ -1197,7 +1359,8 @@ def armar(ruta, prueba=None):
     hoja_ruta = hoja(salida, 12, os.path.join(revision, 'hoja-final.jpg'))
     info = probar(salida)
     print(json.dumps({'salida': os.path.relpath(salida, L.base), 'duracion': round(info['duracion'], 2), 'ancho': info['ancho'],
-                      'alto': info['alto'], 'audio': info['audio'], 'hoja': os.path.relpath(hoja_ruta, L.base)}, ensure_ascii=False))
+                      'alto': info['alto'], 'audio': info['audio'], 'hoja': os.path.relpath(hoja_ruta, L.base),
+                      **({'avisos': avisos} if avisos else {})}, ensure_ascii=False))
 
 
 # ---------------------------------------------------------------------------
@@ -1365,6 +1528,9 @@ def recortar(ruta, salida=None, tolerancia=None, modo='auto'):
             raise SystemExit('Esta imagen no tiene un fondo liso. Quita «--liso» para usar el modelo, o pide la imagen '
                              '«para recortar» (kit.py imagen … --recorte).')
         return recortar(ruta, salida, modo='modelo')
+    r_, g_, b_ = (float(x) for x in cv2.cvtColor(np.uint8([[fondo]]), cv2.COLOR_LAB2RGB)[0, 0])
+    if g_ > r_ + 40 and g_ > b_ + 40:
+        return recortar_croma(a, (r_, g_, b_), salida)
     parecido = (dist < tol).astype(np.uint8)
     _, etiquetas = cv2.connectedComponents(parecido, connectivity=4)
     en_borde = np.unique(np.concatenate([etiquetas[0], etiquetas[-1], etiquetas[:, 0], etiquetas[:, -1]]))
@@ -1390,6 +1556,103 @@ def recortar(ruta, salida=None, tolerancia=None, modo='auto'):
         borde_suave = (alfa < 0.98)[..., None] | franja[..., None]
         rgb[..., 1] = np.where(borde_suave[..., 0], np.minimum(rgb[..., 1], tope), rgb[..., 1])
     return guardar_recorte(rgb, alfa, salida, {'metodo': 'liso', 'fondo': '#%02x%02x%02x' % (round(r_), round(g_), round(b_)), 'quitado': round(quitado, 3)})
+
+
+def croma_rgba(a, fondo):
+    """La clave de croma de un cuadro (array RGB): devuelve el color limpio y la transparencia (0 a 1)."""
+    import cv2
+    rgb = a.astype(np.float32)
+    bg = np.array(fondo, dtype=np.float32)
+    dif_fondo = max(1.0, bg[1] - max(bg[0], bg[2]))
+    dif = rgb[..., 1] - np.maximum(rgb[..., 0], rgb[..., 2])
+    alfa = 1 - np.clip((dif - dif_fondo * 0.22) / (dif_fondo * 0.40), 0, 1)
+    alfa = cv2.morphologyEx(alfa, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    alfa = np.minimum(alfa, cv2.erode(alfa, np.ones((3, 3), np.uint8)) * 0.5 + alfa * 0.5)
+    alfa = cv2.GaussianBlur(alfa, (3, 3), 0)
+    k = alfa[..., None]
+    medio = (k > 0.02) & (k < 0.98)
+    rgb = np.where(medio, np.clip((rgb - (1 - k) * bg) / np.maximum(k, 0.05), 0, 255), rgb)
+    tope = np.maximum(rgb[..., 0], rgb[..., 2])
+    reflejo = (rgb[..., 1] > tope + 6) & ((alfa < 0.999) | (dif > dif_fondo * 0.12))
+    rgb[..., 1] = np.where(reflejo, tope + np.clip((rgb[..., 1] - tope) * 0.15, 0, 6), rgb[..., 1])
+    return rgb, alfa
+
+
+def recortar_video(ruta, salida=None):
+    """Quita el verde croma de un clip (un personaje que se mueve, pedido sobre verde) y lo deja en un WebM
+    con transparencia (VP9 con canal alfa): se usa como capa encima, en el kit y en el editor."""
+    info = probar(ruta)
+    w, h = int(info['ancho']), int(info['alto'])
+    if w > 1080:
+        h, w = round(h * 1080 / w), 1080
+    w -= w % 2
+    h -= h % 2
+    salida = salida or os.path.splitext(ruta)[0] + '-recorte.webm'
+    lee = subprocess.Popen([FFMPEG, '-v', 'error', '-i', ruta, '-vf', f'scale={w}:{h}', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
+                           stdout=subprocess.PIPE)
+    r = subprocess.run([FFPROBE, '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate', '-of', 'csv=p=0', ruta],
+                       capture_output=True, text=True)
+    fps = (r.stdout.strip() or '24/1').split(',')[0]
+    escribe = subprocess.Popen([FFMPEG, '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', f'{w}x{h}', '-r', fps, '-i', '-',
+                                '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-b:v', '0', '-crf', '28', '-row-mt', '1',
+                                '-auto-alt-ref', '0', salida], stdin=subprocess.PIPE)
+    fondo, n, visible = None, 0, 0.0
+    while True:
+        datos = lee.stdout.read(w * h * 3)
+        if len(datos) < w * h * 3:
+            break
+        a = np.frombuffer(datos, np.uint8).reshape(h, w, 3)
+        if fondo is None:
+            # El color del croma, del borde del primer cuadro.
+            g = max(2, min(h, w) // 100)
+            borde = np.concatenate([a[:g].reshape(-1, 3), a[-g:].reshape(-1, 3), a[:, :g].reshape(-1, 3), a[:, -g:].reshape(-1, 3)])
+            fondo = tuple(float(x) for x in np.median(borde, axis=0))
+            if not (fondo[1] > fondo[0] + 40 and fondo[1] > fondo[2] + 40):
+                lee.kill()
+                escribe.kill()
+                raise SystemExit('Este clip no está sobre verde croma: pídelo con «--recorte» para poder quitarle el fondo.')
+        rgb, alfa = croma_rgba(a, fondo)
+        visible = max(visible, float(alfa.mean())) if n else float(alfa.mean())
+        escribe.stdin.write(np.dstack([rgb, alfa * 255]).clip(0, 255).astype(np.uint8).tobytes())
+        n += 1
+    escribe.stdin.close()
+    if escribe.wait() != 0 or not n:
+        raise SystemExit('No pude escribir el clip sin fondo.')
+    if visible < 0.01:
+        os.remove(salida)
+        raise SystemExit('No quedó nada al quitar el verde: el clip no tiene un sujeto sobre el croma.')
+    return {'archivo': salida, 'ancho': w, 'alto': h, 'cuadros': n}
+
+
+def recortar_croma(a, fondo, salida):
+    """Verde croma, como lo hacen los programas de efectos: la transparencia sale de cuánto domina el verde
+    en cada píxel (clave por diferencia de color). Así el humo y el pelo quedan semitransparentes y sin verde,
+    y los huecos (entre los brazos, bajo una pierna) se vacían. Después se «desmezcla» el color del borde
+    (se le quita la parte de verde que traía) y se le baja el verde que sobre."""
+    import cv2
+    rgb = a.astype(np.float32)
+    bg = np.array(fondo, dtype=np.float32)
+    dif_fondo = max(1.0, bg[1] - max(bg[0], bg[2]))
+    dif = rgb[..., 1] - np.maximum(rgb[..., 0], rgb[..., 2])
+    # Menos de un 22 % del verde del fondo: sujeto opaco; más de un 62 %: fondo. En medio, a medias.
+    alfa = 1 - np.clip((dif - dif_fondo * 0.22) / (dif_fondo * 0.40), 0, 1)
+    # Motas sueltas del fondo fuera; el borde, un píxel más adentro (sin aro verde).
+    alfa = cv2.morphologyEx(alfa, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    alfa = np.minimum(alfa, cv2.erode(alfa, np.ones((3, 3), np.uint8)) * 0.5 + alfa * 0.5)
+    alfa = cv2.GaussianBlur(alfa, (3, 3), 0)
+    quitado = float((alfa < 0.5).mean())
+    if quitado < 0.04 or quitado > 0.985:
+        raise SystemExit(f'No encontré un fondo que quitar (salía el {quitado * 100:.0f} % de la imagen).')
+    # Desmezclar: lo semitransparente era sujeto + fondo verde; se queda solo con el sujeto.
+    k = alfa[..., None]
+    medio = (k > 0.02) & (k < 0.98)
+    limpio = np.clip((rgb - (1 - k) * bg) / np.maximum(k, 0.05), 0, 255)
+    rgb = np.where(medio, limpio, rgb)
+    # Y donde aún sobre verde (reflejos del croma en el sujeto), el verde no pasa del mayor de rojo y azul.
+    tope = np.maximum(rgb[..., 0], rgb[..., 2])
+    reflejo = (rgb[..., 1] > tope + 6) & ((alfa < 0.999) | (dif > dif_fondo * 0.12))
+    rgb[..., 1] = np.where(reflejo, tope + np.clip((rgb[..., 1] - tope) * 0.15, 0, 6), rgb[..., 1])
+    return guardar_recorte(rgb, alfa, salida, {'metodo': 'croma', 'fondo': '#%02x%02x%02x' % tuple(round(x) for x in fondo), 'quitado': round(quitado, 3)})
 
 
 def pedir_a_recorte(buzon, datos, espera, que, imprimir=True):
@@ -1450,7 +1713,7 @@ def medio(tipo, prompt, referencias, espera, para_recortar=False):
         base = os.path.join('medios', os.path.basename(r['archivo'])) if not os.path.isabs(r['archivo']) else r['archivo']
         ruta = r['archivo'] if os.path.isfile(r['archivo']) else base
         try:
-            hecho = recortar(ruta)
+            hecho = recortar_video(ruta) if tipo == 'clip' else recortar(ruta)
             r['recorte'] = os.path.relpath(hecho['archivo']).replace('\\', '/')
             r['recorte_tam'] = [hecho['ancho'], hecho['alto']]
         except SystemExit as e:
@@ -1490,8 +1753,11 @@ def main():
         m = sub.add_parser(nombre)
         m.add_argument('prompt', help='qué tiene que verse, bien descrito (sujeto, encuadre, luz, estilo)')
         m.add_argument('--ref', action='append', help='foto de referencia (entrada/… o medios/…); se puede repetir')
-        if nombre == 'imagen':
-            m.add_argument('--recorte', action='store_true', help='sobre verde croma y sin fondo: un PNG para usar como capa')
+        m.add_argument('--recorte', action='store_true',
+                       help='sobre verde croma y sin fondo: un PNG (imagen) o un WebM con transparencia (clip) para usar como capa')
+    rv = sub.add_parser('recortar-video')
+    rv.add_argument('clip')
+    rv.add_argument('--salida')
     rc = sub.add_parser('recortar')
     rc.add_argument('imagen')
     rc.add_argument('--salida')
@@ -1504,6 +1770,8 @@ def main():
     elif x.orden in ('imagen', 'clip'):
         # Un clip puede tardar varios minutos en Flow.
         medio(x.orden, x.prompt, x.ref, 900 if x.orden == 'imagen' else 1500, para_recortar=getattr(x, 'recorte', False))
+    elif x.orden == 'recortar-video':
+        print(json.dumps(recortar_video(x.clip, x.salida), ensure_ascii=False))
     elif x.orden == 'recortar':
         print(json.dumps(recortar(x.imagen, x.salida, x.tolerancia, x.modo), ensure_ascii=False))
     elif x.orden == 'golpes':

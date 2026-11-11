@@ -228,7 +228,7 @@ try {
   if (!(bi[1] > 200 && rojoK(bd))) throw new Error(`El barrido no empuja: ${bi} a la izquierda y ${bd} a la derecha`)
   console.log('transiciones con movimiento en el kit ✓')
 
-  // Recortes: un sujeto sobre verde croma (con un bolsillo verde por dentro) queda sin fondo y sin agujeros.
+  // Recortes: un sujeto sobre verde croma (con un hueco por dentro) queda sin fondo, y el hueco también.
   correr('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=0x00B140:s=400x500', '-vf', "drawbox=x=100:y=80:w=200:h=340:color=0x3C2814:t=fill,drawbox=x=180:y=230:w=40:h=40:color=0x00B140:t=fill", '-frames:v', '1', 'croma.png'], trabajo)
   const rec = json(correr(python, ['kit/kit.py', 'recortar', 'croma.png'], trabajo))
   if (Math.abs(rec.ancho - 200) > 8 || Math.abs(rec.alto - 340) > 8) throw new Error(`El recorte no se ajustó al sujeto: ${JSON.stringify(rec)}`)
@@ -236,10 +236,11 @@ try {
     const r = spawnSync('ffmpeg', ['-v', 'error', '-i', rec.archivo, '-vf', `crop=1:1:${x}:${y},format=rgba`, '-f', 'rawvideo', '-'], { cwd: trabajo })
     return r.stdout[3]
   }
-  if (alfa(100, 170) < 250) throw new Error(`El bolsillo verde dentro del sujeto no debía quitarse: alfa ${alfa(100, 170)}`)
+  // Con croma, el verde de dentro es fondo que se ve por un hueco: queda transparente; el sujeto, opaco.
+  if (alfa(100, 170) > 10 || alfa(40, 60) < 250) throw new Error(`El croma no se quitó bien: hueco ${alfa(100, 170)}, sujeto ${alfa(40, 60)}`)
   const conSala = spawnSync(python, ['kit/kit.py', 'recortar', 'negro.jpg'], { cwd: trabajo, encoding: 'utf8' })
   if (conSala.status === 0) throw new Error('Una imagen de un solo color entera no tiene sujeto: debía decirlo')
-  console.log(`recortes: el sujeto queda solo (${rec.ancho}×${rec.alto}), sin agujeros, y sin sujeto lo dice ✓`)
+  console.log(`recortes: el sujeto queda solo (${rec.ancho}×${rec.alto}), con sus huecos vacíos, y sin sujeto lo dice ✓`)
   console.log(`piezas de documental: título, etiqueta, palabras, objeto con giro 3D (${izq} frente a ${der}) y apiladas ✓`)
   console.log('prueba kit: ok')
 } catch (error) {

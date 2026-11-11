@@ -1,3 +1,8 @@
+/* Las letras de documental (OFL), las mismas que usan el kit y la exportación. */
+@font-face { font-family: 'Playfair Display'; src: url('./assets/fuentes/PlayfairDisplay-Bold.ttf') format('truetype'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Playfair Display'; src: url('./assets/fuentes/PlayfairDisplay-BoldItalic.ttf') format('truetype'); font-weight: 700; font-style: italic; font-display: swap; }
+@font-face { font-family: 'Anton'; src: url('./assets/fuentes/Anton-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; font-display: swap; }
+
 :root {
   --bg: #0b0c0a;
   --panel: #11130f;

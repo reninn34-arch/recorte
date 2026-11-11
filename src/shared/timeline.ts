@@ -158,8 +158,9 @@ export const FUENTES_TEXTO: Record<string, { nombre: string; familia: string; ne
   fina: { nombre: 'Fina', familia: 'Segoe UI', negrita: false },
   gruesa: { nombre: 'Gruesa', familia: 'Arial Black', negrita: false },
   impacto: { nombre: 'Impacto', familia: 'Impact', negrita: false },
-  elegante: { nombre: 'Elegante', familia: 'Georgia', negrita: true },
-  cursiva: { nombre: 'Cursiva', familia: 'Georgia', negrita: true, cursiva: true },
+  elegante: { nombre: 'Elegante', familia: 'Playfair Display', negrita: true },
+  cursiva: { nombre: 'Cursiva', familia: 'Playfair Display', negrita: true, cursiva: true },
+  titular: { nombre: 'Titular', familia: 'Anton', negrita: false },
   maquina: { nombre: 'Máquina', familia: 'Courier New', negrita: true }
 }
 

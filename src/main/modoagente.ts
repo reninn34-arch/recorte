@@ -95,6 +95,12 @@ function copiarKit(trabajo: string): boolean {
   const destino = join(trabajo, 'kit')
   mkdirSync(destino, { recursive: true })
   for (const n of ['kit.py', 'RECETA.md']) copyFileSync(join(origen, n), join(destino, n))
+  // Las letras de documental (Playfair Display, Anton), para `"fuente": "cursiva" | "serif" | "titular"`.
+  const letras = rutaScriptPython('fuentes')
+  if (existsSync(letras)) {
+    mkdirSync(join(destino, 'fuentes'), { recursive: true })
+    for (const n of readdirSync(letras)) copyFileSync(join(letras, n), join(destino, 'fuentes', n))
+  }
   // Los efectos de sonido incluidos, para `"sonidos": [{ "sonido": "pop" }]` en la receta.
   const sonidos = rutaScriptPython('sonidos')
   if (existsSync(sonidos)) {
@@ -255,7 +261,7 @@ ${(() => {
     }
     return [
       m.imagenes
-        ? `- Imágenes con ${m.imagenes}: \`python kit/kit.py imagen "descripción" [--ref entrada/foto.jpg]\`. Úsalas cuando el video necesite algo que no está en sus archivos (una escena, un objeto, un fondo). Con \`--recorte\` sale sin fondo (un PNG para capas que se mueven: personas, objetos, aviones; mira kit/RECETA.md).`
+        ? `- Imágenes con ${m.imagenes}: \`python kit/kit.py imagen "descripción" [--ref entrada/foto.jpg]\`. Úsalas cuando el video necesite algo que no está en sus archivos (una escena, un objeto, un fondo). Con \`--recorte\` sale sin fondo (un PNG para capas que se mueven: personas, objetos, aviones; mira kit/RECETA.md). Un clip con \`--recorte\` y \`--ref\` de esa imagen da el personaje MOVIÉNDOSE sin fondo (gasta créditos).`
         : '- Imágenes generadas: NO (el usuario no las eligió).',
       m.clips
         ? `- Clips de video con ${m.clips}: \`python kit/kit.py clip "descripción" [--ref …]\`. GASTAN créditos del usuario: solo los de las escenas "clip" del guion gráfico que aprobó (${clipsDelPlan(c.agente?.plan) ? `${clipsDelPlan(c.agente?.plan)} clips` : `${MAX_CLIPS_VEO} como mucho, para los momentos clave`}); en un cambio sobre lo ya hecho, los que el usuario pida en ese cambio (hasta ${MAX_CLIPS_GUION}), y en el resumen di cuántos fueron y cuánto costaron. Haz antes la imagen de cada escena y pásala con --ref al clip para que todo se vea coherente.`

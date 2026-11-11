@@ -64,8 +64,9 @@ rótulos sueltos que el usuario mueve y cambia.
   Usa una imagen del objeto SOLO (sin la sala): la sala la pone `fondo`.
 - **apiladas**: fotos impresas con su borde blanco que caen una sobre otra, cada una algo girada; `gris` (por defecto true)
   las pasa a blanco y negro, como fotos de archivo. Pon encima un `titulo` con una palabra roja.
-- Las letras: `cursiva` (serif inclinada, la de los títulos elegantes), `serif`, `gruesa` (sans muy gruesa de titular),
-  `impacto`, `normal`, `fina`.
+- Las letras: `cursiva` (Playfair Display cursiva, la serif de revista de los títulos elegantes: «Fear», «Marte?»),
+  `serif` (Playfair Display recta: años, nombres), `titular` (Anton, condensada muy gruesa: «THE SCREAM», «PLAN»),
+  `gruesa`, `impacto`, `normal`, `fina`. Vienen con Recorte y el editor las tiene igual.
 
 ## Transiciones con movimiento
 Cada momento puede entrar con `"transicion"`: `fundido` (por defecto), `barrido-izquierda`, `barrido-derecha`, `barrido-arriba`,
@@ -75,6 +76,14 @@ en los cambios de tema o de escena, con un «whoosh» en el barrido; lo demás, 
 Los títulos (`titulo`) también entran `"entrada": "palabras"`: palabra a palabra, como una pregunta que se va armando.
 
 ## Reglas
+- **Nada dos veces.** Con subtítulos, los textos de arriba NO repiten la frase: son títulos de diseño cortos (1–3 palabras
+  clave: «2002», «Marte?», «FRACASO») con su letra y su animación, o nada. Sin `rotulo` en cada momento: el rótulo simple
+  es para videos sencillos; en un documental, usa `titulo`.
+- **Nada encima de los subtítulos.** Etiquetas, títulos y capas fuera de su franja (su `pos` ± 0.08; por defecto y 0.70–0.86).
+- `armar` (y `--prueba`) devuelven `avisos` si pasa algo de esto: corrígelos antes de entregar.
+- **Movimiento de cámara.** En una `foto`, `"camara": {"zoom": 1.25, "cx": 0.6, "cy": 0.4}` lleva la cámara del `encuadre` a ese
+  otro encuadre, suave (un paneo, acercarse a una cara, alejarse para revelar). Úsalo en casi todas las fotos: es lo que da la
+  sensación de cámara de la referencia. Movimientos lentos y en una dirección; nada de idas y vueltas.
 - Lo que va más abajo en la lista se dibuja encima. Cada momento entra con un fundido de `transicion` s y se queda
   ese mismo tiempo de más, para que lo siguiente entre encima sin hueco.
 - Pon cada `desde` en un golpe de la música: `python kit/kit.py golpes <audio-o-video>` da los golpes y el tempo.
@@ -139,6 +148,12 @@ Si el usuario eligió generar imágenes o clips (lo dice AGENTS.md), Recorte los
 - `python kit/kit.py imagen "descripción" --recorte` → la pide sola sobre verde croma y le quita el fondo: además de `archivo`
   devuelve `recorte`, un PNG con transparencia para usarlo como capa (una persona, un avión, una bandera, un cohete). Así se
   arman las escenas por capas con paralaje: fondo como foto y cada pieza recortada encima, entrando y moviéndose.
+- **Un personaje que se mueve** (gesticula, camina, gira la cabeza, como el de la referencia): `python kit/kit.py clip
+  "descripción del movimiento" --ref medios/personaje.png --recorte` pide a Flow un clip de 8 s sobre verde croma a partir
+  de su imagen y le quita el verde: devuelve `recorte`, un WebM con transparencia. Úsalo como cualquier capa
+  (`"capas": [{"archivo": "medios/clip-…-recorte.webm", …}]`, con su recorrido y su entrada); si la capa dura más, el clip
+  vuelve a empezar. GASTA créditos (como cualquier clip): solo para el personaje principal o un momento clave.
+- `python kit/kit.py recortar-video <clip>` quita el verde de un clip que ya tengas sobre croma.
 - `python kit/kit.py recortar <imagen>` quita el fondo de una imagen que ya tengas: si es liso (verde, blanco, un color), al
   momento; si no (una sala, la calle), con un modelo que encuentra al sujeto principal (la primera vez se baja, 178 MB).
   Mira el resultado antes de usarlo: si se coló algo del fondo, pide la pieza con `--recorte`.

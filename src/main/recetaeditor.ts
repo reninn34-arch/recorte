@@ -38,7 +38,7 @@ const EXT_IMAGEN = ['.png', '.jpg', '.jpeg', '.webp']
 /** Las piezas del kit que se dibujan encima de la escena y en el editor son rótulos sueltos. */
 export const PIEZAS_ENCIMA = ['titulo', 'etiqueta', 'palabras']
 /** Las letras del kit y su equivalente en el editor. */
-const LETRA_EDITOR: Record<string, string> = { fina: 'fina', normal: 'normal', negrita: 'normal', gruesa: 'gruesa', serif: 'elegante', cursiva: 'cursiva', impacto: 'impacto' }
+const LETRA_EDITOR: Record<string, string> = { fina: 'fina', normal: 'normal', negrita: 'normal', gruesa: 'gruesa', serif: 'elegante', cursiva: 'cursiva', titular: 'titular', impacto: 'impacto' }
 /** Dónde caen las palabras sueltas si la receta no lo dice: igual que SITIOS_PALABRAS del kit. */
 const SITIOS_PALABRAS: [number, number][] = [[0.3, 0.3], [0.68, 0.24], [0.5, 0.42], [0.24, 0.55], [0.72, 0.5], [0.42, 0.66], [0.66, 0.74], [0.3, 0.8], [0.55, 0.18], [0.8, 0.62]]
 const EXT_VIDEO = ['.mp4', '.mov', '.webm', '.mkv', '.m4v']
@@ -319,7 +319,8 @@ export async function proyectoDesdeReceta(
     const a = pinza(num(x.desde, -1), 0, total)
     const b = pinza(num(x.hasta, -1), 0, total)
     if (!texto || b - a < 0.05) continue
-    textos.push({ id: nuevoId('texto'), inicio: a, duracion: b - a, texto, posicion: posSub, ...estiloSub })
+    // A la altura exacta del kit (no a la de «abajo» del editor, que es otra y tapaba lo de debajo).
+    textos.push({ id: nuevoId('texto'), inicio: a, duracion: b - a, texto, posicion: posSub, x: 0.5, y: pinza(num(subs.pos, 0.78), 0.05, 0.95), ...estiloSub })
   }
   if (!editables) return null
 
@@ -387,7 +388,8 @@ export async function proyectoDesdeReceta(
     const medio = ruta ? await medioDe(ruta) : null
     const a = pinza(num(x.desde, -1), 0, total)
     const b = pinza(num(x.hasta, -1), 0, total)
-    if (!medio || medio.tipo !== 'imagen' || b - a < MIN) continue
+    // Una imagen o un clip (un personaje que se mueve, en WebM con transparencia).
+    if (!medio || b - a < MIN) continue
     capas.push({
       id: nuevoId('capa'),
       fuente: medio.id,

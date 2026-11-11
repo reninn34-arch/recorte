@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import { rutaScriptPython } from './transcribir'
 import { join } from 'node:path'
 import {
   ajustesDe,
@@ -332,10 +333,20 @@ export async function exportarTimeline(
   // su entrada, igual que en el monitor. Va debajo de los rótulos.
   let capaBase = '[vcat]'
   const capas = (timeline.capas ?? []).filter((c) => fuenteDe(c.fuente))
+  // FFmpeg pone las capas en píxeles enteros: una que se mueve o crece despacio temblaría. Con alguna así,
+  // se compone al doble de tamaño y luego se reduce (medio píxel de paso, imperceptible).
+  const sup = capas.some((c) => c.fin || c.giro || (c.entrada && !['pop', 'fundido'].includes(c.entrada))) ? 2 : 1
+  const anchoC = ancho * sup
+  const altoC = alto * sup
+  if (sup > 1) {
+    partes.push(`[vcat]scale=${anchoC}:${altoC}:flags=bicubic[vcatSup]`)
+    capaBase = '[vcatSup]'
+  }
   capas.forEach((c, i) => {
     const f = fuenteDe(c.fuente)!
     if (f.tipo === 'imagen') entradas.push('-loop', '1', '-framerate', String(fps), '-t', c.duracion.toFixed(3), '-i', f.ruta)
-    else entradas.push('-ss', (c.desde ?? 0).toFixed(3), '-t', c.duracion.toFixed(3), '-i', f.ruta)
+    // Un clip encima se repite si la capa dura más que él; el de WebM, con libvpx para que conserve su transparencia.
+    else entradas.push('-stream_loop', '-1', ...(/\.webm$/i.test(f.ruta) ? ['-c:v', 'libvpx-vp9'] : []), '-ss', (c.desde ?? 0).toFixed(3), '-t', c.duracion.toFixed(3), '-i', f.ruta)
     const k = n++
     // Lo mismo que estadoCapa (el monitor), en expresiones de FFmpeg: `T` es el segundo de la capa.
     const ex = expresionesCapa(c)
@@ -343,27 +354,31 @@ export async function exportarTimeline(
     const fundido = c.entrada === 'fundido' ? ',fade=t=in:st=0:d=0.35:alpha=1' : c.entrada === 'pop' ? ',fade=t=in:st=0:d=0.08:alpha=1' : ''
     // Con giro, la capa va en un lienzo cuadrado fijo (lo que ocupa en su punto más grande y girada).
     const gira = Boolean(c.giro) || Boolean(c.fin?.giro)
-    const lado = Math.ceil((ancho * Math.max(c.ancho, c.fin?.ancho ?? 0) * 1.17 * Math.hypot(1, aspectoDe(c.fuente)) + 4) / 2) * 2
+    const lado = Math.ceil((anchoC * Math.max(c.ancho, c.fin?.ancho ?? 0) * 1.17 * Math.hypot(1, aspectoDe(c.fuente)) + 4) / 2) * 2
     const giro = gira
       ? `,pad=w=${lado}:h=${lado}:x='(ow-iw)/2':y='(oh-ih)/2':color=black@0:eval=frame,rotate=a='(${en(ex.giro, 't')})*PI/180':c=none:ow=${lado}:oh=${lado}`
       : ''
     partes.push(
-      `[${k}:v]setpts=PTS-STARTPTS,fps=${fps},format=rgba,scale=w='max(2,trunc(${ancho}*${en(ex.ancho, 't')}*${en(ex.escala, 't')}/2)*2)':h=-2:eval=frame${giro}${fundido},setpts=PTS+${c.inicio.toFixed(3)}/TB[capa${i}]`
+      `[${k}:v]setpts=PTS-STARTPTS,fps=${fps},format=rgba,scale=w='max(2,trunc(${anchoC}*${en(ex.ancho, 't')}*${en(ex.escala, 't')}/2)*2)':h=-2:eval=frame:flags=bicubic${giro}${fundido},setpts=PTS+${c.inicio.toFixed(3)}/TB[capa${i}]`
     )
     const salida = `[conCapa${i}]`
     const T = `(t-${c.inicio.toFixed(3)})`
     partes.push(
-      `${capaBase}[capa${i}]overlay=x='${ancho}*${en(ex.x, T)}-w/2':y='${alto}*${en(ex.y, T)}-h/2':eval=frame:eof_action=pass:enable='between(t,${c.inicio.toFixed(3)},${(c.inicio + c.duracion).toFixed(3)})'${salida}`
+      `${capaBase}[capa${i}]overlay=x='${anchoC}*${en(ex.x, T)}-w/2':y='${altoC}*${en(ex.y, T)}-h/2':eval=frame:eof_action=pass:enable='between(t,${c.inicio.toFixed(3)},${(c.inicio + c.duracion).toFixed(3)})'${salida}`
     )
     capaBase = salida
   })
+  if (sup > 1) {
+    partes.push(`${capaBase}scale=${ancho}:${alto}:flags=area[capasJuntas]`)
+    capaBase = '[capasJuntas]'
+  }
   // Los filtros de todo el video (grano, polvo, trama, viñeta, parpadeo): por debajo de los rótulos,
   // para que el texto se siga leyendo nítido.
   if (timeline.filtros) {
     partes.push(...filtrosFfmpeg(timeline.filtros, capaBase, '[filtrado]', ancho, alto, fps, duracion))
     capaBase = '[filtrado]'
   }
-  partes.push(ass ? `${capaBase}subtitles=${ass}[vout]` : `${capaBase}null[vout]`)
+  partes.push(ass ? `${capaBase}subtitles=${ass}${letrasEn(carpeta) ? ':fontsdir=fuentes' : ''}[vout]` : `${capaBase}null[vout]`)
 
   if (musica) {
     // La música se repite (-stream_loop) y se corta a la duración, con fundido de salida.
@@ -558,4 +573,21 @@ export function animarAss(t: TextoTL, lineas: string, libre: { x: number; y: num
     })
     .join('')
   return { inicio: '', cuerpo }
+}
+
+/**
+ * Copia las letras de documental (Playfair Display, Anton) a `fuentes/` del proyecto para que los
+ * rótulos del MP4 las usen (libass las busca ahí). Devuelve si quedaron.
+ */
+function letrasEn(carpeta: string): boolean {
+  try {
+    const origen = rutaScriptPython('fuentes')
+    if (!existsSync(origen)) return false
+    const destino = join(carpeta, 'fuentes')
+    mkdirSync(destino, { recursive: true })
+    for (const n of readdirSync(origen)) if (n.endsWith('.ttf') && !existsSync(join(destino, n))) copyFileSync(join(origen, n), join(destino, n))
+    return true
+  } catch {
+    return false
+  }
 }

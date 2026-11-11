@@ -139,5 +139,37 @@ const color3 = (t, x, y) => {
 const [izq, der] = [color3(2.5, 20, 300), color3(2.5, 610, 300)]
 assert.ok(izq[1] > 200 && rojo(der), `a mitad del barrido, blanco a la izquierda y rojo a la derecha: ${izq} / ${der}`)
 
+// Un personaje que se mueve: un clip sobre verde croma, sin fondo (WebM con transparencia) como capa encima.
+const croma = join(dir, 'croma.mp4')
+ff(['-f', 'lavfi', '-i', 'color=c=0x00B140:s=320x180:d=2:r=24', '-f', 'lavfi', '-i', 'color=c=red:s=60x60:d=2:r=24', '-filter_complex', "[0][1]overlay=x='60+100*t':y=60", '-c:v', 'libx264', '-pix_fmt', 'yuv420p', croma])
+const rv = spawnSync('python', [join(import.meta.dirname, '..', 'python', 'kit', 'kit.py'), 'recortar-video', croma], { encoding: 'utf8' })
+assert.equal(rv.status, 0, rv.stderr)
+const webm = join(dir, 'croma-recorte.webm')
+const conClip = normalizarTimeline(
+  {
+    clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 3 }],
+    textos: [],
+    capas: [{ id: 'k1', fuente: 'm4', inicio: 0, duracion: 3, x: 0.5, y: 0.5, ancho: 1 }]
+  },
+  3,
+  { m4: 2 }
+)
+const otro4 = { ...otro, medios: [...proyecto.medios, { id: 'm4', ruta: webm, tipo: 'video', conAudio: false, nombre: 'personaje.webm', duracion: 2, ancho: 320, alto: 180 }] }
+const r4 = await exportarTimeline(otro4, conClip, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas4'))
+assert.equal(r4.ok, true, r4.error)
+const mp44 = join(dir, 'salidas4', 'timeline-prueba-original.mp4')
+const fila = (t) => {
+  const r = spawnSync('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', mp44, '-frames:v', '1', '-vf', 'crop=640:2:0:180,scale=640:1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'])
+  const px = []
+  for (let i = 0; i < r.stdout.length; i += 3) px.push([r.stdout[i], r.stdout[i + 1], r.stdout[i + 2]])
+  return px
+}
+for (const t of [0.5, 2.5]) {
+  const px = fila(t)
+  const verdes = px.filter((p) => p[1] > p[0] + 40 && p[1] > p[2] + 40).length
+  const rojos = px.filter((p) => rojo(p)).length
+  assert.ok(verdes === 0 && rojos > 20, `en ${t} s el clip sin fondo se ve sin verde (${verdes} verdes, ${rojos} rojos)`)
+}
+
 rmSync(dir, { recursive: true, force: true })
 console.log('exportar: ok')

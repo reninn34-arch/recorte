@@ -277,3 +277,23 @@ la operación `transicion`. Los rótulos tienen `animacion`: palabra a palabra, 
 etiquetas de ASS por palabra o letra; en el monitor, al reproducir). El kit: `"transicion"` en cada momento y títulos con
 `"entrada": "palabras"`; el conversor lo pasa a los clips sueltos (los tramos del video ya hecho la traen dibujada) y la
 etiqueta entra con rebote. Falta: la transición de nube (necesita una textura) y palabras que se juntan en una frase.
+
+### Fase 8 · Acabado de la referencia (2026-11-11)
+
+Tras ver la versión 2 de SpaceX, el fundador marcó lo que la separa de la referencia. Hecho, probado con las pruebas del kit
+y de exportar (sin video real del agente todavía):
+- **Sin temblor.** El kit recortaba y pegaba en píxeles enteros: con movimientos lentos la imagen saltaba. Ahora las fotos
+  (`recorte_suave`) y las capas (`pegar_suave`) van con decimales (una capa a 0,35 px por cuadro avanza parejo). En el editor,
+  con capas en movimiento se compone al doble y se reduce.
+- **Cámara.** `"camara"` en una foto: del `encuadre` a otro, suave (paneos, acercarse a un detalle). Barridos con desenfoque
+  de movimiento.
+- **Croma limpio.** Clave por diferencia de color (`croma_rgba`): el humo queda semitransparente sin verde, los huecos se
+  vacían, el borde se desmezcla.
+- **Nada doble ni tapado.** `armar` devuelve `avisos` si un texto repite el subtítulo o algo cae en su franja; en el editor
+  los subtítulos van a su altura exacta (antes, «abajo» tapaba la etiqueta).
+- **Letras de revista.** Playfair Display (cursiva y recta) y Anton (OFL) en `python/fuentes`: el kit, el monitor
+  (@font-face) y el MP4 (`fontsdir`) usan las mismas. Letra nueva «Titular» en el editor.
+- **Personajes que se mueven.** `kit.py clip … --recorte` (y `recortar-video`): un clip sobre verde → WebM con transparencia,
+  como capa en el kit, el monitor y el MP4 (en bucle si la capa dura más).
+- El resumen del agente ya no queda en «Listo.» y el plan se marca entero al entregar.
+Falta: `generar_con_flow` con clips «para recortar» por MCP; probarlo todo en una versión 3 del video.

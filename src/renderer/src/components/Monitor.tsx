@@ -297,7 +297,7 @@ export function Monitor({
                 {f.tipo === 'imagen' ? (
                   <img src={f.url} alt="" draggable={false} />
                 ) : (
-                  <CapaVideo capa={c} url={f.url} tiempo={reproductor.tiempo} reproduciendo={reproductor.reproduciendo} />
+                  <CapaVideo capa={c} url={f.url} tiempo={reproductor.tiempo} reproduciendo={reproductor.reproduciendo} largo={medios[c.fuente]} />
                 )}
                 {elegida && (
                   <span
@@ -361,9 +361,11 @@ export function Monitor({
 }
 
 /** Una toma de apoyo encima: un video mudo que sigue al cabezal. */
-function CapaVideo({ capa, url, tiempo, reproduciendo }: { capa: CapaTL; url: string; tiempo: number; reproduciendo: boolean }) {
+function CapaVideo({ capa, url, tiempo, reproduciendo, largo }: { capa: CapaTL; url: string; tiempo: number; reproduciendo: boolean; largo?: number }) {
   const ref = useRef<HTMLVideoElement>(null)
-  useSincronizar(ref, (capa.desde ?? 0) + Math.max(0, tiempo - capa.inicio), reproduciendo)
+  // Un clip más corto que la capa vuelve a empezar (como en el MP4).
+  const t = (capa.desde ?? 0) + Math.max(0, tiempo - capa.inicio)
+  useSincronizar(ref, largo && largo > 0.1 ? t % largo : t, reproduciendo)
   return <video ref={ref} src={url} muted preload="auto" />
 }
 

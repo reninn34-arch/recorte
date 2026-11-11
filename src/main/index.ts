@@ -608,8 +608,11 @@ app.whenReady().then(() => {
         // Al seguir tras el límite, lo que dejó desde la ronda cortada cuenta como de esta ronda.
         const desde = seguir ? (c.agente.pausa?.desde ?? Date.now()) : Date.now()
         desdeHacer = desde
+        // Lo último que dijo el agente: si no escribe su resumen en resultado.json, vale como resumen.
+        let dicho = ''
         try {
           const turno = await pasoHacer(c, carpeta, config, cambio, (l) => avisarAgente(c, l, pctPorTiempo(desde, 480)), senal, false, seguir)
+          dicho = turno.respuesta
           if (turno.sesion) c.agente.sesion = turno.sesion
           creaciones.guardar(c)
         } catch (e) {
@@ -629,6 +632,7 @@ app.whenReady().then(() => {
             ? ' Si dejaste un render en segundo plano, se cortó al terminar tu turno: vuelve a lanzarlo EN PRIMER PLANO y espera a que acabe antes de escribir resultado.json.'
             : ''
           const turno = await pasoHacer(c, carpeta, config, `La revisión de Recorte encontró problemas en tu entrega: ${revisado.problemas.join(' ')}${sinArchivo} Corrígelo y vuelve a entregar.`, (l) => avisarAgente(c, l, 0.9), senal, true)
+          if (turno.respuesta) dicho = turno.respuesta
           if (turno.sesion) c.agente.sesion = turno.sesion
           revisado = await revisarYPublicar(c, carpeta, c.version + 1, desde, (l) => avisarAgente(c, l, 0.96))
         }
@@ -641,6 +645,12 @@ app.whenReady().then(() => {
         }
         c.version += 1
         c.agente.rondas += 1
+        // Sin resumen en resultado.json, lo que dijo el agente al terminar (no un «Listo.» a secas).
+        if (revisado.resultado.resumen === 'Listo.' && dicho.trim()) {
+          revisado.resultado.resumen = dicho.replace(/```[\s\S]*?```/g, '').replace(/\s+/g, ' ').trim().slice(0, 900) || 'Listo.'
+        }
+        // Entregado: todos los pasos del plan quedan hechos (aunque no los anunciara uno a uno).
+        if (c.agente.plan?.pasos.length) c.agente.paso = c.agente.plan.pasos.length
         c.agente.resultado = revisado.resultado
         if (revisado.resultado.tipo === 'video') {
           c.salida = revisado.resultado.archivo
