@@ -1179,11 +1179,34 @@ export const DESENFOQUE_MAX = 0.012
  * El clip sobre el que está una capa con profundidad (el que hay bajo ella cuando aparece): su cámara
  * es la de la escena. La capa sigue a ese clip aunque dure más que él (se queda en su último encuadre).
  */
-export function referenciaParalaje(tl: Timeline, c: CapaTL): { inicio: number; largo: number; ajustes: Required<AjustesClip> } | null {
+export interface TramoCamara {
+  inicio: number
+  largo: number
+  ajustes: Required<AjustesClip>
+}
+
+/**
+ * La cámara que sigue una capa con profundidad: la del clip que hay debajo al aparecer y, mientras dura, la de
+ * los demás clips de la MISMA imagen o video (otro encuadre de la misma escena: el fondo cambia de toma y las
+ * capas con él, calzadas). Con otra imagen debajo, se queda en el último encuadre de su escena.
+ */
+export function referenciaParalaje(tl: Timeline, c: CapaTL): (TramoCamara & { tramos: TramoCamara[] }) | null {
   if (c.profundidad == null) return null
   const base = ubicar(tl, c.inicio + 1e-3)
   if (!base) return null
-  return { inicio: base.inicio, largo: Math.max(0.01, base.fin - base.inicio), ajustes: ajustesDe(base.clip) }
+  const fin = c.inicio + c.duracion
+  const mismos = tramos(tl)
+    .filter((x) => x.clip.fuente === base.clip.fuente && x.fin > c.inicio && x.inicio < fin)
+    .map((x) => ({ inicio: x.inicio, largo: Math.max(0.01, x.fin - x.inicio), ajustes: ajustesDe(x.clip) }))
+  return { inicio: base.inicio, largo: Math.max(0.01, base.fin - base.inicio), ajustes: ajustesDe(base.clip), tramos: mismos }
+}
+
+/** El tramo de la escena cuya cámara manda en el segundo `t` (el que está en pantalla o el último que pasó). */
+export function tramoEscena(ref: TramoCamara & { tramos?: TramoCamara[] }, t: number): TramoCamara {
+  const lista = ref.tramos?.length ? ref.tramos : [ref]
+  let elegido = lista[0]
+  for (const x of lista) if (x.inicio <= t + 1e-6) elegido = x
+  return elegido
 }
 
 /**
@@ -1192,19 +1215,27 @@ export function referenciaParalaje(tl: Timeline, c: CapaTL): { inicio: number; l
  * Un punto u del cuadro se ve en z·u_img − (z−1)·cx (el zoom hacia cx, como el crop y el CSS).
  */
 export function aplicarParalaje(
-  ref: { inicio: number; largo: number; ajustes: Required<AjustesClip> },
+  ref: TramoCamara & { tramos?: TramoCamara[] },
   profundidad: number,
   inicioCapa: number,
   t: number,
   e: { x: number; y: number; ancho: number }
 ): { x: number; y: number; ancho: number } {
   const r = camaraEn(ref.ajustes, (inicioCapa - ref.inicio) / ref.largo, inicioCapa - ref.inicio)
-  const k = camaraEn(ref.ajustes, (t - ref.inicio) / ref.largo, Math.min(ref.largo, Math.max(0, t - ref.inicio)))
-  const A = k.z / r.z
-  const bx = A * (r.z - 1) * r.cx - (k.z - 1) * k.cx
-  const by = A * (r.z - 1) * r.cy - (k.z - 1) * k.cy
+  const ahora = tramoEscena(ref, t)
+  // Al empezar la toma de ahora (o al aparecer la capa, en la primera): en un corte a otro encuadre de la misma
+  // escena, la capa se recoloca calzada con el fondo (sin multiplicar el salto) y luego se mueve con paralaje.
+  const desde = Math.max(inicioCapa, ahora.inicio)
+  const s = desde <= inicioCapa + 1e-6 ? r : camaraEn(ahora.ajustes, (desde - ahora.inicio) / ahora.largo, desde - ahora.inicio)
+  const k = camaraEn(ahora.ajustes, (t - ahora.inicio) / ahora.largo, Math.min(ahora.largo, Math.max(0, t - ahora.inicio)))
   const m = 1 + PARALAJE * Math.min(1, Math.max(0, profundidad))
-  return { x: e.x + m * (A * e.x + bx - e.x), y: e.y + m * (A * e.y + by - e.y), ancho: e.ancho * Math.pow(A, m) }
+  const mover = (a: typeof r, b: typeof r, f: number, p: { x: number; y: number; ancho: number }) => {
+    const A = b.z / a.z
+    const bx = A * (a.z - 1) * a.cx - (b.z - 1) * b.cx
+    const by = A * (a.z - 1) * a.cy - (b.z - 1) * b.cy
+    return { x: p.x + f * (A * p.x + bx - p.x), y: p.y + f * (A * p.y + by - p.y), ancho: p.ancho * Math.pow(A, f) }
+  }
+  return mover(s, k, m, s === r ? e : mover(r, s, 1, e))
 }
 
 /**

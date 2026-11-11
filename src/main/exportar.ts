@@ -517,7 +517,7 @@ function desenfoque(valor: number, anchoC: number): string {
  */
 export function expresionesCapa(
   c: CapaTL,
-  ref: { inicio: number; largo: number; ajustes: Required<AjustesClip> } | null = null
+  ref: { inicio: number; largo: number; ajustes: Required<AjustesClip>; tramos?: { inicio: number; largo: number; ajustes: Required<AjustesClip> }[] } | null = null
 ): { x: string; y: string; ancho: string; giro: string; escala: string } {
   const f = c.fin
   const E = f ? `(3*pow(clip(T/${n3(Math.max(0.1, c.duracion))},0,1),2)-2*pow(clip(T/${n3(Math.max(0.1, c.duracion))},0,1),3))` : '0'
@@ -531,30 +531,63 @@ export function expresionesCapa(
   let ancho = lerp(c.ancho, f?.ancho ?? c.ancho)
   if (ref) {
     // Escena 2.5D (aplicarParalaje): la cámara del clip de debajo, de cuando aparece la capa a ahora.
-    const a = ref.ajustes
     const n6 = (v: number) => (Math.round(v * 1e6) / 1e6).toString()
-    const r = camaraEn(a, (c.inicio - ref.inicio) / ref.largo, c.inicio - ref.inicio)
-    const q = `clip((${n6(c.inicio - ref.inicio)}+T)/${n6(ref.largo)},0,1)`
-    const e = `(3*pow(${q},2)-2*pow(${q},3))`
-    const z = `(max(1,${n6(a.zoom)}*(1+(${n6(a.acercar)})*${q}))*${n6(1 + TEMBLOR_ZOOM * a.temblor)})`
-    // La cámara en mano (vaiven), en el segundo del clip: igual que camaraEn.
-    let cx = `clip(${n6(a.cx)}+(${n6(a.panx)})*${e},0,1)`
-    let cy = `clip(${n6(a.cy)}+(${n6(a.pany)})*${e},0,1)`
-    if (a.temblor > 0.001) {
-      const S = `clip(${n6(c.inicio - ref.inicio)}+T,0,${n6(ref.largo)})`
-      const k = `(${n6(TEMBLOR_AMPLITUD * a.temblor)}/max(0.001,${z}-1))`
-      const vx = `(0.6*sin(2*PI*0.53*${S})+0.3*sin(2*PI*1.37*${S}+1.3)+0.1*sin(2*PI*3.1*${S}+2.1))`
-      const vy = `(0.6*sin(2*PI*0.41*${S}+0.7)+0.3*sin(2*PI*1.13*${S}+2.4)+0.1*sin(2*PI*2.7*${S}+0.4))`
-      cx = `clip(${n6(a.cx)}+(${n6(a.panx)})*${e}+${k}*${vx},0,1)`
-      cy = `clip(${n6(a.cy)}+(${n6(a.pany)})*${e}+${k}*${vy},0,1)`
+    const r = camaraEn(ref.ajustes, (c.inicio - ref.inicio) / ref.largo, c.inicio - ref.inicio)
+    // La cámara de cada tramo de la escena (la misma imagen con otro encuadre), en el segundo de ese tramo.
+    const camara = (tr: { inicio: number; largo: number; ajustes: Required<AjustesClip> }) => {
+      const a = tr.ajustes
+      const q = `clip((${n6(c.inicio - tr.inicio)}+T)/${n6(tr.largo)},0,1)`
+      const e = `(3*pow(${q},2)-2*pow(${q},3))`
+      const z = `(max(1,${n6(a.zoom)}*(1+(${n6(a.acercar)})*${q}))*${n6(1 + TEMBLOR_ZOOM * a.temblor)})`
+      // La cámara en mano (vaiven), en el segundo del tramo: igual que camaraEn.
+      let cx = `clip(${n6(a.cx)}+(${n6(a.panx)})*${e},0,1)`
+      let cy = `clip(${n6(a.cy)}+(${n6(a.pany)})*${e},0,1)`
+      if (a.temblor > 0.001) {
+        const S = `clip(${n6(c.inicio - tr.inicio)}+T,0,${n6(tr.largo)})`
+        const k = `(${n6(TEMBLOR_AMPLITUD * a.temblor)}/max(0.001,${z}-1))`
+        const vx = `(0.6*sin(2*PI*0.53*${S})+0.3*sin(2*PI*1.37*${S}+1.3)+0.1*sin(2*PI*3.1*${S}+2.1))`
+        const vy = `(0.6*sin(2*PI*0.41*${S}+0.7)+0.3*sin(2*PI*1.13*${S}+2.4)+0.1*sin(2*PI*2.7*${S}+0.4))`
+        cx = `clip(${n6(a.cx)}+(${n6(a.panx)})*${e}+${k}*${vx},0,1)`
+        cy = `clip(${n6(a.cy)}+(${n6(a.pany)})*${e}+${k}*${vy},0,1)`
+      }
+      return { z, cx, cy }
     }
-    const A = `(${z}/${n6(r.z)})`
+    // Varios tramos: el que está en pantalla según el segundo (como tramoEscena).
+    const lista = ref.tramos?.length ? [...ref.tramos].sort((p, q) => p.inicio - q.inicio) : [ref]
     const m = 1 + PARALAJE * Math.min(1, Math.max(0, c.profundidad ?? 0))
-    const bx = `(${A}*${n6((r.z - 1) * r.cx)}-(${z}-1)*${cx})`
-    const by = `(${A}*${n6((r.z - 1) * r.cy)}-(${z}-1)*${cy})`
-    x = `(${x}+${n6(m)}*(${A}*${x}+${bx}-${x}))`
-    y = `(${y}+${n6(m)}*(${A}*${y}+${by}-${y}))`
-    ancho = `(${ancho}*pow(${A},${n6(m)}))`
+    // Cada toma: la capa calzada con el fondo al empezar la toma (sin paralaje en el salto del corte) y luego con
+    // paralaje (aplicarParalaje). Lo de la primera parte son números; lo de la segunda, expresiones.
+    const enToma = (tr: { inicio: number; largo: number; ajustes: Required<AjustesClip> }) => {
+      const desde = Math.max(c.inicio, tr.inicio)
+      const s = desde <= c.inicio + 1e-6 ? r : camaraEn(tr.ajustes, (desde - tr.inicio) / tr.largo, desde - tr.inicio)
+      let px = x
+      let py = y
+      let pa = ancho
+      if (s !== r) {
+        const A1 = s.z / r.z
+        const bx1 = A1 * (r.z - 1) * r.cx - (s.z - 1) * s.cx
+        const by1 = A1 * (r.z - 1) * r.cy - (s.z - 1) * s.cy
+        px = `(${n6(A1)}*${x}+${n6(bx1)})`
+        py = `(${n6(A1)}*${y}+${n6(by1)})`
+        pa = `(${ancho}*${n6(A1)})`
+      }
+      const k = camara(tr)
+      const A = `(${k.z}/${n6(s.z)})`
+      const bx = `(${A}*${n6((s.z - 1) * s.cx)}-(${k.z}-1)*${k.cx})`
+      const by = `(${A}*${n6((s.z - 1) * s.cy)}-(${k.z}-1)*${k.cy})`
+      return {
+        x: `(${px}+${n6(m)}*(${A}*${px}+${bx}-${px}))`,
+        y: `(${py}+${n6(m)}*(${A}*${py}+${by}-${py}))`,
+        ancho: `(${pa}*pow(${A},${n6(m)}))`
+      }
+    }
+    const tomas = lista.map(enToma)
+    const elegirToma = (campo: 'x' | 'y' | 'ancho') => {
+      let expr = tomas[tomas.length - 1][campo]
+      for (let i = tomas.length - 2; i >= 0; i--) expr = `if(lt(${n6(c.inicio)}+T,${n6(lista[i + 1].inicio)}),${tomas[i][campo]},${expr})`
+      return expr
+    }
+    ;[x, y, ancho] = [elegirToma('x'), elegirToma('y'), elegirToma('ancho')]
   }
   return {
     x,

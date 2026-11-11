@@ -137,10 +137,11 @@ lejano. Así se arma:
    Si solo tienes una foto del paisaje entero (en vertical, como el video), `python kit/kit.py separar <foto> --planos 3`
    la parte en planos por distancia (un modelo local de 99 MB que se baja una vez; rellena lo que queda detrás): devuelve
    `fondo` (úsalo como la `foto`, con `"encuadre": {"zoom": Z, "cx": 0.5, "cy": 0.5}` y su `camara`) y `planos`, cada uno
-   un PNG para una capa en `x` 0.5, `y` 0.5, `ancho` Z (el mismo zoom que la foto, así calza encima), `"entrada": "ninguna"`
-   y la `profundidad` que trae. Mira `mapa` (claro = cerca) y los planos antes de usarlos: con dibujos o con niebla el
-   modelo se equivoca; si un plano sale mal, mejor genera esa pieza por separado. Movimientos de cámara cortos (el relleno
-   de detrás es borroso: que solo asome por los bordes).
+   un PNG para una capa en `x` 0.5, `y` 0.5, `ancho` Z × `ancho_capa` (los planos traen margen alrededor), `"entrada":
+   "ninguna"` y la `profundidad` que trae. Mira `mapa` (claro = cerca) y los planos antes de usarlos: con dibujos o con
+   niebla el modelo se equivoca; si un plano sale mal, mejor genera esa pieza por separado. Movimientos de cámara CORTOS
+   (cx o cy no más de 0.08 por toma, zoom no más de 0.15): detrás de cada plano solo hay relleno. Puedes cortar a otro
+   encuadre de la misma escena con otra `foto` del mismo `fondo`: las capas la siguen calzadas.
 3. **Cada pieza como capa con `"profundidad"`** (0 a 1): sigue a la cámara de la foto de debajo; 0 se mueve pegada al fondo,
    1 (muy cerca) se mueve y crece 2,5 veces más. Una guía: montañas 0.1–0.2, una casa o un árbol a media distancia 0.4–0.5,
    la persona 0.4–0.6, algo en primer plano (una rama, una barandilla, hierba) 0.8–1 con `"desenfoque": 0.4`. Sin
@@ -159,6 +160,9 @@ lejano. Así se arma:
 ]
 ```
 - Lo que va después en `capas` se dibuja encima: de lo lejano a lo cercano.
+- Una escena puede tener varias tomas: varias `foto` seguidas con la MISMA imagen de fondo y distinto encuadre o cámara.
+  Las capas con profundidad siguen a cada una (en el corte se recolocan calzadas con el fondo y luego se mueven con su
+  paralaje).
 - Usa la escena 2.5D en los momentos clave (la presentación del protagonista, el lugar donde pasa todo), no en cada foto.
 - En el editor llega igual: la foto con su paneo y cada pieza en «Encima» con su profundidad (el usuario la cambia).
 
@@ -176,6 +180,8 @@ que cada toma se ve en 3D. Elige la toma por lo que cuenta la frase:
   más cercano) se ve nítido y lo demás se desenfoca según `campo` (0 a 1). Enfoca al protagonista (su `profundidad`): el
   fondo se va a bokeh y la escena gana distancia. Lo hace solo; no pongas además `desenfoque` en cada capa.
 - Una toma por momento, lenta y en una dirección; cambia de toma con el corte, como un operador de cámara.
+- **Nunca un cuadro vacío**: una foto que es solo un fondo (una pared, un haz de luz, una sala oscura) necesita algo
+  encima TODO el rato que se ve (un título, una pieza, una capa). `armar` avisa si queda vacía.
 
 ## Filtros de todo el video
 `"filtros": {"grano": 0.3, "polvo": 0.2, "trama": 0.4, "vineta": 0.5, "parpadeo": 0.1}` (0 a 1): grano de película, polvo
@@ -222,6 +228,8 @@ Si el usuario eligió generar imágenes o clips (lo dice AGENTS.md), Recorte los
      {"codo_d": [0.2, 0.41]}}` (en fracción de la imagen; los nombres son los de `puntos`).
   3. La capa animada es más ancha que la imagen (deja sitio a los brazos): el kit lo ajusta solo; tú pon el `ancho` de la
      persona como siempre.
+  4. Los textos, lejos de sus brazos: con `saludar`, `senalar` o `explicar`, `armar` avisa si una palabra o un título cae
+     donde se mueven (el brazo lo taparía). Ponlos por encima de la cabeza o a un lado, fuera de su alcance.
   Límites: la cabeza no gira de perfil ni los dedos se articulan. Para eso (y para caminar) hace falta un clip de Flow
   con créditos. Combina la marioneta con la escena 2.5D: la persona como capa con `profundidad` y su gesto.
 - **Un personaje que se mueve de verdad** (gesticula, camina; solo si el usuario acepta gastar créditos): `python kit/kit.py clip

@@ -684,11 +684,16 @@ class Marioneta:
         # Hacia fuera para cada brazo (en pantalla): el de la izquierda gira a favor del reloj.
         fuera = {l: (1 if self.P[f'hombro_{l}'][0] < self.P['cuello'][0] else -1) for l in ('i', 'd')}
         if gesto == 'hablar':
-            g['cabeza'] += 3.5 * f * (math.sin(fase * 2 + 0.3) + 0.5 * math.sin(fase * 5 + 1.1))
-            extra['cabeza'] = {'dy': 0.012 * f * self.ancho_hombros * math.sin(fase * 4)}
-            g['torso'] = 1.2 * f * math.sin(fase)
+            # Como alguien que cuenta algo: la cabeza acompaña las frases (se ladea, asiente un poco), el tronco se
+            # mece y las manos suben y bajan con lo que dice. Se tiene que notar en un plano entero.
+            g['cabeza'] += 6 * f * (math.sin(fase * 2 + 0.3) + 0.5 * math.sin(fase * 5 + 1.1))
+            golpe = max(0.0, math.sin(fase * 4)) ** 2
+            extra['cabeza'] = {'dy': 0.04 * f * self.ancho_hombros * golpe, 'sy': 1 - 0.025 * f * golpe}
+            g['torso'] = 2.4 * f * math.sin(fase)
             for l in self.libres:
-                g[f'antebrazo_{l}'] = 7 * f * fuera[l] * (0.5 + 0.5 * math.sin(fase * 3 + (0 if l == 'i' else 2)))
+                mano = 0.5 + 0.5 * math.sin(fase * 3 + (0 if l == 'i' else 2))
+                g[f'brazo_{l}'] = g.get(f'brazo_{l}', 0) + 6 * f * fuera[l] * mano
+                g[f'antebrazo_{l}'] = 22 * f * fuera[l] * mano
         elif gesto == 'asentir':
             # De perfil no se puede: en 2D, asentir es bajar la cabeza y acortarla un poco, dos veces por ciclo.
             k = max(0.0, math.sin(fase * 2)) ** 2
@@ -889,19 +894,40 @@ def desenfoque_de_campo(m, p):
     return min(1.0, campo * abs(p - float(m.get('foco', 0.5))) * 1.5) if campo > 0 else 0.0
 
 
-def paralaje(c, t, x, y, ancho):
+def ventana_fraccion(foto, t):
+    """La ventana de una foto en `t` en fracción de su imagen (igual para dos fotos de la misma imagen)."""
+    x0, y0, cw, ch = foto.ventana_en(t)
+    iw, ih = foto.img.size
+    return x0 / iw, y0 / ih, cw / iw, ch / ih
+
+
+def paralaje(c, t, x, y, ancho, momentos=None):
     """Dónde se ve una capa con profundidad: la cámara de la foto de debajo (su encuadre, acercamiento y
     paneo) va del encuadre de cuando apareció la capa al de ahora, y la capa hace lo mismo multiplicado
-    por su cercanía. Así un paisaje hecho de recortes se siente con distancia."""
+    por su cercanía. Así un paisaje hecho de recortes se siente con distancia. Si la escena sigue con otra
+    foto de la MISMA imagen (otro encuadre), la capa sigue a esa: el fondo cambia de toma y ella con él."""
     base = c.get('base')
     if c.get('profundidad') is None or base is None:
         return x, y, ancho
-    x0r, y0r, cwr, chr_ = base.ventana_en(c['desde'])
-    x0, y0, cw, ch = base.ventana_en(t)
-    A = cwr / cw
-    bx, by = (x0r - x0) / cw, (y0r - y0) / ch
+    ahora = base
+    if momentos:
+        otra = foto_de_fondo(momentos, t)
+        if otra is not None and otra is not base and otra.m.get('archivo') == base.m.get('archivo'):
+            ahora = otra
+    def mover(a, b, f, x, y, ancho):
+        A = a[2] / b[2]
+        bx, by = (a[0] - b[0]) / b[2], (a[1] - b[1]) / b[3]
+        return x + f * (A * x + bx - x), y + f * (A * y + by - y), ancho * A ** f
+
     m = 1 + PARALAJE * c['profundidad']
-    return x + m * (A * x + bx - x), y + m * (A * y + by - y), ancho * A ** m
+    r = ventana_fraccion(base, c['desde'])
+    k = ventana_fraccion(ahora, t)
+    if ahora is base:
+        return mover(r, k, m, x, y, ancho)
+    # Corte a otro encuadre de la misma escena: la capa se recoloca calzada con el fondo al empezar la toma (sin
+    # multiplicar el salto) y luego se mueve con paralaje.
+    s = ventana_fraccion(ahora, ahora.desde)
+    return mover(s, k, m, *mover(r, s, 1, x, y, ancho))
 
 
 def desenfocar(c, im, ancho_px, L, fija):
@@ -1005,7 +1031,7 @@ def capas_encima(lienzo, L, t):
             continue
         dt = t - c['desde']
         x, y, ancho, giro = estado_capa(c, dt)
-        x, y, ancho = paralaje(c, t, x, y, ancho)
+        x, y, ancho = paralaje(c, t, x, y, ancho, getattr(L, 'momentos', None))
         escala, alfa = ancho / c['ancho'], 1.0
         if c['entrada'] == 'pop':
             escala *= pop(dt)
@@ -1717,7 +1743,9 @@ def cargar(ruta):
             if not os.path.isfile(L.ruta(f)):
                 raise SystemExit(f'Momento {i + 1}: no encuentro «{f}».')
         momentos.append(PIEZAS[tipo](m, L))
-    # Las capas con profundidad siguen a la cámara de la foto que tienen debajo al aparecer.
+    # Las capas con profundidad siguen a la cámara de la foto que tienen debajo al aparecer (y a las que siguen
+    # con la misma imagen).
+    L.momentos = momentos
     for c in L.capas:
         if c['profundidad'] is not None:
             c['base'] = foto_de_fondo(momentos, c['desde'])
@@ -1810,10 +1838,67 @@ def _palabras(t):
     return [w for w in re.findall(r"[a-záéíóúüñ0-9]+", str(t).lower()) if len(w) > 2]
 
 
+def avisos_escena(r, L, momentos):
+    """Dos cosas que en la v4 se vieron mal: una foto que es un fondo casi vacío (una pared, un haz de luz) sin
+    nada encima un buen rato, y un texto donde se mueven los brazos de una marioneta (el brazo lo tapa)."""
+    import cv2
+    avisos = []
+    # Lo que va encima en cada momento: títulos, etiquetas, palabras, textos, objetos y capas.
+    encima = [(m.desde, m.hasta) for m in momentos if m.m.get('tipo') in ('titulo', 'etiqueta', 'palabras', 'texto', 'objeto', 'apiladas')]
+    encima += [(c['desde'], c['hasta']) for c in L.capas if c['ancho'] >= 0.12]
+    for i, m in enumerate(momentos):
+        if not isinstance(m, Foto):
+            continue
+        g = cv2.resize(np.asarray(m.img.convert('L'), dtype=np.float32), (135, 240), interpolation=cv2.INTER_AREA)
+        if float(np.abs(cv2.Laplacian(g, cv2.CV_32F)).mean()) >= 4.5:
+            continue
+        # Cuánto rato de este momento no tiene nada encima (a pasos de 0,1 s).
+        vacio = [t for t in np.arange(m.desde, m.hasta, 0.1) if not any(a <= t < b for a, b in encima)]
+        if len(vacio) * 0.1 >= 0.4:
+            avisos.append(f'Momento {i + 1} ({m.desde:.1f}–{m.hasta:.1f} s): «{os.path.basename(m.m.get("archivo", ""))}» es un fondo casi vacío '
+                          f'y no tiene nada encima entre {vacio[0]:.1f} y {vacio[-1] + 0.1:.1f} s: se ve un cuadro vacío. Pon un título, '
+                          'una pieza o una capa encima en todo el momento, o usa una foto con sujeto.')
+    # Textos donde se mueven los brazos de una marioneta que saluda, señala o explica.
+    for j, c in enumerate(L.capas):
+        an = c.get('animada')
+        if not isinstance(an, Marioneta) or an.gesto not in GESTOS_BRAZO:
+            continue
+        # Por dónde pasan los brazos: lo que la animación cubre en algún momento y en reposo no (unos cuadros del ciclo).
+        reposo = an.alfa > 0.5
+        paso = np.zeros_like(reposo)
+        for t in np.arange(0.4, CICLO_S, 0.45):
+            paso |= (np.asarray(an.cuadro(float(t)).getchannel('A')) > 128) & ~reposo
+        ys, xs = np.nonzero(paso)
+        if len(xs) < 50:
+            continue
+        # De píxeles de la animación a fracciones del cuadro (la capa va centrada en x, y con su ancho de animación).
+        ancho_px = L.W * c['ancho'] * an.W / an.w
+        k = ancho_px / an.W
+        a_x = lambda px: (L.W * c['x'] + (px - an.W / 2) * k) / L.W
+        a_y = lambda py: (L.H * c['y'] + (py - an.H / 2) * k) / L.H
+        zona = (a_x(np.percentile(xs, 1)) - 0.05, a_y(np.percentile(ys, 1)) - 0.04, a_x(np.percentile(xs, 99)) + 0.05, a_y(np.percentile(ys, 99)) + 0.04)
+        for i, m in enumerate(momentos):
+            d = m.m
+            if m.hasta <= c['desde'] or m.desde >= c['hasta']:
+                continue
+            sitios = []
+            if d.get('tipo') == 'palabras':
+                sitios = list(zip(d.get('palabras') or [], sitios_palabras(d)))
+            elif d.get('tipo') in ('titulo', 'etiqueta'):
+                sitios = [(d.get('texto') or ' '.join(str(x if isinstance(x, str) else x.get('texto', '')) for x in d.get('lineas') or []),
+                           (float(d.get('x', 0.5)), float(d.get('y', 0.5))))]
+            for texto, (x, y) in sitios:
+                if zona[0] < x < zona[2] and zona[1] < y < zona[3]:
+                    avisos.append(f'Momento {i + 1}: «{str(texto)[:30]}» (x {x:.2f}, y {y:.2f}) cae donde se mueven los brazos de la '
+                                  f'persona de la capa {j + 1} («{an.gesto}»): el brazo lo tapa. Ponlo por encima de su cabeza o '
+                                  f'fuera de x {zona[0]:.2f}–{zona[2]:.2f}.')
+    return avisos
+
+
 def avisos_receta(r, L, momentos):
     """Lo que suele salir mal y se ve feo: un texto que repite lo que dice el subtítulo (dos veces lo
     mismo, arriba y abajo) y algo encima en la franja de los subtítulos (una etiqueta tapada)."""
-    avisos = []
+    avisos = avisos_escena(r, L, momentos)
     subs = (L.subs or {}).get('frases') or []
     if not subs:
         return avisos
@@ -2095,17 +2180,26 @@ def profundidad_foto(im):
 
 
 def rellenar(rgb, hueco):
-    """Rellena lo que queda tapado (`hueco`, 0/1) con lo que hay alrededor: lo que se descubre al moverse la cámara."""
+    """Rellena lo que queda tapado (`hueco`, 0/1) con lo que hay alrededor: lo que se descubre al moverse la cámara.
+    El hueco se agranda bastante (que no quede el contorno de lo que tapaba, que se vería como un fantasma) y el
+    relleno se suaviza: un color de ambiente sin formas, que al asomar por un borde no llama la atención."""
     import cv2
     h, w = hueco.shape
-    k = min(1.0, 640 / max(w, h))
-    chico = cv2.resize(rgb, (max(1, round(w * k)), max(1, round(h * k))), interpolation=cv2.INTER_AREA)
-    m = cv2.resize((hueco * 255).astype(np.uint8), (chico.shape[1], chico.shape[0]), interpolation=cv2.INTER_NEAREST)
-    m = cv2.dilate(m, np.ones((5, 5), np.uint8))
-    lleno = cv2.inpaint(chico, m, 9, cv2.INPAINT_TELEA)
+    k = min(1.0, 360 / max(w, h))
+    cw, ch = max(1, round(w * k)), max(1, round(h * k))
+    chico = cv2.resize(rgb, (cw, ch), interpolation=cv2.INTER_AREA)
+    m = (cv2.resize(hueco.astype(np.float32), (cw, ch), interpolation=cv2.INTER_AREA) > 0.02).astype(np.uint8) * 255
+    g = max(3, round(min(cw, ch) * 0.025)) * 2 + 1
+    m = cv2.dilate(m, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (g, g)))
+    lleno = cv2.inpaint(chico, m, max(5, g), cv2.INPAINT_NS)
+    lleno = cv2.GaussianBlur(lleno, (0, 0), max(2.0, g / 3))
     lleno = cv2.resize(lleno, (w, h), interpolation=cv2.INTER_CUBIC)
-    suave = cv2.GaussianBlur(cv2.dilate((hueco * 255).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(np.float32) / 255, (9, 9), 0)[..., None]
+    suave = cv2.resize(cv2.GaussianBlur(m.astype(np.float32) / 255, (0, 0), g / 4), (w, h), interpolation=cv2.INTER_LINEAR)[..., None]
     return (rgb * (1 - suave) + lleno * suave).astype(np.uint8)
+
+
+# Lo que se le agrega a cada plano por lado (fracción del ancho), para que su orilla no asome al moverse.
+MARGEN_PLANO = 0.15
 
 
 def separar(ruta, planos=3, salida=None):
@@ -2139,16 +2233,35 @@ def separar(ruta, planos=3, salida=None):
             dentro = (d >= cortes[i - 1]).astype(np.float32)
             # Un poco más ancho que su silueta (con el color rellenado), para que al moverse no deje rendija.
             dentro = cv2.dilate(dentro, np.ones((2 * r + 1, 2 * r + 1), np.uint8))
-            alfa = cv2.GaussianBlur(dentro, (2 * r + 1, 2 * r + 1), 0)
+            # Borde suave (el mapa de profundidad es más basto que la foto: un corte duro se vería escalonado).
+            alfa = cv2.GaussianBlur(dentro, (4 * r + 1, 4 * r + 1), 0)
         archivo = f'{base}-plano{i + 1}.png'
-        Image.fromarray(np.dstack([color, (alfa * 255).astype(np.uint8)]), 'RGBA').save(archivo)
-        # La profundidad que se le sugiere: el más lejano es el fondo (0); el más cercano, 0.6.
-        hechos.append({'archivo': archivo, 'profundidad': round(0.6 * i / (planos - 1), 2)})
+        rgba = np.dstack([color, (alfa * 255).astype(np.uint8)])
+        if i > 0:
+            # Un margen alrededor que prolonga el borde y se va difuminando: al moverse con paralaje (más que el fondo),
+            # su orilla no entra en el cuadro y lo que asoma es un color sin formas. La capa va más ancha (`ancho_capa`).
+            mg = round(im.width * MARGEN_PLANO)
+            ext = cv2.copyMakeBorder(rgba, mg, mg, mg, mg, cv2.BORDER_REPLICATE).astype(np.float32)
+            bor = cv2.GaussianBlur(ext, (0, 0), mg / 2.5)
+            hh, ww = ext.shape[:2]
+            yy, xx = np.mgrid[0:hh, 0:ww].astype(np.float32)
+            fuera = np.maximum(np.maximum(mg - xx, xx - (ww - 1 - mg)), np.maximum(mg - yy, yy - (hh - 1 - mg)))
+            w = np.clip(fuera / mg, 0, 1)[..., None] ** 0.5
+            rgba = np.clip(ext * (1 - w) + bor * w, 0, 255).astype(np.uint8)
+        Image.fromarray(rgba, 'RGBA').save(archivo)
+        # La profundidad que se le sugiere: el más lejano es el fondo (0); el más cercano, 0.4 (los planos de una sola
+        # foto no aguantan mucho paralaje: detrás solo hay relleno).
+        hechos.append({'archivo': archivo, 'profundidad': round(0.4 * i / (planos - 1), 2)})
     mapa = f'{base}-profundidad.png'
     Image.fromarray((d * 255).astype(np.uint8), 'L').save(mapa)
+    extra = round((1 + 2 * MARGEN_PLANO) * 1000) / 1000
     return {'fondo': hechos[0]['archivo'], 'planos': hechos[1:], 'mapa': mapa, 'ancho': im.width, 'alto': im.height,
-            'uso': 'el fondo como foto con "encuadre" {"zoom": Z, "cx": 0.5, "cy": 0.5} y su "camara"; cada plano como capa '
-                   'x 0.5, y 0.5, ancho Z (la foto en vertical como el video), con su profundidad y "entrada": "ninguna"'}
+            'ancho_capa': extra,
+            'uso': f'el fondo como foto con "encuadre" {{"zoom": Z, "cx": 0.5, "cy": 0.5}} y su "camara"; cada plano como capa '
+                   f'x 0.5, y 0.5, "ancho" Z × {extra} (traen margen alrededor; la foto en vertical como el video), con su '
+                   'profundidad y "entrada": "ninguna". Puedes cortar a otro encuadre de la MISMA foto (otra foto con otro '
+                   '"encuadre"): las capas la siguen calzadas. Movimientos CORTOS (cx o cy no más de 0.08 en una toma, zoom no '
+                   'más de 0.15): detrás de cada plano solo hay relleno.'}
 
 
 def guardar_recorte(rgb, alfa, salida, extra):

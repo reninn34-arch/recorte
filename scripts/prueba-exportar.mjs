@@ -215,5 +215,37 @@ for (const [i, y] of [[0, 90], [1, 180], [2, 270]]) {
 }
 assert.ok(movido[0] < -10 && Math.abs(movido[1]) < 2 && movido[2] < movido[0] * 2, `paralaje: ${JSON.stringify(movido)}`)
 
+// Dos tomas de la misma imagen (otro encuadre tras el corte): la capa con profundidad sigue a la segunda, calzada.
+const tomas = normalizarTimeline(
+  {
+    clips: [
+      { id: 'c1', fuente: 'm5', entrada: 0, salida: 1.5, ajustes: { zoom: 1.4, cx: 0.3, panx: 0.1 } },
+      { id: 'c2', fuente: 'm5', entrada: 0, salida: 1.5, ajustes: { zoom: 1.4, cx: 0.7, panx: -0.1 } }
+    ],
+    textos: [],
+    capas: [{ id: 'k1', fuente: 'm1', inicio: 0, duracion: 3, x: 0.5, y: 0.5, ancho: 0.08, profundidad: 0.6 }]
+  },
+  3,
+  { m1: 5, m5: 3 }
+)
+assert.equal(referenciaParalaje(tomas, tomas.capas[0]).tramos.length, 2, 'la capa conoce las dos tomas de su escena')
+const r6 = await exportarTimeline(otro5, tomas, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas6'))
+assert.equal(r6.ok, true, r6.error)
+const mp46 = join(dir, 'salidas6', 'timeline-prueba-original.mp4')
+const centro6 = (t) => {
+  const r = spawnSync('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', mp46, '-frames:v', '1', '-vf', 'crop=640:2:0:180,scale=640:1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'])
+  let suma = 0
+  let n = 0
+  for (let i = 0; i < r.stdout.length; i += 3) if (r.stdout[i] > 150 && r.stdout[i + 1] < 90 && r.stdout[i + 2] < 90) (suma += i / 3), n++
+  return n ? suma / n : NaN
+}
+const ref6 = referenciaParalaje(tomas, tomas.capas[0])
+for (const t of [0.7, 1.7, 2.6]) {
+  const x = aplicarParalaje(ref6, 0.6, 0, t, estadoCapa(tomas.capas[0], t)).x * 640
+  const visto = centro6(t)
+  assert.ok(Math.abs(visto - x) < 6, `dos tomas, ${t} s: el MP4 pone la capa en ${visto.toFixed(1)}, el monitor en ${x.toFixed(1)}`)
+}
+assert.ok(Math.abs(centro6(1.7) - centro6(1.4)) > 40, 'en el corte la capa salta con el fondo (sigue a la segunda toma)')
+
 rmSync(dir, { recursive: true, force: true })
 console.log('exportar: ok')
