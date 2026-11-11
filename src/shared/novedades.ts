@@ -24,6 +24,33 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.33',
+    fecha: '2026-11-11',
+    resumen: 'Escenas 2.5D más limpias y personajes que gesticulan de verdad.',
+    novedades: [
+      {
+        icono: 'layers',
+        titulo: 'Una escena, varias tomas',
+        texto: 'Si cortas a otro encuadre de la misma imagen, las capas con profundidad lo siguen calzadas: ya no se descuadran ni asoma lo que hay detrás.'
+      },
+      {
+        icono: 'image',
+        titulo: 'Fotos partidas en planos más limpias',
+        texto: 'Al partir una foto en planos ya no queda la silueta fantasma de lo que tapaba, y cada plano trae margen para que su borde no entre al moverse.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: '«Habla» se nota',
+        texto: 'La marioneta que habla mueve más la cabeza, el tronco y las manos, como alguien que cuenta algo.'
+      },
+      {
+        icono: 'wand',
+        titulo: 'El agente revisa más',
+        texto: 'Avisa si un texto cae donde se mueven los brazos de un personaje o si un fondo vacío se queda sin nada encima.'
+      }
+    ]
+  },
+  {
     version: '0.1.32',
     fecha: '2026-11-11',
     resumen: 'Escenas con distancia, personajes que gesticulan y una cámara 3D: todo sin gastar créditos.',
