@@ -24,6 +24,33 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.36',
+    fecha: '2026-11-11',
+    resumen: 'Escenas vivas: el agente separa a las personas de su escenario y las anima, en vez de entregar fotos con zoom.',
+    novedades: [
+      {
+        icono: 'layers',
+        titulo: 'Escenas vivas',
+        texto: 'De cada imagen con una persona, el agente la recorta, consigue el escenario sin ella, lo parte en planos y la pone delante animada como marioneta: una escena con distancia y movimiento, sin gastar créditos.'
+      },
+      {
+        icono: 'image',
+        titulo: 'El mismo personaje, la misma cara',
+        texto: 'Genera primero al protagonista y lo usa de referencia en cada escena donde vuelve a salir.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Avisa si queda plano o lento',
+        texto: 'Antes de entregar avisa si el video es casi todo fotos planas o si la imagen cambia demasiado despacio para redes.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Tus ajustes se respetan',
+        texto: 'Al abrir una creación, la caja del chat ya no le quita las imágenes si tu cuenta de Flow tarda en cargar.'
+      }
+    ]
+  },
+  {
     version: '0.1.35',
     fecha: '2026-11-11',
     resumen: 'Las correcciones ya son rápidas desde el segundo cambio, y el permiso de voz se pide una sola vez.',
