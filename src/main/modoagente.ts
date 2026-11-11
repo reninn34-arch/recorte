@@ -181,6 +181,12 @@ de museo bajo un foco que entra girando en 3D y fotos de archivo que caen apilad
   con la cámara en movimiento). Úsala en los momentos clave. Si su personaje se mueve (gesticula, saluda, asiente), usa la
   **marioneta** del kit (\`"animar": "hablar"\`, \`"saludar"\`… sin créditos; mira RECETA.md) y elige una **toma de cámara**
   por momento (acercarse, alejarse, travelling, grúa, cámara en mano, profundidad de campo).
+- **Escenas vivas (lo normal en documentales, historias y explicativos con personas)**: no entregues una sucesión de fotos
+  con zoom. Por cada imagen con una persona: \`python kit/kit.py escena medios/img-x.jpg\` recorta a la persona, consigue el
+  escenario sin ella (lo pide a Recorte: no gasta créditos), lo parte en planos y te devuelve el "momento" y las "capas"
+  listos para la receta: la persona delante, animada como marioneta, y el escenario en 3D con la cámara. Elige su gesto
+  por lo que hace. Haz así casi todas las escenas con personas y deja como foto sola solo las de objetos o detalles.
+  \`armar\` avisa si el video es casi todo fotos planas.
 - \`python kit/kit.py golpes <audio-o-video>\`: los golpes de la música y el tempo, para poner cada momento en su golpe.
 - \`python kit/kit.py encuadre <foto> --zoom 1.3 --cx .5 --cy .5\`: cómo queda una foto a pantalla completa.
 - \`python kit/kit.py armar receta.json --prueba 0.5,3,8\`: solo esos fotogramas, en segundos, para corregir antes.
@@ -607,6 +613,13 @@ function comoGuionGrafico(c: Creacion): string {
 - Los clips duran hasta 8 s: una escena más larga va en dos clips o con una imagen; una más corta se recorta.
 - Para que todas las escenas se vean coherentes (el mismo diente, la misma persona, el mismo lugar), define al principio
   del guion gráfico el estilo común y repítelo en cada prompt; y haz primero la imagen de la escena y pásala con --ref al clip.
+- **El mismo personaje, la misma cara**: si una persona sale en varias escenas, la primera escena es SU imagen (de frente,
+  cuerpo entero o medio cuerpo, los brazos un poco separados del cuerpo) y en cada escena donde vuelve a salir pasas esa
+  imagen con --ref y lo dices en el prompt ("the same man as in the reference"). Sin eso, cada imagen trae otra cara.
+- **Escenas vivas, no fotos**: en un documental, una historia o un explicativo con personas, cada escena con una persona
+  es una escena viva (\`kit.py escena\`: la persona recortada y animada como marioneta delante de su escenario en planos)
+  y las escenas clave, además, con el escenario por capas. Márcalo en cada escena ("viva": true). Un video de solo fotos
+  con zoom se ve barato: eso es lo que hay que evitar.
 ${m.clips ? `- En "mensaje" dile cuántos clips son y lo que cuestan (${m.clips}: ${costoClips(c)} por clip), y que solo se generan cuando diga «Hazlo». Como mucho ${MAX_CLIPS_GUION} clips.` : ''}`
 }
 

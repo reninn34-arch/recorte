@@ -125,6 +125,25 @@ NUNCA los pegues con un script aparte: así quedan en las pistas «Encima» y «
   de una serie), `ding` (un dato, un acierto), `caching` (una oferta). O `archivo` con uno propio. `volumen` por defecto 0.6.
 - Un «pop» cuando entra cada logo o ícono, un «whoosh» en los cortes fuertes; sin abusar (uno cada pocos segundos).
 
+## Escenas vivas: de una imagen plana a una escena con la persona animada (úsalo SIEMPRE con personas)
+`python kit/kit.py escena medios/img-x.jpg [--gesto peso] [--planos 2] [--zoom 1.15]` hace en una orden lo que un editor
+haría a mano en After Effects:
+1. recorta a la persona (o al sujeto principal) de la imagen,
+2. consigue el escenario SIN ella: lo pide a Recorte editando la misma imagen (no gasta créditos; tarda un minuto) o, si
+   no se puede, rellena el hueco (`--limpio otra.png` si ya tienes el escenario vacío; `--sin-flow` para no pedirlo),
+3. parte el escenario en planos por distancia,
+4. mira su esqueleto (marioneta),
+y devuelve `"momento"` (la foto del escenario con su encuadre y cámara) y `"capas"` (los planos con su profundidad y la
+persona con su gesto), calzados como en la imagen original. Cópialos a la receta con sus `desde`/`hasta`; puedes cambiar
+la cámara (movimientos cortos), el gesto, una secuencia de gestos o añadir su entrada.
+- El gesto por lo que hace: `peso` (por defecto: trabaja, mira, posa), `hablar` (cuenta algo a cámara), `asentir`,
+  `ladear`, y con los brazos libres `senalar`, `saludar`, `explicar`.
+- Hazlo en casi TODAS las escenas con personas: una sucesión de fotos con zoom se ve barata. Deja como foto sola solo los
+  objetos, los detalles y los planos generales sin nadie. `armar` avisa si el video es casi todo fotos planas.
+- **La misma persona, la misma cara**: genera primero al protagonista (de frente, brazos algo separados) y pasa esa
+  imagen con `--ref` en cada escena donde vuelva a salir ("the same man as in the reference"). Sin eso, cada imagen trae
+  otra cara.
+
 ## Escena 2.5D (un paisaje por capas, con distancia)
 En la referencia los escenarios no son una foto: son 4–5 recortes a distintas distancias (cielo, montañas, el lago con la
 casa, la bandera, la persona). Cada uno entra a su momento y, cuando la cámara se mueve, lo cercano se desplaza más que lo

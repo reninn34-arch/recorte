@@ -366,6 +366,13 @@ try {
   const [hablando, saludando] = [fueraSec(0.4), fueraSec(1.8)]
   if (!(hablando === 0 && saludando > 30)) throw new Error(`La secuencia de gestos no pasó de hablar a saludar: ${hablando} y ${saludando} px fuera`)
   console.log(`secuencia de gestos en una capa: habla y luego saluda (${saludando} px fuera) ✓`)
+  // Escena viva: la figura sobre un escenario (una imagen plana) → el escenario sin ella y la figura como capa.
+  correr('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=0x5a4632:s=400x711,drawgrid=w=50:h=50:c=0x8a7050', '-i', 'figura.png', '-filter_complex', '[0][1]overlay=100:180', '-frames:v', '1', 'plana.png'], trabajo)
+  const viva = json(correr(python, ['kit/kit.py', 'escena', 'plana.png', '--sin-flow', '--planos', '0'], trabajo))
+  const capaPers = viva.capas.at(-1)
+  if (!(existsSync(join(trabajo, viva.personaje)) && existsSync(join(trabajo, viva.fondo)) && viva.momento.tipo === 'foto' && capaPers.archivo === viva.personaje && Math.abs(capaPers.x - 0.5) < 0.1))
+    throw new Error(`escena no separó la figura de su escenario: ${JSON.stringify(viva)}`)
+  console.log(`escena viva: la figura (${capaPers.ancho} de ancho, x ${capaPers.x}) separada de su escenario ✓`)
   console.log(`marioneta: con el esqueleto dado, el brazo se levanta a saludar (${saluda} px fuera de la imagen), capa ${mar.escala}× más ancha ✓`)
 
   // Cámara en mano y profundidad de campo en el kit: el fondo se mueve solo (con la foto quieta) y se desenfoca.

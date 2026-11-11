@@ -1951,6 +1951,16 @@ def avisos_escena(r, L, momentos):
                                   f'persona de la capa {j + 1} («{an.gesto}»): el brazo lo tapa. Ponlo por encima de su cabeza o '
                                   f'fuera de x {zona[0]:.2f}–{zona[2]:.2f}.')
     avisos += avisos_tapados(L, momentos)
+    # Un video que es casi todo fotos planas (sin capas con profundidad ni personajes animados) se ve barato.
+    fotos = [m for m in momentos if isinstance(m, Foto)]
+    total_fotos = sum(m.hasta - m.desde for m in fotos)
+    vivas = [(c['desde'], c['hasta']) for c in L.capas if c.get('profundidad') is not None or c.get('animada') or c.get('video')]
+    if total_fotos > 12 and len(fotos) >= 5:
+        con_vida = sum(0.1 for m in fotos for t in np.arange(m.desde, m.hasta, 0.1) if any(a <= t < b for a, b in vivas))
+        if con_vida / total_fotos < 0.3:
+            avisos.append(f'El video es casi todo fotos planas: solo el {round(100 * con_vida / total_fotos)} % de las fotos tiene capas '
+                          'con profundidad o un personaje animado. En las escenas con personas usa `kit.py escena <imagen>` (la persona '
+                          'recortada y animada delante de su escenario en 3D); deja como foto sola solo objetos y detalles.')
     # La misma imagen en dos capas seguidas que vuelve a entrar con fundido o pop: parpadea en el corte.
     for j, c in enumerate(L.capas):
         for k2, d in enumerate(L.capas):
@@ -2888,7 +2898,9 @@ def revisar(video, referencia=None, salida=None, receta=None):
     detalle = np.array([np.abs(cv2.Laplacian(g[franja], cv2.CV_32F)).mean() for g in gris]) if len(gris) else np.zeros(0)
     vacios = []
     if len(detalle):
-        bajo = detalle < np.median(detalle) * 0.45
+        # Casi vacío: poco detalle Y casi sin contraste (un fondo oscuro con un título grande o un objeto no lo es).
+        contraste = np.array([g[franja].std() for g in gris])
+        bajo = (detalle < np.median(detalle) * 0.4) & (contraste < 22)
         i = 0
         while i < len(bajo):
             if bajo[i]:
@@ -2940,6 +2952,10 @@ def revisar(video, referencia=None, salida=None, receta=None):
     ref = resumen.get('referencia')
     if ref and resumen['cortes_por_segundo'] < ref['cortes_por_segundo'] * 0.75:
         avisos.append(f"Ritmo: {resumen['cortes_por_segundo']} cortes/s frente a {ref['cortes_por_segundo']} de la referencia: va más lento.")
+    if not ref and dur > 15 and (resumen['cortes_por_segundo'] < 0.4 or resumen['plano_mas_largo'] > 4.5):
+        avisos.append(f"Ritmo (sin referencia): {resumen['cortes_por_segundo']} cambios de imagen por segundo y el plano más largo dura "
+                      f"{resumen['plano_mas_largo']} s. En un video para redes se espera un cambio cada 1–2 s: parte las escenas largas "
+                      'en dos o tres momentos (otro encuadre, un detalle, un título encima) si no es un estilo lento a propósito.')
     if ref and resumen['plano_mas_largo'] > ref['plano_mas_largo'] * 1.5 and resumen['plano_mas_largo'] > 2.5:
         avisos.append(f"El plano más largo dura {resumen['plano_mas_largo']} s (en la referencia, {ref['plano_mas_largo']} s).")
     resumen['avisos'] = avisos
@@ -3009,6 +3025,144 @@ def donde(receta, consulta):
     return {'buscado': consulta, 'hallados': hallados[:12], **({} if hallados else {'nota': 'No lo encuentro en la receta: mira revision/revisar-ritmo.jpg para ubicarlo por la imagen.'})}
 
 
+# ---------------------------------------------------------------------------
+# Escena viva: una imagen plana → fondo limpio en planos + el personaje recortado y animado
+# ---------------------------------------------------------------------------
+
+SIN_PERSONA = ('Edita esta imagen: déjala EXACTAMENTE igual (mismo encuadre, misma cámara, misma luz, mismos colores, mismo '
+               'estilo y mismos objetos en el mismo sitio) pero SIN {quien}: el lugar vacío, con lo que había detrás '
+               'completado de forma natural. No añadas nada nuevo ni muevas nada.')
+
+
+def _generar_silencioso(prompt, referencias, espera=420):
+    """Pide una imagen a Recorte (con la memoria de lo ya generado) y devuelve su ruta, o None si no se pudo."""
+    import hashlib
+    firma = []
+    for ref in referencias:
+        try:
+            st = os.stat(ref)
+            firma.append([ref, st.st_size, int(st.st_mtime)])
+        except OSError:
+            firma.append([ref])
+    clave = hashlib.sha1(json.dumps(['imagen', prompt.strip(), False, firma], ensure_ascii=False).encode()).hexdigest()[:16]
+    ruta_mem, memoria = _memoria(os.path.join('medios', '.generados.json'))
+    previo = memoria.get(clave)
+    if previo:
+        p = previo.get('archivo')
+        for x in (p, os.path.join(_trabajo(), p or '')):
+            if p and os.path.isfile(x):
+                return x
+    try:
+        r = pedir_a_recorte('medios', {'tipo': 'imagen', 'prompt': prompt, 'referencias': referencias}, espera, 'la imagen', imprimir=False)
+    except SystemExit:
+        return None
+    memoria[clave] = {k: v for k, v in r.items() if k not in ('creditos',)}
+    _guardar_memoria(ruta_mem, memoria)
+    p = r.get('archivo')
+    for x in (p, os.path.join(_trabajo(), p or '')):
+        if p and os.path.isfile(x):
+            return x
+    return None
+
+
+def escena(ruta, salida=None, planos=2, zoom=1.15, limpio=None, sin_flow=False, gesto=None):
+    """Convierte una imagen plana en una escena viva, como en un documental hecho a mano:
+    1. recorta al personaje principal (el modelo de fondos, ayudado por el esqueleto si es una persona),
+    2. consigue el fondo limpio, SIN la persona: lo pide a Recorte (la misma imagen editada; no gasta créditos) o, si no
+       se puede, rellena el hueco,
+    3. parte ese fondo en planos por distancia,
+    4. si es una persona, mira su esqueleto para la marioneta,
+    y devuelve el trozo de receta listo: la foto de fondo con su cámara, los planos con su profundidad y el personaje como
+    capa con su gesto, todo calzado como en la imagen original (para una foto con "encuadre" zoom `zoom`, centrada)."""
+    import cv2
+    im = abrir_foto(ruta)
+    if max(im.size) > 2048:
+        im.thumbnail((2048, 2048), Image.LANCZOS)
+    w, h = im.size
+    base = salida or os.path.splitext(ruta)[0]
+    rgb = np.asarray(im, dtype=np.float32)
+    alfa = mascara_modelo(im)
+    # ¿Es una persona? Con el esqueleto: si lo hay, el recorte se queda con lo que está unido a ella.
+    persona = False
+    puntos = {}
+    try:
+        tmp = Image.fromarray(np.dstack([rgb, alfa * 255]).clip(0, 255).astype(np.uint8), 'RGBA')
+        puntos = esqueleto(tmp)
+        persona = sum(1 for n in ('hombro_i', 'hombro_d', 'cadera_i', 'cadera_d', 'nariz') if puntos.get(n, (0, 0, 0))[2] > 0.4) >= 3
+    except SystemExit:
+        persona = False
+    if persona:
+        xs = [p[0] for p in puntos.values() if p[2] > 0.3]
+        ys = [p[1] for p in puntos.values() if p[2] > 0.3]
+        caja = np.zeros((h, w), np.uint8)
+        mx, my = (max(xs) - min(xs)) * 0.35 + w * 0.03, (max(ys) - min(ys)) * 0.15 + h * 0.03
+        cv2.rectangle(caja, (int(min(xs) - mx), int(min(ys) - my * 2)), (int(max(xs) + mx), int(max(ys) + my)), 1, -1)
+        n, etiquetas = cv2.connectedComponents((alfa > 0.5).astype(np.uint8))
+        dentro = set(np.unique(etiquetas[(caja > 0) & (alfa > 0.5)])) - {0}
+        alfa = alfa * np.isin(etiquetas, list(dentro)).astype(np.float32) if dentro else alfa
+    if float((alfa > 0.5).mean()) < 0.01:
+        raise SystemExit('No encontré a nadie ni nada destacado que separar en esta imagen.')
+    recorte = guardar_recorte(rgb, alfa, f'{base}-personaje.png', {})
+    ys_, xs_ = np.nonzero(alfa > 0.03)
+    x0, x1, y0, y1 = xs_.min(), xs_.max() + 1, ys_.min(), ys_.max() + 1
+    # El fondo limpio: lo pedido a Recorte, el que se dio o, si no, rellenando el hueco.
+    metodo = 'dado'
+    if not limpio and not sin_flow:
+        quien = 'la persona' if persona else 'el sujeto principal'
+        limpio = _generar_silencioso(SIN_PERSONA.format(quien=quien), [ruta])
+        metodo = 'generado' if limpio else 'relleno'
+    if limpio and os.path.isfile(limpio):
+        plato = abrir_foto(limpio).resize((w, h), Image.LANCZOS)
+    else:
+        metodo = 'relleno'
+        g = max(9, round(min(w, h) * 0.02)) | 1
+        hueco = cv2.dilate((alfa > 0.1).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (g, g))).astype(np.float32)
+        plato = Image.fromarray(rellenar(rgb.astype(np.uint8), hueco))
+    ruta_plato = f'{base}-fondo.png'
+    plato.save(ruta_plato)
+    capas = []
+    fondo = ruta_plato
+    extra = 1.0
+    if planos and planos >= 2:
+        partes = separar(ruta_plato, planos, f'{base}-fondo')
+        fondo = partes['fondo']
+        extra = partes['ancho_capa']
+        for p in partes['planos']:
+            capas.append({'archivo': p['archivo'], 'x': 0.5, 'y': 0.5, 'ancho': round(zoom * extra, 3), 'entrada': 'ninguna',
+                          'profundidad': p['profundidad']})
+    # El personaje en su sitio: su centro y su ancho en la imagen, llevados al cuadro con el zoom de la foto.
+    cx, cy = (x0 + x1) / 2 / w, (y0 + y1) / 2 / h
+    pers = {'archivo': recorte['archivo'], 'x': round(0.5 + (cx - 0.5) * zoom, 3), 'y': round(0.5 + (cy - 0.5) * zoom, 3),
+            'ancho': round((x1 - x0) / w * zoom, 3), 'entrada': 'ninguna', 'profundidad': 0.45 if capas else 0.3}
+    libres = 0
+    if persona:
+        try:
+            info = info_esqueleto(recorte['archivo'])
+            libres = info['brazos_libres']
+        except SystemExit:
+            info = None
+        # Por defecto, «peso» (el cuerpo se mece, los brazos quietos): vale para quien trabaja, mira o posa. «hablar» es para
+        # quien cuenta algo a cámara; con lo que tiene en las manos, moverlas lo arrastra.
+        pers['animar'] = gesto or 'peso'
+    capas.append(pers)
+    momento = {'tipo': 'foto', 'archivo': fondo, 'encuadre': {'zoom': zoom, 'cx': 0.5, 'cy': 0.5},
+               'camara': {'zoom': round(zoom + 0.08, 3), 'cx': 0.5, 'cy': 0.5}}
+    avisos = []
+    if metodo == 'relleno':
+        avisos.append('No pude pedir el fondo sin la persona: rellené el hueco (borroso). Muévelo poco o pon otra pieza delante; '
+                      'si puedes, pídelo con kit.py imagen "…sin la persona…" --ref <imagen> y pásalo con --limpio.')
+    if persona and not libres:
+        avisos.append('Sus brazos van pegados o cruzados: la marioneta solo mueve cabeza, tronco y peso ("hablar", "asentir", '
+                      '"ladear", "peso").')
+    return {'fondo': fondo, 'personaje': recorte['archivo'], 'es_persona': persona, 'brazos_libres': libres, 'fondo_limpio': metodo,
+            'momento': momento, 'capas': capas, **({'avisos': avisos} if avisos else {}),
+            'uso': 'Pon "momento" en la receta (con su desde/hasta) y "capas" (con los mismos desde/hasta), en ese orden: '
+                   'los planos y luego el personaje. Calza con la imagen original si la foto va con ese encuadre. Cámara: '
+                   'movimientos cortos. Elige el gesto por lo que hace: "peso" (por defecto: trabaja, mira, posa), "hablar" '
+                   '(cuenta algo a cámara), "asentir", "ladear", "senalar"/"saludar"/"explicar" (con los brazos libres), o una '
+                   'secuencia de gestos.'}
+
+
 def main():
     # En Windows la consola no es UTF-8: sin esto, las tildes de lo que se imprime llegan rotas al agente.
     for flujo in (sys.stdout, sys.stderr):
@@ -3068,6 +3222,14 @@ def main():
     dn = sub.add_parser('donde')
     dn.add_argument('consulta', help='lo que nombra el usuario: «la bandera», «el título 2002», «cuando dice órbita»')
     dn.add_argument('--receta', default='receta.json')
+    es2 = sub.add_parser('escena')
+    es2.add_argument('imagen')
+    es2.add_argument('--planos', type=int, default=2, help='en cuántos planos partir el fondo (0: sin partir)')
+    es2.add_argument('--zoom', type=float, default=1.15, help='el zoom de la foto de fondo en la receta')
+    es2.add_argument('--limpio', help='el fondo sin la persona, si ya lo tienes')
+    es2.add_argument('--sin-flow', action='store_true', help='no pedir el fondo limpio: rellenar el hueco')
+    es2.add_argument('--gesto', choices=GESTOS, help='el gesto de la marioneta (por defecto «hablar»)')
+    es2.add_argument('--salida')
     sp = sub.add_parser('separar')
     sp.add_argument('imagen')
     sp.add_argument('--planos', type=int, default=3)
@@ -3097,6 +3259,8 @@ def main():
         print(json.dumps(revisar(x.video, x.referencia, receta=x.receta), ensure_ascii=False))
     elif x.orden == 'donde':
         print(json.dumps(donde(x.receta, x.consulta), ensure_ascii=False))
+    elif x.orden == 'escena':
+        print(json.dumps(escena(x.imagen, x.salida, x.planos, x.zoom, x.limpio, x.sin_flow, x.gesto), ensure_ascii=False))
     elif x.orden == 'separar':
         print(json.dumps(separar(x.imagen, x.planos, x.salida), ensure_ascii=False))
     elif x.orden == 'recortar':
