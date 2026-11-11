@@ -24,6 +24,33 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.32',
+    fecha: '2026-11-11',
+    resumen: 'Escenas con distancia, personajes que gesticulan y una cámara 3D: todo sin gastar créditos.',
+    novedades: [
+      {
+        icono: 'layers',
+        titulo: 'Escena 2.5D',
+        texto: 'Dale «Profundidad» a una capa y seguirá a la cámara del clip: lo lejano se mueve poco y lo cercano mucho, como un paisaje hecho de capas. También tiene «Desenfoque» para lo que está fuera de foco.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Personajes marioneta',
+        texto: 'En el menú de movimiento de una persona recortada: «Marioneta: habla, asiente, ladea la cabeza, cambia el peso», y con los brazos separados del cuerpo «saluda, señala, explica». Recorte encuentra su esqueleto y la mueve por huesos (la primera vez baja un modelo de 134 MB).'
+      },
+      {
+        icono: 'film',
+        titulo: 'Cámara 3D',
+        texto: 'En cada clip: «Toma de cámara» (acercarse, alejarse, travelling, grúa, empuje), paneo, cámara en mano y profundidad de campo con su foco. Con capas con profundidad encima, se ve en 3D.'
+      },
+      {
+        icono: 'wand',
+        titulo: 'El agente lo usa',
+        texto: 'El agente arma escenas por capas, parte una foto en planos por distancia, mueve a los personajes y elige una toma por momento.'
+      }
+    ]
+  },
+  {
     version: '0.1.31',
     fecha: '2026-11-11',
     resumen: 'Anima tus imágenes recortadas sin gastar créditos: respiran, se balancean, ondean, flotan o echan humo.',
