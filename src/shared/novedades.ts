@@ -24,6 +24,29 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.25',
+    fecha: '2026-11-10',
+    resumen: 'Claude Code (u otro agente) ya puede ver y editar tus proyectos de Recorte mientras la app está abierta.',
+    novedades: [
+      {
+        icono: 'sparkles',
+        titulo: 'Recorte desde tu agente',
+        texto:
+          'En Ajustes › «Recorte desde tu agente», un botón conecta Claude Code. Desde ahí puede ver tus proyectos, mirar cómo queda un momento, poner rótulos, logos y sonidos, cortar, transcribir y exportar. Solo funciona en tu equipo y con una contraseña propia.'
+      },
+      {
+        icono: 'undo',
+        titulo: 'Lo ves y lo deshaces',
+        texto: 'Lo que cambia el agente aparece al momento en tu editor y se deshace con Ctrl+Z, como cualquier retoque tuyo.'
+      },
+      {
+        icono: 'type',
+        titulo: 'El chat sabe qué dice la narración',
+        texto: 'Los videos que hace el agente se transcriben solos al abrirlos en el editor, así el cambio rápido entiende lo que se dice.'
+      }
+    ]
+  },
+  {
     version: '0.1.24',
     fecha: '2026-11-10',
     resumen: 'Logos encima del video, rótulos donde quieras y efectos de sonido, todo editable en la timeline. Y los agentes funcionan mejor.',
