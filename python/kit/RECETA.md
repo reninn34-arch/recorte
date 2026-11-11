@@ -39,6 +39,34 @@ y deja `revision/hoja-final.jpg`. Con `--prueba 0.5,3,8` saca solo esos fotogram
 - **texto**: frase en `lineas`; `destacar` agranda una (color de acento, con línea debajo). `oscurecer` (0–1)
   oscurece y desenfoca lo de debajo; sin él, va sobre el fondo. `"brillo": false` quita el barrido sobre el texto.
 
+## Piezas de documental (museo, archivo, títulos de revista)
+Para el estilo de mini documental (una historia contada con una obra, un objeto o una persona) hay piezas propias.
+Las tres primeras van ENCIMA de lo que ya se ve (ponlas en la lista después de la escena); en el editor quedan como
+rótulos sueltos que el usuario mueve y cambia.
+```json
+{ "tipo": "titulo", "desde": 0.1, "hasta": 2.4, "x": 0.5, "y": 0.17, "entrada": "subir", "subrayado": "#D62828", "grano": false,
+  "lineas": [{ "texto": "¿Y si un hombre decidiera ir a", "tam": 0.038 },
+             { "texto": "Marte?", "fuente": "cursiva", "tam": 0.2, "color": "#D62828" }] },
+{ "tipo": "etiqueta", "desde": 3.8, "hasta": 5, "texto": "ELON MUSK", "x": 0.64, "y": 0.56, "fondo": "#FFD60A", "giro": -4 },
+{ "tipo": "palabras", "desde": 9.6, "hasta": 11.5, "palabras": ["Riesgo", "Fracaso", "Obsesión"], "destacar": [1], "fuente": "cursiva" },
+{ "tipo": "objeto", "archivo": "medios/cohete.png", "fondo": "medios/pared.jpg", "desde": 5, "hasta": 7.5, "ancho": 0.55, "giro": 38, "foco": true, "marco": true },
+{ "tipo": "apiladas", "fotos": ["medios/a.jpg", "medios/b.jpg", "medios/c.jpg"], "fondo": "#1A1714", "gris": true, "desde": 7.5, "hasta": 9.5 }
+```
+- **titulo**: varias líneas, cada una con su `fuente`, `tam` (fracción del ancho: 0.035 una frase pequeña, 0.2 una palabra
+  grande, 0.3–0.35 una palabra que llena la pantalla) y `color`. `entrada`: `subir` (línea a línea), `maquina` (letra a
+  letra) o `pop` (rebota). `subrayado`: una raya de color bajo la última línea. `grano`: letras gastadas, de imprenta.
+  `oscurecer` (0–1): oscurece lo de debajo. `x`, `y`: el centro del bloque.
+- **etiqueta**: la tira de papel de color con un nombre (por defecto amarilla con letra negra y algo girada), entra con un «pop».
+- **palabras**: palabras sueltas que aparecen una a una en distintos sitios y flotan. `destacar`: índices más grandes y en el
+  color de acento. `posiciones`: `[[x, y], …]` si quieres elegir dónde cae cada una.
+- **objeto**: una pieza como en un museo (un cuadro, un cohete, un producto): con `marco` (true o un color), sombra, bajo un
+  `foco` de luz desde arriba y entrando con un `giro` 3D (grados) que se asienta. Sobre `fondo` (una imagen o un color).
+  Usa una imagen del objeto SOLO (sin la sala): la sala la pone `fondo`.
+- **apiladas**: fotos impresas con su borde blanco que caen una sobre otra, cada una algo girada; `gris` (por defecto true)
+  las pasa a blanco y negro, como fotos de archivo. Pon encima un `titulo` con una palabra roja.
+- Las letras: `cursiva` (serif inclinada, la de los títulos elegantes), `serif`, `gruesa` (sans muy gruesa de titular),
+  `impacto`, `normal`, `fina`.
+
 ## Reglas
 - Lo que va más abajo en la lista se dibuja encima. Cada momento entra con un fundido de `transicion` s y se queda
   ese mismo tiempo de más, para que lo siguiente entre encima sin hueco.

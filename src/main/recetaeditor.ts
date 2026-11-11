@@ -31,6 +31,12 @@ import { duracionMedio, probeVideo } from './ffmpeg'
  */
 
 const EXT_IMAGEN = ['.png', '.jpg', '.jpeg', '.webp']
+/** Las piezas del kit que se dibujan encima de la escena y en el editor son rótulos sueltos. */
+export const PIEZAS_ENCIMA = ['titulo', 'etiqueta', 'palabras']
+/** Las letras del kit y su equivalente en el editor. */
+const LETRA_EDITOR: Record<string, string> = { fina: 'fina', normal: 'normal', negrita: 'normal', gruesa: 'gruesa', serif: 'elegante', cursiva: 'cursiva', impacto: 'impacto' }
+/** Dónde caen las palabras sueltas si la receta no lo dice: igual que SITIOS_PALABRAS del kit. */
+const SITIOS_PALABRAS: [number, number][] = [[0.3, 0.3], [0.68, 0.24], [0.5, 0.42], [0.24, 0.55], [0.72, 0.5], [0.42, 0.66], [0.66, 0.74], [0.3, 0.8], [0.55, 0.18], [0.8, 0.62]]
 const EXT_VIDEO = ['.mp4', '.mov', '.webm', '.mkv', '.m4v']
 const MIN = 0.1
 
@@ -99,8 +105,9 @@ export async function proyectoDesdeReceta(
     .map((m) => ({ ...m, tipo: String(m.tipo ?? ''), desde: pinza(num(m.desde, 0), 0, total), hasta: pinza(num(m.hasta, total), 0, total) }))
     .filter((m) => m.hasta - m.desde >= MIN)
     .sort((a, b) => a.desde - b.desde)
-  // Las frases que oscurecen lo de debajo van encima de otra cosa: son rótulos. Lo demás llena la pantalla.
-  const encima = momentos.filter((m) => m.tipo === 'texto' && num(m.oscurecer, 0) > 0)
+  // Las frases que oscurecen lo de debajo, los títulos, las etiquetas y las palabras sueltas van encima
+  // de otra cosa: son rótulos. Lo demás llena la pantalla.
+  const encima = momentos.filter((m) => (m.tipo === 'texto' && num(m.oscurecer, 0) > 0) || PIEZAS_ENCIMA.includes(m.tipo))
   const base = momentos.filter((m) => !encima.includes(m))
   if (!base.length) return null
 
@@ -191,7 +198,81 @@ export async function proyectoDesdeReceta(
       textos.push({ id: nuevoId('texto'), inicio: a, duracion: largo, texto: m.rotulo.trim(), posicion: m.rotulo_pos === 'abajo' ? 'abajo' : 'arriba', ...estiloRotulo })
     }
   }
+  // El tamaño del kit es una fracción del ancho; el del editor, relativo a su rótulo (6 % del lado corto).
+  const anchoK = num(receta.ancho, 1080)
+  const altoK = num(receta.alto, 1920)
+  const tamEditor = (fraccion: number) => Math.round(pinza((fraccion * anchoK) / (Math.min(anchoK, altoK) * 0.06), 0.5, 6) * 100) / 100
+  const hexDe = (v: unknown) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : undefined)
+  const letra = (v: unknown, defecto: string) => LETRA_EDITOR[String(v ?? defecto)] ?? LETRA_EDITOR[defecto] ?? 'normal'
   for (const m of encima) {
+    const visible = { inicio: m.desde, duracion: m.hasta - m.desde }
+    if (m.tipo === 'titulo') {
+      // Cada línea, su rótulo (cada una con su letra, tamaño y color), apiladas como en el kit.
+      const lineas = (Array.isArray(m.lineas) ? m.lineas : [])
+        .map((l) => (typeof l === 'string' ? { texto: l } : l && typeof l === 'object' ? (l as Record<string, unknown>) : null))
+        .filter((l): l is Record<string, unknown> => Boolean(l) && typeof l!.texto === 'string' && Boolean(String(l!.texto).trim()))
+      const altos = lineas.map((l) => num(l.tam, 0.06) * anchoK * 1.25)
+      let y = num(m.y, 0.5) * altoK - altos.reduce((a, b) => a + b, 0) / 2
+      for (const [i, l] of lineas.entries()) {
+        const color = hexDe(l.color)
+        textos.push({
+          id: nuevoId('texto'),
+          ...visible,
+          texto: String(l.texto).trim(),
+          posicion: 'centro',
+          x: pinza(num(m.x, 0.5), 0, 1),
+          y: pinza((y + altos[i] / 2) / altoK, 0, 1),
+          sinCaja: true,
+          tamano: tamEditor(num(l.tam, 0.06)),
+          ...(color && color !== '#ffffff' ? { color } : !color && colorTexto ? { color: colorTexto } : {}),
+          fuente: letra(l.fuente ?? m.fuente, String(receta.fuente ?? 'fina'))
+        })
+        y += altos[i]
+      }
+      continue
+    }
+    if (m.tipo === 'etiqueta') {
+      if (typeof m.texto !== 'string' || !m.texto.trim()) continue
+      textos.push({
+        id: nuevoId('texto'),
+        ...visible,
+        texto: m.texto.trim(),
+        posicion: 'centro',
+        x: pinza(num(m.x, 0.5), 0, 1),
+        y: pinza(num(m.y, 0.5), 0, 1),
+        tamano: tamEditor(num(m.tam, 0.05)),
+        color: hexDe(m.color) ?? '#111111',
+        caja: hexDe(m.fondo) ?? '#ffd60a',
+        fuente: letra(m.fuente, 'gruesa')
+      })
+      continue
+    }
+    if (m.tipo === 'palabras') {
+      const palabras = (Array.isArray(m.palabras) ? m.palabras : []).map((p) => String(p)).filter((p) => p.trim())
+      const dados = Array.isArray(m.posiciones) ? m.posiciones : []
+      const paso = num(m.paso, Math.min(0.4, Math.max(0.12, (m.hasta - m.desde - 0.6) / Math.max(1, palabras.length))))
+      const destacar = new Set(Array.isArray(m.destacar) ? m.destacar : [])
+      for (const [i, p] of palabras.entries()) {
+        const sitio = Array.isArray(dados[i]) ? (dados[i] as unknown[]) : SITIOS_PALABRAS[i % SITIOS_PALABRAS.length]
+        const inicio = m.desde + i * paso
+        if (m.hasta - inicio < MIN) continue
+        const color = destacar.has(i) ? (hexDe(receta.color_acento) ?? '#d4af5a') : (hexDe(m.color) ?? colorTexto)
+        textos.push({
+          id: nuevoId('texto'),
+          inicio,
+          duracion: m.hasta - inicio,
+          texto: p.trim(),
+          posicion: 'centro',
+          x: pinza(num(sitio[0], 0.5), 0, 1),
+          y: pinza(num(sitio[1], 0.5), 0, 1),
+          sinCaja: true,
+          tamano: tamEditor(num(m.tam, 0.05) * (destacar.has(i) ? 1.5 : 1)),
+          ...(color ? { color } : {}),
+          fuente: letra(m.fuente, String(receta.fuente ?? 'fina'))
+        })
+      }
+      continue
+    }
     const lineas = (Array.isArray(m.lineas) ? m.lineas : []).filter((l): l is string => typeof l === 'string' && Boolean(l.trim()))
     if (!lineas.length) continue
     // La línea que el kit destaca va más grande: aquí, todo el rótulo un poco más grande.

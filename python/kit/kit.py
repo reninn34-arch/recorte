@@ -74,6 +74,10 @@ FUENTES = {
     'normal': ['segoeui.ttf', 'Helvetica.ttc', 'DejaVuSans.ttf', 'arial.ttf'],
     'negrita': ['segoeuib.ttf', 'arialbd.ttf', 'Helvetica.ttc', 'DejaVuSans-Bold.ttf'],
     'gruesa': ['seguibl.ttf', 'ariblk.ttf', 'segoeuib.ttf', 'DejaVuSans-Bold.ttf'],
+    # Serif de revista: «serif» recta y «cursiva» inclinada (los títulos elegantes de un documental).
+    'serif': ['georgiab.ttf', 'palab.ttf', 'timesbd.ttf', 'DejaVuSerif-Bold.ttf'],
+    'cursiva': ['georgiaz.ttf', 'palabi.ttf', 'timesbi.ttf', 'DejaVuSerif-BoldItalic.ttf'],
+    'impacto': ['impact.ttf', 'ariblk.ttf', 'DejaVuSans-Bold.ttf'],
 }
 CARPETAS_FUENTES = [os.path.join(os.environ.get('WINDIR', r'C:\Windows'), 'Fonts'), '/System/Library/Fonts', '/Library/Fonts',
                     '/usr/share/fonts/truetype/dejavu', os.path.expanduser('~/.fonts')]
@@ -569,7 +573,370 @@ class Texto(Momento):
         return capa
 
 
-PIEZAS = {'foto': Foto, 'video': Video, 'comparar': Comparar, 'collage': Collage, 'texto': Texto}
+# ---------------------------------------------------------------------------
+# Piezas encima (títulos, etiquetas, palabras) y piezas de documental (objeto, apiladas)
+# ---------------------------------------------------------------------------
+
+def coef_perspectiva(destino, origen):
+    """Los 8 coeficientes de PIL para llevar los 4 puntos `destino` (salida) a `origen` (entrada)."""
+    a, b = [], []
+    for (x, y), (X, Y) in zip(destino, origen):
+        a.append([x, y, 1, 0, 0, 0, -X * x, -X * y])
+        b.append(X)
+        a.append([0, 0, 0, x, y, 1, -Y * x, -Y * y])
+        b.append(Y)
+    return np.linalg.solve(np.array(a, dtype=np.float64), np.array(b, dtype=np.float64)).tolist()
+
+
+def pop(dt):
+    """El rebote de entrada (45 % → 117 % → 100 % en 0,24 s), el mismo de las capas del editor."""
+    if dt < 0:
+        return 0.0
+    return 0.45 + dt / 0.13 * 0.72 if dt < 0.13 else (1.17 - (dt - 0.13) / 0.11 * 0.17 if dt < 0.24 else 1.0)
+
+
+def con_sombra(capa, texto, fuerza=140, radio=10, baja=4):
+    """Pega `texto` (RGBA) en `capa` con una sombra suave debajo, para leerse sobre cualquier imagen."""
+    caja = texto.getchannel('A').getbbox()
+    if not caja:
+        return
+    # Solo la zona con texto (más el desenfoque): desenfocar el cuadro entero en cada fotograma es lento.
+    m = radio * 3 + baja
+    x0, y0 = max(0, caja[0] - m), max(0, caja[1] - m)
+    x1, y1 = min(texto.width, caja[2] + m), min(texto.height, caja[3] + m)
+    trozo = texto.crop((x0, y0, x1, y1))
+    if fuerza > 0:
+        sombra = Image.new('RGBA', trozo.size, (0, 0, 0, 0))
+        sombra.putalpha(trozo.getchannel('A').point(lambda a: round(a * fuerza / 255)))
+        capa.alpha_composite(sombra.filter(ImageFilter.GaussianBlur(radio)), (x0, min(capa.height - 1, y0 + baja)))
+    capa.alpha_composite(trozo, (x0, y0))
+
+
+_GRANO = {}
+
+
+def grano(capa, fuerza=0.22):
+    """Textura de imprenta sobre lo que tenga color en `capa` (RGBA): letras gastadas, no planas."""
+    clave = capa.size
+    if clave not in _GRANO:
+        rng = np.random.default_rng(7)
+        ruido = rng.random((capa.size[1] // 2 + 1, capa.size[0] // 2 + 1)).astype(np.float32)
+        ruido = np.repeat(np.repeat(ruido, 2, axis=0), 2, axis=1)[:capa.size[1], :capa.size[0]]
+        _GRANO[clave] = ruido[..., None]
+    a = np.asarray(capa, dtype=np.float32).copy()
+    a[..., :3] *= 1 - fuerza * 0.35 + fuerza * 0.35 * _GRANO[clave]
+    a[..., 3:4] *= (1 - fuerza * 0.35) + fuerza * 0.35 * (_GRANO[clave] > 0.12)
+    return Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), 'RGBA')
+
+
+def lineas_titulo(m, L):
+    """Las líneas de un título: cada una con su texto, letra, tamaño (fracción del ancho) y color."""
+    out = []
+    for i, x in enumerate(m.get('lineas') or []):
+        if isinstance(x, str):
+            x = {'texto': x}
+        txt = str(x.get('texto', '')).strip()
+        if not txt:
+            continue
+        tam = float(x.get('tam', 0.06))
+        estilo = x.get('fuente', m.get('fuente', L.fuente))
+        f = fuente(estilo, max(8, int(L.W * tam)))
+        # Si no cabe, la línea se encoge hasta el 90 % del ancho.
+        ancho = ImageDraw.Draw(Image.new('L', (1, 1))).textlength(txt, font=f)
+        if ancho > L.W * 0.9:
+            f = fuente(estilo, max(8, int(L.W * tam * L.W * 0.9 / ancho)))
+        out.append({'texto': txt, 'f': f, 'color': color(x.get('color'), L.texto)})
+    return out
+
+
+class Encima(Momento):
+    """Algo que se dibuja ENCIMA de lo que ya hay (no tapa la escena): títulos, etiquetas, palabras."""
+
+    def __init__(self, m, L):
+        super().__init__(m, L)
+        self.entra = 0
+
+    def visible(self, t):
+        return self.desde - 1e-6 <= t < self.hasta
+
+    def salida(self, t):
+        return 1 - tramo(t, self.hasta - 0.15, self.hasta)
+
+    def cuadro(self, t, debajo=None):
+        capa = (debajo if debajo is not None else Image.new('RGBA', (self.L.W, self.L.H), self.L.fondo + (255,))).copy()
+        if capa.mode != 'RGBA':
+            capa = capa.convert('RGBA')
+        k = self.salida(t)
+        if k > 0.01:
+            self.dibujar(capa, t, k)
+        return capa
+
+
+class Titulo(Encima):
+    """Un título de varias líneas, cada una con su letra, tamaño y color (p. ej. una pregunta pequeña
+    en blanco y una palabra enorme en serif cursiva roja). Entra línea a línea («subir»), letra a letra
+    («maquina») o rebotando («pop»); `subrayado` traza una raya bajo la última línea; `grano` la gasta."""
+
+    def __init__(self, m, L):
+        super().__init__(m, L)
+        self.lineas = lineas_titulo(m, L)
+        d = ImageDraw.Draw(Image.new('L', (1, 1)))
+        for ln in self.lineas:
+            sube, baja = ln['f'].getmetrics()
+            ln['alto'] = sube + baja
+            ln['ancho'] = d.textlength(ln['texto'], font=ln['f'])
+        self.alto = sum(ln['alto'] * 1.08 for ln in self.lineas)
+
+    def dibujar(self, capa, t, k):
+        L, m = self.L, self.m
+        if m.get('oscurecer'):
+            o = float(m['oscurecer']) * ease_in_out(tramo(t, self.desde, self.desde + 0.4)) * k
+            capa.alpha_composite(Image.new('RGBA', capa.size, (0, 0, 0, round(255 * o))))
+        cx, cy = L.W * float(m.get('x', 0.5)), L.H * float(m.get('y', 0.5))
+        entrada = m.get('entrada', 'subir')
+        texto = Image.new('RGBA', capa.size, (0, 0, 0, 0))
+        d = ImageDraw.Draw(texto)
+        y = cy - self.alto / 2
+        for i, ln in enumerate(self.lineas):
+            t0 = self.desde + i * float(m.get('paso', 0.14))
+            x = cx - ln['ancho'] / 2
+            if entrada == 'maquina':
+                n = int(len(ln['texto']) * tramo(t, t0, t0 + max(0.2, len(ln['texto']) * 0.035)))
+                if n:
+                    d.text((x, y), ln['texto'][:n], font=ln['f'], fill=ln['color'] + (round(255 * k),))
+            elif entrada == 'pop':
+                e = pop(t - t0)
+                if e > 0:
+                    pieza = Image.new('RGBA', (int(ln['ancho']) + 8, ln['alto'] + 8), (0, 0, 0, 0))
+                    ImageDraw.Draw(pieza).text((4, 4), ln['texto'], font=ln['f'], fill=ln['color'] + (round(255 * k),))
+                    pieza = pieza.resize((max(1, round(pieza.width * e)), max(1, round(pieza.height * e))), Image.BILINEAR)
+                    texto.alpha_composite(pieza, (round(cx - pieza.width / 2), round(y + ln['alto'] / 2 - pieza.height / 2)))
+            else:
+                e = ease_out(tramo(t, t0, t0 + 0.45))
+                if e > 0.01:
+                    d.text((x, y + (1 - e) * L.H * 0.025), ln['texto'], font=ln['f'], fill=ln['color'] + (round(255 * e * k),))
+            y += ln['alto'] * 1.08
+        if m.get('subrayado') and self.lineas:
+            ult = self.lineas[-1]
+            t0 = self.desde + len(self.lineas) * float(m.get('paso', 0.14)) + 0.15
+            e = ease_out(tramo(t, t0, t0 + 0.4))
+            if e > 0:
+                media = ult['ancho'] / 2 * e
+                grueso = max(3, int(L.W * 0.008))
+                d.rectangle((cx - media, y + grueso, cx + media, y + grueso * 2), fill=color(m['subrayado'], L.acento) + (round(255 * k),))
+        if m.get('grano'):
+            texto = grano(texto)
+        con_sombra(capa, texto, fuerza=0 if m.get('sombra') is False else 150, radio=max(4, L.W // 110))
+
+
+class Etiqueta(Encima):
+    """La tira de color con un nombre, como un recorte de papel pegado encima (entra con un «pop»)."""
+
+    def __init__(self, m, L):
+        super().__init__(m, L)
+        f = fuente(m.get('fuente', 'gruesa'), max(8, int(L.W * float(m.get('tam', 0.05)))))
+        txt = str(m.get('texto', '')).strip()
+        d = ImageDraw.Draw(Image.new('L', (1, 1)))
+        ancho = int(d.textlength(txt, font=f))
+        sube, baja = f.getmetrics()
+        px, py = int(f.size * 0.55), int(f.size * 0.32)
+        w, h = ancho + px * 2, sube + baja + py * 2
+        pieza = Image.new('RGBA', (w + 20, h + 20), (0, 0, 0, 0))
+        dp = ImageDraw.Draw(pieza)
+        # Bordes de papel recortado: los lados con pequeños dientes al azar (siempre los mismos).
+        rng = np.random.default_rng(len(txt) * 31 + 5)
+        arriba = [(10 + x, 10 + rng.uniform(0, 4)) for x in np.linspace(0, w, 14)]
+        abajo = [(10 + x, 10 + h - rng.uniform(0, 4)) for x in np.linspace(w, 0, 14)]
+        dp.polygon(arriba + abajo, fill=color(m.get('fondo'), (255, 214, 10)) + (255,))
+        dp.text((10 + px, 10 + py), txt, font=f, fill=color(m.get('color'), (17, 17, 17)) + (255,))
+        self.pieza = pieza.rotate(float(m.get('giro', -4)), resample=Image.BICUBIC, expand=True)
+
+    def dibujar(self, capa, t, k):
+        e = pop(t - self.desde)
+        if e <= 0:
+            return
+        L = self.L
+        im = self.pieza.resize((max(1, round(self.pieza.width * e)), max(1, round(self.pieza.height * e))), Image.BILINEAR)
+        if k < 0.999:
+            im.putalpha(im.getchannel('A').point(lambda a: round(a * k)))
+        x = round(L.W * float(self.m.get('x', 0.5)) - im.width / 2)
+        y = round(L.H * float(self.m.get('y', 0.5)) - im.height / 2)
+        lienzo = Image.new('RGBA', capa.size, (0, 0, 0, 0))
+        lienzo.paste(im, (x, y), im)
+        con_sombra(capa, lienzo, fuerza=110, radio=8, baja=6)
+
+
+# Dónde caen las palabras sueltas si la receta no lo dice (centro de cada una, en fracciones).
+SITIOS_PALABRAS = [(0.3, 0.3), (0.68, 0.24), (0.5, 0.42), (0.24, 0.55), (0.72, 0.5), (0.42, 0.66), (0.66, 0.74), (0.3, 0.8),
+                   (0.55, 0.18), (0.8, 0.62)]
+
+
+def sitios_palabras(m):
+    dados = m.get('posiciones') or []
+    return [tuple(dados[i]) if i < len(dados) else SITIOS_PALABRAS[i % len(SITIOS_PALABRAS)] for i in range(len(m.get('palabras') or []))]
+
+
+class Palabras(Encima):
+    """Palabras sueltas que aparecen una a una en distintos sitios y flotan despacio (fear… isolation…).
+    `destacar`: índices que van más grandes y en el color de acento."""
+
+    def __init__(self, m, L):
+        super().__init__(m, L)
+        self.palabras = [str(x) for x in (m.get('palabras') or [])]
+        self.sitios = sitios_palabras(m)
+        n = max(1, len(self.palabras))
+        self.paso = float(m.get('paso', min(0.4, max(0.12, (self.hasta - self.desde - 0.6) / n))))
+        destacar = set(m.get('destacar') or [])
+        tam = float(m.get('tam', 0.05))
+        self.estilos = [(fuente(m.get('fuente', L.fuente), int(L.W * tam * (1.5 if i in destacar else 1))),
+                         L.acento if i in destacar else color(m.get('color'), L.texto)) for i in range(n)]
+
+    def dibujar(self, capa, t, k):
+        L = self.L
+        texto = Image.new('RGBA', capa.size, (0, 0, 0, 0))
+        d = ImageDraw.Draw(texto)
+        for i, w in enumerate(self.palabras):
+            t0 = self.desde + i * self.paso
+            e = ease_out(tramo(t, t0, t0 + 0.35))
+            if e <= 0.01:
+                continue
+            f, col = self.estilos[i]
+            x, y = self.sitios[i]
+            deriva = (t - t0) * L.H * 0.008
+            ancho = d.textlength(w, font=f)
+            d.text((L.W * x - ancho / 2, L.H * y - f.size / 2 - deriva + (1 - e) * 14), w, font=f, fill=col + (round(255 * e * k),))
+        con_sombra(capa, texto, fuerza=150, radio=max(4, L.W // 120))
+
+
+def fondo_de(m, L, clave='fondo'):
+    """El fondo de una pieza: una imagen que cubre el cuadro o un color liso."""
+    f = m.get(clave)
+    if isinstance(f, str) and not f.startswith('#') and os.path.isfile(L.ruta(f)):
+        return encuadrar(abrir_foto(L.ruta(f)), L.W, L.H)
+    return Image.new('RGB', (L.W, L.H), color(f, L.fondo))
+
+
+def foco_de(L, cx=0.5, fuerza=0.7):
+    """Un cono de luz desde arriba y lo demás en penumbra (como una obra colgada bajo su lámpara)."""
+    yy, xx = np.mgrid[0:L.H:2, 0:L.W:2].astype(np.float32)
+    u, v = xx / L.W - cx, yy / L.H
+    ancho = 0.12 + v * 0.42
+    cono = np.exp(-(u / ancho) ** 2 * 2.2) * np.clip(1.15 - v * 0.75, 0, 1)
+    luz = 1 - fuerza + fuerza * np.clip(cono * 1.25, 0, 1.25)
+    luz = np.repeat(np.repeat(luz, 2, axis=0), 2, axis=1)[:L.H, :L.W]
+    return luz[..., None]
+
+
+class Objeto(Momento):
+    """Una pieza (un cuadro, un cohete, un producto) presentada como en un museo: con marco, sombra,
+    bajo un foco y entrando con un giro 3D que se asienta. Sobre `fondo` (imagen o color)."""
+
+    def __init__(self, m, L):
+        super().__init__(m, L)
+        im = abrir_foto(L.ruta(m['archivo'])).convert('RGBA')
+        ancho = round(L.W * float(m.get('ancho', 0.62)))
+        im = im.resize((ancho, max(1, round(im.height * ancho / im.width))), Image.LANCZOS)
+        marco = m.get('marco', True)
+        if marco:
+            g = max(6, ancho // 30)
+            con = Image.new('RGBA', (im.width + g * 2, im.height + g * 2), color(marco if isinstance(marco, str) else None, (176, 132, 62)) + (255,))
+            ImageDraw.Draw(con).rectangle((g // 2, g // 2, con.width - g // 2 - 1, con.height - g // 2 - 1), outline=(60, 40, 20, 255), width=max(2, g // 4))
+            con.paste(im, (g, g))
+            im = con
+        self.pieza = im
+        self.fondo = fondo_de(m, L)
+        self.luz = foco_de(L, float(m.get('x', 0.5))) if m.get('foco', True) else None
+        self.giro = float(m.get('giro', 38))
+        self.giro_final = float(m.get('giro_final', 0))
+
+    def cuadro(self, t):
+        L, m = self.L, self.m
+        p = tramo(t, self.desde, self.desde + float(m.get('entrada', 1.1)))
+        ang = math.radians(self.giro_final + (self.giro - self.giro_final) * (1 - ease_out(p)))
+        # Al final se acerca un poco (como una cámara que respira).
+        escala = (0.88 + 0.12 * ease_out(p)) * (1 + 0.04 * tramo(t, self.desde, self.hasta))
+        w, h = self.pieza.width * escala, self.pieza.height * escala
+        dist = w * 2.2
+        esquinas = []
+        for x, y in ((-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2), (-w / 2, h / 2)):
+            z = x * math.sin(ang)
+            f = dist / (dist + z)
+            esquinas.append((x * math.cos(ang) * f, y * f))
+        x0, y0 = min(e[0] for e in esquinas), min(e[1] for e in esquinas)
+        x1, y1 = max(e[0] for e in esquinas), max(e[1] for e in esquinas)
+        bw, bh = max(1, int(x1 - x0) + 2), max(1, int(y1 - y0) + 2)
+        destino = [(e[0] - x0, e[1] - y0) for e in esquinas]
+        origen = [(0, 0), (self.pieza.width, 0), (self.pieza.width, self.pieza.height), (0, self.pieza.height)]
+        pieza = self.pieza.transform((bw, bh), Image.PERSPECTIVE, coef_perspectiva(destino, origen), Image.BICUBIC)
+        lienzo = self.fondo.copy().convert('RGBA')
+        cx, cy = L.W * float(m.get('x', 0.5)), L.H * float(m.get('y', 0.47))
+        pos = (round(cx - bw / 2), round(cy - bh / 2))
+        sombra = Image.new('RGBA', (bw + 80, bh + 80), (0, 0, 0, 0))
+        sombra.paste(Image.new('RGBA', (bw, bh), (0, 0, 0, 170)), (40, 40), pieza)
+        lienzo.alpha_composite(sombra.filter(ImageFilter.GaussianBlur(22)), (pos[0] - 40 + 10, pos[1] - 40 + 24))
+        lienzo.alpha_composite(pieza, pos)
+        if self.luz is not None:
+            a = np.asarray(lienzo.convert('RGB'), dtype=np.float32) * self.luz
+            lienzo = Image.fromarray(np.clip(a, 0, 255).astype(np.uint8)).convert('RGBA')
+        if m.get('brillo'):
+            a = barrido(np.asarray(lienzo.convert('RGB'), dtype=np.float32), (t - self.desde - 1.0) / 0.9 * 1.4 - 0.2, fuerza=0.35)
+            lienzo = Image.fromarray(np.clip(a, 0, 255).astype(np.uint8)).convert('RGBA')
+        self.rotulo(lienzo, t)
+        return lienzo
+
+
+class Apiladas(Momento):
+    """Fotos impresas (con su borde blanco) que caen una sobre otra, cada una algo girada.
+    `gris`: en blanco y negro, como archivo. Sobre `fondo` (imagen o color)."""
+
+    def __init__(self, m, L):
+        super().__init__(m, L)
+        self.fondo = fondo_de(m, L)
+        if m.get('oscurecer_fondo'):
+            a = np.asarray(self.fondo, dtype=np.float32) * (1 - float(m['oscurecer_fondo']))
+            self.fondo = Image.fromarray(a.astype(np.uint8))
+        rng = np.random.default_rng(11)
+        ancho = round(L.W * float(m.get('ancho', 0.66)))
+        self.fotos = []
+        for f in m.get('fotos') or []:
+            im = abrir_foto(L.ruta(f))
+            if m.get('gris', True):
+                im = im.convert('L').convert('RGB')
+            im = caber(im, ancho, round(L.H * 0.42))
+            b = max(6, ancho // 28)
+            impresa = Image.new('RGBA', (im.width + b * 2, im.height + b * 2), (244, 241, 234, 255))
+            impresa.paste(im, (b, b))
+            self.fotos.append({'im': impresa, 'giro': float(rng.uniform(-11, 11)),
+                               'dx': float(rng.uniform(-0.07, 0.07)), 'dy': float(rng.uniform(-0.05, 0.05))})
+        n = max(1, len(self.fotos))
+        self.paso = float(m.get('paso', min(0.5, max(0.18, (self.hasta - self.desde - 0.5) / n))))
+
+    def cuadro(self, t):
+        L = self.L
+        lienzo = self.fondo.copy().convert('RGBA')
+        for i, f in enumerate(self.fotos):
+            t0 = self.desde + i * self.paso
+            e = ease_out(tramo(t, t0, t0 + 0.35))
+            if e <= 0:
+                continue
+            escala = 1.25 - 0.25 * e
+            giro = f['giro'] + (1 - e) * 14
+            im = f['im'].resize((round(f['im'].width * escala), round(f['im'].height * escala)), Image.BILINEAR).rotate(giro, Image.BICUBIC, expand=True)
+            if e < 1:
+                im.putalpha(im.getchannel('A').point(lambda a: round(a * min(1, e * 2))))
+            cx = L.W * (0.5 + f['dx'])
+            cy = L.H * (0.47 + f['dy']) - (1 - e) * L.H * 0.12
+            pos = (round(cx - im.width / 2), round(cy - im.height / 2))
+            sombra = Image.new('RGBA', im.size, (0, 0, 0, 0))
+            sombra.putalpha(im.getchannel('A').point(lambda a: round(a * 0.55)))
+            lienzo.alpha_composite(sombra.filter(ImageFilter.GaussianBlur(14)), (pos[0] + 8, pos[1] + 14))
+            lienzo.alpha_composite(im, pos)
+        self.rotulo(lienzo, t)
+        return lienzo
+
+
+PIEZAS = {'foto': Foto, 'video': Video, 'comparar': Comparar, 'collage': Collage, 'texto': Texto,
+          'objeto': Objeto, 'apiladas': Apiladas, 'titulo': Titulo, 'etiqueta': Etiqueta, 'palabras': Palabras}
 
 
 # ---------------------------------------------------------------------------
@@ -589,6 +956,9 @@ def cargar(ruta):
         for clave in ('archivo', 'antes', 'despues'):
             if clave in m and not os.path.isfile(L.ruta(m[clave])):
                 raise SystemExit(f'Momento {i + 1}: no encuentro «{m[clave]}».')
+        for f in (m.get('fotos') or []) if tipo == 'apiladas' else []:
+            if not os.path.isfile(L.ruta(f)):
+                raise SystemExit(f'Momento {i + 1}: no encuentro «{f}».')
         momentos.append(PIEZAS[tipo](m, L))
     fin = max([m.hasta for m in momentos] or [1.0])
     dur = float(r.get('duracion', fin))
@@ -600,7 +970,7 @@ def cuadro(L, momentos, t, dur, fundido_final):
     for m in momentos:
         if not m.visible(t):
             continue
-        capa = m.cuadro(t, lienzo) if isinstance(m, Texto) else m.cuadro(t)
+        capa = m.cuadro(t, lienzo) if isinstance(m, (Texto, Encima)) else m.cuadro(t)
         k = m.opacidad(t)
         if k >= 0.999:
             lienzo = capa if capa.mode == 'RGBA' else capa.convert('RGBA')

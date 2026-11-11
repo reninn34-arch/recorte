@@ -41,6 +41,34 @@ try {
   assert.equal(tl.sonidos[0].nombre, 'pop')
   console.log('receta → editor: capas y sonidos en su pista ✓')
 
+  // Las piezas de documental: el título, la etiqueta y las palabras llegan como rótulos sueltos.
+  writeFileSync(
+    join(trabajo, 'receta-docu.json'),
+    JSON.stringify({
+      ancho: 540, alto: 960, duracion: 4, fuente: 'normal', color_acento: '#D62828',
+      momentos: [
+        { tipo: 'foto', archivo: 'entrada/foto.jpg', desde: 0, hasta: 2 },
+        { tipo: 'objeto', archivo: 'entrada/logo.png', desde: 2, hasta: 4 },
+        { tipo: 'titulo', desde: 0, hasta: 2, y: 0.2, lineas: [{ texto: 'Una pregunta', tam: 0.04 }, { texto: 'Marte', fuente: 'cursiva', tam: 0.2, color: '#D62828' }] },
+        { tipo: 'etiqueta', desde: 0.5, hasta: 2, texto: 'ELON MUSK', x: 0.6, y: 0.55 },
+        { tipo: 'palabras', desde: 2, hasta: 4, palabras: ['Riesgo', 'Fracaso'], destacar: [1] },
+        { tipo: 'titulo', desde: 3, hasta: 4, lineas: [{ texto: 'PLAN', fuente: 'gruesa', tam: 0.34 }] }
+      ]
+    })
+  )
+  const docu = await proyectoDesdeReceta(join(trabajo, 'receta-docu.json'), trabajo, proyecto, 4)
+  assert.ok(docu)
+  const rot = (texto) => docu.timeline.textos.find((t) => t.texto === texto)
+  assert.equal(docu.timeline.clips.length, 2, 'la foto suelta y el objeto como tramo del video hecho')
+  assert.equal(docu.timeline.clips[1].fuente, FUENTE_PRINCIPAL)
+  assert.deepEqual([rot('Marte').fuente, rot('Marte').color, rot('Marte').sinCaja], ['cursiva', '#d62828', true])
+  assert.ok(rot('Marte').y > rot('Una pregunta').y, 'las líneas del título van una debajo de otra')
+  assert.ok(rot('Marte').tamano > 3 && rot('Una pregunta').tamano < 1, 'cada línea con su tamaño')
+  assert.deepEqual([rot('ELON MUSK').caja, rot('ELON MUSK').color, rot('ELON MUSK').x], ['#ffd60a', '#111111', 0.6], 'la etiqueta es un rótulo con su caja amarilla')
+  assert.ok(rot('Fracaso').inicio > rot('Riesgo').inicio && rot('Fracaso').color === '#d62828', 'las palabras entran escalonadas y la destacada en el acento')
+  assert.equal(rot('PLAN').tamano, 5.67, 'una palabra que llena la pantalla (0,34 del ancho)')
+  console.log('receta → editor: títulos, etiqueta y palabras como rótulos editables ✓')
+
   // Los retoques: el usuario cambia el rótulo, mueve la capa, quita el sonido, regenera una frase y añade un rótulo.
   const entregada = {
     ...tl,

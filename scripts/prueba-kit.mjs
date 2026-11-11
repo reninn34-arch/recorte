@@ -158,6 +158,35 @@ try {
   }
   if (!conCapas.audio || !(vol(1.95, 0.3) > vol(0.5, 0.5) + 20)) throw new Error(`El «pop» no suena en su segundo: ${vol(1.95, 0.3)} dB frente a ${vol(0.5, 0.5)} dB`)
   console.log('capas y sonidos: la capa aparece en su sitio y el «pop» suena en su segundo ✓')
+
+  // Las piezas de documental: título de revista, etiqueta, palabras, objeto con giro 3D y fotos apiladas.
+  writeFileSync(
+    join(trabajo, 'receta-docu.json'),
+    JSON.stringify({
+      ancho: 270, alto: 480, fps: 12, duracion: 5, salida: 'salida/docu.mp4', color_acento: '#D62828',
+      momentos: [
+        { tipo: 'objeto', archivo: 'logo.png', fondo: 'negro.jpg', desde: 0, hasta: 2, ancho: 0.5, giro: 40 },
+        { tipo: 'titulo', desde: 0.1, hasta: 2, y: 0.85, subrayado: '#D62828', grano: true, lineas: [{ texto: 'Una pregunta', tam: 0.05 }, { texto: 'Marte', fuente: 'cursiva', tam: 0.2, color: '#D62828' }] },
+        { tipo: 'etiqueta', desde: 0.5, hasta: 2, texto: 'NOMBRE', x: 0.6, y: 0.6 },
+        { tipo: 'apiladas', fotos: ['negro.jpg', 'logo.png', 'negro.jpg'], fondo: '#202020', desde: 2, hasta: 3.5 },
+        { tipo: 'palabras', desde: 3.5, hasta: 5, palabras: ['uno', 'dos', 'tres'], destacar: [1], entrada: 'pop' }
+      ]
+    })
+  )
+  const docu = json(correr(python, ['kit/kit.py', 'armar', 'receta-docu.json', '--prueba', '0.3,1.5,3.2,4.8'], trabajo))
+  if (docu.pruebas.length !== 4) throw new Error(`Faltan fotogramas de las piezas de documental: ${JSON.stringify(docu)}`)
+  // En pleno giro el objeto (rojo) no es un rectángulo recto: su borde izquierdo y derecho tienen distinto alto.
+  const columna = (t, x) => {
+    const r = spawnSync('ffmpeg', ['-v', 'error', '-i', `revision/prueba-${t}.jpg`, '-vf', `crop=2:480:${x}:0`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { cwd: trabajo })
+    let rojos = 0
+    for (let i = 0; i < r.stdout.length; i += 6) if (r.stdout[i] > 120 && r.stdout[i + 1] < 90) rojos++
+    return rojos
+  }
+  const [izq, der] = [columna('00.30', 80), columna('00.30', 186)]
+  if (!(Math.abs(izq - der) > 6)) throw new Error(`El objeto no entra girando en 3D: ${izq} y ${der} píxeles rojos a cada lado`)
+  const conTodo = json(correr(python, ['kit/kit.py', 'armar', 'receta-docu.json'], trabajo))
+  if (Math.abs(conTodo.duracion - 5) > 0.2) throw new Error(`El video de documental no salió: ${JSON.stringify(conTodo)}`)
+  console.log(`piezas de documental: título, etiqueta, palabras, objeto con giro 3D (${izq} frente a ${der}) y apiladas ✓`)
   console.log('prueba kit: ok')
 } catch (error) {
   console.error(`prueba kit: error · ${error instanceof Error ? error.message : String(error)}`)

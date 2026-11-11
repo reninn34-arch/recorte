@@ -124,7 +124,9 @@ function escribirAss(
         // La caja de su color (con caja, el borde del estilo es la caja), opaca como en el monitor.
         ...(t.caja && !t.sinCaja ? [`\\3c${colorAss(t.caja).replace('&H00', '&H')}&`, '\\3a&H00&'] : []),
         // La letra: una fuente de Windows, la misma que dibuja el monitor.
-        ...(t.fuente && FUENTES_TEXTO[t.fuente] ? [`\\fn${FUENTES_TEXTO[t.fuente].familia}`, FUENTES_TEXTO[t.fuente].negrita ? '\\b1' : '\\b0'] : [])
+        ...(t.fuente && FUENTES_TEXTO[t.fuente]
+          ? [`\\fn${FUENTES_TEXTO[t.fuente].familia}`, FUENTES_TEXTO[t.fuente].negrita ? '\\b1' : '\\b0', FUENTES_TEXTO[t.fuente].cursiva ? '\\i1' : '\\i0']
+          : [])
       ].join('')
       // Cada línea del rótulo es una línea en el video.
       const lineas = t.texto

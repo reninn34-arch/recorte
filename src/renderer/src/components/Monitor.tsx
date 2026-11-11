@@ -254,7 +254,11 @@ export function Monitor({
                   ...(r.color ? { color: r.color } : {}),
                   ...(r.caja && !r.sinCaja ? { background: r.caja } : {}),
                   ...(r.fuente && FUENTES_TEXTO[r.fuente]
-                    ? { fontFamily: `"${FUENTES_TEXTO[r.fuente].familia}", Arial, sans-serif`, fontWeight: FUENTES_TEXTO[r.fuente].negrita ? 700 : 400 }
+                    ? {
+                        fontFamily: `"${FUENTES_TEXTO[r.fuente].familia}", Arial, sans-serif`,
+                        fontWeight: FUENTES_TEXTO[r.fuente].negrita ? 700 : 400,
+                        fontStyle: FUENTES_TEXTO[r.fuente].cursiva ? 'italic' : 'normal'
+                      }
                     : {})
                 }}
                 onClick={(e) => e.stopPropagation()}

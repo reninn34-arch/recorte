@@ -106,16 +106,17 @@ export interface TextoTL {
  * Las letras de los rótulos. Son fuentes que trae Windows: el monitor (CSS) y el render
  * (libass) usan la misma, así lo que se ve es lo que se exporta.
  */
-export const FUENTES_TEXTO: Record<string, { nombre: string; familia: string; negrita: boolean }> = {
+export const FUENTES_TEXTO: Record<string, { nombre: string; familia: string; negrita: boolean; cursiva?: boolean }> = {
   normal: { nombre: 'Normal', familia: 'Arial', negrita: true },
   fina: { nombre: 'Fina', familia: 'Segoe UI', negrita: false },
   gruesa: { nombre: 'Gruesa', familia: 'Arial Black', negrita: false },
   impacto: { nombre: 'Impacto', familia: 'Impact', negrita: false },
   elegante: { nombre: 'Elegante', familia: 'Georgia', negrita: true },
+  cursiva: { nombre: 'Cursiva', familia: 'Georgia', negrita: true, cursiva: true },
   maquina: { nombre: 'Máquina', familia: 'Courier New', negrita: true }
 }
 
-export const LIMITES_TAMANO = [0.5, 2.5] as const
+export const LIMITES_TAMANO = [0.5, 6] as const
 const COLOR_HEX = /^#[0-9a-f]{6}$/i
 
 /** El estilo de un rótulo, limpio: lo neutro no se guarda. */

@@ -22,6 +22,7 @@ import { extraerJson, falloDeAgente, Parado, rechazoPorPolitica } from './ia'
 import { agenteConHerramientas, SesionPerdida, turnoAgente } from './turnoagente'
 import { mediosDisponibles } from './mediosagente'
 import { buscarPython, rutaScriptPython, transcribirArchivo } from './transcribir'
+import { PIEZAS_ENCIMA } from './recetaeditor'
 
 /**
  * El modo agente (ver shared/modoagente.ts). Cada creación en este modo tiene su carpeta
@@ -162,7 +163,13 @@ Con \`kit/\` no programas el video: escribes \`receta.json\` (qué foto o video,
 \`python kit/kit.py armar receta.json\` lo hace en UNA pasada, con la música, y deja \`revision/hoja-final.jpg\`.
 Trae fotos a pantalla completa con encuadre y acercamiento, video, antes/después (deslizar, lado, arriba), collage,
 frases con brillo, rótulos, desenfocar zonas, fundidos, la música recortada, capas encima (logos, íconos con su «pop»)
-y efectos de sonido (whoosh, pop, ding…). Lee \`kit/RECETA.md\` (es corto).
+y efectos de sonido (whoosh, pop, ding…). Para mini documentales trae además títulos de revista (serif cursiva, sans
+gruesa, palabra roja enorme, subrayado, grano), la etiqueta de papel con un nombre, palabras sueltas que flotan, un objeto
+de museo bajo un foco que entra girando en 3D y fotos de archivo que caen apiladas. Lee \`kit/RECETA.md\` (es corto).
+- **Si el usuario trae un video de referencia para copiar su estilo**, haz una lista de sus efectos (qué letra, qué color,
+  cómo entra cada cosa, cada cuánto cambia la imagen) y pon al lado la pieza del kit que hace cada uno: casi todo está.
+  Respeta su ritmo (en estos documentales, un cambio cada 1–1,5 s: parte una escena en dos o tres momentos con otro
+  encuadre o con un título encima) y su jerarquía de letras. Lo que el kit no tenga, dilo en el resumen.
 - \`python kit/kit.py golpes <audio-o-video>\`: los golpes de la música y el tempo, para poner cada momento en su golpe.
 - \`python kit/kit.py encuadre <foto> --zoom 1.3 --cx .5 --cy .5\`: cómo queda una foto a pantalla completa.
 - \`python kit/kit.py armar receta.json --prueba 0.5,3,8\`: solo esos fotogramas, en segundos, para corregir antes.
@@ -1008,7 +1015,7 @@ async function renderLimpio(rutaReceta: string, carpeta: string, version: number
     const momentos = Array.isArray(r.momentos) ? r.momentos : []
     const conTextos =
       Boolean((r.subtitulos as { frases?: unknown[] } | undefined)?.frases?.length) ||
-      momentos.some((m) => m.rotulo || (m.tipo === 'texto' && Number(m.oscurecer ?? 0) > 0)) ||
+      momentos.some((m) => m.rotulo || (m.tipo === 'texto' && Number(m.oscurecer ?? 0) > 0) || PIEZAS_ENCIMA.includes(String(m.tipo))) ||
       (Array.isArray(r.capas) && r.capas.length > 0)
     if (!conTextos) return null
     const trabajo = carpetaTrabajo(carpeta)
@@ -1021,7 +1028,7 @@ async function renderLimpio(rutaReceta: string, carpeta: string, version: number
     delete r.sonidos
     r.momentos = momentos
       // Los rótulos que van encima de otra cosa son textos del editor: fuera.
-      .filter((m) => !(m.tipo === 'texto' && Number(m.oscurecer ?? 0) > 0))
+      .filter((m) => !(m.tipo === 'texto' && Number(m.oscurecer ?? 0) > 0) && !PIEZAS_ENCIMA.includes(String(m.tipo)))
       .map((m) => ({ ...m, rotulo: null }))
     const nombre = `.limpio-v${version}.mp4`
     r.salida = `salida/${nombre}`

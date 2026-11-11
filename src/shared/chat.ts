@@ -775,7 +775,7 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
 - {"op":"musica","volumen":V,"ducking":true|false}  volumen 0 a 1 de la música ya puesta (bajo la voz suele ir bien 0.2–0.4); ducking hace que baje sola cuando hay voz.
 - {"op":"quitar_musica"}
 - {"op":"sonido_clip","clip":N,"sonido":true|false}  quita o devuelve el sonido propio del clip N.
-- {"op":"cambiar_texto","texto_n":N,"tamano":1.5,"color":"#ffcc00","sin_caja":true,"caja":"#0a2540","fuente":"gruesa"}  también cambia el estilo del rótulo: tamano 0.5–2.5 (1 normal), color #rrggbb, sin_caja (solo la letra con borde), caja (el color de la caja, #rrggbb), fuente: normal, gruesa, impacto, elegante, maquina. Para varias líneas usa \\n en "texto".
+- {"op":"cambiar_texto","texto_n":N,"tamano":1.5,"color":"#ffcc00","sin_caja":true,"caja":"#0a2540","fuente":"gruesa"}  también cambia el estilo del rótulo: tamano 0.5–6 (1 normal; 4–6 para una palabra que llena la pantalla), color #rrggbb, sin_caja (solo la letra con borde), caja (el color de la caja, #rrggbb), fuente: normal, gruesa, impacto, elegante, cursiva, maquina. Para varias líneas usa \\n en "texto".
 - {"op":"cambiar_voz","voz_n":N,"texto":"…","voz":"Kore","inicio":T,"volumen":V}  cambia la frase de narración N. Con "texto" o "voz", Recorte vuelve a generar SOLO esa frase (con la voz que ya tenía si no das otra). "inicio" la mueve, "volumen" 0–1.5.
 - {"op":"anadir_voz","inicio":T,"texto":"…","voz":"Kore"}  añade una frase de narración nueva en el segundo T (sin "voz", la de las demás frases).
 - {"op":"borrar_voz","voz_n":N}
