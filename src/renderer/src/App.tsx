@@ -553,6 +553,11 @@ export default function App() {
     })()
   }
 
+  // Un agente de fuera (por MCP) pide enseñar una creación: al frente, con su chat.
+  const abrirCreacionRef = useRef(abrirCreacionIA)
+  abrirCreacionRef.current = abrirCreacionIA
+  useEffect(() => window.recorte.onAbrirCreacion((id) => void abrirCreacionRef.current(id)), [])
+
   function seguirAgente() {
     if (!creacion || trabajandoCreacion) return
     const id = creacion.id

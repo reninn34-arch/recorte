@@ -130,6 +130,34 @@ try {
   writeFileSync(join(trabajo, 'voz', `respuesta-${otro}.json`), JSON.stringify({ ok: false, error: 'El usuario eligió hacer este video SIN voz.' }))
   if ((await finNegado) === 0 || !/SIN voz/.test(motivo)) throw new Error(`Sin voz elegida, el kit debía decirlo: ${motivo}`)
   console.log('voz no elegida: el kit lo dice y no inventa otra ✓')
+
+  // Capas encima y efectos de sonido: un cuadrado rojo arriba a la izquierda y un «pop» en el segundo 2.
+  mkdirSync(join(trabajo, 'kit', 'sonidos'), { recursive: true })
+  copyFileSync(join(raiz, 'python', 'sonidos', 'pop.wav'), join(trabajo, 'kit', 'sonidos', 'pop.wav'))
+  correr('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=200x200', '-frames:v', '1', 'logo.png'], trabajo)
+  correr('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=600x800', '-frames:v', '1', 'negro.jpg'], trabajo)
+  writeFileSync(
+    join(trabajo, 'receta-capas.json'),
+    JSON.stringify({
+      ancho: 270, alto: 480, fps: 12, duracion: 3, salida: 'salida/capas.mp4', fundido_final: 0,
+      momentos: [{ tipo: 'foto', archivo: 'negro.jpg', desde: 0, hasta: 3, acercar: false }],
+      capas: [{ archivo: 'logo.png', desde: 1, hasta: 3, x: 0.25, y: 0.2, ancho: 0.3, entrada: 'fundido' }],
+      sonidos: [{ sonido: 'pop', en: 2, volumen: 1 }]
+    })
+  )
+  const conCapas = json(correr(python, ['kit/kit.py', 'armar', 'receta-capas.json'], trabajo))
+  const pixel = (t, x, y) => {
+    const r = spawnSync('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', conCapas.salida, '-frames:v', '1', '-vf', `crop=2:2:${x}:${y}`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { cwd: trabajo })
+    return [...r.stdout]
+  }
+  const [antesCapa, conCapa] = [pixel(0.5, 67, 96), pixel(2.5, 67, 96)]
+  if (!(antesCapa[0] < 40 && conCapa[0] > 180 && conCapa[1] < 80)) throw new Error(`La capa no está donde se pidió: ${antesCapa} antes, ${conCapa} con ella`)
+  const vol = (desde, dura) => {
+    const r = spawnSync('ffmpeg', ['-v', 'info', '-ss', String(desde), '-t', String(dura), '-i', conCapas.salida, '-af', 'volumedetect', '-f', 'null', '-'], { cwd: trabajo, encoding: 'utf8' })
+    return Number(/max_volume: (-?[\d.]+) dB/.exec(r.stderr)?.[1] ?? -99)
+  }
+  if (!conCapas.audio || !(vol(1.95, 0.3) > vol(0.5, 0.5) + 20)) throw new Error(`El «pop» no suena en su segundo: ${vol(1.95, 0.3)} dB frente a ${vol(0.5, 0.5)} dB`)
+  console.log('capas y sonidos: la capa aparece en su sitio y el «pop» suena en su segundo ✓')
   console.log('prueba kit: ok')
 } catch (error) {
   console.error(`prueba kit: error · ${error instanceof Error ? error.message : String(error)}`)

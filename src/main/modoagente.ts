@@ -94,6 +94,12 @@ function copiarKit(trabajo: string): boolean {
   const destino = join(trabajo, 'kit')
   mkdirSync(destino, { recursive: true })
   for (const n of ['kit.py', 'RECETA.md']) copyFileSync(join(origen, n), join(destino, n))
+  // Los efectos de sonido incluidos, para `"sonidos": [{ "sonido": "pop" }]` en la receta.
+  const sonidos = rutaScriptPython('sonidos')
+  if (existsSync(sonidos)) {
+    mkdirSync(join(destino, 'sonidos'), { recursive: true })
+    for (const n of readdirSync(sonidos)) if (n.endsWith('.wav')) copyFileSync(join(sonidos, n), join(destino, 'sonidos', n))
+  }
   // El FFmpeg de Recorte, aunque no esté en el PATH del agente.
   writeFileSync(join(destino, 'rutas.json'), JSON.stringify({ ffmpeg: resolverBinario('ffmpeg'), ffprobe: resolverBinario('ffprobe') }))
   return true
@@ -155,7 +161,8 @@ ${
 Con \`kit/\` no programas el video: escribes \`receta.json\` (qué foto o video, cuándo, con qué rótulo y efecto) y
 \`python kit/kit.py armar receta.json\` lo hace en UNA pasada, con la música, y deja \`revision/hoja-final.jpg\`.
 Trae fotos a pantalla completa con encuadre y acercamiento, video, antes/después (deslizar, lado, arriba), collage,
-frases con brillo, rótulos, desenfocar zonas, fundidos y la música recortada. Lee \`kit/RECETA.md\` (es corto).
+frases con brillo, rótulos, desenfocar zonas, fundidos, la música recortada, capas encima (logos, íconos con su «pop»)
+y efectos de sonido (whoosh, pop, ding…). Lee \`kit/RECETA.md\` (es corto).
 - \`python kit/kit.py golpes <audio-o-video>\`: los golpes de la música y el tempo, para poner cada momento en su golpe.
 - \`python kit/kit.py encuadre <foto> --zoom 1.3 --cx .5 --cy .5\`: cómo queda una foto a pantalla completa.
 - \`python kit/kit.py armar receta.json --prueba 0.5,3,8\`: solo esos fotogramas, en segundos, para corregir antes.
@@ -1001,13 +1008,17 @@ async function renderLimpio(rutaReceta: string, carpeta: string, version: number
     const momentos = Array.isArray(r.momentos) ? r.momentos : []
     const conTextos =
       Boolean((r.subtitulos as { frases?: unknown[] } | undefined)?.frases?.length) ||
-      momentos.some((m) => m.rotulo || (m.tipo === 'texto' && Number(m.oscurecer ?? 0) > 0))
+      momentos.some((m) => m.rotulo || (m.tipo === 'texto' && Number(m.oscurecer ?? 0) > 0)) ||
+      (Array.isArray(r.capas) && r.capas.length > 0)
     if (!conTextos) return null
     const trabajo = carpetaTrabajo(carpeta)
     const kit = join(trabajo, 'kit', 'kit.py')
     const py = await buscarPython()
     if (!py || !existsSync(kit)) return null
+    // Las capas y los sonidos también tienen su pista en el editor.
     delete r.subtitulos
+    delete r.capas
+    delete r.sonidos
     r.momentos = momentos
       // Los rótulos que van encima de otra cosa son textos del editor: fuera.
       .filter((m) => !(m.tipo === 'texto' && Number(m.oscurecer ?? 0) > 0))

@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from 'electron'
-import { duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, SONIDOS_INCLUIDOS, timelineVacia, type Timeline } from '../shared/timeline'
+import { duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, SONIDOS_INCLUIDOS, timelineInicial, timelineVacia, type Timeline } from '../shared/timeline'
 import { randomUUID } from 'node:crypto'
-import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, join, resolve, sep } from 'node:path'
 import type {
   AnalisisResultado,
@@ -31,10 +31,12 @@ import { registrarMedia } from './media'
 import { proponerClips } from './momentos'
 import { Proyectos } from './proyectos'
 import { recetaLocal } from './receta'
-import { crearVideo } from './crear'
+import { crearVideo, ejecutar } from './crear'
 import { renderClip, renderReceta } from './render'
 import { exportarTimeline } from './exportar'
 import { iniciarMcpRecorte } from './mcpapp'
+import { resolverBinario } from './binarios'
+import { bloqueRetoques, describirRetoques } from '../shared/retoques'
 import { Creaciones, EXTENSIONES_ADJUNTOS, pasoGuion, pasoVideo, type ConfigAgente } from './creaciones'
 import { convertirAVoz, generarVozGemini, prepararVoz } from './voz'
 import { montarVozEnVideo } from './montajevoz'
@@ -50,7 +52,7 @@ import { medirReferencia } from './estilo/referencia'
 import { analizarConGeminiVideo, interpretarEstilo } from './estilo/ficha'
 import { viabilidadDe } from './estilo/viabilidad'
 import { guardar } from './disco'
-import { cambiaElGuion, ID_SEGURO, MAX_CLIPS_VEO, mismaNarracion, pideMontarVoz, textoNarracion, VOCES_GEMINI, vozDesactualizada, vozVigente } from '../shared/creacion'
+import { cambiaElGuion, ID_SEGURO, MAX_CLIPS_VEO, mismaNarracion, pideMontarVoz, textoMuestra, textoNarracion, VOCES_GEMINI, vozDesactualizada, vozVigente } from '../shared/creacion'
 import type { AgenteId, Creacion, EleccionTarea, MensajeCreacion, NivelModelo, PeticionCreacion, TareasCreacion } from '../shared/creacion'
 import { turnoAgente } from './chat'
 import { buscarActualizacion, estadoActualizacion, instalarActualizacion, prepararActualizaciones } from './actualizar'
@@ -106,11 +108,15 @@ app.whenReady().then(() => {
   const proyectos = new Proyectos()
   const ajustes = new Ajustes()
   const creaciones = new Creaciones()
-  registrarMedia(proyectos, creaciones)
+  const carpetaMuestras = join(app.getPath('userData'), 'muestras-voz')
+  registrarMedia(proyectos, creaciones, carpetaMuestras)
 
   /** Cuándo empezó a trabajar el agente en cada creación: la pantalla cuenta desde ahí, no desde que la abres. */
   const inicioCreacion = new Map<string, number>()
+  /** El último aviso de cada creación (para que un agente de fuera vea cómo va). */
+  const ultimoProgreso = new Map<string, { pct: number; texto: string }>()
   const enviarProgreso = (progreso: Progreso) => {
+    if (progreso.fase === 'creacion') ultimoProgreso.set(progreso.id, { pct: progreso.pct, texto: progreso.texto ?? '' })
     const desde = progreso.fase === 'creacion' ? inicioCreacion.get(progreso.id) : undefined
     const evento = desde !== undefined && progreso.desde === undefined ? { ...progreso, desde } : progreso
     for (const ventana of BrowserWindow.getAllWindows()) {
@@ -594,7 +600,11 @@ app.whenReady().then(() => {
       try {
         enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.05, texto: seguir ? 'El agente sigue donde iba' : 'El agente está trabajando' })
         // Si pide un cambio sobre lo hecho, va como pedido; si solo aprobó el plan, sin pedido.
-        const cambio = texto && !esAprobacion(texto) ? texto : undefined
+        const pedido = texto && !esAprobacion(texto) ? texto : undefined
+        // Lo que retocó a mano en el editor viaja con el pedido, para que la versión nueva no lo pise.
+        const retoques = c.agente.resultado && !seguir ? retoquesDe(c) : []
+        if (retoques.length) avisarAgente(c, `Le paso al agente ${retoques.length === 1 ? 'tu retoque' : `tus ${retoques.length} retoques`} a mano`, 0.06)
+        const cambio = pedido || retoques.length ? `${pedido ?? 'Haz una versión nueva conservando lo que retoqué.'}${bloqueRetoques(retoques)}` : undefined
         // Al seguir tras el límite, lo que dejó desde la ronda cortada cuenta como de esta ronda.
         const desde = seguir ? (c.agente.pausa?.desde ?? Date.now()) : Date.now()
         desdeHacer = desde
@@ -1027,7 +1037,43 @@ app.whenReady().then(() => {
   }
   /** Los tramos fijos (los del video entregado) pasan a salir de `fuente`. */
   const tramosDe = (tl: Timeline, fuente: string): Timeline => ({ ...tl, clips: tl.clips.map((x) => (x.fuente === FUENTE_PRINCIPAL ? { ...x, fuente } : x)) })
-  ipcMain.handle('creacion:editor', async (_evento, id: unknown) => {
+  /**
+   * La timeline tal como la entregó el agente (junto a su video, `salidas/agente-vN.editor.json`):
+   * con ella se sabe después qué retocó el usuario a mano.
+   */
+  const rutaEntregada = (c: Creacion, salida: string) => join(creaciones.carpeta(c.id), `${salida.replace(/\.mp4$/i, '')}.editor.json`)
+  const guardarEntregada = (c: Creacion, tl: Timeline) => {
+    if (!c.salida) return
+    try {
+      guardar(rutaEntregada(c, c.salida), JSON.stringify(tl))
+    } catch {
+      // Sin ella, el agente no se entera de los retoques (como antes), pero el editor sigue igual.
+    }
+  }
+  /** Lo que el usuario retocó a mano en el editor sobre la última versión que abrió (para el agente). */
+  const retoquesDe = (c: Creacion): string[] => {
+    if (!c.proyectoEditor || !c.editorSalida) return []
+    const p = proyectos.abrir(c.proyectoEditor)
+    const entregada = join(creaciones.carpeta(c.id), `${c.editorSalida.replace(/\.mp4$/i, '')}.editor.json`)
+    // Con una versión pendiente sin aplicar, el usuario todavía no tocó esa versión.
+    if (!p?.timeline || p.timelinePendiente || !existsSync(entregada)) return []
+    try {
+      const base = JSON.parse(readFileSync(entregada, 'utf8')) as Timeline
+      const medios = new Map((p.medios ?? []).map((m) => [m.id, m]))
+      return describirRetoques(base, p.timeline, {
+        medio: (f) => {
+          const m = medios.get(f)
+          return m ? `${m.tipo === 'imagen' ? 'la imagen' : 'el video'} «${m.nombre}» (${m.ruta})` : 'tu video entregado'
+        },
+        archivo: (rel) => join(proyectos.carpeta(p.id), rel)
+      })
+    } catch {
+      return []
+    }
+  }
+  ipcMain.handle('creacion:editor', (_evento, id: unknown) => creacionAlEditor(id))
+  /** El proyecto del editor de una creación con video (lo crea, o mete la versión nueva en el mismo). */
+  async function creacionAlEditor(id: unknown): Promise<Project> {
     if (typeof id !== 'string') throw new Error('Creación inválida.')
     const c = creaciones.get(id)
     if (!c?.salida) throw new Error('Todavía no hay un video para editar.')
@@ -1075,6 +1121,7 @@ app.whenReady().then(() => {
         previo.medios = medios
         previo.timelinePendiente = timeline
         proyectos.save(previo)
+        guardarEntregada(c, timeline)
         c.editorSalida = c.salida
         creaciones.guardar(c)
         return proyectos.abrir(previo.id) ?? previo
@@ -1105,6 +1152,7 @@ app.whenReady().then(() => {
     }
     // Sin frases de voz sueltas, el chat no sabría qué se dice: se transcribe solo, sin esperar.
     const abierto = proyectos.abrir(ingesta.project.id) ?? ingesta.project
+    guardarEntregada(c, abierto.timeline ?? timelineInicial(abierto.source.duration))
     if (!abierto.timeline?.voces?.length) {
       void transcribirProyecto(abierto.id).then((r) => {
         if (!r.ok || !r.project) return
@@ -1113,7 +1161,7 @@ app.whenReady().then(() => {
       })
     }
     return abierto
-  })
+  }
   // ===== Voz de las creaciones =====
   ipcMain.handle('voz:estado', async () => ({ ...(await ajustes.estadoVoz()), google: estadoVozGoogle() }))
   // La voz con la cuenta de Google: se entra en Edge (Google no deja entrar dentro de la app).
@@ -1294,6 +1342,54 @@ app.whenReady().then(() => {
     proyectos.save(actual)
     return { project: actual, agregados: nuevos.map((m) => m.id), fallos }
   }
+  /**
+   * La muestra de una voz de Gemini para oírla antes de elegirla. Cada voz se genera una sola vez
+   * (la misma que da probar_voz por MCP) y queda en `userData/muestras-voz`.
+   */
+  ipcMain.handle('voz:muestra', async (_evento, voz: unknown) => {
+    const v = VOCES_GEMINI.find((x) => x.id === voz)
+    if (!v) throw new Error('Esa voz no existe.')
+    const ruta = join(carpetaMuestras, `${v.id}.wav`)
+    if (!existsSync(ruta)) {
+      mkdirSync(carpetaMuestras, { recursive: true })
+      try {
+        await generarFraseVoz(textoMuestra(v.id), v.id, ruta)
+      } catch (e) {
+        rmSync(ruta, { force: true })
+        throw new Error(`No pude generar la muestra: ${textoError(e)}`)
+      }
+    }
+    return `recorte-media://muestras/${v.id}.wav`
+  })
+  /**
+   * Una frase narrada con tu propia voz, grabada en el editor: se pasa a WAV, se le quita el
+   * silencio de los bordes y queda en la carpeta del proyecto, como las de Gemini.
+   */
+  ipcMain.handle('proyecto:voz-grabada', async (_evento, id: unknown, datos: unknown, texto: unknown) => {
+    if (typeof id !== 'string' || !proyectos.get(id)) throw new Error('El proyecto ya no existe.')
+    if (!(datos instanceof Uint8Array) || datos.length < 200) throw new Error('La grabación salió vacía.')
+    const media = join(proyectos.carpeta(id), 'media')
+    mkdirSync(media, { recursive: true })
+    const nombre = `voz-propia-${randomUUID().slice(0, 8)}`
+    const temporal = join(media, `${nombre}.webm`)
+    const salida = join(media, `${nombre}.wav`)
+    writeFileSync(temporal, datos)
+    try {
+      const ffmpeg = resolverBinario('ffmpeg') ?? 'ffmpeg'
+      // El silencio del principio y del final (el clic de grabar), fuera; lo de en medio, tal cual.
+      const bordes = 'silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.08,areverse,silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.15,areverse'
+      const r = await ejecutar([`"${ffmpeg}"`, '-y', '-v', 'error', '-i', `"${temporal}"`, '-vn', '-ac', '1', '-ar', '48000', '-af', bordes, '-t', '120', `"${salida}"`], media, 120_000)
+      if (r.codigo !== 0 || !existsSync(salida)) throw new Error(`No pude leer la grabación: ${r.salida.trim().slice(-200)}`)
+    } finally {
+      rmSync(temporal, { force: true })
+    }
+    const duracion = Math.round((await duracionMedio(salida)) * 100) / 100
+    if (!(duracion > 0.2)) {
+      rmSync(salida, { force: true })
+      throw new Error('No se oye nada en la grabación. Revisa el micrófono y vuelve a grabar.')
+    }
+    return { archivo: `media/${nombre}.wav`, duracion, texto: typeof texto === 'string' ? texto.replace(/\s+/g, ' ').trim().slice(0, 600) : '' }
+  })
   // Una frase de narración hecha a mano en el editor: con el texto y la voz que diga el usuario,
   // sin pasar por el agente (no gasta sus créditos). El audio queda en la carpeta del proyecto.
   ipcMain.handle('proyecto:voz-frase', async (_evento, id: unknown, pedido: unknown) => {
@@ -2208,6 +2304,31 @@ app.whenReady().then(() => {
   }
 
   // ===== Recorte por MCP: que un agente de fuera vea y edite los proyectos =====
+  /** Trae la ventana al frente y le pide a la interfaz que abra algo (un proyecto o una creación). */
+  const alFrente = (canal: string, id: string) => {
+    const w = BrowserWindow.getAllWindows()[0]
+    if (!w) return
+    if (w.isMinimized()) w.restore()
+    w.show()
+    w.focus()
+    w.webContents.send(canal, id)
+  }
+  /**
+   * Un turno del agente de una creación pedido por MCP: empieza ya y sigue solo (el agente de fuera
+   * pregunta cómo va con ver_creacion). La interfaz lo ve trabajando por sus avisos de progreso.
+   */
+  const enSegundoPlano = (id: string, texto: string | undefined, turno: (c: Creacion, senal: AbortSignal) => Promise<void>) => {
+    if (creandoAhora.has(id)) throw new Error('El agente ya está trabajando en este video: espera a que acabe (mira ver_creacion) o páralo.')
+    if (!creaciones.get(id)) throw new Error('Esa creación ya no existe.')
+    ultimoProgreso.delete(id)
+    void conCreacion(id, async (c, senal) => {
+      if (texto) c.mensajes.push(mensaje('usuario', texto.slice(0, 2000)))
+      enviarProgreso({ id: c.id, fase: 'creacion', pct: 0.02, texto: 'Empezando' })
+      await turno(c, senal)
+      enviarProgreso({ id: c.id, fase: 'creacion', pct: 1, texto: 'Listo' })
+      return creaciones.guardar(c)
+    }).catch(() => {})
+  }
   const mcp = iniciarMcpRecorte({
     proyectos,
     listarCreaciones: () => creaciones.listar(),
@@ -2220,13 +2341,35 @@ app.whenReady().then(() => {
       const { transcript: _t, ...ligero } = proyecto
       for (const w of BrowserWindow.getAllWindows()) w.webContents.send('proyecto:externo', { proyecto: ligero, quien, conTimeline: Boolean(conTimeline) })
     },
-    abrirEnApp: (id) => {
-      const w = BrowserWindow.getAllWindows()[0]
-      if (!w) return
-      if (w.isMinimized()) w.restore()
-      w.show()
-      w.focus()
-      w.webContents.send('proyecto:abrir', id)
+    abrirEnApp: (id) => alFrente('proyecto:abrir', id),
+    // ===== Crear por MCP (6.3) =====
+    creaciones: {
+      nueva: (p) => creaciones.nueva(p),
+      get: (id) => creaciones.get(id),
+      carpeta: (id) => creaciones.carpeta(id)
+    },
+    trabajando: (id) => (creandoAhora.has(id) ? { desde: inicioCreacion.get(id) ?? Date.now(), ...ultimoProgreso.get(id) } : null),
+    charlar: (id, texto) => enSegundoPlano(id, texto, (c, senal) => charlaConAgente(c, senal)),
+    hacer: (id, texto) => enSegundoPlano(id, texto, (c, senal) => hacerConAgente(c, senal, texto)),
+    seguir: (id) => {
+      if (creandoAhora.has(id)) throw new Error('El agente ya está trabajando en este video.')
+      void seguirCreacion(id).catch(() => {})
+    },
+    parar: (id) => pararTrabajo(`creacion:${id}`),
+    alEditor: (id) => creacionAlEditor(id),
+    abrirCreacionEnApp: (id) => alFrente('creacion:abrir-externa', id),
+    voz: {
+      conectada: async () => Boolean((await ajustes.claveVoz()) || estadoVozGoogle().correo),
+      porDefecto: async () => (await ajustes.estadoVoz()).vozGemini ?? 'Kore',
+      generar: (texto, voz, salida) => generarFraseVoz(texto, voz, salida),
+      carpetaMuestras,
+      duracion: (ruta) => duracionMedio(ruta),
+      delChat: (id, tl, ops) => generarVocesDelChat(id, tl, ops)
+    },
+    flow: {
+      conectado: () => estadoFlow().cuentas.length > 0,
+      derechos: () => estadoFlow().derechos === true,
+      generar: (pedido, carpeta) => pedirFlow(pedido, carpeta)
     }
   })
   ipcMain.handle('mcp:estado', () => mcp.estado())

@@ -45,7 +45,7 @@ import type { OpcionesExport } from '../../../shared/api'
 import type { TranscriptSegment } from '../../../shared/types'
 import type { Historial } from '../hooks/timeline'
 import { Icon } from '../Icons'
-import { InspectorVoz, type GenerarVoz } from './InspectorVoz'
+import { InspectorVoz, type GenerarVoz, type GrabarVoz } from './InspectorVoz'
 
 /**
  * La timeline editable: regla, pista de video magnética, pista de textos y la voz
@@ -105,6 +105,7 @@ export function TimelineEditor({
   exportar,
   importarMusica,
   generarVoz,
+  grabarVoz,
   onCambiarArchivo,
   medios,
   duraciones,
@@ -131,6 +132,8 @@ export function TimelineEditor({
   importarMusica: () => Promise<MusicaTL | null>
   /** Genera una frase de narración con una voz (sin agente); sin esto, la voz no se edita a mano. */
   generarVoz?: GenerarVoz
+  /** Grabar una frase con tu voz (el micrófono). */
+  grabarVoz?: GrabarVoz
   /** Cambia el archivo del clip por otro que elija el usuario (otra foto, otro video). */
   onCambiarArchivo?: (clipId: string) => void
   /** La biblioteca: lo que se puede poner encima del video. */
@@ -1144,6 +1147,7 @@ export function TimelineEditor({
             tiempo={tiempo}
             historial={historial}
             generar={generarVoz}
+            grabar={grabarVoz}
             onElegir={(id) => (setNuevaVoz(false), onElegir(id ? { tipo: 'voz', id } : null))}
             onCerrar={() => setNuevaVoz(false)}
           />

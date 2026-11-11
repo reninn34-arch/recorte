@@ -62,6 +62,19 @@ editor de Recorte (texto, letra, color y caja). Lo mismo con los rótulos: usa `
 - `caja`: el color de la caja (`null` = sin caja, solo la letra con borde). `pos`: la altura (0 arriba, 1 abajo).
 - Cubre TODO lo que se dice, de principio a fin: si cambias escenas, revisa que ninguna frase quede sin subtítulo.
 
+## Capas encima y efectos de sonido (también editables)
+Logos, íconos, sellos o una foto pequeña encima del video van en `"capas"`, y los efectos de sonido en `"sonidos"`.
+NUNCA los pegues con un script aparte: así quedan en las pistas «Encima» y «Sonidos» del editor y el usuario los mueve.
+```json
+"capas": [{ "archivo": "entrada/logo.png", "desde": 2.0, "hasta": 4.5, "x": 0.5, "y": 0.32, "ancho": 0.3, "entrada": "pop" }],
+"sonidos": [{ "sonido": "pop", "en": 2.0 }, { "sonido": "whoosh", "en": 6.0, "volumen": 0.5 }, { "archivo": "entrada/campana.wav", "en": 9 }]
+```
+- `x`, `y`: el centro de la capa (0–1 del cuadro). `ancho`: fracción del ancho (0.05–1). `entrada`: `pop`, `fundido` o `ninguna`.
+  Solo imágenes (un PNG con transparencia queda mejor). Que no tape caras ni subtítulos.
+- `sonido`: uno de los que trae Recorte: `whoosh` (un cambio rápido), `pop` (algo que aparece), `pop-alto` (el siguiente
+  de una serie), `ding` (un dato, un acierto), `caching` (una oferta). O `archivo` con uno propio. `volumen` por defecto 0.6.
+- Un «pop» cuando entra cada logo o ícono, un «whoosh» en los cortes fuertes; sin abusar (uno cada pocos segundos).
+
 ## La voz (narración)
 Recorte genera la narración con la voz que eligió el usuario; tú solo escribes qué dice.
 1. Escribe `voz/narracion.txt` con UNA frase por línea (una por momento, natural y hablada, ~2,5 palabras por segundo).

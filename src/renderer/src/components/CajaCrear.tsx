@@ -140,6 +140,34 @@ export function CajaCrear({
   const [voz, setVoz] = useState<string | null>(c0?.vozElegida ?? null)
   const [vozConectada, setVozConectada] = useState(false)
   const vozTocada = useRef(false)
+  // Oír una voz antes de elegirla: su muestra se genera la primera vez y después sale al momento.
+  const [oyendo, setOyendo] = useState<string | null>(null)
+  const [cargandoMuestra, setCargandoMuestra] = useState<string | null>(null)
+  const [errorMuestra, setErrorMuestra] = useState<string | null>(null)
+  const reproductor = useRef<HTMLAudioElement | null>(null)
+  useEffect(() => () => reproductor.current?.pause(), [])
+  async function oir(id: string) {
+    reproductor.current?.pause()
+    if (oyendo === id) {
+      setOyendo(null)
+      return
+    }
+    setErrorMuestra(null)
+    setCargandoMuestra(id)
+    try {
+      const url = await window.recorte.vozMuestra(id)
+      const audio = new Audio(url)
+      reproductor.current = audio
+      audio.onended = () => setOyendo((o) => (o === id ? null : o))
+      setOyendo(id)
+      await audio.play()
+    } catch (error) {
+      setOyendo(null)
+      setErrorMuestra(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error))
+    } finally {
+      setCargandoMuestra(null)
+    }
+  }
   // Tras el plan: esperar el «Hazlo» (pregúntame antes) o empezar solo si no hay preguntas.
   const [directo, setDirecto] = useState(Boolean(c0?.directo))
   useEffect(() => {
@@ -584,10 +612,23 @@ export function CajaCrear({
                       <span className="cc-grupo-nombre">Voces de Gemini</span>
                       <div className="cc-voces">
                         {VOCES_GEMINI.map((v) => (
-                          <Opcion key={v.id} elegida={voz === v.id} onClick={() => ((vozTocada.current = true), setVoz(v.id), void window.recorte.vozGuardar({ vozGemini: v.id }), cerrar())} nota={v.descripcion}>
-                            {v.id}
-                          </Opcion>
+                          <div key={v.id} className="cc-voz-fila">
+                            <Opcion elegida={voz === v.id} onClick={() => ((vozTocada.current = true), setVoz(v.id), void window.recorte.vozGuardar({ vozGemini: v.id }), cerrar())} nota={v.descripcion}>
+                              {v.id}
+                            </Opcion>
+                            <button
+                              type="button"
+                              className={`cc-oir ${oyendo === v.id ? 'is-sonando' : ''}`}
+                              onClick={() => void oir(v.id)}
+                              disabled={cargandoMuestra !== null && cargandoMuestra !== v.id}
+                              title={oyendo === v.id ? 'Parar' : `Oír a ${v.id}`}
+                              aria-label={oyendo === v.id ? 'Parar' : `Oír a ${v.id}`}
+                            >
+                              {cargandoMuestra === v.id ? <span className="cc-oir-cargando" /> : <Icon name={oyendo === v.id ? 'pause' : 'play'} size={12} />}
+                            </button>
+                          </div>
                         ))}
+                        {errorMuestra && <p className="cc-nota crear-error">{errorMuestra}</p>}
                       </div>
                       <p className="cc-nota">El agente escribe lo que dice y Recorte lo narra con esta voz, frase por frase.</p>
                     </>

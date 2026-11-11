@@ -50,6 +50,8 @@ const api: RecorteApi = {
   exportarTimeline: (id, timeline, opciones) => ipcRenderer.invoke('proyecto:exportar-timeline', id, timeline, opciones),
   abrirExportacion: (id) => ipcRenderer.invoke('proyecto:abrir-exportacion', id),
   vozFrase: (id, pedido) => ipcRenderer.invoke('proyecto:voz-frase', id, pedido),
+  vozGrabada: (id, datos, texto) => ipcRenderer.invoke('proyecto:voz-grabada', id, datos, texto),
+  vozMuestra: (voz) => ipcRenderer.invoke('voz:muestra', voz),
   importarMusica: (id) => ipcRenderer.invoke('proyecto:importar-musica', id),
   mcpEstado: () => ipcRenderer.invoke('mcp:estado'),
   mcpConectarClaude: () => ipcRenderer.invoke('mcp:conectar-claude'),
@@ -63,6 +65,11 @@ const api: RecorteApi = {
     const listener = (_evento: Electron.IpcRendererEvent, id: string) => cb(id)
     ipcRenderer.on('proyecto:abrir', listener)
     return () => ipcRenderer.removeListener('proyecto:abrir', listener)
+  },
+  onAbrirCreacion: (cb) => {
+    const listener = (_evento: Electron.IpcRendererEvent, id: string) => cb(id)
+    ipcRenderer.on('creacion:abrir-externa', listener)
+    return () => ipcRenderer.removeListener('creacion:abrir-externa', listener)
   },
   ponerSonido: (id, incluido) => ipcRenderer.invoke('proyecto:poner-sonido', id, incluido),
   elegirAdjuntos: () => ipcRenderer.invoke('dialog:open-adjuntos'),

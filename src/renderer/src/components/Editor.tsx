@@ -259,6 +259,18 @@ export function Editor({
                 }
               }
         }
+        grabarVoz={
+          proyecto.demo
+            ? undefined
+            : async (datos, texto) => {
+                try {
+                  return await window.recorte.vozGrabada(proyecto.id, datos, texto)
+                } catch (error) {
+                  onAviso(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error))
+                  return null
+                }
+              }
+        }
         onCambiarArchivo={proyecto.demo ? undefined : (clipId) => void cambiarArchivo(clipId)}
         medios={proyecto.demo ? undefined : (proyecto.medios ?? []).map((m) => ({ id: m.id, nombre: m.nombre, tipo: m.tipo }))}
         duraciones={duraciones}

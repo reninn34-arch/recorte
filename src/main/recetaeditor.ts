@@ -6,8 +6,10 @@ import {
   FUENTE_PRINCIPAL,
   normalizarTimeline,
   nuevoId,
+  type CapaTL,
   type ClipTL,
   type PosicionTexto,
+  type SonidoTL,
   type TextoTL,
   type Timeline,
   type VozTL
@@ -103,7 +105,8 @@ export async function proyectoDesdeReceta(
   if (!base.length) return null
 
   const frases = (Array.isArray(receta.voz) ? receta.voz : []).filter((v): v is Record<string, unknown> => Boolean(v) && typeof v === 'object')
-  const hayPistasDeAudio = frases.length > 0 || Boolean(receta.musica)
+  const sonidosReceta = (Array.isArray(receta.sonidos) ? receta.sonidos : []).filter((v): v is Record<string, unknown> => Boolean(v) && typeof v === 'object')
+  const hayPistasDeAudio = frases.length > 0 || Boolean(receta.musica) || sonidosReceta.length > 0
   const medios: MedioProyecto[] = []
   const porRuta = new Map<string, MedioProyecto>()
   const medioDe = async (ruta: string): Promise<MedioProyecto | null> => {
@@ -283,7 +286,56 @@ export async function proyectoDesdeReceta(
     }
   }
 
-  const timeline = normalizarTimeline({ version: 1, clips, textos, voces, ...(musica ? { musica } : {}) }, duracionFinal, duracionesDeMedios(medios))
+  // Las capas encima (logos, íconos): cada imagen a la biblioteca y a la pista «Encima», con su sitio y su entrada.
+  const capas: CapaTL[] = []
+  for (const c of Array.isArray(receta.capas) ? receta.capas : []) {
+    if (!c || typeof c !== 'object') continue
+    const x = c as Record<string, unknown>
+    const ruta = dentro(trabajo, x.archivo)
+    const medio = ruta ? await medioDe(ruta) : null
+    const a = pinza(num(x.desde, -1), 0, total)
+    const b = pinza(num(x.hasta, -1), 0, total)
+    if (!medio || medio.tipo !== 'imagen' || b - a < MIN) continue
+    capas.push({
+      id: nuevoId('capa'),
+      fuente: medio.id,
+      inicio: a,
+      duracion: b - a,
+      x: pinza(num(x.x, 0.5), 0, 1),
+      y: pinza(num(x.y, 0.5), 0, 1),
+      ancho: pinza(num(x.ancho, 0.3), 0.05, 1),
+      ...(x.entrada === 'fundido' ? { entrada: 'fundido' as const } : x.entrada === 'ninguna' ? {} : { entrada: 'pop' as const })
+    })
+  }
+  // Los efectos de sonido: los incluidos (kit/sonidos) o los del agente, copiados al proyecto.
+  const sonidos: SonidoTL[] = []
+  for (const [i, x] of sonidosReceta.entries()) {
+    const incluido = typeof x.sonido === 'string' && /^[\w-]{1,30}$/.test(x.sonido) ? dentro(trabajo, `kit/sonidos/${x.sonido}.wav`) : null
+    const ruta = incluido ?? dentro(trabajo, x.archivo)
+    if (!ruta) continue
+    const nombre = `sonido-${String(i + 1).padStart(2, '0')}-${randomUUID().slice(0, 6)}${extname(ruta).toLowerCase() || '.wav'}`
+    try {
+      const duracion = await duracionMedio(ruta)
+      if (!(duracion > 0)) continue
+      copyFileSync(ruta, join(media, nombre))
+      sonidos.push({
+        id: nuevoId('sonido'),
+        inicio: pinza(num(x.en, 0), 0, total),
+        duracion: Math.round(duracion * 100) / 100,
+        archivo: `media/${nombre}`,
+        nombre: typeof x.sonido === 'string' ? x.sonido : basename(ruta, extname(ruta)),
+        ...(typeof x.volumen === 'number' ? { volumen: pinza(x.volumen, 0, 1.5) } : {})
+      })
+    } catch {
+      // Un sonido que no se pudo leer se queda fuera; los demás siguen.
+    }
+  }
+
+  const timeline = normalizarTimeline(
+    { version: 1, clips, textos, voces, ...(musica ? { musica } : {}), ...(capas.length ? { capas } : {}), ...(sonidos.length ? { sonidos } : {}) },
+    duracionFinal,
+    duracionesDeMedios(medios)
+  )
   if (!timeline.clips.length) return null
   return { medios, timeline, editables, fijos }
 }

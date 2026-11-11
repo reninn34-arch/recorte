@@ -168,10 +168,42 @@ narración. Sin voz nueva por MCP todavía (gasta créditos: 6.3).
 **6.3 · Crear por MCP.** Empezar una creación, conversar el plan, «Hazlo», generar una frase de voz (con su
 muestra) y pedir imágenes o clips a Flow, con confirmación del gasto.
 
+*Hecho (2026-11-10), probado con `prueba:mcp` (sin agente ni voz de verdad):* crear_video (la misma creación del
+modo agente: petición, formato, duración, archivos, voz, imágenes y clips de Flow, «Hazlo directo»), ver_creacion
+(si trabaja y en qué, el plan con sus pasos marcados, la conversación con sus opciones y lo generado),
+hablar_con_agente, hacer_video (también «seguir» tras el límite de uso), parar_agente y pasar_al_editor (el proyecto
+del editor de lo entregado). Los turnos van en segundo plano: la herramienta vuelve al momento y la app lo ve
+trabajando como cuando sigue solo. ver_voces, probar_voz (una muestra por voz, guardada en `userData/muestras-voz`),
+voz nueva en editar_timeline (cambiar_voz, anadir_voz) y generar_con_flow (imagen o clip a la biblioteca del
+proyecto). Lo que gasta (voz, clips) responde primero con el costo y un código de un solo uso, atado a ese pedido;
+el gasto de una creación se acepta una vez. abrir_en_recorte también abre una creación con su chat.
+Falta: probarlo con Claude Code real tras reiniciar Recorte.
+
 **6.4 · Los agentes de Recorte por MCP.** Que el agente que trabaja dentro de Recorte pida voz, imágenes y
 clips por MCP en vez de los archivos de pedido, y que al rehacer un video reciba los retoques a mano.
 
+*Hecho (2026-11-10), probado con `prueba:kit` y `prueba:retoques` (sin agente real):*
+- **El buzón de archivos se queda.** Se decidió no pasar voz, imágenes y clips del agente interno a MCP: el buzón
+  (`kit.py voz|imagen|clip`) funciona con todos los agentes, también con los que no salen a la red, y no tiene
+  puertos ni llaves que repartir. MCP queda para los agentes de fuera.
+- **Los retoques a mano viajan al agente.** Al pasar una versión al editor se guarda su timeline tal como se entregó
+  (`salidas/agente-vN.editor.json`). Al pedir otra versión, `describirRetoques` (`shared/retoques.ts`) compara esa
+  timeline con la de ahora (rótulos: texto, tiempo, sitio y estilo; frases de voz con la ruta del audio ya regenerado,
+  para no volver a pedirlo; capas; sonidos; música; clips) y el agente lo recibe con su pedido para pasarlo a su receta.
+- **La receta trae capas y sonidos.** `"capas"` (imagen, segundos, centro, ancho, entrada pop/fundido) y `"sonidos"`
+  (uno de los incluidos, que ahora se copian a `kit/sonidos/`, o un archivo). El kit los dibuja y mezcla, el conversor
+  los deja en «Encima» y «Sonidos», y la versión sin textos sale sin ellos.
+Falta: probarlo con un agente real (que use capas y sonidos y respete los retoques); las capas de video no van en la receta.
+
 **6.5 · Lo que queda de la voz.** Muestra de cada voz en el menú y narrar con tu voz grabada frase por frase.
+
+*Hecho (2026-11-10), compila y pasan las pruebas; sin mirarlo en la app ni probarlo con micrófono y voz de verdad:*
+- En el menú Voz de la caja, cada voz tiene su botón para oírla (`voz:muestra`). La muestra se genera la primera vez y
+  se guarda en `userData/muestras-voz`, la misma carpeta que usa probar_voz por MCP (`textoMuestra`). Se sirve como
+  `recorte-media://muestras/<voz>.wav`.
+- En el panel de la narración del editor, «Grabar»: con una frase elegida reemplaza su audio por tu voz; sin frase,
+  añade una nueva en el cabezal. Se pasa a WAV con el silencio de los bordes recortado (`proyecto:voz-grabada`,
+  `media/voz-propia-….wav`) y es un paso de Ctrl+Z. «Toda la voz con…» no toca las frases grabadas.
 
 ### Fase 5 · Todo en el editor, con el chat como conversación
 

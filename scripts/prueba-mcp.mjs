@@ -28,6 +28,10 @@ proyectos.create({
 })
 
 const avisos = []
+const creadas = new Map()
+const ocupadas = new Set()
+const turnos = []
+let vocesGeneradas = 0
 const herramientas = herramientasRecorte({
   proyectos,
   listarCreaciones: () => [],
@@ -37,7 +41,40 @@ const herramientas = herramientasRecorte({
   exportar: async () => ({ ok: false }),
   copiarSonido: async () => ({ archivo: 'media/pop.wav', duracion: 0.14, nombre: 'Pop' }),
   avisarCambio: (p, quien, conTimeline) => avisos.push({ p, quien, conTimeline }),
-  abrirEnApp: () => {}
+  abrirEnApp: () => {},
+  // Crear por MCP (6.3), con una creación y una voz de mentira.
+  creaciones: {
+    nueva: async (pet) => {
+      const c = { id: 'c-prueba', nombre: pet.peticion.slice(0, 40), fase: 'plan', formato: pet.formato, mensajes: [], version: 0, vozElegida: pet.vozElegida, flow: pet.flow, directo: pet.directo }
+      creadas.set(c.id, c)
+      return c
+    },
+    get: (cid) => creadas.get(cid) ?? null,
+    carpeta: (cid) => join(dir, 'creaciones', cid)
+  },
+  trabajando: (cid) => (ocupadas.has(cid) ? { desde: Date.now(), pct: 0.3, texto: 'Mirando tus archivos' } : null),
+  charlar: (cid, texto) => {
+    turnos.push({ cid, texto, que: 'charla' })
+    ocupadas.add(cid)
+  },
+  hacer: (cid, texto) => turnos.push({ cid, texto, que: 'hacer' }),
+  seguir: () => {},
+  parar: (cid) => ocupadas.delete(cid),
+  alEditor: async () => assert.fail('no se usa'),
+  abrirCreacionEnApp: () => {},
+  voz: {
+    conectada: async () => true,
+    porDefecto: async () => 'Kore',
+    generar: async () => assert.fail('no se usa'),
+    carpetaMuestras: join(dir, 'muestras'),
+    duracion: async () => 1,
+    delChat: async (_id, _tl, ops) => {
+      vocesGeneradas++
+      for (const o of ops) if (o.op === 'anadir_voz') o.audio = { archivo: 'media/voz-1.wav', duracion: 1.2, voz: 'Kore', texto: o.texto }
+      return []
+    }
+  },
+  flow: { conectado: () => true, derechos: () => true, generar: async () => assert.fail('no se usa') }
 })
 const servidor = new ServidorMcp(herramientas, 'secreto-de-prueba-0123456789', { nombre: 'recorte', version: '0', instrucciones: 'x' })
 const puerto = await servidor.iniciar(47900 + Math.floor(Math.random() * 50))
@@ -88,9 +125,47 @@ try {
   assert.equal(p.timeline.textos[0].x, 0.3)
   assert.equal(p.timeline.sonidos[0].nombre, 'Pop')
   assert.deepEqual([avisos.length, avisos[0].quien, avisos[0].conTimeline], [1, 'claude-code', true], 'avisa a la interfaz quién y que cambió la timeline')
-  // La voz nueva gasta créditos: todavía no por aquí.
-  const voz = await llamar('editar_timeline', { proyecto: id, operaciones: [{ op: 'anadir_voz', inicio: 1, texto: 'hola' }] })
-  assert.equal(voz.isError, true)
+  // La voz nueva gasta: primero el costo y un código; con el código, se genera y entra.
+  const opsVoz = [{ op: 'anadir_voz', inicio: 1, texto: 'hola' }]
+  const voz = await llamar('editar_timeline', { proyecto: id, operaciones: opsVoz })
+  const codigo = voz.content[0].text.match(/"confirmacion": "([0-9A-F]+)"/)?.[1]
+  assert.ok(codigo, voz.content[0].text)
+  assert.equal(vocesGeneradas, 0, 'sin confirmar no gasta')
+  const otro = await llamar('editar_timeline', { proyecto: id, operaciones: [{ op: 'anadir_voz', inicio: 1, texto: 'otra cosa' }], confirmacion: codigo })
+  assert.match(otro.content[0].text, /Esto gasta/, 'el código vale solo para ese pedido')
+  const conCodigo = await llamar('editar_timeline', { proyecto: id, operaciones: opsVoz, confirmacion: codigo })
+  assert.ok(!conCodigo.isError, conCodigo.content[0].text)
+  assert.equal(vocesGeneradas, 1)
+  assert.equal(proyectos.get(id).timeline.voces.at(-1).texto, 'hola')
+  const repetido = await llamar('editar_timeline', { proyecto: id, operaciones: opsVoz, confirmacion: codigo })
+  assert.match(repetido.content[0].text, /Esto gasta/, 'un código se usa una sola vez')
+
+  // Crear: con voz pide permiso; con el código empieza la charla del plan y vuelve al momento.
+  for (const n of ['crear_video', 'ver_creacion', 'hablar_con_agente', 'hacer_video', 'parar_agente', 'pasar_al_editor', 'ver_voces', 'probar_voz', 'generar_con_flow']) {
+    assert.ok(nombres.includes(n), n)
+  }
+  const pedido = { peticion: 'Un video sobre el cuidado de los dientes', formato: 'vertical', voz: 'charon' }
+  const sinPermiso = await llamar('crear_video', pedido)
+  const cc = sinPermiso.content[0].text.match(/"confirmacion": "([0-9A-F]+)"/)?.[1]
+  assert.ok(cc && creadas.size === 0, 'sin confirmar no crea nada')
+  const creada = await llamar('crear_video', { ...pedido, confirmacion: cc })
+  assert.match(creada.content[0].text, /id c-prueba/)
+  assert.equal(creadas.get('c-prueba').vozElegida, 'Charon', 'la voz se reconoce sin importar mayúsculas')
+  assert.deepEqual(turnos[0], { cid: 'c-prueba', texto: undefined, que: 'charla' })
+  assert.match((await llamar('ver_creacion', { creacion: 'c-prueba' })).content[0].text, /TRABAJANDO.*Mirando tus archivos/)
+  assert.equal((await llamar('hablar_con_agente', { creacion: 'c-prueba', mensaje: 'Más corto' })).isError, true, 'no se le habla mientras trabaja')
+  ocupadas.delete('c-prueba')
+  creadas.get('c-prueba').agente = { registro: [], rondas: 0, plan: { entendi: 'Un video de dientes', pasos: ['Guion', 'Voz', 'Montaje'], preguntas: [] } }
+  assert.match((await llamar('ver_creacion', { creacion: 'c-prueba' })).content[0].text, /\[ \] 2\. Voz/)
+  // Ya aceptó el gasto de esta creación: hablar y «Hazlo» no vuelven a pedirlo.
+  assert.ok(!(await llamar('hablar_con_agente', { creacion: 'c-prueba', mensaje: 'Más corto' })).isError)
+  ocupadas.delete('c-prueba')
+  const hazlo = await llamar('hacer_video', { creacion: 'c-prueba' })
+  assert.match(hazlo.content[0].text, /haciendo el video/)
+  assert.deepEqual(turnos.map((t) => t.que), ['charla', 'charla', 'hacer'])
+  // Sin voz conectada y con una voz desconocida, no hace nada.
+  assert.equal((await llamar('crear_video', { peticion: 'x', voz: 'Nadie' })).isError, true)
+  assert.match((await llamar('ver_voces', {})).content[0].text, /Charon: Informativa/)
   // Lo pendiente (aún no aplicado en el editor) manda al leer y editar.
   const conPendiente = proyectos.get(id)
   conPendiente.timelinePendiente = { ...conPendiente.timeline, textos: [] }

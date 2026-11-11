@@ -7,6 +7,11 @@ import { Icon } from '../Icons'
 /** Lo que devuelve Recorte al generar una frase: su audio ya está en la carpeta del proyecto. */
 export type FraseGenerada = { archivo: string; duracion: number; texto: string; voz: string }
 export type GenerarVoz = (texto: string, voz?: string) => Promise<FraseGenerada | null>
+/** Una frase grabada con el micrófono: Recorte la deja en el proyecto (sin gastar nada). */
+export type GrabarVoz = (datos: Uint8Array, texto: string) => Promise<{ archivo: string; duracion: number; texto: string } | null>
+
+/** Las frases grabadas con tu voz (no se regeneran con «Toda la voz con…»). */
+export const esVozPropia = (v: VozTL): boolean => v.archivo.includes('voz-propia-')
 
 /**
  * La narración a mano, sin pasar por el agente (no gasta sus créditos): cambiar lo que dice
@@ -19,6 +24,7 @@ export function InspectorVoz({
   tiempo,
   historial,
   generar,
+  grabar,
   onElegir,
   onCerrar
 }: {
@@ -28,6 +34,7 @@ export function InspectorVoz({
   tiempo: number
   historial: Historial
   generar: GenerarVoz
+  grabar?: GrabarVoz
   onElegir: (id: string | null) => void
   onCerrar?: () => void
 }) {
@@ -43,7 +50,29 @@ export function InspectorVoz({
   }, [frase?.id])
 
   const cambio = Boolean(frase) && (texto.trim() !== (frase?.texto ?? '').trim() || voz !== (frase?.voz ?? voz))
-  const otras = (timeline.voces ?? []).filter((v) => v.voz !== voz || !v.voz).length
+  const otras = (timeline.voces ?? []).filter((v) => !esVozPropia(v) && (v.voz !== voz || !v.voz)).length
+  const grabador = useGrabadora()
+
+  /** Graba con el micrófono: en una frase, reemplaza su audio; sin frase, añade una en el cabezal. */
+  async function grabarYUsar() {
+    if (!grabar || ocupado) return
+    if (grabador.estado !== 'grabando') return void grabador.empezar()
+    const datos = await grabador.parar()
+    if (!datos) return
+    setOcupado('Preparando tu grabación')
+    const dicho = texto.trim() || frase?.texto || ''
+    const r = await grabar(datos, dicho)
+    setOcupado(null)
+    if (!r) return
+    if (frase) {
+      historial.aplicar(cambiarVoz(timeline, frase.id, { archivo: r.archivo, duracion: r.duracion, texto: r.texto, voz: undefined }))
+      return
+    }
+    const { timeline: con, id } = anadirVoz(timeline, { inicio: tiempo, duracion: r.duracion, archivo: r.archivo, texto: r.texto })
+    if (con === timeline) return
+    historial.aplicar(con)
+    onElegir(id)
+  }
 
   async function regenerar() {
     if (!frase || !texto.trim() || ocupado) return
@@ -67,7 +96,7 @@ export function InspectorVoz({
 
   /** Todas las frases con la voz elegida: una por una, y al final un solo paso de deshacer. */
   async function todas() {
-    const lista = (timeline.voces ?? []).filter((v) => v.texto.trim())
+    const lista = (timeline.voces ?? []).filter((v) => v.texto.trim() && !esVozPropia(v))
     if (!lista.length || ocupado) return
     let tl = timeline
     for (const [i, v] of lista.entries()) {
@@ -101,6 +130,17 @@ export function InspectorVoz({
           </option>
         ))}
       </select>
+      {grabar && (
+        <button
+          className={`btn small ${grabador.estado === 'grabando' ? 'primary' : ''}`}
+          disabled={Boolean(ocupado)}
+          onClick={() => void grabarYUsar()}
+          title={frase ? 'Graba esta frase con tu voz (reemplaza su audio)' : 'Graba con tu voz una frase nueva en el cabezal'}
+        >
+          <span className={`voz-punto ${grabador.estado === 'grabando' ? '' : 'apagado'}`} />
+          {grabador.estado === 'grabando' ? `Parar · ${grabador.segundos.toFixed(0)} s` : 'Grabar'}
+        </button>
+      )}
       {frase ? (
         <>
           <button className="btn small primary" disabled={!cambio || !texto.trim() || Boolean(ocupado)} onClick={() => void regenerar()} title="Vuelve a generar solo esta frase, con este texto y esta voz">
@@ -133,13 +173,14 @@ export function InspectorVoz({
           Generar aquí
         </button>
       )}
+      {grabador.error && <span className="crear-error">{grabador.error}</span>}
       {ocupado ? (
         <span className="tl-dim">{ocupado}…</span>
       ) : (
         <>
           {frase && (
             <span className="tl-dim">
-              {frase.duracion.toFixed(1)} s{frase.voz ? ` · ${frase.voz}` : ''}
+              {frase.duracion.toFixed(1)} s{esVozPropia(frase) ? ' · tu voz' : frase.voz ? ` · ${frase.voz}` : ''}
             </span>
           )}
           <span className="tl-flex" />
@@ -169,4 +210,54 @@ export function InspectorVoz({
       )}
     </div>
   )
+}
+
+/** El micrófono: empezar, parar (devuelve lo grabado) y cuántos segundos van. */
+function useGrabadora() {
+  const [estado, setEstado] = useState<'listo' | 'grabando'>('listo')
+  const [segundos, setSegundos] = useState(0)
+  const [error, setError] = useState<string | null>(null)
+  const grabador = useRef<MediaRecorder | null>(null)
+  const trozos = useRef<Blob[]>([])
+
+  useEffect(() => {
+    if (estado !== 'grabando') return
+    const desde = Date.now()
+    const reloj = setInterval(() => setSegundos((Date.now() - desde) / 1000), 250)
+    return () => clearInterval(reloj)
+  }, [estado])
+  // Si se cierra el panel grabando, el micrófono se suelta.
+  useEffect(() => () => grabador.current?.stream.getTracks().forEach((t) => t.stop()), [])
+
+  async function empezar() {
+    setError(null)
+    try {
+      const flujo = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
+      const r = new MediaRecorder(flujo, { mimeType: 'audio/webm' })
+      trozos.current = []
+      r.ondataavailable = (e) => e.data.size && trozos.current.push(e.data)
+      grabador.current = r
+      r.start()
+      setSegundos(0)
+      setEstado('grabando')
+    } catch {
+      setError('No pude usar el micrófono: revisa que esté conectado y que Windows le dé permiso a Recorte.')
+    }
+  }
+
+  function parar(): Promise<Uint8Array | null> {
+    const r = grabador.current
+    if (!r || r.state === 'inactive') return Promise.resolve(null)
+    return new Promise((ok) => {
+      r.onstop = async () => {
+        r.stream.getTracks().forEach((t) => t.stop())
+        setEstado('listo')
+        const blob = new Blob(trozos.current, { type: 'audio/webm' })
+        ok(blob.size ? new Uint8Array(await blob.arrayBuffer()) : null)
+      }
+      r.stop()
+    })
+  }
+
+  return { estado, segundos, error, empezar, parar }
 }

@@ -189,6 +189,7 @@ class Lienzo:
         self.transicion = float(r.get('transicion', 0.22))
         self.base = os.path.dirname(os.path.abspath(r['_ruta']))
         self.subs = leer_subtitulos(r.get('subtitulos'), self)
+        self.capas = leer_capas(r.get('capas'), self)
 
     def ruta(self, p):
         return p if os.path.isabs(p) else os.path.join(self.base, p)
@@ -259,6 +260,73 @@ def subtitulo(lienzo, L, t):
         else:
             d.text((x, y), ln, font=f, fill=s['color'], stroke_width=max(2, s['tam'] // 14), stroke_fill=(0, 0, 0))
     lienzo.alpha_composite(capa)
+    return lienzo
+
+
+def sonido_incluido(nombre):
+    """La ruta de un efecto de sonido que trae Recorte (`whoosh`, `pop`, `pop-alto`, `ding`, `caching`)."""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sonidos', f'{nombre}.wav')
+
+
+def leer_capas(lista, L):
+    """Imágenes encima del video (logos, íconos, sellos): cada una con su sitio, su ancho y su entrada.
+
+    Van en la receta (no pegadas con un script aparte) para que en el editor de Recorte queden en la
+    pista «Encima» y el usuario las mueva, las agrande o las quite.
+    """
+    capas = []
+    for i, c in enumerate(lista or []):
+        try:
+            ruta = L.ruta(c['archivo'])
+            desde, hasta = float(c['desde']), float(c['hasta'])
+        except (KeyError, TypeError, ValueError):
+            raise SystemExit(f'Capa {i + 1}: necesita "archivo", "desde" y "hasta".')
+        if not os.path.isfile(ruta):
+            raise SystemExit(f'Capa {i + 1}: no encuentro «{c["archivo"]}».')
+        if os.path.splitext(ruta)[1].lower() not in ('.png', '.jpg', '.jpeg', '.webp'):
+            raise SystemExit(f'Capa {i + 1}: solo imágenes (png, jpg, webp).')
+        if hasta <= desde:
+            continue
+        im = Image.open(ruta).convert('RGBA')
+        ancho = min(1.0, max(0.05, float(c.get('ancho', 0.3))))
+        w = max(1, round(L.W * ancho))
+        h = max(1, round(im.height * w / im.width))
+        entrada = c.get('entrada', 'pop')
+        capas.append({
+            'im': im.resize((w, h), Image.LANCZOS),
+            'desde': desde, 'hasta': hasta,
+            'x': min(1.0, max(0.0, float(c.get('x', 0.5)))), 'y': min(1.0, max(0.0, float(c.get('y', 0.5)))),
+            'entrada': entrada if entrada in ('pop', 'fundido', 'ninguna') else 'pop',
+        })
+    return capas
+
+
+def capas_encima(lienzo, L, t):
+    """Dibuja las capas visibles en `t`. El «pop» rebota como en el editor (45 % → 117 % → 100 % en 0,24 s)."""
+    for c in L.capas:
+        if not (c['desde'] <= t < c['hasta']):
+            continue
+        dt = t - c['desde']
+        escala, alfa = 1.0, 1.0
+        if c['entrada'] == 'pop':
+            escala = 0.45 + dt / 0.13 * 0.72 if dt < 0.13 else (1.17 - (dt - 0.13) / 0.11 * 0.17 if dt < 0.24 else 1.0)
+            alfa = min(1.0, dt / 0.08)
+        elif c['entrada'] == 'fundido':
+            alfa = min(1.0, dt / 0.35)
+        alfa *= 1 - tramo(t, c['hasta'] - 0.12, c['hasta'])
+        if alfa <= 0.01:
+            continue
+        im = c['im']
+        if abs(escala - 1) > 0.01:
+            im = im.resize((max(1, round(im.width * escala)), max(1, round(im.height * escala))), Image.BILINEAR)
+        if alfa < 0.999:
+            im = im.copy()
+            im.putalpha(im.getchannel('A').point(lambda a: round(a * alfa)))
+        x = round(L.W * c['x'] - im.width / 2)
+        y = round(L.H * c['y'] - im.height / 2)
+        capa = Image.new('RGBA', lienzo.size, (0, 0, 0, 0))
+        capa.paste(im, (x, y), im)
+        lienzo.alpha_composite(capa)
     return lienzo
 
 
@@ -538,6 +606,9 @@ def cuadro(L, momentos, t, dur, fundido_final):
             lienzo = capa if capa.mode == 'RGBA' else capa.convert('RGBA')
         elif k > 0.001:
             lienzo = Image.blend(lienzo, capa, k)
+    if lienzo.mode != 'RGBA':
+        lienzo = lienzo.convert('RGBA')
+    lienzo = capas_encima(lienzo, L, t)
     lienzo = subtitulo(lienzo, L, t)
     if fundido_final > 0:
         k = tramo(t, dur - fundido_final, dur)
@@ -594,6 +665,16 @@ def armar(ruta, prueba=None):
         partes.append(f'[{n}:a]aresample=48000,aformat=channel_layouts=stereo,volume={float(f.get("volumen", 1))},'
                       f'adelay={int(float(f.get("en", 0)) * 1000)}:all=1[v{i}]')
         pistas.append(f'[v{i}]')
+    # Los efectos de sonido: uno de los que trae Recorte (`"sonido": "pop"`) o un archivo, en su segundo.
+    for i, s in enumerate(r.get('sonidos') or []):
+        ruta = sonido_incluido(s['sonido']) if s.get('sonido') else L.ruta(s.get('archivo', ''))
+        if not os.path.isfile(ruta):
+            raise SystemExit(f'Sonido {i + 1}: no encuentro «{s.get("sonido") or s.get("archivo")}».')
+        entrada_audio += ['-i', ruta]
+        n = len(entrada_audio) // 2
+        partes.append(f'[{n}:a]aresample=48000,aformat=channel_layouts=stereo,volume={float(s.get("volumen", 0.6))},'
+                      f'adelay={int(float(s.get("en", 0)) * 1000)}:all=1[s{i}]')
+        pistas.append(f'[s{i}]')
     if pistas:
         mezcla = (f'{"".join(pistas)}amix=inputs={len(pistas)}:normalize=0:dropout_transition=0,apad[a]'
                   if len(pistas) > 1 else f'{pistas[0]}apad[a]')

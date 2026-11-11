@@ -1,6 +1,6 @@
 import { protocol } from 'electron'
 import { createReadStream, statSync } from 'node:fs'
-import { extname, resolve, sep } from 'node:path'
+import { extname, join, resolve, sep } from 'node:path'
 import { Readable } from 'node:stream'
 import type { Creaciones } from './creaciones'
 import type { Proyectos } from './proyectos'
@@ -31,7 +31,7 @@ const TIPOS: Record<string, string> = {
  * `fuente` es el video original; el resto, archivos dentro de la carpeta del proyecto.
  * Soporta rangos para que el reproductor pueda adelantar y atrasar.
  */
-export function registrarMedia(proyectos: Proyectos, creaciones: Creaciones): void {
+export function registrarMedia(proyectos: Proyectos, creaciones: Creaciones, carpetaMuestras?: string): void {
   protocol.handle('recorte-media', async (request) => {
     const url = new URL(request.url)
     const id = url.hostname
@@ -43,6 +43,12 @@ export function registrarMedia(proyectos: Proyectos, creaciones: Creaciones): vo
       const medio = proyecto?.medios?.find((m) => m.id === relativo.slice(6))
       if (!medio) return new Response('No encontrado', { status: 404 })
       return servirArchivo(medio.ruta, request)
+    }
+
+    // `muestras/<voz>.wav`: la muestra de una voz de Gemini, para oírla antes de elegirla.
+    if (id === 'muestras' && carpetaMuestras) {
+      if (!/^[\w-]{1,40}\.wav$/.test(relativo)) return new Response('Prohibido', { status: 403 })
+      return servirArchivo(join(carpetaMuestras, relativo), request)
     }
 
     if (relativo === 'fuente') {

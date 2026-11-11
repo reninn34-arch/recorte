@@ -142,6 +142,9 @@ export interface VozCreacion {
 }
 
 /** Las 30 voces de Gemini TTS; las descripciones son nuestras, para elegir de un vistazo. */
+/** Lo que dice la muestra de cada voz (la misma en la caja y por MCP: se genera una vez). */
+export const textoMuestra = (voz: string): string => `Hola, soy ${voz}. Así sonaría la narración de tu video con mi voz.`
+
 export const VOCES_GEMINI: { id: string; descripcion: string }[] = [
   { id: 'Zephyr', descripcion: 'Brillante' },
   { id: 'Puck', descripcion: 'Animada' },

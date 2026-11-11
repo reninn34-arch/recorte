@@ -284,6 +284,10 @@ export interface RecorteApi {
   /** Elige un audio, lo copia a `media/` del proyecto y devuelve la pista lista para la timeline. */
   /** Genera una frase de narración con una voz de Gemini y la deja en el proyecto (sin agente). */
   vozFrase: (id: string, pedido: { texto: string; voz?: string }) => Promise<{ archivo: string; duracion: number; texto: string; voz: string }>
+  /** Una frase grabada con tu voz en el editor (el audio del micrófono): queda en el proyecto. */
+  vozGrabada: (id: string, datos: Uint8Array, texto: string) => Promise<{ archivo: string; duracion: number; texto: string }>
+  /** La URL de la muestra de una voz de Gemini (la genera la primera vez). */
+  vozMuestra: (voz: string) => Promise<string>
   importarMusica: (id: string) => Promise<{ ok: boolean; musica?: MusicaTL; error?: string } | null>
   /** Copia un efecto de sonido al proyecto: uno incluido (su id) o, sin id, uno que elija el usuario. */
   mcpEstado: () => Promise<EstadoMcp>
@@ -293,6 +297,8 @@ export interface RecorteApi {
   onProyectoExterno: (cb: (e: { proyecto: Project; quien: string; conTimeline: boolean }) => void) => () => void
   /** Un agente pidió mostrar un proyecto en el editor. */
   onAbrirProyecto: (cb: (id: string) => void) => () => void
+  /** Un agente de fuera (MCP) pide enseñar una creación con su chat. */
+  onAbrirCreacion: (cb: (id: string) => void) => () => void
   ponerSonido: (id: string, incluido?: string) => Promise<{ ok: boolean; sonido?: { archivo: string; nombre: string; duracion: number }; error?: string } | null>
   /** Crear con IA: videos desde cero, sin material importado. */
   elegirAdjuntos: () => Promise<string[]>
