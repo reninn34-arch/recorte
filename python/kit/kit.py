@@ -15,6 +15,7 @@ import argparse
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -1943,7 +1944,70 @@ def avisos_receta(r, L, momentos):
     return avisos
 
 
-def armar(ruta, prueba=None):
+# ---------------------------------------------------------------------------
+# Render quirúrgico: en un cambio, solo se vuelven a dibujar los segundos que cambiaron
+# ---------------------------------------------------------------------------
+
+# Lo de la receta que cambia la imagen entera (si cambia, se rehace todo).
+_GLOBAL_EXCLUIR = ('momentos', 'capas', 'subtitulos', 'voz', 'musica', 'sonidos', 'salida', 'preset', 'crf', '_ruta')
+_CLAVES_ARCHIVO = ('archivo', 'antes', 'despues', 'fondo', 'fotos')
+
+
+def _firmar(x, L):
+    """Una pieza de la receta con la huella de sus archivos (si se rehace una imagen con el mismo nombre, cuenta como cambio)."""
+    if not isinstance(x, dict):
+        return x
+    f = dict(x)
+    for k in _CLAVES_ARCHIVO:
+        v = x.get(k)
+        for p in (v if isinstance(v, list) else [v]):
+            if isinstance(p, str) and not p.startswith('#'):
+                try:
+                    st = os.stat(L.ruta(p))
+                    f[f'_{k}_{p}'] = [st.st_size, int(st.st_mtime)]
+                except OSError:
+                    pass
+    return f
+
+
+def huella_receta(r, L):
+    """Lo que define la imagen del video, para comparar con el render anterior."""
+    subs = dict(r.get('subtitulos') or {})
+    frases = subs.pop('frases', []) or []
+    return {
+        'global': json.dumps({k: v for k, v in r.items() if k not in _GLOBAL_EXCLUIR} | {'_subs': subs}, sort_keys=True, ensure_ascii=False),
+        'momentos': [json.dumps(_firmar(m, L), sort_keys=True, ensure_ascii=False) for m in r.get('momentos') or []],
+        'capas': [json.dumps(_firmar(c, L), sort_keys=True, ensure_ascii=False) for c in r.get('capas') or []],
+        'frases': [json.dumps(f, sort_keys=True, ensure_ascii=False) for f in frases],
+    }
+
+
+def tramos_cambiados(antes, ahora, transicion):
+    """Los segundos que hay que volver a dibujar: los de cada pieza que está en una receta y no en la otra (con lo que
+    dura su transición). None si cambió algo de todo el video (tamaño, filtros, letra de los subtítulos…)."""
+    if antes.get('global') != ahora.get('global'):
+        return None
+    tramos = []
+    for clave, extra in (('momentos', max(transicion, 0.5) + 0.15), ('capas', 0.15), ('frases', 0.15)):
+        a, b = antes.get(clave) or [], ahora.get(clave) or []
+        for x in [m for m in a if m not in b] + [m for m in b if m not in a]:
+            d = json.loads(x)
+            try:
+                desde, hasta = float(d.get('desde', d.get('en', 0))), float(d.get('hasta', d.get('desde', 0)))
+            except (TypeError, ValueError):
+                return None
+            tramos.append((max(0.0, desde - 0.15), hasta + extra))
+    tramos.sort()
+    juntos = []
+    for a, b in tramos:
+        if juntos and a <= juntos[-1][1] + 0.3:
+            juntos[-1] = (juntos[-1][0], max(juntos[-1][1], b))
+        else:
+            juntos.append((a, b))
+    return juntos
+
+
+def armar(ruta, prueba=None, todo=False):
     r, L, momentos, dur = cargar(ruta)
     avisos = avisos_receta(r, L, momentos)
     fundido_final = float(r.get('fundido_final', 0.5))
@@ -2011,12 +2075,45 @@ def armar(ruta, prueba=None):
              *entrada_audio, *filtro_audio,
              '-vf', 'format=yuv420p', '-c:v', 'libx264', '-preset', r.get('preset', 'veryfast'), '-crf', str(r.get('crf', 16)),
              '-movflags', '+faststart', salida]
+    # Render quirúrgico: si hay un render anterior de esta misma receta con otros cambios, solo se vuelven a dibujar los
+    # segundos que cambiaron; el resto se copia de aquel video (minutos en vez de media hora).
+    memoria = os.path.join(L.base, 'salida', '.ultimo-render.json')
+    huella = huella_receta(r, L)
+    anterior, rehacer = None, None
+    if not todo:
+        try:
+            with open(memoria, encoding='utf-8') as f:
+                m = json.load(f)
+            previo = L.ruta(m['salida'])
+            if (os.path.isfile(previo) and os.path.abspath(previo) != os.path.abspath(salida) and m.get('ancho') == L.W
+                    and m.get('alto') == L.H and m.get('fps') == L.fps):
+                rehacer = tramos_cambiados(m.get('huella') or {}, huella, L.transicion)
+                if rehacer is not None and sum(b - a for a, b in rehacer) < dur * 0.7:
+                    anterior = previo
+        except (OSError, ValueError, KeyError):
+            anterior = None
+    lector = None
+    if anterior:
+        lector = subprocess.Popen([FFMPEG, '-v', 'error', '-i', anterior, '-f', 'rawvideo', '-pix_fmt', 'rgb24',
+                                   '-vf', f'scale={L.W}:{L.H}', '-'], stdout=subprocess.PIPE)
+        print(f'render quirúrgico: rehago {", ".join(f"{a:.1f}–{b:.1f} s" for a, b in rehacer) or "nada"}; '
+              f'el resto sale de {os.path.relpath(anterior, L.base)}', file=sys.stderr, flush=True)
     ff = subprocess.Popen(orden, stdin=subprocess.PIPE)
     total = int(round(dur * L.fps))
+    tam = L.W * L.H * 3
+    dibujados = 0
     for i in range(total):
-        ff.stdin.write(np.asarray(cuadro(L, momentos, i / L.fps, dur, fundido_final), dtype=np.uint8).tobytes())
+        t = i / L.fps
+        viejo = lector.stdout.read(tam) if lector else b''
+        if lector and len(viejo) == tam and not any(a <= t < b for a, b in rehacer):
+            ff.stdin.write(viejo)
+        else:
+            ff.stdin.write(np.asarray(cuadro(L, momentos, t, dur, fundido_final), dtype=np.uint8).tobytes())
+            dibujados += 1
         if i % (L.fps * 2) == 0:
             print(f'cuadro {i}/{total}', file=sys.stderr, flush=True)
+    if lector:
+        lector.kill()
     ff.stdin.close()
     if ff.wait() != 0:
         raise SystemExit('FFmpeg falló al codificar.')
@@ -2025,8 +2122,14 @@ def armar(ruta, prueba=None):
             m.proc.kill()
     hoja_ruta = hoja(salida, 12, os.path.join(revision, 'hoja-final.jpg'))
     info = probar(salida)
+    try:
+        with open(memoria, 'w', encoding='utf-8') as f:
+            json.dump({'salida': os.path.relpath(salida, L.base), 'ancho': L.W, 'alto': L.H, 'fps': L.fps, 'huella': huella}, f, ensure_ascii=False)
+    except OSError:
+        pass
     print(json.dumps({'salida': os.path.relpath(salida, L.base), 'duracion': round(info['duracion'], 2), 'ancho': info['ancho'],
                       'alto': info['alto'], 'audio': info['audio'], 'hoja': os.path.relpath(hoja_ruta, L.base),
+                      'dibujados': f'{dibujados} de {total} cuadros' + (' (el resto, del render anterior)' if anterior else ''),
                       **({'avisos': avisos} if avisos else {})}, ensure_ascii=False))
 
 
@@ -2465,19 +2568,54 @@ def pedir_a_recorte(buzon, datos, espera, que, imprimir=True):
     raise SystemExit(f'Recorte no respondió al pedido de {que}. Sigue sin ello y dilo en el resumen.')
 
 
-def voz(archivo, espera=900):
+def _trabajo():
+    """La carpeta de trabajo (la que tiene kit/ dentro)."""
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _memoria(nombre):
+    ruta = os.path.join(_trabajo(), nombre)
+    try:
+        with open(ruta, encoding='utf-8') as f:
+            return ruta, json.load(f)
+    except (OSError, ValueError):
+        return ruta, {}
+
+
+def _guardar_memoria(ruta, datos):
+    os.makedirs(os.path.dirname(ruta), exist_ok=True)
+    with open(ruta, 'w', encoding='utf-8') as f:
+        json.dump(datos, f, ensure_ascii=False, indent=1)
+
+
+def voz(archivo, espera=900, nueva=False):
     """Pide a Recorte la narración con la voz que eligió el usuario: una frase por línea del archivo.
 
-    Devuelve cada frase con su archivo y lo que dura, para poner cada momento en su frase.
+    Devuelve cada frase con su archivo y lo que dura, para poner cada momento en su frase. Las frases que ya se
+    generaron antes (el mismo texto) se reutilizan sin volver a gastar cuota: solo se piden las nuevas o cambiadas.
+    Con `nueva`, se piden todas otra vez (si el usuario cambió de voz).
     """
     with open(archivo, encoding='utf-8-sig') as f:
         frases = [l.strip() for l in f if l.strip()]
     if not frases:
         raise SystemExit('El archivo no tiene frases (una por línea).')
-    pedir_a_recorte('voz', {'frases': frases}, espera, 'la voz')
+    ruta, memoria = _memoria(os.path.join('voz', '.frases.json'))
+    hechas = {} if nueva else {t: e for t, e in memoria.items() if os.path.isfile(os.path.join(_trabajo(), e.get('archivo', '')))}
+    faltan = [t for t in frases if t not in hechas]
+    voz_elegida = next((e.get('voz') for e in hechas.values() if e.get('voz')), None)
+    if faltan:
+        r = pedir_a_recorte('voz', {'frases': faltan}, espera, 'la voz', imprimir=False)
+        voz_elegida = r.get('voz') or voz_elegida
+        for f in r.get('frases') or []:
+            hechas[f['texto']] = {**f, 'voz': r.get('voz')}
+            memoria[f['texto']] = {**f, 'voz': r.get('voz')}
+        _guardar_memoria(ruta, memoria)
+    salida = [{k: v for k, v in hechas[t].items() if k != 'voz'} for t in frases if t in hechas]
+    print(json.dumps({'ok': True, 'voz': voz_elegida, 'frases': salida, 'total': round(sum(f['duracion'] for f in salida), 2),
+                      'nuevas': len(faltan), 'reutilizadas': len(frases) - len(faltan)}, ensure_ascii=False))
 
 
-def medio(tipo, prompt, referencias, espera, para_recortar=False):
+def medio(tipo, prompt, referencias, espera, para_recortar=False, nuevo=False):
     """Pide a Recorte una imagen o un clip generado (Google Flow o ChatGPT, con las cuentas del usuario).
 
     Las referencias (fotos de entrada/ o de medios/) hacen que lo generado se parezca a ellas. Devuelve el archivo en medios/.
@@ -2486,8 +2624,30 @@ def medio(tipo, prompt, referencias, espera, para_recortar=False):
     """
     if not prompt.strip():
         raise SystemExit('Describe qué generar.')
+    # Lo mismo pedido otra vez (mismo texto, mismas referencias): se reutiliza lo que ya se generó, sin gastar.
+    import hashlib
+    firma_refs = []
+    for ref in referencias or []:
+        try:
+            st = os.stat(ref)
+            firma_refs.append([ref, st.st_size, int(st.st_mtime)])
+        except OSError:
+            firma_refs.append([ref])
+    clave = hashlib.sha1(json.dumps([tipo, prompt.strip(), bool(para_recortar), firma_refs], ensure_ascii=False).encode()).hexdigest()[:16]
+    ruta_mem, memoria = _memoria(os.path.join('medios', '.generados.json'))
+    previo = memoria.get(clave)
+    if previo and not nuevo:
+        existe = lambda p: bool(p) and (os.path.isfile(p) or os.path.isfile(os.path.join(_trabajo(), p)))
+        if existe(previo.get('archivo')) and (not para_recortar or existe(previo.get('recorte'))):
+            print(json.dumps({**previo, 'reutilizado': True,
+                              'nota': 'Ya lo habías generado con este mismo pedido: no se volvió a generar ni gastó. Usa --nuevo para otra versión.'},
+                             ensure_ascii=False))
+            return
     r = pedir_a_recorte('medios', {'tipo': tipo, 'prompt': prompt + (PARA_RECORTAR if para_recortar else ''), 'referencias': referencias or []},
                         espera, 'la imagen' if tipo == 'imagen' else 'el clip', imprimir=not para_recortar)
+    if not para_recortar:
+        memoria[clave] = {k: v for k, v in r.items() if k not in ('creditos',)}
+        _guardar_memoria(ruta_mem, memoria)
     if para_recortar:
         base = os.path.join('medios', os.path.basename(r['archivo'])) if not os.path.isabs(r['archivo']) else r['archivo']
         ruta = r['archivo'] if os.path.isfile(r['archivo']) else base
@@ -2497,7 +2657,215 @@ def medio(tipo, prompt, referencias, espera, para_recortar=False):
             r['recorte_tam'] = [hecho['ancho'], hecho['alto']]
         except SystemExit as e:
             r['recorte_error'] = str(e)
+        if r.get('recorte'):
+            memoria[clave] = {k: v for k, v in r.items() if k not in ('creditos',)}
+            _guardar_memoria(ruta_mem, memoria)
         print(json.dumps(r, ensure_ascii=False))
+
+
+# ---------------------------------------------------------------------------
+# Revisar como un editor: hojas, comparación con la referencia, cortes y medidas
+# ---------------------------------------------------------------------------
+
+LISTA_REVISION = [
+    'Cuadros vacíos, grises o negros sin querer (un fondo sin nada encima, una transición que deja un hueco).',
+    'Textos: ¿alguno repite lo que dice el subtítulo?, ¿alguno queda tapado (por un brazo, una capa, el subtítulo) o '
+    'cortado por el borde?, ¿se leen?',
+    'Recortes: amplía los bordes de cada persona u objeto recortado: ¿quedan restos de verde, halos, siluetas fantasma '
+    'o trozos de fondo?',
+    'Movimiento (tiras de los cortes): ¿algo tiembla, salta, se descuadra en un corte o deja una estela?',
+    'Ritmo: ¿cada cuánto cambia la imagen frente a la referencia (cortes por segundo)?, ¿hay tramos donde la misma '
+    'imagen dura demasiado?',
+    'Estilo frente a la referencia: letras, tamaños, colores, filtros, cómo entran las cosas, la jerarquía.',
+    'Cada momento tiene un sujeto claro y se entiende qué cuenta.',
+    'El pedido: repasa CADA cosa que pidió el usuario y comprueba en los cuadros que está hecha.',
+]
+
+
+def _cuadros(video, fps, ancho=180):
+    """Los cuadros de un video a `fps`, en gris y en color pequeño (para medir), con su segundo."""
+    info = probar(video)
+    alto = round(ancho * info['alto'] / max(1, info['ancho']) / 2) * 2
+    p = subprocess.run([FFMPEG, '-v', 'error', '-i', video, '-vf', f'fps={fps},scale={ancho}:{alto}', '-f', 'rawvideo',
+                        '-pix_fmt', 'rgb24', '-'], capture_output=True)
+    a = np.frombuffer(p.stdout, np.uint8)
+    n = a.size // (ancho * alto * 3)
+    return a[:n * ancho * alto * 3].reshape(n, alto, ancho, 3), info
+
+
+def _cortes(video):
+    """Los segundos donde cambia la imagen (cambios de plano, también con fundidos o barridos): picos de la diferencia
+    entre cuadros seguidos (a 8 por segundo), al menos 0,4 s entre uno y otro."""
+    p = subprocess.run([FFMPEG, '-v', 'error', '-i', video, '-vf', 'fps=8,scale=96:170', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
+                       capture_output=True)
+    a = np.frombuffer(p.stdout, np.uint8)
+    n = a.size // (96 * 170 * 3)
+    if n < 3:
+        return []
+    a = a[:n * 96 * 170 * 3].reshape(n, 170, 96, 3).astype(np.float32)
+    d = np.abs(np.diff(a, axis=0)).mean(axis=(1, 2, 3))
+    umbral = max(10.0, 2.2 * float(np.median(d)))
+    cortes = []
+    for i in range(len(d)):
+        if d[i] > umbral and d[i] == d[max(0, i - 2):i + 3].max():
+            t = (i + 1) / 8
+            if not cortes or t - cortes[-1] >= 0.4:
+                cortes.append(round(t, 3))
+    return cortes
+
+
+def revisar(video, referencia=None, salida=None):
+    """Mira un video como lo haría un editor: hojas para el ritmo, la referencia al lado, tiras de cada corte para
+    el movimiento y medidas (cortes por segundo, tramos vacíos, destellos). Deja las imágenes en revision/ y un
+    informe con lo que hay que mirar en cada una."""
+    import cv2
+    carpeta = salida or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(video))) if os.path.basename(
+        os.path.dirname(os.path.abspath(video))) == 'salida' else os.path.dirname(os.path.abspath(video)), 'revision')
+    os.makedirs(carpeta, exist_ok=True)
+    rutas = {}
+    cuadros, info = _cuadros(video, 4)
+    dur = info['duracion']
+    # 1. El ritmo: dos cuadros por segundo, una fila cada 5 s.
+    rutas['ritmo'] = os.path.join(carpeta, 'revisar-ritmo.jpg')
+    subprocess.run([FFMPEG, '-v', 'error', '-y', '-i', video, '-vf', f'fps=2,scale=160:-2,tile=10x{max(1, math.ceil(dur / 5))}',
+                    '-frames:v', '1', rutas['ritmo']], check=False)
+    # 2. Los cortes: una tira de 7 cuadros (a 12 por segundo) alrededor de cada cambio de plano.
+    cortes = _cortes(video)
+    elegidos = cortes[:16]
+    if elegidos:
+        filas = []
+        for t in elegidos:
+            p = subprocess.run([FFMPEG, '-v', 'error', '-ss', f'{max(0, t - 0.25):.3f}', '-t', '0.6', '-i', video, '-vf',
+                                'fps=12,scale=120:-2', '-frames:v', '7', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], capture_output=True)
+            h = round(120 * info['alto'] / info['ancho'] / 2) * 2
+            a = np.frombuffer(p.stdout, np.uint8)
+            n = a.size // (120 * h * 3)
+            if n:
+                tira = a[:n * 120 * h * 3].reshape(n, h, 120, 3)
+                fila = np.zeros((h, 120 * 7, 3), np.uint8)
+                for i in range(n):
+                    fila[:, i * 120:(i + 1) * 120] = tira[i]
+                filas.append(fila)
+        if filas:
+            rutas['cortes'] = os.path.join(carpeta, 'revisar-cortes.jpg')
+            Image.fromarray(np.vstack(filas)).save(rutas['cortes'], quality=85)
+    # 3. Medidas: tramos casi vacíos (mucho menos detalle que lo normal del video) y destellos (saltos de luz).
+    gris = np.stack([cv2.cvtColor(c, cv2.COLOR_RGB2GRAY) for c in cuadros]).astype(np.float32) if len(cuadros) else np.zeros((0, 1, 1))
+    franja = slice(0, int(gris.shape[1] * 0.68)) if len(gris) else slice(0, 1)
+    detalle = np.array([np.abs(cv2.Laplacian(g[franja], cv2.CV_32F)).mean() for g in gris]) if len(gris) else np.zeros(0)
+    vacios = []
+    if len(detalle):
+        bajo = detalle < np.median(detalle) * 0.45
+        i = 0
+        while i < len(bajo):
+            if bajo[i]:
+                j = i
+                while j < len(bajo) and bajo[j]:
+                    j += 1
+                if (j - i) / 4 >= 0.5:
+                    vacios.append([round(i / 4, 2), round(j / 4, 2)])
+                i = j
+            else:
+                i += 1
+    luz = gris.mean(axis=(1, 2)) if len(gris) else np.zeros(0)
+    destellos = [round(i / 4, 2) for i in range(1, len(luz) - 1) if abs(luz[i] - luz[i - 1]) > 55 and abs(luz[i] - luz[i + 1]) > 55]
+    resumen = {'video': video, 'duracion': round(dur, 2), 'cortes': len(cortes),
+               'cortes_por_segundo': round(len(cortes) / max(dur, 0.1), 2),
+               'plano_mas_largo': round(max(np.diff([0.0] + cortes + [dur])) if dur else 0, 2),
+               'tramos_casi_vacios': vacios, 'destellos': destellos}
+    # 4. La referencia: su ritmo y, al lado, el video en las mismas posiciones.
+    if referencia and os.path.isfile(referencia):
+        rc = _cortes(referencia)
+        rd = probar(referencia)['duracion']
+        resumen['referencia'] = {'cortes_por_segundo': round(len(rc) / max(rd, 0.1), 2),
+                                 'plano_mas_largo': round(max(np.diff([0.0] + rc + [rd])) if rd else 0, 2)}
+        pares = []
+        for k in range(8):
+            f = (k + 0.5) / 8
+            fila = []
+            for v, d in ((video, dur), (referencia, rd)):
+                p = subprocess.run([FFMPEG, '-v', 'error', '-ss', f'{f * d:.2f}', '-i', v, '-frames:v', '1', '-vf', 'scale=200:356:force_original_aspect_ratio=decrease,pad=200:356:(ow-iw)/2:(oh-ih)/2',
+                                    '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], capture_output=True)
+                fila.append(np.frombuffer(p.stdout, np.uint8)[:200 * 356 * 3].reshape(356, 200, 3) if len(p.stdout) >= 200 * 356 * 3 else np.zeros((356, 200, 3), np.uint8))
+            pares.append(np.hstack([fila[0], np.full((356, 6, 3), 255, np.uint8), fila[1]]))
+        rutas['referencia'] = os.path.join(carpeta, 'revisar-referencia.jpg')
+        Image.fromarray(np.vstack([np.hstack(pares[:4]), np.hstack(pares[4:])])).save(rutas['referencia'], quality=85)
+    resumen['imagenes'] = {k: os.path.relpath(v) for k, v in rutas.items()}
+    avisos = []
+    if vacios:
+        avisos.append('Tramos casi vacíos en ' + ', '.join(f'{a}–{b} s' for a, b in vacios) + ': mira si es a propósito.')
+    if destellos:
+        avisos.append('Saltos bruscos de luz (un cuadro negro o blanco suelto) en ' + ', '.join(f'{t} s' for t in destellos) + '.')
+    ref = resumen.get('referencia')
+    if ref and resumen['cortes_por_segundo'] < ref['cortes_por_segundo'] * 0.75:
+        avisos.append(f"Ritmo: {resumen['cortes_por_segundo']} cortes/s frente a {ref['cortes_por_segundo']} de la referencia: va más lento.")
+    if ref and resumen['plano_mas_largo'] > ref['plano_mas_largo'] * 1.5 and resumen['plano_mas_largo'] > 2.5:
+        avisos.append(f"El plano más largo dura {resumen['plano_mas_largo']} s (en la referencia, {ref['plano_mas_largo']} s).")
+    resumen['avisos'] = avisos
+    resumen['mira'] = LISTA_REVISION
+    with open(os.path.join(carpeta, 'revisar.md'), 'w', encoding='utf-8') as f:
+        f.write('# Revisión de ' + os.path.basename(video) + '\n\n')
+        f.write('Imágenes: ' + ', '.join(f'{k}: {os.path.relpath(v, carpeta)}' for k, v in rutas.items()) + '\n')
+        f.write('(ritmo: cada fila son 5 s, cada cuadro 0,5 s · cortes: una fila por cambio de plano, 7 cuadros seguidos · '
+                'referencia: tu video a la izquierda y la referencia a la derecha, en las mismas posiciones)\n\n')
+        f.write('Medidas: ' + json.dumps({k: v for k, v in resumen.items() if k not in ('mira', 'imagenes', 'avisos')}, ensure_ascii=False) + '\n\n')
+        f.write('Avisos:\n' + ''.join(f'- {a}\n' for a in avisos or ['ninguno']) + '\nMira y responde, uno por uno:\n')
+        f.write(''.join(f'{i + 1}. {x}\n' for i, x in enumerate(LISTA_REVISION)))
+    return resumen
+
+
+def _normal(t):
+    import unicodedata
+    return ''.join(c for c in unicodedata.normalize('NFD', str(t).lower()) if unicodedata.category(c) != 'Mn')
+
+
+def donde(receta, consulta):
+    """Encuentra en la receta lo que nombra el usuario («la bandera», «el título 2002», «cuando dice órbita»): cada
+    pieza con su tipo, sus segundos y su texto o archivo, y saca su cuadro del último render a revision/."""
+    with open(receta, encoding='utf-8-sig') as f:
+        r = json.load(f)
+    base = os.path.dirname(os.path.abspath(receta))
+    palabras = [w for w in re.findall(r'\w+', _normal(consulta)) if len(w) > 2]
+    if not palabras:
+        raise SystemExit('Dime qué buscar (una palabra del texto, del archivo o de lo que se dice).')
+    hallados = []
+
+    def mira(donde_, i, d, desde, hasta):
+        texto = ' '.join(str(d.get(k, '')) for k in ('archivo', 'texto', 'rotulo', 'tipo', 'animar', 'sonido'))
+        for k in ('lineas', 'palabras', 'fotos'):
+            for x in d.get(k) or []:
+                texto += ' ' + (x if isinstance(x, str) else str(x.get('texto', '')) if isinstance(x, dict) else '')
+        n = _normal(texto)
+        tino = sum(w in n for w in palabras)
+        if tino:
+            hallados.append({'donde': donde_, 'n': i + 1, 'tipo': d.get('tipo', donde_[:-1]), 'desde': desde, 'hasta': hasta,
+                             'que': texto.strip()[:90], 'coincide': tino})
+
+    for i, m in enumerate(r.get('momentos') or []):
+        mira('momentos', i, m, m.get('desde'), m.get('hasta'))
+    for i, c in enumerate(r.get('capas') or []):
+        mira('capas', i, c, c.get('desde'), c.get('hasta'))
+    for i, s in enumerate((r.get('subtitulos') or {}).get('frases') or []):
+        mira('subtitulos', i, s, s.get('desde'), s.get('hasta'))
+    hallados.sort(key=lambda h: (-h['coincide'], h['desde'] or 0))
+    # El cuadro de cada una en el último render (si lo hay), para verla antes de tocarla.
+    try:
+        with open(os.path.join(base, 'salida', '.ultimo-render.json'), encoding='utf-8') as f:
+            video = os.path.join(base, json.load(f)['salida'])
+    except (OSError, ValueError, KeyError):
+        video = None
+    if video and os.path.isfile(video):
+        os.makedirs(os.path.join(base, 'revision'), exist_ok=True)
+        for k, h in enumerate(hallados[:6]):
+            try:
+                t = (float(h['desde']) + float(h['hasta'])) / 2
+            except (TypeError, ValueError):
+                continue
+            ruta = os.path.join(base, 'revision', f'donde-{k + 1}.jpg')
+            subprocess.run([FFMPEG, '-v', 'error', '-y', '-ss', f'{t:.2f}', '-i', video, '-frames:v', '1', '-vf', 'scale=360:-2', ruta], check=False)
+            if os.path.isfile(ruta):
+                h['cuadro'] = os.path.relpath(ruta, base)
+    return {'buscado': consulta, 'hallados': hallados[:12], **({} if hallados else {'nota': 'No lo encuentro en la receta: mira revision/revisar-ritmo.jpg para ubicarlo por la imagen.'})}
 
 
 def main():
@@ -2526,14 +2894,17 @@ def main():
     a = sub.add_parser('armar')
     a.add_argument('receta')
     a.add_argument('--prueba', help='segundos separados por coma: solo esos fotogramas, a revision/')
+    a.add_argument('--todo', action='store_true', help='dibujar el video entero aunque haya un render anterior que aprovechar')
     v = sub.add_parser('voz')
     v.add_argument('archivo', help='texto con una frase por línea')
+    v.add_argument('--nueva', action='store_true', help='pedir todas las frases otra vez (si el usuario cambió de voz)')
     for nombre in ('imagen', 'clip'):
         m = sub.add_parser(nombre)
         m.add_argument('prompt', help='qué tiene que verse, bien descrito (sujeto, encuadre, luz, estilo)')
         m.add_argument('--ref', action='append', help='foto de referencia (entrada/… o medios/…); se puede repetir')
         m.add_argument('--recorte', action='store_true',
                        help='sobre verde croma y sin fondo: un PNG (imagen) o un WebM con transparencia (clip) para usar como capa')
+        m.add_argument('--nuevo', action='store_true', help='generar otra versión aunque ya exista una con el mismo pedido')
     an = sub.add_parser('animar')
     an.add_argument('imagen')
     an.add_argument('--tipo', choices=TIPOS_ANIMAR + GESTOS, default='respirar')
@@ -2548,6 +2919,12 @@ def main():
     rv = sub.add_parser('recortar-video')
     rv.add_argument('clip')
     rv.add_argument('--salida')
+    rv2 = sub.add_parser('revisar')
+    rv2.add_argument('video')
+    rv2.add_argument('--referencia', help='el video de referencia, para comparar ritmo y estilo')
+    dn = sub.add_parser('donde')
+    dn.add_argument('consulta', help='lo que nombra el usuario: «la bandera», «el título 2002», «cuando dice órbita»')
+    dn.add_argument('--receta', default='receta.json')
     sp = sub.add_parser('separar')
     sp.add_argument('imagen')
     sp.add_argument('--planos', type=int, default=3)
@@ -2560,10 +2937,11 @@ def main():
                     help='auto: fondo liso si lo es y si no el modelo (se baja una vez, 178 MB)')
     x = p.parse_args()
     if x.orden == 'voz':
-        voz(x.archivo)
+        voz(x.archivo, nueva=x.nueva)
     elif x.orden in ('imagen', 'clip'):
         # Un clip puede tardar varios minutos en Flow.
-        medio(x.orden, x.prompt, x.ref, 900 if x.orden == 'imagen' else 1500, para_recortar=getattr(x, 'recorte', False))
+        medio(x.orden, x.prompt, x.ref, 900 if x.orden == 'imagen' else 1500, para_recortar=getattr(x, 'recorte', False),
+              nuevo=getattr(x, 'nuevo', False))
     elif x.orden == 'animar':
         puntos = json.loads(open(x.puntos, encoding='utf-8').read() if os.path.isfile(x.puntos) else x.puntos) if x.puntos else None
         print(json.dumps(animar_imagen(x.imagen, x.tipo, x.fuerza, x.salida, x.duracion, puntos=puntos, lado=x.lado), ensure_ascii=False))
@@ -2571,6 +2949,10 @@ def main():
         print(json.dumps(info_esqueleto(x.imagen, x.salida), ensure_ascii=False))
     elif x.orden == 'recortar-video':
         print(json.dumps(recortar_video(x.clip, x.salida), ensure_ascii=False))
+    elif x.orden == 'revisar':
+        print(json.dumps(revisar(x.video, x.referencia), ensure_ascii=False))
+    elif x.orden == 'donde':
+        print(json.dumps(donde(x.receta, x.consulta), ensure_ascii=False))
     elif x.orden == 'separar':
         print(json.dumps(separar(x.imagen, x.planos, x.salida), ensure_ascii=False))
     elif x.orden == 'recortar':
@@ -2582,7 +2964,7 @@ def main():
     elif x.orden == 'encuadre':
         vista_encuadre(x.foto, x.zoom, x.cx, x.cy, x.ancho, x.alto)
     else:
-        armar(x.receta, [float(v) for v in x.prueba.split(',')] if x.prueba else None)
+        armar(x.receta, [float(v) for v in x.prueba.split(',')] if x.prueba else None, todo=x.todo)
 
 
 if __name__ == '__main__':

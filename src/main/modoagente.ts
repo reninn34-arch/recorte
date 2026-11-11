@@ -199,11 +199,22 @@ Escribe código propio solo para lo que el kit no tenga, y aun así usa el kit p
 4. **Elige la herramienta.** FFmpeg para montar y cortar; Python + FFmpeg para animar con control de cada
    píxel; HyperFrames para diseño, tipografía y motion graphics.
 5. **Hazlo** y deja el resultado en \`salida/\`.
-6. **Compruébalo antes de entregar.** Saca fotogramas del resultado (inicio, momentos clave y final) a
-   \`revision/\`, MÍRALOS y mide lo que se pueda (duración, tamaño, que nada se recorte, que el croma siga
-   uniforme si lo hay). Si algo falla, corrígelo y vuelve a comprobar. No entregues sin mirar.
+6. **Revísalo como un editor antes de entregar** (no solo unos fotogramas sueltos):
+   - \`python kit/kit.py revisar salida/<video>.mp4 [--referencia entrada/<ref>.mp4]\` deja en \`revision/\` la hoja del
+     ritmo (dos cuadros por segundo), una tira de 7 cuadros seguidos por cada corte (para ver el MOVIMIENTO: temblores,
+     saltos, estelas, capas que se descuadran), tu video al lado de la referencia y \`revisar.md\` con medidas (cortes por
+     segundo frente a la referencia, tramos casi vacíos, destellos) y la lista de lo que hay que mirar. ÁBRELAS y amplía
+     (recorta y agranda) los bordes de cada recorte y cada texto: los defectos se ven de cerca.
+   - **Ojos frescos**: si puedes lanzar otro agente (la herramienta Task o Agent), pídele que revise SOLO viendo las
+     imágenes de \`revision/\`, \`revisar.md\`, la referencia y el pedido del usuario (sin la receta ni tus notas), y que te
+     devuelva la lista de defectos concretos con su segundo. Quien hizo el video ve lo que quiso hacer; el revisor ve lo
+     que hay. Si no puedes lanzarlo, haz tú la revisión punto por punto de \`revisar.md\` como si fuera el video de otro.
+   - Corrige cada defecto, vuelve a armar (solo se rehacen los segundos que cambian) y vuelve a revisar lo corregido.
+     No entregues con un defecto que viste.
 7. **Entrega** escribiendo \`resultado.json\` en esta carpeta:
    \`{"archivo": "salida/<nombre>", "receta": "receta.json", "resumen": "qué hiciste, en 1-3 frases", "comprobaciones": ["qué comprobaste y cómo salió", "…"]}\`
+   En un cambio, el resumen contesta PUNTO POR PUNTO lo que pidió el usuario: «Pediste X → hice Y (en el segundo Z)»,
+   y si algo no se pudo, por qué.
    (\`receta\` solo si lo hiciste con el kit: con ella el usuario abre cada foto, rótulo y frase de voz suelta en su editor para retocarla a mano. Por eso, si el kit alcanza, úsalo.)
 
 ## La duración la decide el material, no una cifra
@@ -758,6 +769,21 @@ export async function pasoHacer(
     : ''
   // Un cambio sobre un video ya hecho no repite el método entero: toca solo lo pedido
   // (menos tiempo y menos créditos del plan del usuario).
+  const COMO_CAMBIAR = `Cómo hacer un cambio (quirúrgico, como un editor con oficio; no gastes de más):
+1. Separa el pedido en puntos concretos. Para cada uno, ubícalo: \`python kit/kit.py donde "lo que nombra"\` (la
+   bandera, el título 2002, «cuando dice órbita») te da la pieza, sus segundos y su cuadro en revision/. Míralo.
+2. Escribe en notas.md qué entendiste de cada punto: «antes → después», con su pieza y su segundo. Si un punto se
+   puede leer de dos maneras, elige la más probable por lo que pidió antes y dilo en el resumen.
+3. Cambia SOLO esas piezas en tus archivos de trabajo (receta.json…) y conserva todo lo demás tal cual. No vuelvas a
+   mirar vistazo/ ni entrada/ ni a medir lo que ya mediste (está en notas.md), y no rehagas el plan.
+4. No regeneres lo que no se pide cambiar: imágenes, clips y frases de voz que ya existen se reutilizan (el kit
+   devuelve lo ya generado si pides lo mismo; una frase de voz solo se vuelve a pedir si cambia su texto).
+5. Arma a un archivo NUEVO en salida/ (otro nombre, p. ej. con -v2): \`armar\` aprovecha el render anterior y solo
+   vuelve a dibujar los segundos que cambiaron (minutos, no media hora).
+6. Comprueba cada punto: saca el cuadro de esos segundos ANTES y DESPUÉS, míralos lado a lado y comprueba también que
+   lo de alrededor sigue igual. \`python kit/kit.py revisar\` sobre el nuevo si el cambio fue grande.
+7. Escribe resultado.json contestando punto por punto («Pediste X → hice Y, en el segundo Z») y termina sin dejar
+   procesos abiertos.`
   const completo =
     hay && pedido
       ? `ESTO ES UN CAMBIO sobre un video que ya hiciste, no un video nuevo. Tu manual sigue en AGENTS.md por si lo necesitas.
@@ -768,10 +794,7 @@ YA HICISTE ESTA VERSIÓN: ${versionAnterior} (lo que dijiste: ${hay.resumen}). T
 
 LO QUE PIDE AHORA EL USUARIO: ${pedido}
 
-Cómo trabajar para no gastar de más:
-- No vuelvas a mirar vistazo/ ni entrada/ ni a medir lo que ya mediste (está en notas.md), y no rehagas el plan.
-- Abre el archivo de trabajo que produjo la versión anterior, cambia SOLO lo que se pide y conserva todo lo demás tal cual.
-- Renderiza a un archivo NUEVO en salida/ (otro nombre, p. ej. con -v2), mira 2 o 3 fotogramas de lo que cambiaste y entrega.
+${COMO_CAMBIAR}
 Al terminar escribe resultado.json como dice el manual y termina (no dejes servidores ni procesos abiertos).`
       : `Lee AGENTS.md (tu manual) y sigue el método completo, del paso 1 al 7. Empieza por notas.md y vistazo/: no repitas lo que ya viste.
 
@@ -781,11 +804,11 @@ Cuando termines y lo hayas comprobado mirando los fotogramas, escribe resultado.
   // Retomando la conversación, el agente ya sabe qué vio, qué planeó y qué hizo: solo lo nuevo.
   const corto = esCorreccion && pedido
     ? `${pedido}
-Corrige solo eso partiendo de lo que acabas de hacer, vuelve a comprobarlo y vuelve a escribir resultado.json como dice el manual. Termina sin dejar procesos abiertos.`
+Corrige solo eso partiendo de lo que acabas de hacer (ubícalo con \`kit/kit.py donde\`, cambia solo esas piezas y vuelve a armar: solo se rehacen esos segundos), compara el antes y el después de esos segundos y vuelve a escribir resultado.json contestando punto por punto. Termina sin dejar procesos abiertos.`
     : hay && pedido
       ? `Cambio sobre la versión que entregaste (${versionAnterior}): ${pedido}
-Cambia SOLO eso, partiendo de tus archivos de trabajo, y conserva todo lo demás tal cual. No vuelvas a mirar ni a medir lo que ya conoces.
-Renderiza a un archivo NUEVO en salida/, mira 2 o 3 fotogramas de lo que cambiaste y vuelve a escribir resultado.json como dice el manual. Termina sin dejar procesos abiertos.`
+
+${COMO_CAMBIAR}`
       : `El usuario aprobó el plan${pedido ? ` con esto: ${pedido}` : ''}. Ahora hazlo: sigue el método de AGENTS.md del paso 2 al 7 (ya miraste los archivos y apuntaste en notas.md: no lo repitas).${anunciar}
 Cuando lo hayas comprobado mirando los fotogramas, escribe resultado.json como dice el manual y termina (no dejes servidores ni previsualizaciones abiertas).`
   const entregaLista = () => fecha(resultadoJson) >= desde && archivoEntregado(carpeta, desde) !== null

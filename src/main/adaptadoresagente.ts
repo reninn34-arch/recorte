@@ -71,7 +71,7 @@ const CLAUDE: Adaptador = {
   stderrEsAvance: false,
   orden: (base, _cwd, sesion) =>
     // acceptEdits: escribe solo dentro de su directorio de trabajo; stream-json para ver qué hace.
-    `${base.trim()} --permission-mode acceptEdits --allowedTools "Bash Read Write Edit Glob Grep" --output-format stream-json --verbose${sesion ? ` --resume ${sesion}` : ''}`,
+    `${base.trim()} --permission-mode acceptEdits --allowedTools "Bash Read Write Edit Glob Grep Task Agent" --output-format stream-json --verbose${sesion ? ` --resume ${sesion}` : ''}`,
   leer(linea) {
     const ev = json(linea)
     if (!ev) return linea.trim() ? [{ t: 'linea', texto: corto(linea, 200) }] : []

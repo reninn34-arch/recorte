@@ -93,6 +93,12 @@ try {
   const dada = json(dicho)
   if (!dada.ok || dada.frases.length !== 2 || dada.frases[1].archivo !== frases[1].archivo) throw new Error(`El kit no devolvió las frases: ${dicho}`)
   console.log('voz: el kit pide, espera y devuelve cada frase con su archivo ✓')
+  // Las mismas frases otra vez: se reutilizan sin pedir nada (sin gastar cuota).
+  const otraVez = json(correr(python, ['kit/kit.py', 'voz', 'voz/narracion.txt'], trabajo))
+  const pedidosAhora = readdirSync(join(trabajo, 'voz')).filter((n) => /^pedido-/.test(n)).length
+  if (!(otraVez.reutilizadas === 2 && otraVez.nuevas === 0 && pedidosAhora === 1 && otraVez.frases[0].archivo === frases[0].archivo))
+    throw new Error(`Las frases repetidas no se reutilizaron: ${JSON.stringify(otraVez)}`)
+  console.log('voz repetida: se reutiliza sin volver a pedirla ✓')
 
   correr('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=600x800', '-frames:v', '1', 'foto.jpg'], trabajo)
   correr('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=110:duration=5', 'musica.wav'], trabajo)
@@ -115,6 +121,40 @@ try {
   const [conFrase, sinFrase] = [volumen(0.4, 0.8), volumen(3.5, 0.4)]
   if (!(conFrase > sinFrase + 4)) throw new Error(`La voz no suena sobre la música: ${conFrase} dB con frase, ${sinFrase} dB sin ella`)
   console.log(`voz en el video: ${conFrase} dB con frase frente a ${sinFrase} dB de música sola ✓`)
+
+  // Render quirúrgico: se cambia solo el segundo momento; el siguiente render dibuja solo esos segundos y copia
+  // el resto del anterior.
+  correr('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'smptebars=s=600x800', '-frames:v', '1', 'barras.jpg'], trabajo)
+  const dos = (rotulo) => ({
+    ancho: 270, alto: 480, fps: 12, duracion: 6, fundido_final: 0,
+    momentos: [
+      { tipo: 'foto', archivo: 'foto.jpg', desde: 0, hasta: 3, rotulo: 'Uno' },
+      { tipo: 'foto', archivo: 'barras.jpg', desde: 3, hasta: 6, rotulo }
+    ]
+  })
+  writeFileSync(join(trabajo, 'receta-q.json'), JSON.stringify({ ...dos('Dos'), salida: 'salida/q1.mp4' }))
+  const q1 = json(correr(python, ['kit/kit.py', 'armar', 'receta-q.json'], trabajo))
+  writeFileSync(join(trabajo, 'receta-q.json'), JSON.stringify({ ...dos('Otro rótulo'), salida: 'salida/q2.mp4' }))
+  const q2 = json(correr(python, ['kit/kit.py', 'armar', 'receta-q.json'], trabajo))
+  const [hechos, de] = /(\d+) de (\d+)/.exec(q2.dibujados).slice(1).map(Number)
+  if (!(hechos < de * 0.7 && hechos > 0 && /render anterior/.test(q2.dibujados))) throw new Error(`El render no fue quirúrgico: ${JSON.stringify(q2)}`)
+  const gris = (archivo, t) => {
+    const r = spawnSync('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', archivo, '-frames:v', '1', '-vf', 'crop=270:110:0:0', '-f', 'rawvideo', '-pix_fmt', 'gray', '-'], { cwd: trabajo })
+    return [...r.stdout]
+  }
+  // Cuántos píxeles cambian de verdad (más de 40 niveles): el ruido de recomprimir no cuenta.
+  const dif = (a, b) => a.filter((v, i) => Math.abs(v - b[i]) > 40).length
+  const [igual, cambio] = [dif(gris(q1.salida, 1.5), gris(q2.salida, 1.5)), dif(gris(q1.salida, 4.5), gris(q2.salida, 4.5))]
+  if (!(igual < 30 && cambio > 300)) throw new Error(`Render quirúrgico: lo que no cambió difiere ${igual}, lo cambiado ${cambio}`)
+  console.log(`render quirúrgico: ${q2.dibujados}; lo demás, igual que antes ✓`)
+  // Ubicar lo que nombra el usuario y revisar como un editor.
+  const hallado = json(correr(python, ['kit/kit.py', 'donde', 'el otro rotulo', '--receta', 'receta-q.json'], trabajo))
+  const h0 = hallado.hallados[0]
+  if (!(h0 && h0.desde === 3 && h0.cuadro && existsSync(join(trabajo, h0.cuadro)))) throw new Error(`donde no lo ubicó: ${JSON.stringify(hallado)}`)
+  const rev = json(correr(python, ['kit/kit.py', 'revisar', q2.salida, '--referencia', q1.salida], trabajo))
+  if (!(rev.cortes >= 1 && rev.referencia && Object.values(rev.imagenes).every((p) => existsSync(join(trabajo, p))) && existsSync(join(trabajo, 'revision', 'revisar.md'))))
+    throw new Error(`revisar no dejó lo que debía: ${JSON.stringify(rev)}`)
+  console.log(`donde (${h0.donde} ${h0.n}, ${h0.desde}–${h0.hasta} s) y revisar (${rev.cortes} corte, ${Object.keys(rev.imagenes).length} hojas) ✓`)
 
   // Sin voz elegida, Recorte lo dice y el kit termina con ese motivo.
   writeFileSync(join(trabajo, 'voz', 'una.txt'), 'Otra frase.\n', 'utf8')

@@ -183,6 +183,22 @@ que cada toma se ve en 3D. Elige la toma por lo que cuenta la frase:
 - **Nunca un cuadro vacío**: una foto que es solo un fondo (una pared, un haz de luz, una sala oscura) necesita algo
   encima TODO el rato que se ve (un título, una pieza, una capa). `armar` avisa si queda vacía.
 
+## Revisar, ubicar y cambiar (como un editor)
+- `python kit/kit.py revisar salida/x.mp4 [--referencia entrada/ref.mp4]` → en `revision/`: `revisar-ritmo.jpg` (dos
+  cuadros por segundo, una fila cada 5 s), `revisar-cortes.jpg` (7 cuadros seguidos en cada corte: el movimiento),
+  `revisar-referencia.jpg` (tu video a la izquierda y la referencia a la derecha, en las mismas posiciones) y
+  `revisar.md` (cortes por segundo frente a la referencia, plano más largo, tramos casi vacíos, destellos y la lista de
+  lo que hay que mirar). Úsalo antes de entregar.
+- `python kit/kit.py donde "la bandera"` → las piezas de la receta que nombra el usuario, con sus segundos y su cuadro
+  del último render en `revision/donde-N.jpg`. Úsalo en cada cambio para ubicar de qué habla.
+- **Render quirúrgico**: `armar` recuerda lo último que renderizó; si armas la receta cambiada a OTRO archivo de
+  salida, solo vuelve a dibujar los segundos de las piezas que cambiaron y copia el resto de aquel video (dice cuántos
+  cuadros dibujó). Si cambias algo de todo el video (tamaño, filtros, la letra de los subtítulos), lo hace entero.
+  `--todo` lo fuerza entero.
+- **No se gasta dos veces**: `kit.py imagen`/`clip` con el mismo pedido y las mismas referencias devuelven lo que ya se
+  generó (`"reutilizado": true`); `--nuevo` pide otra versión. `kit.py voz` solo pide las frases nuevas o cambiadas
+  (las demás se reutilizan); `--nueva` las pide todas otra vez (si el usuario cambió de voz).
+
 ## Filtros de todo el video
 `"filtros": {"grano": 0.3, "polvo": 0.2, "trama": 0.4, "vineta": 0.5, "parpadeo": 0.1}` (0 a 1): grano de película, polvo
 y rayas, trama de puntos de imprenta, viñeta y parpadeo de proyector. Van encima de la escena y de las capas y debajo de los
