@@ -24,6 +24,33 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.27',
+    fecha: '2026-11-10',
+    resumen: 'El agente ya hace mini documentales con títulos de revista, objetos de museo en 3D y fotos de archivo, y los puedes retocar en el editor.',
+    novedades: [
+      {
+        icono: 'type',
+        titulo: 'Títulos de revista',
+        texto: 'Preguntas de gancho con una palabra enorme en serif cursiva roja, años subrayados, la etiqueta amarilla con un nombre, palabras que flotan y una palabra final que llena la pantalla. En el editor llegan como rótulos sueltos, con la nueva letra Cursiva.'
+      },
+      {
+        icono: 'cubo',
+        titulo: 'Objetos de museo y fotos de archivo',
+        texto: 'Una obra, un cohete o un producto con su marco, bajo un foco de luz, entrando con un giro 3D. Y fotos en blanco y negro que caen una sobre otra.'
+      },
+      {
+        icono: 'film',
+        titulo: 'Copia el estilo de un video',
+        texto: 'Pásale al agente un video de referencia: lista sus efectos, usa la pieza que hace cada uno y respeta su ritmo. Si algo no lo puede hacer, te lo dice.'
+      },
+      {
+        icono: 'clock',
+        titulo: 'Render más rápido',
+        texto: 'Los videos con muchos textos se arman cerca de un tercio más rápido.'
+      }
+    ]
+  },
+  {
     version: '0.1.26',
     fecha: '2026-11-10',
     resumen: 'Oye cada voz antes de elegirla, graba tu voz frase por frase y tus retoques ya no se pierden al rehacer un video.',
