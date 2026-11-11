@@ -284,9 +284,19 @@ export function CajaCrear({
       flow: imagenes || videos ? { imagenes, videos, ...(imagenes && modeloImagen ? { modeloImagen } : {}), ...(modeloVideo ? { modeloVideo } : {}) } : null,
       tareas: tVideo ? { video: tVideo } : null
     }
-    const clave = JSON.stringify(ajustes)
-    // La primera vez solo se apunta: no se guarda nada que el usuario no tocó.
-    if (ajustesVistos.current !== null && ajustesVistos.current !== clave) chat.onAjustar(ajustes)
+    // Lo que el usuario eligió en la caja (sin lo que depende de que carguen sus cuentas de Flow o de voz).
+    const clave = JSON.stringify([voz, directo, modeloImagen, modeloVideo, tVideo])
+    // Lo que ya tiene guardado la creación: si la caja solo se puso al día con ella, no hay nada que guardar.
+    const guardado = JSON.stringify([
+      c0?.vozElegida ?? null,
+      Boolean(c0?.directo),
+      c0?.flow?.imagenes ? (c0.flow.modeloImagen ?? MODELOS_IMAGEN[0] ?? null) : null,
+      c0?.flow?.videos ? (c0.flow.modeloVideo ?? null) : null,
+      c0?.tareas?.video ?? null
+    ])
+    // La primera vez solo se apunta, y nunca se guarda por cargar las cuentas (antes, si Flow tardaba en cargar, la
+    // caja guardaba «sin imágenes» en una creación que las tenía): solo lo que el usuario cambia.
+    if (ajustesVistos.current !== null && ajustesVistos.current !== clave && clave !== guardado) chat.onAjustar(ajustes)
     ajustesVistos.current = clave
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voz, vozConectada, directo, modeloImagen, modeloVideo, tVideo, conFlow, conChatGPT])
