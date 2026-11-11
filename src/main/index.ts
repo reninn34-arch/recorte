@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from 'electron'
-import { duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, SONIDOS_INCLUIDOS, timelineInicial, timelineVacia, type Timeline } from '../shared/timeline'
+import { ANIMAR_CAPA, duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, SONIDOS_INCLUIDOS, timelineInicial, timelineVacia, type Timeline } from '../shared/timeline'
 import { randomUUID } from 'node:crypto'
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, join, resolve, sep } from 'node:path'
@@ -1428,6 +1428,37 @@ app.whenReady().then(() => {
     if (!nuevo) throw new Error(`No pude agregar el recorte: ${agregado.fallos.join(', ')}`)
     return { project: agregado.project, medio: nuevo }
   }
+  /**
+   * Anima una imagen recortada de la biblioteca (respira, se balancea, ondea, flota, humo) con el kit: un
+   * WebM con transparencia en bucle que entra a la biblioteca. Como el «Puppet» de After Effects: sin créditos.
+   */
+  async function animarImagen(id: string, medio: string, tipo: string): Promise<{ project: Project; medio: string }> {
+    const p = proyectos.abrir(id)
+    if (!p) throw new Error('El proyecto ya no existe.')
+    const m = p.medios?.find((x) => x.id === medio)
+    if (!m || m.tipo !== 'imagen') throw new Error('Solo se anima una imagen (mejor recortada, sin fondo).')
+    if (!ANIMAR_CAPA.some((a) => a.id === tipo)) throw new Error('Ese movimiento no existe.')
+    const py = await buscarPython()
+    const kit = rutaScriptPython(join('kit', 'kit.py'))
+    if (!py || !existsSync(kit)) throw new Error('Hace falta Python para animar (Ajustes › Sistema).')
+    const carpeta = join(proyectos.carpeta(id), 'animadas')
+    mkdirSync(carpeta, { recursive: true })
+    const salida = join(carpeta, `${basename(m.nombre, extname(m.nombre)).slice(0, 40)}-${tipo}-${randomUUID().slice(0, 6)}.webm`)
+    const cita = (x: string) => (/[\s"]/.test(x) ? `"${x}"` : x)
+    const r = await ejecutar([[py.cmd, ...py.args].map(cita).join(' '), cita(kit), 'animar', cita(m.ruta), '--tipo', tipo, '--salida', cita(salida)], carpeta, 600_000)
+    if (r.codigo !== 0 || !existsSync(salida)) {
+      const motivo = r.salida.trim().split('\n').filter(Boolean).pop() ?? ''
+      throw new Error(motivo.length < 300 && motivo ? motivo : 'No pude animarla.')
+    }
+    const agregado = await agregarRutas(id, [salida])
+    const nuevo = agregado.agregados[0]
+    if (!nuevo) throw new Error(`No pude agregar la animación: ${agregado.fallos.join(', ')}`)
+    return { project: agregado.project, medio: nuevo }
+  }
+  ipcMain.handle('proyecto:animar-imagen', (_evento, id: unknown, medio: unknown, tipo: unknown) => {
+    if (typeof id !== 'string' || typeof medio !== 'string' || typeof tipo !== 'string') throw new Error('Datos inválidos.')
+    return animarImagen(id, medio, tipo)
+  })
   ipcMain.handle('proyecto:quitar-fondo', (_evento, id: unknown, medio: unknown) => {
     if (typeof id !== 'string' || typeof medio !== 'string') throw new Error('Datos inválidos.')
     return quitarFondo(id, medio)
@@ -2385,6 +2416,7 @@ app.whenReady().then(() => {
     },
     abrirEnApp: (id) => alFrente('proyecto:abrir', id),
     quitarFondo: (id, medio) => quitarFondo(id, medio),
+    animarImagen: (id, medio, tipo) => animarImagen(id, medio, tipo),
     // ===== Crear por MCP (6.3) =====
     creaciones: {
       nueva: (p) => creaciones.nueva(p),

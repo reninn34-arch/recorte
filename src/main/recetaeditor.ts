@@ -6,8 +6,11 @@ import {
   FUENTE_PRINCIPAL,
   normalizarTimeline,
   nuevoId,
+  ANIMAR_CAPA,
   ENTRADAS_CAPA,
+  MARGEN_ANIMAR,
   TRANSICIONES,
+  type TipoAnimar,
   type TransicionClip,
   type CapaTL,
   type ClipTL,
@@ -21,6 +24,7 @@ import {
 import type { MedioProyecto } from '../shared/types'
 import { resolverBinario } from './binarios'
 import { ejecutar } from './crear'
+import { buscarPython } from './transcribir'
 import { duracionMedio, probeVideo } from './ffmpeg'
 
 /**
@@ -390,14 +394,22 @@ export async function proyectoDesdeReceta(
     const b = pinza(num(x.hasta, -1), 0, total)
     // Una imagen o un clip (un personaje que se mueve, en WebM con transparencia).
     if (!medio || b - a < MIN) continue
+    // Una imagen animada por el kit («animar»): en el editor, su animación en bucle (un WebM), con la imagen de base.
+    const tipoAnimar = typeof x.animar === 'string' ? x.animar : x.animar && typeof x.animar === 'object' ? (x.animar as Record<string, unknown>).tipo : null
+    const animada =
+      medio.tipo === 'imagen' && typeof tipoAnimar === 'string' && ANIMAR_CAPA.some((t) => t.id === tipoAnimar) && ruta
+        ? await animarConKit(trabajo, ruta, tipoAnimar, carpetaProyecto)
+        : null
+    const medioAnimado = animada ? await medioDe(animada) : null
     capas.push({
       id: nuevoId('capa'),
-      fuente: medio.id,
+      fuente: medioAnimado?.id ?? medio.id,
+      ...(medioAnimado ? { animada: { tipo: tipoAnimar as TipoAnimar, base: medio.id } } : {}),
       inicio: a,
       duracion: b - a,
       x: pinza(num(x.x, 0.5), 0, 1),
       y: pinza(num(x.y, 0.5), 0, 1),
-      ancho: pinza(num(x.ancho, 0.3), 0.05, 1),
+      ancho: pinza(num(x.ancho, 0.3) * (medioAnimado ? MARGEN_ANIMAR : 1), 0.05, 1.5),
       ...(typeof x.entrada === 'string' && ENTRADAS_CAPA.includes(x.entrada as EntradaCapa)
         ? { entrada: x.entrada as EntradaCapa }
         : x.entrada === 'ninguna'
@@ -453,4 +465,17 @@ export async function proyectoDesdeReceta(
   )
   if (!timeline.clips.length) return null
   return { medios, timeline, editables, fijos }
+}
+
+/** La animación en bucle de una imagen (con el kit de la carpeta de trabajo): la ruta del WebM, o null si no salió. */
+async function animarConKit(trabajo: string, imagen: string, tipo: string, carpetaProyecto: string): Promise<string | null> {
+  const kit = join(trabajo, 'kit', 'kit.py')
+  const py = await buscarPython()
+  if (!py || !existsSync(kit)) return null
+  const carpeta = join(carpetaProyecto, 'animadas')
+  mkdirSync(carpeta, { recursive: true })
+  const salida = join(carpeta, `${basename(imagen, extname(imagen)).slice(0, 40)}-${tipo}-${randomUUID().slice(0, 6)}.webm`)
+  const cita = (v: string) => (/[\s"]/.test(v) ? `"${v}"` : v)
+  const r = await ejecutar([[py.cmd, ...py.args].map(cita).join(' '), cita(kit), 'animar', cita(imagen), '--tipo', tipo, '--salida', cita(salida)], carpeta, 600_000)
+  return r.codigo === 0 && existsSync(salida) ? salida : null
 }

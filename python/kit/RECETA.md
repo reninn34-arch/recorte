@@ -148,7 +148,14 @@ Si el usuario eligió generar imágenes o clips (lo dice AGENTS.md), Recorte los
 - `python kit/kit.py imagen "descripción" --recorte` → la pide sola sobre verde croma y le quita el fondo: además de `archivo`
   devuelve `recorte`, un PNG con transparencia para usarlo como capa (una persona, un avión, una bandera, un cohete). Así se
   arman las escenas por capas con paralaje: fondo como foto y cada pieza recortada encima, entrando y moviéndose.
-- **Un personaje que se mueve** (gesticula, camina, gira la cabeza, como el de la referencia): `python kit/kit.py clip
+- **Animar una imagen recortada SIN gastar créditos** (como el «Puppet» de After Effects): en la capa,
+  `"animar": "respirar"` (una persona quieta), `"balanceo"` (de pie, se mece desde los pies), `"ondear"` (una bandera o
+  tela, desde el asta a la izquierda), `"flotar"` (sube y baja) o `"humo"` (humo, nubes, fuego); o
+  `"animar": {"tipo": "ondear", "fuerza": 0.7}` (0 a 1; 0.5 es natural). Va en bucle y se combina con su recorrido (`fin`).
+  Úsalo en casi todas las piezas recortadas: la bandera ondea, el personaje respira o se balancea, el humo se agita. En el
+  editor llega animada (el usuario cambia el movimiento o la deja quieta). `python kit/kit.py animar <png> --tipo ondear`
+  la deja como WebM si la necesitas suelta.
+- **Un personaje que se mueve de verdad** (gesticula, camina; solo si el usuario acepta gastar créditos): `python kit/kit.py clip
   "descripción del movimiento" --ref medios/personaje.png --recorte` pide a Flow un clip de 8 s sobre verde croma a partir
   de su imagen y le quita el verde: devuelve `recorte`, un WebM con transparencia. Úsalo como cualquier capa
   (`"capas": [{"archivo": "medios/clip-…-recorte.webm", …}]`, con su recorrido y su entrada); si la capa dura más, el clip

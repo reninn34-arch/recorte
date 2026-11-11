@@ -228,6 +228,27 @@ try {
   if (!(bi[1] > 200 && rojoK(bd))) throw new Error(`El barrido no empuja: ${bi} a la izquierda y ${bd} a la derecha`)
   console.log('transiciones con movimiento en el kit ✓')
 
+  // Animar una imagen recortada (sin créditos): la bandera ondea en la receta y como WebM con transparencia.
+  writeFileSync(
+    join(trabajo, 'receta-animar.json'),
+    JSON.stringify({
+      ancho: 270, alto: 480, fps: 12, duracion: 2, fundido_final: 0,
+      momentos: [{ tipo: 'foto', archivo: 'blanco.jpg', desde: 0, hasta: 2, acercar: false }],
+      capas: [{ archivo: 'logo.png', desde: 0, hasta: 2, x: 0.5, y: 0.5, ancho: 0.6, entrada: 'ninguna', animar: { tipo: 'ondear', fuerza: 1 } }]
+    })
+  )
+  json(correr(python, ['kit/kit.py', 'armar', 'receta-animar.json', '--prueba', '0.3,1.3'], trabajo))
+  const filaRoja = (t) => {
+    const r = spawnSync('ffmpeg', ['-v', 'error', '-i', `revision/prueba-${t}.jpg`, '-vf', 'crop=270:2:0:166,scale=270:1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { cwd: trabajo })
+    let n = 0
+    for (let i = 0; i < r.stdout.length; i += 3) if (r.stdout[i] > 150 && r.stdout[i + 1] < 90) n++
+    return n
+  }
+  if (filaRoja('00.30') === filaRoja('01.30')) throw new Error('La capa con «animar» no se movió entre dos momentos')
+  const anim = json(correr(python, ['kit/kit.py', 'animar', 'logo.png', '--tipo', 'balanceo', '--duracion', '1'], trabajo))
+  if (!existsSync(join(trabajo, anim.archivo)) || anim.margen !== 0.08) throw new Error(`La animación no salió: ${JSON.stringify(anim)}`)
+  console.log('animar una imagen (ondear, balanceo) sin créditos ✓')
+
   // Recortes: un sujeto sobre verde croma (con un hueco por dentro) queda sin fondo, y el hueco también.
   correr('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=0x00B140:s=400x500', '-vf', "drawbox=x=100:y=80:w=200:h=340:color=0x3C2814:t=fill,drawbox=x=180:y=230:w=40:h=40:color=0x00B140:t=fill", '-frames:v', '1', 'croma.png'], trabajo)
   const rec = json(correr(python, ['kit/kit.py', 'recortar', 'croma.png'], trabajo))

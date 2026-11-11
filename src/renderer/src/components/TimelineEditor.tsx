@@ -43,6 +43,8 @@ import {
   FILTROS,
   TRANSICIONES,
   ANIMACIONES_TEXTO,
+  ANIMAR_CAPA,
+  type TipoAnimar,
   type AnimacionTexto,
   type TransicionClip,
   MOVIMIENTOS_CAPA,
@@ -116,6 +118,7 @@ export function TimelineEditor({
   grabarVoz,
   onCambiarArchivo,
   onQuitarFondo,
+  onAnimarCapa,
   quitandoFondo,
   medios,
   duraciones,
@@ -148,6 +151,8 @@ export function TimelineEditor({
   onCambiarArchivo?: (clipId: string) => void
   /** Quita el fondo liso de la imagen de una capa (la cambia por su recorte). */
   onQuitarFondo?: (capaId: string) => void
+  /** Anima la imagen de una capa (respira, se balancea, ondea…) o la deja quieta (null). */
+  onAnimarCapa?: (capaId: string, tipo: TipoAnimar | null) => void
   quitandoFondo?: boolean
   /** La biblioteca: lo que se puede poner encima del video. */
   medios?: { id: string; nombre: string; tipo: 'video' | 'imagen' }[]
@@ -1187,6 +1192,21 @@ export function TimelineEditor({
             <button className="btn small ghost" onClick={() => historial.aplicar(cambiarCapa(timeline, capaElegida.id, { x: 0.5, y: 0.5 }, medidas))}>
               Centrar
             </button>
+            {onAnimarCapa && (capaElegida.animada || medios?.find((m) => m.id === capaElegida.fuente)?.tipo === 'imagen') && (
+              <select
+                value={capaElegida.animada?.tipo ?? 'quieta'}
+                disabled={quitandoFondo}
+                title="Anima la imagen como en After Effects (sin gastar créditos): mejor con la imagen ya sin fondo"
+                onChange={(e) => onAnimarCapa(capaElegida.id, e.target.value === 'quieta' ? null : (e.target.value as TipoAnimar))}
+              >
+                <option value="quieta">Imagen quieta</option>
+                {ANIMAR_CAPA.map((a) => (
+                  <option key={a.id} value={a.id} title={`Para ${a.para}`}>
+                    {a.nombre}
+                  </option>
+                ))}
+              </select>
+            )}
             {onQuitarFondo && medios?.find((m) => m.id === capaElegida.fuente)?.tipo === 'imagen' && (
               <button
                 className="btn small ghost"

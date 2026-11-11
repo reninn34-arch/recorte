@@ -33,6 +33,7 @@ const ocupadas = new Set()
 const turnos = []
 let vocesGeneradas = 0
 const recortes = []
+const animadas = []
 const herramientas = herramientasRecorte({
   proyectos,
   listarCreaciones: () => [],
@@ -43,6 +44,13 @@ const herramientas = herramientasRecorte({
   copiarSonido: async () => ({ archivo: 'media/pop.wav', duracion: 0.14, nombre: 'Pop' }),
   avisarCambio: (p, quien, conTimeline) => avisos.push({ p, quien, conTimeline }),
   abrirEnApp: () => {},
+  animarImagen: async (pid, medio, tipo) => {
+    animadas.push([medio, tipo])
+    const p = proyectos.abrir(pid)
+    p.medios = [...(p.medios ?? []), { id: 'm-anim', ruta: video, nombre: 'logo-ondear.webm', tipo: 'video', duracion: 4 }]
+    proyectos.save(p)
+    return { project: p, medio: 'm-anim' }
+  },
   quitarFondo: async (pid, medio) => {
     recortes.push(medio)
     const p = proyectos.abrir(pid)
@@ -179,6 +187,19 @@ try {
   const sinFondo = await llamar('quitar_fondo', { proyecto: id, medio: 'm-logo' })
   assert.ok(!sinFondo.isError && /m-recorte/.test(sinFondo.content[0].text), sinFondo.content[0].text)
   assert.deepEqual(recortes, ['m-logo'])
+  // Animar la imagen de una capa (sin créditos) y devolverla quieta.
+  const conCapa = proyectos.get(id)
+  conCapa.medios = [...(conCapa.medios ?? []), { id: 'm-logo', ruta: video, nombre: 'logo.png', tipo: 'imagen', duracion: 0 }]
+  conCapa.timeline = { ...conCapa.timeline, capas: [{ id: 'k1', fuente: 'm-logo', inicio: 0, duracion: 2, x: 0.5, y: 0.5, ancho: 0.3 }] }
+  delete conCapa.timelinePendiente
+  proyectos.save(conCapa)
+  const an = await llamar('animar_capa', { proyecto: id, capa: 1, tipo: 'ondear' })
+  assert.ok(!an.isError, an.content[0].text)
+  const capaAnim = proyectos.get(id).timeline.capas[0]
+  assert.deepEqual([capaAnim.fuente, capaAnim.animada?.tipo, capaAnim.animada?.base, animadas[0]], ['m-anim', 'ondear', 'm-logo', ['m-logo', 'ondear']])
+  await llamar('animar_capa', { proyecto: id, capa: 1, tipo: 'quieta' })
+  const quieta = proyectos.get(id).timeline.capas[0]
+  assert.deepEqual([quieta.fuente, quieta.animada, Math.round(quieta.ancho * 100) / 100], ['m-logo', undefined, 0.3], 'vuelve a la imagen quieta, a su tamaño')
   // Lo pendiente (aún no aplicado en el editor) manda al leer y editar.
   const conPendiente = proyectos.get(id)
   conPendiente.timelinePendiente = { ...conPendiente.timeline, textos: [] }

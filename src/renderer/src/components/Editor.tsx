@@ -8,7 +8,7 @@ import { RenderQueue } from './RenderQueue'
 import { SourceCard } from './SourceCard'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
-import { capaNueva, cambiarCapa, cambiarFuente, duracionTimeline, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, type Timeline } from '../../../shared/timeline'
+import { capaNueva, cambiarCapa, cambiarFuente, MARGEN_ANIMAR, type TipoAnimar, duracionTimeline, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, type Timeline } from '../../../shared/timeline'
 import { useHistorial, useReproductor, type FuentesVista } from '../hooks/timeline'
 import { Monitor } from './Monitor'
 import { MediosPanel } from './MediosPanel'
@@ -160,6 +160,33 @@ export function Editor({
     }
   }
 
+  /**
+   * Anima la imagen de una capa (o la devuelve quieta): la animación entra a la biblioteca y la capa pasa a
+   * usarla, un poco más ancha porque la animación trae margen alrededor. La imagen original se guarda.
+   */
+  async function animarCapa(capaId: string, tipo: TipoAnimar | null) {
+    const capa = timeline.capas?.find((c) => c.id === capaId)
+    if (!capa || quitandoFondo) return
+    const base = capa.animada?.base ?? capa.fuente
+    const anchoBase = capa.animada ? capa.ancho / MARGEN_ANIMAR : capa.ancho
+    if (!tipo) {
+      if (capa.animada) historial.aplicar(cambiarCapa(timeline, capaId, { fuente: base, animada: undefined, ancho: anchoBase }, duraciones))
+      return
+    }
+    setQuitandoFondo(true)
+    try {
+      const r = await window.recorte.animarImagen(proyecto.id, base, tipo)
+      onMedios(r.project.medios ?? [])
+      const largo = r.project.medios?.find((m) => m.id === r.medio)?.duracion ?? 4
+      historial.aplicar(cambiarCapa(timeline, capaId, { fuente: r.medio, animada: { tipo, base }, ancho: Math.min(1.5, anchoBase * MARGEN_ANIMAR) }, { ...duraciones, [r.medio]: largo }))
+      onAviso('Listo: la capa ya se mueve. Vuelve a «Quieta» cuando quieras.')
+    } catch (error) {
+      onAviso(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error))
+    } finally {
+      setQuitandoFondo(false)
+    }
+  }
+
   /** Pone otra foto u otro video en el lugar de un clip (el primero que elija), sin mover lo demás. */
   async function cambiarArchivo(clipId: string) {
     if (agregando) return
@@ -291,6 +318,7 @@ export function Editor({
         }
         onCambiarArchivo={proyecto.demo ? undefined : (clipId) => void cambiarArchivo(clipId)}
         onQuitarFondo={proyecto.demo ? undefined : (capaId) => void quitarFondo(capaId)}
+        onAnimarCapa={proyecto.demo ? undefined : (capaId, tipo) => void animarCapa(capaId, tipo)}
         quitandoFondo={quitandoFondo}
         medios={proyecto.demo ? undefined : (proyecto.medios ?? []).map((m) => ({ id: m.id, nombre: m.nombre, tipo: m.tipo }))}
         duraciones={duraciones}

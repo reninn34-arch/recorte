@@ -237,7 +237,23 @@ export interface CapaTL {
   giro?: number
   /** Si se mueve: dónde, de qué tamaño y con qué giro termina (si no, se queda quieta). */
   fin?: FinCapa
+  /**
+   * Una imagen recortada animada (respira, se balancea, ondea, flota, humo): `fuente` es su animación en
+   * bucle (un WebM con transparencia) y `base` la imagen de la que sale, para cambiarla o volver a ella.
+   */
+  animada?: { tipo: TipoAnimar; base: FuenteId }
 }
+
+export type TipoAnimar = 'respirar' | 'balanceo' | 'ondear' | 'flotar' | 'humo'
+export const ANIMAR_CAPA: { id: TipoAnimar; nombre: string; para: string }[] = [
+  { id: 'respirar', nombre: 'Respira', para: 'una persona quieta que respira' },
+  { id: 'balanceo', nombre: 'Se balancea', para: 'una persona de pie que se mece' },
+  { id: 'ondear', nombre: 'Ondea', para: 'una bandera o una tela al viento' },
+  { id: 'flotar', nombre: 'Flota', para: 'algo que sube y baja despacio' },
+  { id: 'humo', nombre: 'Humo', para: 'humo, nubes o fuego que se agitan' }
+]
+/** La animación deja un margen del 8 % por lado: la capa animada mide esto más para que la imagen se vea igual. */
+export const MARGEN_ANIMAR = 1.16
 
 /**
  * Los filtros de todo el video, de 0 (nada) a 1 (fuerte): el aspecto de película o de imprenta
@@ -471,7 +487,8 @@ export function normalizarCapas(entrada: unknown, total: number, medios: Record<
               giro: Math.round(pinza(num(c.fin.giro, num(c.giro, 0)), -720, 720) * 10) / 10
             }
           }
-        : {})
+        : {}),
+      ...(c.animada && medios[c.animada.base] !== undefined && ANIMAR_CAPA.some((a) => a.id === c.animada!.tipo) ? { animada: c.animada } : {})
     })
   }
   return capas.sort((a, b) => a.inicio - b.inicio)
@@ -991,6 +1008,7 @@ export function cambiarCapa(tl: Timeline, id: string, cambio: Partial<Omit<CapaT
       // `entrada: undefined` en el cambio la quita (entra de golpe); `fin: undefined`, el movimiento.
       if ('entrada' in cambio && !cambio.entrada) delete nueva.entrada
       if ('fin' in cambio && !cambio.fin) delete nueva.fin
+      if ('animada' in cambio && !cambio.animada) delete nueva.animada
       return nueva
     }),
     duracionTimeline(tl),

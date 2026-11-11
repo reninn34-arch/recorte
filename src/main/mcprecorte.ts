@@ -7,7 +7,7 @@ import { aplicarOperaciones, describirTimelineParaAgente, OPERACIONES_DOC, valid
 import type { RenderResultado, TranscripcionResultado } from '../shared/api'
 import { COSTO_CLIP, MAX_CLIPS_VEO, textoMuestra, VOCES_GEMINI, type Creacion, type PeticionCreacion } from '../shared/creacion'
 import { MODELOS_IMAGEN, modelosVideoVigentes, type PedidoFlow, type ResultadoFlow } from '../shared/flow'
-import { duracionesDeMedios, duracionTimeline, normalizarTimeline, timelineInicial, ventanaTimeline, type Timeline } from '../shared/timeline'
+import { cambiarCapa, duracionesDeMedios, duracionTimeline, MARGEN_ANIMAR, normalizarTimeline, timelineInicial, ventanaTimeline, type Timeline, type TipoAnimar } from '../shared/timeline'
 import type { Project } from '../shared/types'
 
 /** Lo que se añade a un pedido de imagen «para recortar» (lo mismo que PARA_RECORTAR del kit). */
@@ -39,6 +39,8 @@ export interface ContextoMcp {
   abrirEnApp: (id: string) => void
   /** Quita el fondo liso de una imagen de la biblioteca y la agrega como medio nuevo. */
   quitarFondo: (id: string, medio: string) => Promise<{ project: Project; medio: string }>
+  /** Anima una imagen de la biblioteca (respirar, balanceo, ondear, flotar, humo): la animación como medio nuevo. */
+  animarImagen: (id: string, medio: string, tipo: string) => Promise<{ project: Project; medio: string }>
   // ===== Crear por MCP (6.3) =====
   creaciones: {
     nueva: (p: PeticionCreacion) => Promise<Creacion>
@@ -372,6 +374,46 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
         ctx.avisarCambio(r.project, sesion.cliente)
         const m = r.project.medios?.find((x) => x.id === r.medio)
         return ok(`Listo: ${r.medio} = imagen «${m?.nombre ?? 'recorte'}» sin fondo. Úsala con editar_timeline («anadir_capa»).`)
+      }
+    },
+    {
+      nombre: 'animar_capa',
+      descripcion:
+        'Anima la imagen de una capa como en After Effects, SIN gastar créditos: «respirar» (una persona quieta), «balanceo» (de pie, ' +
+        'se mece desde los pies), «ondear» (una bandera o tela), «flotar» (sube y baja) o «humo» (humo, nubes, fuego). Mejor con la ' +
+        'imagen ya sin fondo (quitar_fondo). La capa pasa a usar la animación en bucle; «quieta» la devuelve a la imagen.',
+      esquema: {
+        type: 'object',
+        properties: {
+          proyecto: proyectoArg,
+          capa: { type: 'number', description: 'El número de la capa (ver_proyecto).' },
+          tipo: { type: 'string', enum: ['respirar', 'balanceo', 'ondear', 'flotar', 'humo', 'quieta'] }
+        },
+        required: ['proyecto', 'capa', 'tipo']
+      },
+      correr: async (args, sesion) => {
+        const p = buscar(args.proyecto)
+        const tl = timelineDe(p)
+        const capa = tl.capas?.[Math.round(Number(args.capa)) - 1]
+        if (!capa) return fallo(`No existe la capa ${String(args.capa)}.`)
+        const base = capa.animada?.base ?? capa.fuente
+        const anchoBase = capa.animada ? capa.ancho / MARGEN_ANIMAR : capa.ancho
+        let nueva: Timeline
+        let proyecto = p
+        if (args.tipo === 'quieta') {
+          nueva = cambiarCapa(tl, capa.id, { fuente: base, animada: undefined, ancho: anchoBase }, duracionesDeMedios(p.medios))
+        } else {
+          const r = await ctx.animarImagen(p.id, base, texto(args.tipo))
+          proyecto = r.project
+          nueva = cambiarCapa(tl, capa.id, { fuente: r.medio, animada: { tipo: texto(args.tipo) as TipoAnimar, base }, ancho: Math.min(1.5, anchoBase * MARGEN_ANIMAR) }, duracionesDeMedios(r.project.medios))
+        }
+        const actual = ctx.proyectos.get(p.id)!
+        actual.medios = proyecto.medios
+        actual.timeline = nueva
+        delete actual.timelinePendiente
+        ctx.proyectos.save(actual)
+        ctx.avisarCambio(actual, sesion.cliente, true)
+        return ok(args.tipo === 'quieta' ? `La capa ${String(args.capa)} vuelve a ser la imagen quieta.` : `La capa ${String(args.capa)} ya se mueve («${texto(args.tipo)}», en bucle).`)
       }
     },
     {

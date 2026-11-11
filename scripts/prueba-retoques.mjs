@@ -20,6 +20,7 @@ try {
   mkdirSync(join(trabajo, 'kit', 'sonidos'), { recursive: true })
   mkdirSync(proyecto)
   copyFileSync(join(raiz, 'python', 'sonidos', 'pop.wav'), join(trabajo, 'kit', 'sonidos', 'pop.wav'))
+  copyFileSync(join(raiz, 'python', 'kit', 'kit.py'), join(trabajo, 'kit', 'kit.py'))
   ff('-f', 'lavfi', '-i', 'testsrc2=s=600x800', '-frames:v', '1', join(trabajo, 'entrada', 'foto.jpg'))
   ff('-f', 'lavfi', '-i', 'color=c=red:s=200x200', '-frames:v', '1', join(trabajo, 'entrada', 'logo.png'))
   writeFileSync(
@@ -27,7 +28,10 @@ try {
     JSON.stringify({
       ancho: 540, alto: 960, duracion: 4,
       momentos: [{ tipo: 'foto', archivo: 'entrada/foto.jpg', desde: 0, hasta: 4, rotulo: 'Hola' }],
-      capas: [{ archivo: 'entrada/logo.png', desde: 1, hasta: 3, x: 0.3, y: 0.2, ancho: 0.25, entrada: 'pop' }],
+      capas: [
+        { archivo: 'entrada/logo.png', desde: 1, hasta: 3, x: 0.3, y: 0.2, ancho: 0.25, entrada: 'pop' },
+        { archivo: 'entrada/logo.png', desde: 0, hasta: 4, x: 0.6, y: 0.5, ancho: 0.4, entrada: 'ninguna', animar: 'balanceo' }
+      ],
       filtros: { grano: 0.3, vineta: 0.5 },
       sonidos: [{ sonido: 'pop', en: 1 }, { sonido: 'no-existe', en: 2 }]
     })
@@ -35,7 +39,14 @@ try {
   const armado = await proyectoDesdeReceta(join(trabajo, 'receta.json'), trabajo, proyecto, 4)
   assert.ok(armado, 'la receta se convierte')
   const tl = armado.timeline
-  assert.equal(tl.capas?.length, 1, 'la capa entra en «Encima»')
+  assert.equal(tl.capas?.length, 2, 'las capas entran en «Encima»')
+  const animadaTl = tl.capas.find((x) => x.animada)
+  assert.ok(animadaTl, 'la capa con «animar» llega animada')
+  assert.equal(animadaTl.animada.tipo, 'balanceo')
+  assert.ok(armado.medios.some((m) => m.id === animadaTl.fuente && m.tipo === 'video'), 'su animación es un video de la biblioteca')
+  assert.ok(armado.medios.some((m) => m.id === animadaTl.animada.base && m.tipo === 'imagen'), 'y guarda su imagen de base')
+  assert.ok(Math.abs(animadaTl.ancho - 0.4 * 1.16) < 0.01, 'un poco más ancha por el margen de la animación')
+  tl.capas = tl.capas.filter((x) => !x.animada)
   assert.deepEqual([tl.capas[0].x, tl.capas[0].y, tl.capas[0].ancho, tl.capas[0].entrada, tl.capas[0].inicio, tl.capas[0].duracion], [0.3, 0.2, 0.25, 'pop', 1, 2])
   assert.ok(armado.medios.some((m) => m.id === tl.capas[0].fuente && m.tipo === 'imagen'), 'su imagen queda en la biblioteca')
   assert.equal(tl.sonidos?.length, 1, 'el «pop» entra en «Sonidos» (el que no existe, no)')

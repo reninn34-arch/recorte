@@ -317,8 +317,106 @@ def leer_capas(lista, L):
                     'giro': float(fin.get('giro', giro))} if fin else None,
             'entrada': entrada if entrada in ('pop', 'fundido', 'ninguna', 'izquierda', 'derecha', 'arriba', 'abajo') else 'pop',
             'video': video, 'desde_video': float(c.get('inicio', 0)),
+            # Animar una imagen recortada (respirar, balanceo, ondear, flotar, humo), sin gastar créditos.
+            'animada': (Animada(im.resize((max(w, round(L.W * float(fin.get('ancho', ancho)))) if fin else w,
+                                           max(1, round(im.height * (max(w, round(L.W * float(fin.get('ancho', ancho)))) if fin else w) / im.width))), Image.LANCZOS),
+                                *((c['animar'], 0.5) if isinstance(c.get('animar'), str) else (c['animar'].get('tipo'), c['animar'].get('fuerza', 0.5))))
+                        if c.get('animar') and not video else None),
         })
     return capas
+
+
+# ---------------------------------------------------------------------------
+# Animar una imagen recortada (como el «Puppet» o las deformaciones de After Effects, sin gastar créditos)
+# ---------------------------------------------------------------------------
+
+TIPOS_ANIMAR = ('respirar', 'balanceo', 'ondear', 'flotar', 'humo')
+# Lo que dura un ciclo: todo vuelve a como empezó, así el bucle no se nota.
+CICLO_S = 4.0
+
+
+class Animada:
+    """Una imagen RGBA que se deforma suavemente con el tiempo. Se le deja margen alrededor para que el
+    movimiento no se corte en los bordes. `fuerza` de 0 a 1 (0.5 es natural)."""
+
+    def __init__(self, im, tipo, fuerza=0.5):
+        import cv2
+        self.cv2 = cv2
+        self.tipo = tipo if tipo in TIPOS_ANIMAR else 'respirar'
+        self.f = max(0.0, min(1.5, float(fuerza)))
+        m = 0.08
+        w, h = im.size
+        self.mx, self.my = round(w * m), round(h * m)
+        base = Image.new('RGBA', (w + 2 * self.mx, h + 2 * self.my), (0, 0, 0, 0))
+        base.paste(im, (self.mx, self.my))
+        self.a = np.asarray(base, dtype=np.uint8)
+        H, W = self.a.shape[:2]
+        self.W, self.H, self.w, self.h = W, H, w, h
+        yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+        self.xx, self.yy = xx, yy
+        # Coordenadas dentro de la imagen: u de 0 (izquierda) a 1, v de 0 (arriba) a 1 (abajo, los pies).
+        self.u = (xx - self.mx) / max(1, w)
+        self.v = (yy - self.my) / max(1, h)
+
+    def cuadro(self, t):
+        cv2 = self.cv2
+        f, w, h = self.f, self.w, self.h
+        fase = 2 * math.pi * (t % CICLO_S) / CICLO_S
+        sx, sy = self.xx.copy(), self.yy.copy()
+        luz = None
+        arriba = np.clip(1 - self.v, 0, 1)  # 1 en la cabeza, 0 en los pies
+        if self.tipo == 'respirar':
+            # El cuerpo se estira hacia arriba al inspirar (los pies no se mueven) y se ensancha un poco el pecho.
+            k = math.sin(fase)
+            sy += 0.014 * f * h * k * arriba
+            pecho = np.exp(-((self.v - 0.35) / 0.18) ** 2)
+            sx += 0.006 * f * w * k * pecho * (0.5 - self.u) * 2
+        elif self.tipo == 'balanceo':
+            # Se mece desde los pies, más arriba más (como alguien de pie que cambia el peso).
+            sx += 0.022 * f * w * math.sin(fase) * arriba ** 1.5
+            sy += 0.004 * f * h * math.sin(2 * fase) * arriba
+        elif self.tipo == 'ondear':
+            # Ondea desde el asta (a la izquierda): la onda corre hacia la derecha y crece con la distancia.
+            onda = 2 * math.pi * (self.u / 0.55) - 2 * fase
+            lejos = np.clip(self.u, 0, 1)
+            sy += 0.035 * f * h * np.sin(onda) * lejos
+            sx += 0.010 * f * w * np.cos(onda) * lejos
+            luz = 1 + 0.14 * f * np.cos(onda) * lejos
+        elif self.tipo == 'flotar':
+            sy += 0.025 * f * h * math.sin(fase)
+            sx += 0.006 * f * w * math.sin(fase * 0.5 + 1)
+        elif self.tipo == 'humo':
+            # Se agita y sube: ondas lentas que se cruzan, más arriba más.
+            sx += 0.03 * f * w * np.sin(2 * math.pi * self.v / 0.4 + fase) * np.sin(2 * math.pi * self.u / 0.7 + fase) * (0.4 + arriba)
+            sy += 0.02 * f * h * np.sin(2 * math.pi * self.u / 0.5 - fase) * (0.3 + arriba)
+        out = cv2.remap(self.a, sx, sy, cv2.INTER_CUBIC, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
+        if luz is not None:
+            rgb = out[..., :3].astype(np.float32) * luz[..., None]
+            out = np.dstack([np.clip(rgb, 0, 255).astype(np.uint8), out[..., 3]])
+        return Image.fromarray(out, 'RGBA')
+
+
+def animar_imagen(ruta, tipo, fuerza=0.5, salida=None, duracion=CICLO_S, fps=30):
+    """La imagen recortada, animada en bucle (un WebM con transparencia): para usarla como capa en el editor."""
+    im = Image.open(ruta).convert('RGBA')
+    # Hasta 1080 de lado: suficiente para una capa y rápido de animar.
+    if max(im.size) > 1080:
+        im.thumbnail((1080, 1080), Image.LANCZOS)
+    an = Animada(im, tipo, fuerza)
+    W, H = an.W - an.W % 2, an.H - an.H % 2
+    salida = salida or os.path.splitext(ruta)[0] + f'-{an.tipo}.webm'
+    escribe = subprocess.Popen([FFMPEG, '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', f'{W}x{H}', '-r', str(fps), '-i', '-',
+                                '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-b:v', '0', '-crf', '26', '-row-mt', '1', '-auto-alt-ref', '0',
+                                salida], stdin=subprocess.PIPE)
+    n = max(1, round(duracion * fps))
+    for i in range(n):
+        escribe.stdin.write(np.asarray(an.cuadro(i / fps), dtype=np.uint8)[:H, :W].tobytes())
+    escribe.stdin.close()
+    if escribe.wait() != 0:
+        raise SystemExit('No pude escribir la animación.')
+    return {'archivo': salida, 'ancho': W, 'alto': H, 'tipo': an.tipo, 'duracion': round(n / fps, 2),
+            # El margen que se le dejó alrededor: la capa animada es un 16 % más grande que la imagen.
+            'margen': 0.08}
 
 
 class VideoCapa:
@@ -468,8 +566,15 @@ def capas_encima(lienzo, L, t):
         alfa *= 1 - tramo(t, c['hasta'] - 0.12, c['hasta'])
         if alfa <= 0.01:
             continue
-        im = c['video'].cuadro(c['desde_video'] + dt) if c['video'] else c['im']
-        pegar_suave(lienzo, im, L.W * x, L.H * y, L.W * c['ancho'] * escala, giro, alfa)
+        if c['video']:
+            im, ancho_px = c['video'].cuadro(c['desde_video'] + dt), L.W * c['ancho'] * escala
+        elif c['animada']:
+            # La animada trae margen alrededor: se agranda en la misma proporción para que la imagen mida lo mismo.
+            an = c['animada']
+            im, ancho_px = an.cuadro(dt), L.W * c['ancho'] * escala * an.W / an.w
+        else:
+            im, ancho_px = c['im'], L.W * c['ancho'] * escala
+        pegar_suave(lienzo, im, L.W * x, L.H * y, ancho_px, giro, alfa)
     return lienzo
 
 
@@ -1755,6 +1860,12 @@ def main():
         m.add_argument('--ref', action='append', help='foto de referencia (entrada/… o medios/…); se puede repetir')
         m.add_argument('--recorte', action='store_true',
                        help='sobre verde croma y sin fondo: un PNG (imagen) o un WebM con transparencia (clip) para usar como capa')
+    an = sub.add_parser('animar')
+    an.add_argument('imagen')
+    an.add_argument('--tipo', choices=TIPOS_ANIMAR, default='respirar')
+    an.add_argument('--fuerza', type=float, default=0.5)
+    an.add_argument('--duracion', type=float, default=CICLO_S)
+    an.add_argument('--salida')
     rv = sub.add_parser('recortar-video')
     rv.add_argument('clip')
     rv.add_argument('--salida')
@@ -1770,6 +1881,8 @@ def main():
     elif x.orden in ('imagen', 'clip'):
         # Un clip puede tardar varios minutos en Flow.
         medio(x.orden, x.prompt, x.ref, 900 if x.orden == 'imagen' else 1500, para_recortar=getattr(x, 'recorte', False))
+    elif x.orden == 'animar':
+        print(json.dumps(animar_imagen(x.imagen, x.tipo, x.fuerza, x.salida, x.duracion), ensure_ascii=False))
     elif x.orden == 'recortar-video':
         print(json.dumps(recortar_video(x.clip, x.salida), ensure_ascii=False))
     elif x.orden == 'recortar':

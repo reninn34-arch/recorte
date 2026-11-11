@@ -229,6 +229,8 @@ export interface RecorteApi {
   agregarMedios: (id: string) => Promise<{ project: Project; agregados: string[]; fallos: string[] } | null>
   /** Quita el fondo liso de una imagen de la biblioteca: devuelve el proyecto con el recorte (un medio nuevo) y su id. */
   quitarFondo: (id: string, medio: string) => Promise<{ project: Project; medio: string }>
+  /** Anima una imagen recortada (respirar, balanceo, ondear, flotar, humo): devuelve la animación (un medio nuevo). */
+  animarImagen: (id: string, medio: string, tipo: string) => Promise<{ project: Project; medio: string }>
   /** Quita un medio del proyecto y sus clips de la timeline (el archivo no se toca). */
   quitarMedio: (id: string, medio: string) => Promise<Project>
   transcribir: (id: string) => Promise<TranscripcionResultado>
