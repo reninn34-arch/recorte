@@ -24,6 +24,23 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.35',
+    fecha: '2026-11-11',
+    resumen: 'Las correcciones ya son rápidas desde el segundo cambio, y el permiso de voz se pide una sola vez.',
+    novedades: [
+      {
+        icono: 'scissors',
+        titulo: 'Correcciones rápidas de verdad',
+        texto: 'Al pedir un cambio, el agente solo vuelve a dibujar los segundos que cambian. Antes, la copia para el editor le hacía perder esa memoria y el video se rehacía entero.'
+      },
+      {
+        icono: 'key',
+        titulo: 'El permiso de voz, una vez',
+        texto: 'Lo que aceptas gastar en una creación (la voz) queda guardado con ella: ya no se te pregunta en cada versión, aunque reinicies Recorte. Solo se vuelve a preguntar si el gasto cambia.'
+      }
+    ]
+  },
+  {
     version: '0.1.34',
     fecha: '2026-11-11',
     resumen: 'Correcciones quirúrgicas: el agente cambia solo lo que pides, sin rehacer ni gastar de más, y revisa como un editor.',
