@@ -24,6 +24,28 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.31',
+    fecha: '2026-11-11',
+    resumen: 'Anima tus imágenes recortadas sin gastar créditos: respiran, se balancean, ondean, flotan o echan humo.',
+    novedades: [
+      {
+        icono: 'sparkles',
+        titulo: 'Imágenes que se mueven',
+        texto: 'Elige una capa de imagen y, en su menú de movimiento: «Respira», «Se balancea», «Ondea», «Flota» o «Humo». Se anima en bucle como en After Effects, sin clips ni créditos. Vuelve a «Imagen quieta» cuando quieras.'
+      },
+      {
+        icono: 'layers',
+        titulo: 'Mejor con la imagen sin fondo',
+        texto: 'Quítale el fondo primero: así la bandera ondea sola y el personaje respira sin arrastrar el fondo.'
+      },
+      {
+        icono: 'film',
+        titulo: 'También el agente',
+        texto: 'El agente de Recorte anima las piezas recortadas de sus videos (la bandera, el personaje, el humo) y te llegan animadas al editor.'
+      }
+    ]
+  },
+  {
     version: '0.1.30',
     fecha: '2026-11-11',
     resumen: 'Acabado de documental: movimientos sin temblor, recortes sin borde verde, letras de revista y personajes que se mueven.',
