@@ -24,6 +24,33 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.34',
+    fecha: '2026-11-11',
+    resumen: 'Correcciones quirúrgicas: el agente cambia solo lo que pides, sin rehacer ni gastar de más, y revisa como un editor.',
+    novedades: [
+      {
+        icono: 'scissors',
+        titulo: 'Cambios quirúrgicos',
+        texto: 'Cuando pides un cambio, el agente ubica de qué hablas, cambia solo esa parte y solo vuelve a dibujar esos segundos: una corrección tarda minutos, no media hora. Te contesta punto por punto qué hizo con cada cosa.'
+      },
+      {
+        icono: 'check',
+        titulo: 'No gasta dos veces',
+        texto: 'Las imágenes, clips y frases de voz que ya se generaron se reutilizan: en un cambio solo se pide lo nuevo.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Revisa como un editor',
+        texto: 'Antes de entregar mira el ritmo, el movimiento en cada corte y el video al lado de la referencia, y un segundo agente lo revisa con ojos frescos. Avisa si algo tapa un texto, si un brazo sale del cuadro o si una imagen parpadea.'
+      },
+      {
+        icono: 'wand',
+        titulo: 'Gestos seguidos',
+        texto: 'Un personaje marioneta puede hablar y luego señalar o saludar en la misma capa, pasando de un gesto a otro sin cortes.'
+      }
+    ]
+  },
+  {
     version: '0.1.33',
     fecha: '2026-11-11',
     resumen: 'Escenas 2.5D más limpias y personajes que gesticulan de verdad.',
