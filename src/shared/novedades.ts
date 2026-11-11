@@ -24,6 +24,35 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.24',
+    fecha: '2026-11-10',
+    resumen: 'Logos encima del video, rótulos donde quieras y efectos de sonido, todo editable en la timeline. Y los agentes funcionan mejor.',
+    novedades: [
+      {
+        icono: 'layers',
+        titulo: 'Encima del video',
+        texto:
+          'Pon un logo, un ícono o una toma de apoyo encima del video con «Encima» o arrastrándolo desde la biblioteca. Muévelo en el monitor, cámbiale el tamaño por la esquina y elige si entra con pop o fundiéndose.'
+      },
+      {
+        icono: 'type',
+        titulo: 'Rótulos donde quieras',
+        texto: 'Arrastra cualquier rótulo en el monitor para ponerlo en su sitio; se pega al centro con una guía.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Efectos de sonido',
+        texto: 'Una pista nueva con whoosh, pop, ding y caja registradora, o un sonido de tu equipo, cada uno con su volumen.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Subtítulos y agentes más fiables',
+        texto:
+          'Los subtítulos ya no salen duplicados en el editor. «Hazlo directo» arranca sin preguntar, Codex funciona en Windows, OpenCode y Gemini CLI se entienden mejor y los archivos con BOM ya no fallan.'
+      }
+    ]
+  },
+  {
     version: '0.1.23',
     fecha: '2026-11-10',
     resumen: 'El agente ve todo lo que tienes conectado y te propone usarlo cuando mejora el video, con un botón para activarlo.',
