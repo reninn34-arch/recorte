@@ -607,25 +607,39 @@ export function fundirClip(tl: Timeline, id: string | null, segundos: number, ti
  * Cómo se ve en el monitor el clip que entra con su transición, `p` de 0 (empieza) a 1 (ya entró):
  * desplazamiento, escala, desenfoque, opacidad, recorte en círculo y un velo blanco (destello).
  */
-export function vistaTransicion(tipo: TransicionClip | undefined, p: number): { x: number; y: number; escala: number; desenfoque: number; opacidad: number; circulo: number | null; blanco: number } {
+export function vistaTransicion(
+  tipo: TransicionClip | undefined,
+  p: number
+): {
+  x: number
+  y: number
+  escala: number
+  desenfoque: number
+  opacidad: number
+  circulo: number | null
+  blanco: number
+  /** El clip anterior, debajo: cómo sale (se empuja en un barrido, se acerca en el zoom, se queda en un fundido). */
+  previo: { x: number; y: number; escala: number; opacidad: number }
+} {
   const q = pinza(p, 0, 1)
   const e = 1 - (1 - q) ** 3
-  const base = { x: 0, y: 0, escala: 1, desenfoque: 0, opacidad: 1, circulo: null as number | null, blanco: 0 }
+  const quieto = { x: 0, y: 0, escala: 1, opacidad: 1 }
+  const base = { x: 0, y: 0, escala: 1, desenfoque: 0, opacidad: 1, circulo: null as number | null, blanco: 0, previo: quieto }
   switch (tipo) {
     case 'barrido-izquierda':
-      return { ...base, x: 1 - e }
+      return { ...base, x: 1 - e, previo: { ...quieto, x: -e } }
     case 'barrido-derecha':
-      return { ...base, x: -(1 - e) }
+      return { ...base, x: -(1 - e), previo: { ...quieto, x: e } }
     case 'barrido-arriba':
-      return { ...base, y: 1 - e }
+      return { ...base, y: 1 - e, previo: { ...quieto, y: -e } }
     case 'barrido-abajo':
-      return { ...base, y: -(1 - e) }
+      return { ...base, y: -(1 - e), previo: { ...quieto, y: e } }
     case 'zoom':
-      return { ...base, escala: 1.25 - 0.25 * e, opacidad: q }
+      return { ...base, escala: 1.25 - 0.25 * e, opacidad: q, previo: { ...quieto, escala: 1 + 0.35 * e } }
     case 'desenfoque':
       return { ...base, desenfoque: (1 - q) * 14, opacidad: Math.min(1, q * 1.6) }
     case 'destello':
-      return { ...base, opacidad: q < 0.5 ? 0 : 1, blanco: 1 - Math.abs(2 * q - 1) }
+      return { ...base, opacidad: q < 0.5 ? 0 : 1, blanco: 1 - Math.abs(2 * q - 1), previo: { ...quieto, opacidad: q < 0.5 ? 1 : 0 } }
     case 'circulo':
       return { ...base, circulo: e }
     default:

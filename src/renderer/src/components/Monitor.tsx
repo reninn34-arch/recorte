@@ -81,6 +81,8 @@ export function Monitor({
   // (fundido, barrido, zoom, desenfoque, destello, círculo).
   const tr = clipActual?.fundido && ubicado && ubicado.indice > 0 && enClip < clipActual.fundido ? vistaTransicion(clipActual.transicion, enClip / clipActual.fundido) : null
   const fundido = tr ? tr.opacidad : 1
+  const clipPrevio = tr && ubicado ? timeline.clips[ubicado.indice - 1] : undefined
+  const previoUrl = clipPrevio && fuentes[clipPrevio.fuente]?.tipo === 'imagen' ? fuentes[clipPrevio.fuente].url : undefined
   const estiloImagen: React.CSSProperties = {
     visibility: vacia ? 'hidden' : 'visible',
     transform:
@@ -206,13 +208,30 @@ export function Monitor({
     >
       {src ? (
         <>
-          <video
-            ref={reproductor.videoRef}
-            preload="auto"
-            style={{ ...estiloImagen, visibility: vacia || enImagen ? 'hidden' : 'visible' }}
-            {...reproductor.eventos}
-          />
-          {enImagen && <img className="monitor-imagen" src={reproductor.imagen!} alt="" style={estiloImagen} />}
+          {/* El video va en un lienzo del tamaño exacto del cuadro y que recorta lo que sobra: así el zoom y las
+              transiciones (un barrido, el círculo) se mueven dentro del cuadro y no por el negro de los lados. */}
+          <div className="monitor-lienzo" style={cw > 0 ? { width: cw, height: ch } : undefined}>
+            {/* Durante una transición, la foto del clip anterior queda debajo (sale empujada, se acerca o se
+                funde), como en el MP4: sin ella, cada corte con transición parpadeaba a negro. */}
+            {previoUrl && tr && (
+              <img
+                className="monitor-imagen"
+                src={previoUrl}
+                alt=""
+                style={{
+                  transform: `translate(${(tr.previo.x * 100).toFixed(2)}%, ${(tr.previo.y * 100).toFixed(2)}%) scale(${tr.previo.escala.toFixed(4)})`,
+                  opacity: tr.previo.opacidad
+                }}
+              />
+            )}
+            <video
+              ref={reproductor.videoRef}
+              preload="auto"
+              style={{ ...estiloImagen, visibility: vacia || enImagen ? 'hidden' : 'visible' }}
+              {...reproductor.eventos}
+            />
+            {enImagen && <img className="monitor-imagen" src={reproductor.imagen!} alt="" style={estiloImagen} />}
+          </div>
         </>
       ) : (
         <div className="monitor-vacio"><Icon name="play" size={28} /></div>

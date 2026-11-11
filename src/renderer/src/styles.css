@@ -1425,6 +1425,7 @@ button { cursor: pointer; }
   cursor: pointer;
 }
 .monitor video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.monitor-lienzo { position: absolute; inset: 0; margin: auto; width: 100%; height: 100%; overflow: hidden; }
 .monitor-play {
   position: absolute;
   inset: 0;
@@ -1449,6 +1450,8 @@ button { cursor: pointer; }
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
+  /* Su ancho es el del texto (hasta el 86 % del cuadro): con left 50 %, sin esto se partía a la mitad del ancho. */
+  width: max-content;
   max-width: 86%;
   padding: 0.25em 0.6em;
   border-radius: 0.3em;
@@ -1477,9 +1480,17 @@ button { cursor: pointer; }
 .tl-barra {
   display: flex;
   align-items: center;
+  /* Si no cabe en una línea, lo de la derecha (zoom, Ajustar, Exportar) baja a otra: nunca se esconde. */
+  flex-wrap: wrap;
   gap: 4px;
+  row-gap: 2px;
   padding: 6px 8px;
   border-bottom: 1px solid var(--line);
+  container-type: inline-size;
+}
+@container (max-width: 860px) {
+  .tl-barra .tl-boton { padding: 0 5px; gap: 3px; }
+  .tl-barra .tl-separador { display: none; }
 }
 .tl-boton {
   display: inline-flex;
