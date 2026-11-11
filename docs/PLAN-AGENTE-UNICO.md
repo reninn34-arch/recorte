@@ -113,9 +113,50 @@ Cada fase se puede publicar sola y deja la app funcionando.
   timeline v2.
 - La voz con Gemini por frases y sus tiempos (`voz.ts`, `montajevoz.ts`).
 
-## Pendiente de decidir
-- Codex en Windows no puede escribir con su sandbox: o trabaja sin sandbox, o se avisa en la app
-  de que en Windows no sirve para el modo agente.
+## Repaso de pendientes (2026-11-10)
+
+Hecho desde que se anotó: imágenes y clips de Flow para el agente (0.1.18), tu narración grabada como
+voz del video (0.1.20), probar con agentes reales (Claude Code, Codex y OpenCode hacen un video completo),
+el aspecto del kit en el editor (acercamiento, fundidos, letras, encuadre), varias líneas en el panel de
+texto, la versión nueva del agente en el mismo proyecto (Ctrl+Z vuelve a la anterior) y Codex en Windows
+(sin sandbox, decidido por el fundador).
+
+Sigue faltando, y va en la fase 6:
+- Oír una muestra de cada voz en el menú de la caja.
+- Posición libre de los rótulos (hoy solo arriba, centro o abajo).
+- Pistas apiladas: una imagen o video encima de otro (íconos, logos de redes, tomas de apoyo).
+- Una pista de efectos de sonido (el «whoosh» de un corte, el «pop» de un rótulo).
+- Arrastrar de la biblioteca a la timeline.
+- Narrar con tu voz grabada desde el editor (frase por frase).
+- Que los retoques a mano viajen al agente cuando rehace el video (hoy no los conoce: se recuperan con Ctrl+Z).
+- El cambio rápido sin transcripción: en un proyecto del agente no sabe qué se dice (debería usar la narración).
+- Ver en el chat la descripción de cada imagen o clip generado.
+- Probar con un agente real: Antigravity (sin uso hasta el 15-nov), Gemini CLI (con llave de AI Studio),
+  Kimi (no instalado) y la tarjeta «Explicativo 3D».
+
+### Fase 6 · Recorte por MCP (que un agente maneje la app)
+
+Un servidor MCP dentro de Recorte (solo en el equipo, con una contraseña que se genera sola) para que
+Claude Code, Claude en el escritorio, Codex u otro agente usen la app: lo que hagan queda en el editor,
+editable. Lo que gasta créditos (voz, Flow) pide confirmación. Por partes:
+
+**6.1 · Que el editor pueda lo que se hace a mano.** Antes del MCP, porque es lo que el MCP va a usar:
+pistas apiladas (encima: imágenes, logos e íconos con su posición y animación de entrada), posición libre
+de los rótulos, pista de efectos de sonido y arrastrar de la biblioteca. Con esto, un video como los de
+Cangrejal (carteles con ícono, logos de redes al nombrarlas, tomas de apoyo, efectos) se arma entero en el
+editor y no en un MP4 cerrado.
+
+**6.2 · Ver y editar por MCP.** Listar proyectos y creaciones, leer la timeline, aplicar cambios (las
+mismas operaciones del cambio rápido, más las de 6.1), añadir medios, transcribir y exportar. El cambio
+rápido usa la transcripción de la narración en los proyectos del agente.
+
+**6.3 · Crear por MCP.** Empezar una creación, conversar el plan, «Hazlo», generar una frase de voz (con su
+muestra) y pedir imágenes o clips a Flow, con confirmación del gasto.
+
+**6.4 · Los agentes de Recorte por MCP.** Que el agente que trabaja dentro de Recorte pida voz, imágenes y
+clips por MCP en vez de los archivos de pedido, y que al rehacer un video reciba los retoques a mano.
+
+**6.5 · Lo que queda de la voz.** Muestra de cada voz en el menú y narrar con tu voz grabada frase por frase.
 
 ### Fase 5 · Todo en el editor, con el chat como conversación
 
