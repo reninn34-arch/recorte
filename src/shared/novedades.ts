@@ -24,6 +24,38 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.30',
+    fecha: '2026-11-11',
+    resumen: 'Acabado de documental: movimientos sin temblor, recortes sin borde verde, letras de revista y personajes que se mueven.',
+    novedades: [
+      {
+        icono: 'film',
+        titulo: 'Movimientos como de cámara',
+        texto: 'Los acercamientos, paneos y capas que se mueven ya no tiemblan, y los barridos llevan desenfoque de movimiento.'
+      },
+      {
+        icono: 'image',
+        titulo: 'Recortes limpios',
+        texto: 'Al quitar un fondo verde ya no queda borde verde, y el humo o el pelo se quedan semitransparentes.'
+      },
+      {
+        icono: 'type',
+        titulo: 'Letras de revista',
+        texto: 'Playfair Display (la serif cursiva de los títulos elegantes) y Anton (la condensada de los titulares enormes), en el editor y en el video final. Nueva letra «Titular».'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Personajes que se mueven',
+        texto: 'El agente puede animar un personaje recortado (un clip sin fondo encima del video), como en los documentales de redes.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Sin textos dobles ni tapados',
+        texto: 'El agente revisa que los títulos no repitan los subtítulos ni los tapen, y los subtítulos quedan a su altura en el editor.'
+      }
+    ]
+  },
+  {
     version: '0.1.29',
     fecha: '2026-11-11',
     resumen: 'El monitor ya reproduce sin saltos y el botón Exportar vuelve a estar a la vista.',
