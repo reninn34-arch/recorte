@@ -34,7 +34,8 @@ function estiloTexto(t: TextoTL): string {
     t.tamano && t.tamano !== 1 ? `tamaño ×${t.tamano.toFixed(2)}` : '',
     t.color ? `color ${t.color}` : '',
     t.fuente ? `letra ${t.fuente}` : '',
-    t.sinCaja ? 'sin caja' : t.caja ? `caja ${t.caja}` : ''
+    t.sinCaja ? 'sin caja' : t.caja ? `caja ${t.caja}` : '',
+    t.animacion ? `aparece ${t.animacion}` : ''
   ]
     .filter(Boolean)
     .join(', ')
@@ -96,7 +97,9 @@ function capas(antes: CapaTL[] | undefined, ahora: CapaTL[] | undefined, ctx: Co
   const out: string[] = []
   const a = porId(antes)
   const b = porId(ahora)
-  const donde = (c: CapaTL) => `de ${s(c.inicio)} a ${s(c.inicio + c.duracion)}, centro en x ${c.x.toFixed(2)}, y ${c.y.toFixed(2)}, ancho ${c.ancho.toFixed(2)}${c.entrada ? `, entrada ${c.entrada}` : ''}`
+  const donde = (c: CapaTL) =>
+    `de ${s(c.inicio)} a ${s(c.inicio + c.duracion)}, centro en x ${c.x.toFixed(2)}, y ${c.y.toFixed(2)}, ancho ${c.ancho.toFixed(2)}${c.giro ? `, giro ${c.giro}°` : ''}${c.entrada ? `, entrada ${c.entrada}` : ''}` +
+    (c.fin ? `, y se mueve hasta x ${c.fin.x.toFixed(2)}, y ${c.fin.y.toFixed(2)}, ancho ${c.fin.ancho.toFixed(2)}${c.fin.giro ? `, giro ${c.fin.giro}°` : ''}` : '')
   for (const x of antes ?? []) {
     const y = b.get(x.id)
     if (!y) out.push(`Quitó la capa ${ctx.medio(x.fuente)} (${s(x.inicio)}).`)
@@ -122,7 +125,8 @@ function sonidos(antes: SonidoTL[] | undefined, ahora: SonidoTL[] | undefined, c
 }
 
 /** Lo que importa de un clip para saber si se tocó (sin su id). */
-const huellaClip = (c: ClipTL): string => JSON.stringify({ f: c.fuente, e: c.entrada.toFixed(2), s: c.salida.toFixed(2), a: c.ajustes ?? null, m: Boolean(c.mudo), d: c.fundido ?? 0 })
+const huellaClip = (c: ClipTL): string =>
+  JSON.stringify({ f: c.fuente, e: c.entrada.toFixed(2), s: c.salida.toFixed(2), a: c.ajustes ?? null, m: Boolean(c.mudo), d: c.fundido ?? 0, t: c.transicion ?? null })
 
 function clips(antes: Timeline, ahora: Timeline, ctx: ContextoRetoques): string[] {
   const x = antes.clips.map(huellaClip)
@@ -132,7 +136,7 @@ function clips(antes: Timeline, ahora: Timeline, ctx: ContextoRetoques): string[
     const que = clip.fuente === FUENTE_PRINCIPAL ? `tu video entregado, del ${s(clip.entrada)} al ${s(clip.salida)}` : `${ctx.medio(clip.fuente)}${clip.entrada > 0.05 ? ` desde su ${s(clip.entrada)}` : ''}`
     const extra = [
       clip.ajustes?.zoom && clip.ajustes.zoom !== 1 ? `zoom ${clip.ajustes.zoom.toFixed(2)}` : '',
-      clip.fundido ? `entra con fundido de ${s(clip.fundido)}` : ''
+      clip.fundido ? `entra con ${clip.transicion ?? 'fundido'} de ${s(clip.fundido)}` : ''
     ].filter(Boolean)
     return `  ${i + 1}. ${s(inicio)}–${s(fin)}: ${que}${extra.length ? ` (${extra.join(', ')})` : ''}`
   })
@@ -149,6 +153,14 @@ function musica(antes: Timeline, ahora: Timeline, ctx: ContextoRetoques): string
   return []
 }
 
+function filtros(antes: Timeline, ahora: Timeline): string[] {
+  const a = JSON.stringify(antes.filtros ?? {})
+  const b = JSON.stringify(ahora.filtros ?? {})
+  if (a === b) return []
+  if (!ahora.filtros) return ['Quitó los filtros del video.']
+  return [`Puso los filtros del video así (0 a 1): ${Object.entries(ahora.filtros).map(([k, v]) => `${k} ${v}`).join(', ')}.`]
+}
+
 /** Los retoques a mano, en frases; vacío si no tocó nada. */
 export function describirRetoques(entregada: Timeline, actual: Timeline, ctx: ContextoRetoques): string[] {
   const todo = [
@@ -157,7 +169,8 @@ export function describirRetoques(entregada: Timeline, actual: Timeline, ctx: Co
     ...voces(entregada.voces, actual.voces, ctx),
     ...capas(entregada.capas, actual.capas, ctx),
     ...sonidos(entregada.sonidos, actual.sonidos, ctx),
-    ...musica(entregada, actual, ctx)
+    ...musica(entregada, actual, ctx),
+    ...filtros(entregada, actual)
   ]
   return todo.length > MAX_RETOQUES ? [...todo.slice(0, MAX_RETOQUES), `…y ${todo.length - MAX_RETOQUES} retoques más del mismo estilo.`] : todo
 }

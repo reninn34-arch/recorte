@@ -32,6 +32,7 @@ const creadas = new Map()
 const ocupadas = new Set()
 const turnos = []
 let vocesGeneradas = 0
+const recortes = []
 const herramientas = herramientasRecorte({
   proyectos,
   listarCreaciones: () => [],
@@ -42,6 +43,13 @@ const herramientas = herramientasRecorte({
   copiarSonido: async () => ({ archivo: 'media/pop.wav', duracion: 0.14, nombre: 'Pop' }),
   avisarCambio: (p, quien, conTimeline) => avisos.push({ p, quien, conTimeline }),
   abrirEnApp: () => {},
+  quitarFondo: async (pid, medio) => {
+    recortes.push(medio)
+    const p = proyectos.abrir(pid)
+    p.medios = [...(p.medios ?? []), { id: 'm-recorte', ruta: video, nombre: 'logo-sin-fondo.png', tipo: 'imagen', duracion: 0 }]
+    proyectos.save(p)
+    return { project: p, medio: 'm-recorte' }
+  },
   // Crear por MCP (6.3), con una creación y una voz de mentira.
   creaciones: {
     nueva: async (pet) => {
@@ -116,7 +124,8 @@ try {
     operaciones: [
       { op: 'anadir_texto', inicio: 0.5, texto: 'Hola' },
       { op: 'cambiar_texto', texto_n: 1, x: 0.3, y: 0.2 },
-      { op: 'anadir_sonido', sonido: 'pop', inicio: 1 }
+      { op: 'anadir_sonido', sonido: 'pop', inicio: 1 },
+      { op: 'filtros', grano: 0.3, vineta: 0.6 }
     ]
   })
   assert.ok(!r.isError, r.content[0].text)
@@ -124,6 +133,7 @@ try {
   assert.equal(p.timeline.textos[0].texto, 'Hola')
   assert.equal(p.timeline.textos[0].x, 0.3)
   assert.equal(p.timeline.sonidos[0].nombre, 'Pop')
+  assert.deepEqual(p.timeline.filtros, { grano: 0.3, vineta: 0.6 }, 'los filtros por chat o MCP')
   assert.deepEqual([avisos.length, avisos[0].quien, avisos[0].conTimeline], [1, 'claude-code', true], 'avisa a la interfaz quién y que cambió la timeline')
   // La voz nueva gasta: primero el costo y un código; con el código, se genera y entra.
   const opsVoz = [{ op: 'anadir_voz', inicio: 1, texto: 'hola' }]
@@ -166,6 +176,9 @@ try {
   // Sin voz conectada y con una voz desconocida, no hace nada.
   assert.equal((await llamar('crear_video', { peticion: 'x', voz: 'Nadie' })).isError, true)
   assert.match((await llamar('ver_voces', {})).content[0].text, /Charon: Informativa/)
+  const sinFondo = await llamar('quitar_fondo', { proyecto: id, medio: 'm-logo' })
+  assert.ok(!sinFondo.isError && /m-recorte/.test(sinFondo.content[0].text), sinFondo.content[0].text)
+  assert.deepEqual(recortes, ['m-logo'])
   // Lo pendiente (aún no aplicado en el editor) manda al leer y editar.
   const conPendiente = proyectos.get(id)
   conPendiente.timelinePendiente = { ...conPendiente.timeline, textos: [] }

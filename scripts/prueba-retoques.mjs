@@ -28,6 +28,7 @@ try {
       ancho: 540, alto: 960, duracion: 4,
       momentos: [{ tipo: 'foto', archivo: 'entrada/foto.jpg', desde: 0, hasta: 4, rotulo: 'Hola' }],
       capas: [{ archivo: 'entrada/logo.png', desde: 1, hasta: 3, x: 0.3, y: 0.2, ancho: 0.25, entrada: 'pop' }],
+      filtros: { grano: 0.3, vineta: 0.5 },
       sonidos: [{ sonido: 'pop', en: 1 }, { sonido: 'no-existe', en: 2 }]
     })
   )
@@ -39,6 +40,7 @@ try {
   assert.ok(armado.medios.some((m) => m.id === tl.capas[0].fuente && m.tipo === 'imagen'), 'su imagen queda en la biblioteca')
   assert.equal(tl.sonidos?.length, 1, 'el «pop» entra en «Sonidos» (el que no existe, no)')
   assert.equal(tl.sonidos[0].nombre, 'pop')
+  assert.deepEqual(tl.filtros, { grano: 0.3, vineta: 0.5 }, 'los filtros de la receta son los filtros del editor')
   console.log('receta → editor: capas y sonidos en su pista ✓')
 
   // Las piezas de documental: el título, la etiqueta y las palabras llegan como rótulos sueltos.
@@ -48,7 +50,8 @@ try {
       ancho: 540, alto: 960, duracion: 4, fuente: 'normal', color_acento: '#D62828',
       momentos: [
         { tipo: 'foto', archivo: 'entrada/foto.jpg', desde: 0, hasta: 2 },
-        { tipo: 'objeto', archivo: 'entrada/logo.png', desde: 2, hasta: 4 },
+        { tipo: 'objeto', archivo: 'entrada/logo.png', desde: 2, hasta: 3 },
+        { tipo: 'foto', archivo: 'entrada/foto.jpg', desde: 3, hasta: 4, transicion: 'zoom' },
         { tipo: 'titulo', desde: 0, hasta: 2, y: 0.2, lineas: [{ texto: 'Una pregunta', tam: 0.04 }, { texto: 'Marte', fuente: 'cursiva', tam: 0.2, color: '#D62828' }] },
         { tipo: 'etiqueta', desde: 0.5, hasta: 2, texto: 'ELON MUSK', x: 0.6, y: 0.55 },
         { tipo: 'palabras', desde: 2, hasta: 4, palabras: ['Riesgo', 'Fracaso'], destacar: [1] },
@@ -59,8 +62,10 @@ try {
   const docu = await proyectoDesdeReceta(join(trabajo, 'receta-docu.json'), trabajo, proyecto, 4)
   assert.ok(docu)
   const rot = (texto) => docu.timeline.textos.find((t) => t.texto === texto)
-  assert.equal(docu.timeline.clips.length, 2, 'la foto suelta y el objeto como tramo del video hecho')
+  assert.equal(docu.timeline.clips.length, 3, 'las fotos sueltas y el objeto como tramo del video hecho')
   assert.equal(docu.timeline.clips[1].fuente, FUENTE_PRINCIPAL)
+  assert.deepEqual([docu.timeline.clips[2].transicion, docu.timeline.clips[2].fundido], ['zoom', 0.45], 'la transición del momento es la del clip')
+  assert.equal(rot('ELON MUSK').animacion, 'pop', 'la etiqueta entra con rebote')
   assert.deepEqual([rot('Marte').fuente, rot('Marte').color, rot('Marte').sinCaja], ['cursiva', '#d62828', true])
   assert.ok(rot('Marte').y > rot('Una pregunta').y, 'las líneas del título van una debajo de otra')
   assert.ok(rot('Marte').tamano > 3 && rot('Una pregunta').tamano < 1, 'cada línea con su tamaño')
@@ -78,6 +83,8 @@ try {
   actual.textos[0].texto = 'Hola a todos'
   actual.capas[0].x = 0.7
   actual.sonidos = []
+  actual.filtros = { grano: 0.3, vineta: 0.8 }
+  actual.capas[0].fin = { x: 0.9, y: 0.2, ancho: 0.25, giro: 0 }
   actual.voces[0] = { ...actual.voces[0], texto: 'Bienvenidos a la clínica', archivo: 'media/voz-nueva.wav' }
   actual.textos.push({ id: 'texto-nuevo', inicio: 2, duracion: 1, texto: 'Llámanos', posicion: 'abajo', x: 0.5, y: 0.9 })
   const ctx = { medio: (f) => (f === FUENTE_PRINCIPAL ? 'tu video' : `la imagen «${f}»`), archivo: (r) => `C:/proyecto/${r}` }
@@ -89,7 +96,9 @@ try {
   assert.match(todo, /ahora dice «Bienvenidos a la clínica».*usa C:\/proyecto\/media\/voz-nueva\.wav/)
   assert.match(todo, /Añadió el rótulo «Llámanos» de 2 s a 3 s, en x 0\.50, y 0\.90/)
   assert.ok(!/clips/.test(todo), 'los clips no se tocaron: no se mencionan')
-  assert.equal(retoques.length, 5, todo)
+  assert.match(todo, /se mueve hasta x 0\.90/)
+  assert.match(todo, /filtros del video así .*vineta 0\.8/)
+  assert.equal(retoques.length, 6, todo)
   assert.deepEqual(describirRetoques(entregada, structuredClone(entregada), ctx), [], 'sin retoques, nada')
   assert.equal(bloqueRetoques([]), '')
   assert.match(bloqueRetoques(retoques), /RETOQUES QUE EL USUARIO HIZO A MANO[\s\S]*- Quitó el sonido/)

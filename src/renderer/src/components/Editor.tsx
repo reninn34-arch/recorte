@@ -8,7 +8,7 @@ import { RenderQueue } from './RenderQueue'
 import { SourceCard } from './SourceCard'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
-import { capaNueva, cambiarFuente, duracionTimeline, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, type Timeline } from '../../../shared/timeline'
+import { capaNueva, cambiarCapa, cambiarFuente, duracionTimeline, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, type Timeline } from '../../../shared/timeline'
 import { useHistorial, useReproductor, type FuentesVista } from '../hooks/timeline'
 import { Monitor } from './Monitor'
 import { MediosPanel } from './MediosPanel'
@@ -142,6 +142,24 @@ export function Editor({
     return r.timeline
   }
 
+  /** Quita el fondo de la imagen de una capa: el recorte entra a la biblioteca y la capa pasa a usarlo. */
+  const [quitandoFondo, setQuitandoFondo] = useState(false)
+  async function quitarFondo(capaId: string) {
+    const capa = timeline.capas?.find((c) => c.id === capaId)
+    if (!capa || quitandoFondo) return
+    setQuitandoFondo(true)
+    try {
+      const r = await window.recorte.quitarFondo(proyecto.id, capa.fuente)
+      onMedios(r.project.medios ?? [])
+      historial.aplicar(cambiarCapa(timeline, capaId, { fuente: r.medio }, { ...duraciones, [r.medio]: MAX_IMAGEN }))
+      onAviso('Listo: la capa ya no tiene fondo. El original sigue en la biblioteca.')
+    } catch (error) {
+      onAviso(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error))
+    } finally {
+      setQuitandoFondo(false)
+    }
+  }
+
   /** Pone otra foto u otro video en el lugar de un clip (el primero que elija), sin mover lo demás. */
   async function cambiarArchivo(clipId: string) {
     if (agregando) return
@@ -272,6 +290,8 @@ export function Editor({
               }
         }
         onCambiarArchivo={proyecto.demo ? undefined : (clipId) => void cambiarArchivo(clipId)}
+        onQuitarFondo={proyecto.demo ? undefined : (capaId) => void quitarFondo(capaId)}
+        quitandoFondo={quitandoFondo}
         medios={proyecto.demo ? undefined : (proyecto.medios ?? []).map((m) => ({ id: m.id, nombre: m.nombre, tipo: m.tipo }))}
         duraciones={duraciones}
         ponerSonido={

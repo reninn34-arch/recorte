@@ -255,7 +255,7 @@ ${(() => {
     }
     return [
       m.imagenes
-        ? `- Imágenes con ${m.imagenes}: \`python kit/kit.py imagen "descripción" [--ref entrada/foto.jpg]\`. Úsalas cuando el video necesite algo que no está en sus archivos (una escena, un objeto, un fondo).`
+        ? `- Imágenes con ${m.imagenes}: \`python kit/kit.py imagen "descripción" [--ref entrada/foto.jpg]\`. Úsalas cuando el video necesite algo que no está en sus archivos (una escena, un objeto, un fondo). Con \`--recorte\` sale sin fondo (un PNG para capas que se mueven: personas, objetos, aviones; mira kit/RECETA.md).`
         : '- Imágenes generadas: NO (el usuario no las eligió).',
       m.clips
         ? `- Clips de video con ${m.clips}: \`python kit/kit.py clip "descripción" [--ref …]\`. GASTAN créditos del usuario: solo los de las escenas "clip" del guion gráfico que aprobó (${clipsDelPlan(c.agente?.plan) ? `${clipsDelPlan(c.agente?.plan)} clips` : `${MAX_CLIPS_VEO} como mucho, para los momentos clave`}); en un cambio sobre lo ya hecho, los que el usuario pida en ese cambio (hasta ${MAX_CLIPS_GUION}), y en el resumen di cuántos fueron y cuánto costaron. Haz antes la imagen de cada escena y pásala con --ref al clip para que todo se vea coherente.`
@@ -1016,7 +1016,8 @@ async function renderLimpio(rutaReceta: string, carpeta: string, version: number
     const conTextos =
       Boolean((r.subtitulos as { frases?: unknown[] } | undefined)?.frases?.length) ||
       momentos.some((m) => m.rotulo || (m.tipo === 'texto' && Number(m.oscurecer ?? 0) > 0) || PIEZAS_ENCIMA.includes(String(m.tipo))) ||
-      (Array.isArray(r.capas) && r.capas.length > 0)
+      (Array.isArray(r.capas) && r.capas.length > 0) ||
+      Boolean(r.filtros)
     if (!conTextos) return null
     const trabajo = carpetaTrabajo(carpeta)
     const kit = join(trabajo, 'kit', 'kit.py')
@@ -1026,6 +1027,7 @@ async function renderLimpio(rutaReceta: string, carpeta: string, version: number
     delete r.subtitulos
     delete r.capas
     delete r.sonidos
+    delete r.filtros
     r.momentos = momentos
       // Los rótulos que van encima de otra cosa son textos del editor: fuera.
       .filter((m) => !(m.tipo === 'texto' && Number(m.oscurecer ?? 0) > 0) && !PIEZAS_ENCIMA.includes(String(m.tipo)))

@@ -227,6 +227,8 @@ export interface RecorteApi {
   borrarCreacion: (id: string) => Promise<boolean>
   /** Abre el selector y agrega varios videos o imágenes a la biblioteca del proyecto. */
   agregarMedios: (id: string) => Promise<{ project: Project; agregados: string[]; fallos: string[] } | null>
+  /** Quita el fondo liso de una imagen de la biblioteca: devuelve el proyecto con el recorte (un medio nuevo) y su id. */
+  quitarFondo: (id: string, medio: string) => Promise<{ project: Project; medio: string }>
   /** Quita un medio del proyecto y sus clips de la timeline (el archivo no se toca). */
   quitarMedio: (id: string, medio: string) => Promise<Project>
   transcribir: (id: string) => Promise<TranscripcionResultado>

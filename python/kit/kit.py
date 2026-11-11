@@ -6,6 +6,7 @@ Uso (desde la carpeta de trabajo):
   python kit/kit.py encuadre <foto> [--zoom 1.3 --cx .5 --cy .5] [--ancho 1080 --alto 1920]
                                                               cómo queda una foto a pantalla completa
   python kit/kit.py armar <receta.json> [--prueba 0.5,3,8]    hace el video (o solo esos fotogramas)
+  python kit/kit.py recortar <imagen> [--salida x.png]       quita un fondo liso: un PNG con transparencia para una capa
 
 La receta está explicada en kit/RECETA.md. Todo sale en una sola pasada: los fotogramas se dibujan con
 NumPy y Pillow y van por tubería a FFmpeg, con la música recortada y su fundido.
@@ -194,6 +195,9 @@ class Lienzo:
         self.base = os.path.dirname(os.path.abspath(r['_ruta']))
         self.subs = leer_subtitulos(r.get('subtitulos'), self)
         self.capas = leer_capas(r.get('capas'), self)
+        self.filtros = {k: min(1.0, max(0.0, float(v))) for k, v in (r.get('filtros') or {}).items()
+                        if k in ('grano', 'polvo', 'trama', 'vineta', 'parpadeo') and isinstance(v, (int, float)) and v > 0}
+        self._f = {}
 
     def ruta(self, p):
         return p if os.path.isabs(p) else os.path.join(self.base, p)
@@ -296,13 +300,80 @@ def leer_capas(lista, L):
         w = max(1, round(L.W * ancho))
         h = max(1, round(im.height * w / im.width))
         entrada = c.get('entrada', 'pop')
+        fin = c.get('fin') if isinstance(c.get('fin'), dict) else None
+        x, y, giro = min(1.0, max(0.0, float(c.get('x', 0.5)))), min(1.0, max(0.0, float(c.get('y', 0.5)))), float(c.get('giro', 0))
         capas.append({
-            'im': im.resize((w, h), Image.LANCZOS),
-            'desde': desde, 'hasta': hasta,
-            'x': min(1.0, max(0.0, float(c.get('x', 0.5)))), 'y': min(1.0, max(0.0, float(c.get('y', 0.5)))),
-            'entrada': entrada if entrada in ('pop', 'fundido', 'ninguna') else 'pop',
+            # La imagen al tamaño más grande que llegue a tener (crece sin perder nitidez).
+            'im': im.resize((max(w, round(L.W * float(fin.get('ancho', ancho)))) if fin else w,
+                             max(1, round(im.height * (max(w, round(L.W * float(fin.get('ancho', ancho)))) if fin else w) / im.width))), Image.LANCZOS),
+            'desde': desde, 'hasta': hasta, 'x': x, 'y': y, 'ancho': ancho, 'giro': giro,
+            'fin': {'x': float(fin.get('x', x)), 'y': float(fin.get('y', y)), 'ancho': float(fin.get('ancho', ancho)),
+                    'giro': float(fin.get('giro', giro))} if fin else None,
+            'entrada': entrada if entrada in ('pop', 'fundido', 'ninguna', 'izquierda', 'derecha', 'arriba', 'abajo') else 'pop',
         })
     return capas
+
+
+def estado_capa(c, dt):
+    """Dónde está una capa `dt` s después de aparecer: igual que estadoCapa del editor (recorrido suave
+    hasta `fin` y entrada desde un lado en 0,45 s)."""
+    f = c['fin']
+    p = ease_in_out(tramo(dt, 0, max(0.1, c['hasta'] - c['desde']))) if f else 0
+    x = c['x'] + (f['x'] - c['x']) * p if f else c['x']
+    y = c['y'] + (f['y'] - c['y']) * p if f else c['y']
+    ancho = c['ancho'] + (f['ancho'] - c['ancho']) * p if f else c['ancho']
+    giro = c['giro'] + (f['giro'] - c['giro']) * p if f else c['giro']
+    k = 1 - (1 - tramo(dt, 0, 0.45)) ** 3
+    lado = {'izquierda': ('x', -ancho / 2 - 0.02), 'derecha': ('x', 1 + ancho / 2 + 0.02), 'arriba': ('y', -0.35), 'abajo': ('y', 1.35)}.get(c['entrada'])
+    if lado and lado[0] == 'x':
+        x = lado[1] + (x - lado[1]) * k
+    elif lado:
+        y = lado[1] + (y - lado[1]) * k
+    return x, y, ancho, giro
+
+
+def aplicar_filtros(lienzo, L, t):
+    """Los filtros de todo el video (como los del editor): trama de imprenta, polvo, grano, viñeta y
+    parpadeo. Van encima de la escena y las capas, y debajo de los subtítulos."""
+    f = L.filtros
+    if not f:
+        return lienzo
+    a = np.asarray(lienzo.convert('RGB'), dtype=np.float32)
+    cache = L._f
+    if f.get('trama'):
+        if 'trama' not in cache:
+            k = 2 * math.pi / max(3, L.W / 180)
+            yy, xx = np.mgrid[0:L.H, 0:L.W].astype(np.float32)
+            cache['trama'] = (0.5 + 0.5 * np.sin(xx * k) * np.sin(yy * k))[..., None]
+        b = cache['trama']
+        # Mezcla «overlay», como en el MP4.
+        sup = np.where(a < 128, 2 * a * b, 255 - 2 * (255 - a) * (1 - b))
+        a = a + (sup - a) * 0.45 * f['trama']
+    if f.get('polvo'):
+        rng = np.random.default_rng(int(t * L.fps) + 3)
+        w3, h3 = max(16, L.W // 3), max(16, L.H // 3)
+        motas = (rng.random((h3, w3)) > 1 - 0.0016 * f['polvo']).astype(np.float32) * 255
+        n = int(round(t * L.fps))
+        if n % 7 > 4:
+            motas[:, (n * 97) % w3] = np.maximum(motas[:, (n * 97) % w3], 170)
+        motas = np.asarray(Image.fromarray(motas.astype(np.uint8)).resize((L.W, L.H), Image.BILINEAR), dtype=np.float32)[..., None]
+        sup = 255 - (255 - a) * (255 - motas) / 255
+        a = a + (sup - a) * 0.7 * f['polvo']
+    if f.get('grano'):
+        rng = np.random.default_rng(int(t * L.fps) * 7 + 1)
+        ruido = rng.standard_normal((L.H // 2 + 1, L.W // 2 + 1)).astype(np.float32)
+        ruido = np.repeat(np.repeat(ruido, 2, axis=0), 2, axis=1)[:L.H, :L.W, None]
+        a = a + ruido * 30 * f['grano'] * 0.6
+    if f.get('vineta'):
+        if 'vineta' not in cache:
+            yy, xx = np.mgrid[0:L.H, 0:L.W].astype(np.float32)
+            r = np.sqrt(((xx / L.W - 0.5) * 2) ** 2 + ((yy / L.H - 0.5) * 2) ** 2) / math.sqrt(2)
+            cache['vineta'] = r[..., None]
+        ang = 0.2 + 0.6 * f['vineta']
+        a = a * np.clip(1 - (cache['vineta'] * ang * 1.6) ** 2, 0, 1)
+    if f.get('parpadeo'):
+        a = a + 255 * 0.045 * f['parpadeo'] * math.sin(t * 31) * math.sin(t * 7.3)
+    return Image.fromarray(np.clip(a, 0, 255).astype(np.uint8)).convert('RGBA')
 
 
 def capas_encima(lienzo, L, t):
@@ -311,9 +382,10 @@ def capas_encima(lienzo, L, t):
         if not (c['desde'] <= t < c['hasta']):
             continue
         dt = t - c['desde']
-        escala, alfa = 1.0, 1.0
+        x, y, ancho, giro = estado_capa(c, dt)
+        escala, alfa = ancho / c['ancho'], 1.0
         if c['entrada'] == 'pop':
-            escala = 0.45 + dt / 0.13 * 0.72 if dt < 0.13 else (1.17 - (dt - 0.13) / 0.11 * 0.17 if dt < 0.24 else 1.0)
+            escala *= pop(dt)
             alfa = min(1.0, dt / 0.08)
         elif c['entrada'] == 'fundido':
             alfa = min(1.0, dt / 0.35)
@@ -321,15 +393,19 @@ def capas_encima(lienzo, L, t):
         if alfa <= 0.01:
             continue
         im = c['im']
-        if abs(escala - 1) > 0.01:
-            im = im.resize((max(1, round(im.width * escala)), max(1, round(im.height * escala))), Image.BILINEAR)
+        w = max(1, round(L.W * c['ancho'] * escala))
+        if w != im.width:
+            im = im.resize((w, max(1, round(im.height * w / im.width))), Image.BILINEAR)
+        if abs(giro) > 0.05:
+            # Positivo = a favor del reloj, como en el editor (PIL gira al revés).
+            im = im.rotate(-giro, resample=Image.BICUBIC, expand=True)
         if alfa < 0.999:
             im = im.copy()
             im.putalpha(im.getchannel('A').point(lambda a: round(a * alfa)))
-        x = round(L.W * c['x'] - im.width / 2)
-        y = round(L.H * c['y'] - im.height / 2)
+        px = round(L.W * x - im.width / 2)
+        py = round(L.H * y - im.height / 2)
         capa = Image.new('RGBA', lienzo.size, (0, 0, 0, 0))
-        capa.paste(im, (x, y), im)
+        capa.paste(im, (px, py), im)
         lienzo.alpha_composite(capa)
     return lienzo
 
@@ -341,11 +417,13 @@ class Momento:
         self.m, self.L = m, L
         self.desde = float(m.get('desde', 0))
         self.hasta = float(m.get('hasta', self.desde + 2))
-        self.entra = float(m.get('entra', L.transicion))
+        # Con una transición con movimiento (barrido, zoom…), su entrada dura más que un fundido.
+        self.tipo_entrada = m.get('transicion') if m.get('transicion') in TRANSICIONES_KIT else None
+        self.entra = float(m.get('entra', 0.45 if self.tipo_entrada and self.tipo_entrada != 'fundido' else L.transicion))
 
     def visible(self, t):
-        # Se queda un poco más para que lo siguiente entre encima sin dejar un hueco.
-        return self.desde - 1e-6 <= t < self.hasta + self.L.transicion
+        # Se queda un poco más para que lo siguiente entre encima sin dejar un hueco (un barrido lo empuja 0,45 s).
+        return self.desde - 1e-6 <= t < self.hasta + max(self.L.transicion, 0.5)
 
     def opacidad(self, t):
         return ease_in_out(tramo(t, self.desde, self.desde + self.entra)) if self.entra > 0 else 1.0
@@ -704,6 +782,16 @@ class Titulo(Encima):
                 n = int(len(ln['texto']) * tramo(t, t0, t0 + max(0.2, len(ln['texto']) * 0.035)))
                 if n:
                     d.text((x, y), ln['texto'][:n], font=ln['f'], fill=ln['color'] + (round(255 * k),))
+            elif entrada == 'palabras':
+                # Palabra a palabra, cada una fundiéndose a su tiempo (como «What if… Fear… could be…»).
+                palabras = ln['texto'].split(' ')
+                paso = min(0.22, 1.4 / max(1, len(palabras)))
+                px = x
+                for j, w in enumerate(palabras):
+                    e = tramo(t, t0 + j * paso, t0 + j * paso + 0.15)
+                    if e > 0.01:
+                        d.text((px, y), w, font=ln['f'], fill=ln['color'] + (round(255 * e * k),))
+                    px += d.textlength(w + ' ', font=ln['f'])
             elif entrada == 'pop':
                 e = pop(t - t0)
                 if e > 0:
@@ -965,20 +1053,60 @@ def cargar(ruta):
     return r, L, momentos, dur
 
 
+TRANSICIONES_KIT = ('fundido', 'barrido-izquierda', 'barrido-derecha', 'barrido-arriba', 'barrido-abajo', 'zoom', 'desenfoque',
+                    'destello', 'circulo')
+
+
+def transicion(lienzo, capa, tipo, k, L):
+    """Cómo entra `capa` sobre `lienzo` (k de 0 a 1), igual que las transiciones del editor (xfade de FFmpeg)."""
+    capa = capa if capa.mode == 'RGBA' else capa.convert('RGBA')
+    e = 1 - (1 - k) ** 3
+    if tipo and tipo.startswith('barrido-'):
+        # Empuja: lo de antes sale por un lado y lo nuevo entra por el otro.
+        dx = {'barrido-izquierda': -1, 'barrido-derecha': 1}.get(tipo, 0)
+        dy = {'barrido-arriba': -1, 'barrido-abajo': 1}.get(tipo, 0)
+        out = Image.new('RGBA', lienzo.size, (0, 0, 0, 255))
+        ox, oy = round(dx * e * L.W), round(dy * e * L.H)
+        out.paste(lienzo, (ox, oy))
+        out.paste(capa, (ox - dx * L.W, oy - dy * L.H))
+        return out
+    if tipo == 'zoom':
+        # Lo de antes se acerca mientras se funde con lo nuevo.
+        s = 1 + 0.35 * e
+        w, h = round(L.W / s), round(L.H / s)
+        viejo = lienzo.crop(((L.W - w) // 2, (L.H - h) // 2, (L.W - w) // 2 + w, (L.H - h) // 2 + h)).resize(lienzo.size, Image.BILINEAR)
+        return Image.blend(viejo, capa, k)
+    if tipo == 'desenfoque':
+        r = 18 * (1 - abs(2 * k - 1))
+        mezcla = Image.blend(lienzo, capa, k)
+        return mezcla.filter(ImageFilter.GaussianBlur(r)) if r > 0.5 else mezcla
+    if tipo == 'destello':
+        blanco = Image.new('RGBA', lienzo.size, (255, 255, 255, 255))
+        return Image.blend(lienzo, blanco, min(1, k * 2)) if k < 0.5 else Image.blend(blanco, capa, (k - 0.5) * 2)
+    if tipo == 'circulo':
+        mascara = Image.new('L', lienzo.size, 0)
+        r = e * math.hypot(L.W, L.H) / 2
+        ImageDraw.Draw(mascara).ellipse((L.W / 2 - r, L.H / 2 - r, L.W / 2 + r, L.H / 2 + r), fill=255)
+        return Image.composite(capa, lienzo, mascara)
+    return Image.blend(lienzo, capa, k)
+
+
 def cuadro(L, momentos, t, dur, fundido_final):
     lienzo = Image.new('RGBA', (L.W, L.H), L.fondo + (255,))
     for m in momentos:
         if not m.visible(t):
             continue
         capa = m.cuadro(t, lienzo) if isinstance(m, (Texto, Encima)) else m.cuadro(t)
-        k = m.opacidad(t)
+        tipo = getattr(m, 'tipo_entrada', None)
+        k = tramo(t, m.desde, m.desde + m.entra) if tipo and m.entra > 0 else m.opacidad(t)
         if k >= 0.999:
             lienzo = capa if capa.mode == 'RGBA' else capa.convert('RGBA')
         elif k > 0.001:
-            lienzo = Image.blend(lienzo, capa, k)
+            lienzo = transicion(lienzo, capa, tipo, k, L) if tipo else Image.blend(lienzo, capa, k)
     if lienzo.mode != 'RGBA':
         lienzo = lienzo.convert('RGBA')
     lienzo = capas_encima(lienzo, L, t)
+    lienzo = aplicar_filtros(lienzo, L, t)
     lienzo = subtitulo(lienzo, L, t)
     if fundido_final > 0:
         k = tramo(t, dur - fundido_final, dur)
@@ -1121,7 +1249,150 @@ def vista_encuadre(foto, zoom, cx, cy, ancho, alto):
     print(json.dumps({'vista': salida}, ensure_ascii=False))
 
 
-def pedir_a_recorte(buzon, datos, espera, que):
+# ---------------------------------------------------------------------------
+# Recortes: quitar un fondo liso (para usar personas y objetos como capas)
+# ---------------------------------------------------------------------------
+
+# Lo que se añade al pedir una imagen «para recortar»: el sujeto solo, sobre verde croma liso.
+PARA_RECORTAR = (' Aislado sobre un fondo verde croma liso y uniforme (#00B140), sin degradados, sin sombras ni suelo en el '
+                 'fondo, el sujeto entero dentro del encuadre con un poco de margen, sin texto.')
+
+
+# El modelo para quitar el fondo de cualquier foto: ISNet (DIS, Apache 2.0), el que usa rembg. Se baja una vez.
+MODELO_FONDO = ('isnet-general-use.onnx', 'https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-general-use.onnx', 178648008)
+
+
+def carpeta_modelos():
+    """Donde viven los modelos: la de Recorte (la misma para el editor y para el agente)."""
+    if _R.get('modelos'):
+        return _R['modelos']
+    base = os.environ.get('APPDATA') or os.path.join(os.path.expanduser('~'), '.config')
+    return os.path.join(base, 'recorte', 'modelos')
+
+
+def modelo_fondo():
+    """La sesión del modelo de fondos (lo baja y prepara onnxruntime la primera vez)."""
+    try:
+        import onnxruntime as ort
+    except ImportError:
+        print('Preparando el quitafondos (una vez)…', file=sys.stderr, flush=True)
+        subprocess.run([sys.executable, '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check', 'onnxruntime'], check=True)
+        import onnxruntime as ort
+    nombre, url, tam = MODELO_FONDO
+    ruta = os.path.join(carpeta_modelos(), nombre)
+    if not os.path.isfile(ruta) or os.path.getsize(ruta) != tam:
+        import urllib.request
+        os.makedirs(os.path.dirname(ruta), exist_ok=True)
+        temporal = ruta + '.bajando'
+        print(f'Bajando el modelo para quitar fondos ({tam // 1_000_000} MB, una sola vez)…', file=sys.stderr, flush=True)
+        with urllib.request.urlopen(url, timeout=60) as r, open(temporal, 'wb') as f:
+            hecho, aviso = 0, 0
+            while True:
+                trozo = r.read(1 << 20)
+                if not trozo:
+                    break
+                f.write(trozo)
+                hecho += len(trozo)
+                if hecho - aviso > tam // 10:
+                    aviso = hecho
+                    print(f'  {hecho * 100 // tam} %', file=sys.stderr, flush=True)
+        if os.path.getsize(temporal) != tam:
+            os.remove(temporal)
+            raise SystemExit('El modelo para quitar fondos no se bajó entero. Revisa la conexión y vuelve a probar.')
+        os.replace(temporal, ruta)
+    return ort.InferenceSession(ruta, providers=['CPUExecutionProvider'])
+
+
+def mascara_modelo(im):
+    """La silueta del sujeto principal de una foto (0 a 1), con el modelo: personas, objetos, animales."""
+    sesion = modelo_fondo()
+    a = np.asarray(im.convert('RGB').resize((1024, 1024), Image.LANCZOS), dtype=np.float32)
+    a = a / max(float(a.max()), 1e-6)
+    a = (a - np.array([0.485, 0.456, 0.406], dtype=np.float32)) / 1.0
+    entrada = a.transpose(2, 0, 1)[None].astype(np.float32)
+    salida = sesion.run(None, {sesion.get_inputs()[0].name: entrada})[0][0, 0]
+    salida = (salida - salida.min()) / max(float(salida.max() - salida.min()), 1e-6)
+    m = Image.fromarray((salida * 255).astype(np.uint8), 'L').resize(im.size, Image.LANCZOS)
+    m = np.asarray(m, dtype=np.float32) / 255
+    # Lo dudoso, decidido: sin zonas a medias (humo, reflejos) que dejan ver el fondo a través del sujeto,
+    # pero con la orilla suave (un par de píxeles) para que no se vea recortado a tijera.
+    duro = np.clip((m - 0.35) / 0.3, 0, 1)
+    import cv2
+    r = max(1, round(min(im.size) / 600))
+    return cv2.GaussianBlur(duro.astype(np.float32), (2 * r + 1, 2 * r + 1), 0)
+
+
+def guardar_recorte(rgb, alfa, salida, extra):
+    """El PNG con transparencia, recortado a lo que se ve (con 2 px de margen)."""
+    h, w = alfa.shape
+    ys, xs = np.where(alfa > 0.03)
+    if not len(ys):
+        raise SystemExit('No encontré ningún sujeto en la imagen.')
+    m = 2
+    y0, y1, x0, x1 = max(0, ys.min() - m), min(h, ys.max() + m + 1), max(0, xs.min() - m), min(w, xs.max() + m + 1)
+    rgba = np.dstack([rgb, alfa * 255]).clip(0, 255).astype(np.uint8)
+    os.makedirs(os.path.dirname(os.path.abspath(salida)), exist_ok=True)
+    Image.fromarray(rgba[y0:y1, x0:x1], 'RGBA').save(salida, optimize=True)
+    return {'archivo': salida, 'ancho': int(x1 - x0), 'alto': int(y1 - y0), **extra}
+
+
+def recortar(ruta, salida=None, tolerancia=None, modo='auto'):
+    """Quita el fondo de una imagen y la deja en un PNG con transparencia, recortado al sujeto.
+
+    - Fondo liso (verde croma, blanco o un color): es fondo lo que se parece al color de los bordes Y toca los
+      bordes, así no se agujerea un sujeto que tenga ese color por dentro. Borde suave y sin halo verde. Rápido.
+    - Cualquier otra foto (una sala, la calle): con el modelo ISNet, que encuentra al sujeto principal.
+    `modo`: «auto» (liso si el fondo lo es; si no, el modelo), «liso» o «modelo».
+    """
+    import cv2
+    im = abrir_foto(ruta)
+    salida = salida or os.path.splitext(ruta)[0] + '-recorte.png'
+    if modo == 'modelo':
+        alfa = mascara_modelo(im)
+        return guardar_recorte(np.asarray(im, dtype=np.float32), alfa, salida, {'metodo': 'modelo', 'quitado': round(float(1 - alfa.mean()), 3)})
+    a = np.asarray(im, dtype=np.uint8)
+    h, w = a.shape[:2]
+    lab = cv2.cvtColor(a, cv2.COLOR_RGB2LAB).astype(np.float32)
+    g = max(2, min(h, w) // 100)
+    borde = np.concatenate([lab[:g].reshape(-1, 3), lab[-g:].reshape(-1, 3), lab[:, :g].reshape(-1, 3), lab[:, -g:].reshape(-1, 3)])
+    fondo = np.median(borde, axis=0)
+    dist = np.linalg.norm(lab - fondo, axis=2)
+    dist_borde = np.linalg.norm(borde - fondo, axis=1)
+    tol = float(tolerancia) if tolerancia else max(14.0, float(np.percentile(dist_borde, 92)) * 1.6 + 6)
+    # Un fondo liso es parejo en todo el borde; si no lo es (una foto de una sala, la calle), el modelo.
+    if float(np.percentile(dist_borde, 70)) > 30 or float(np.percentile(dist_borde, 95)) > 55:
+        if modo == 'liso':
+            raise SystemExit('Esta imagen no tiene un fondo liso. Quita «--liso» para usar el modelo, o pide la imagen '
+                             '«para recortar» (kit.py imagen … --recorte).')
+        return recortar(ruta, salida, modo='modelo')
+    parecido = (dist < tol).astype(np.uint8)
+    _, etiquetas = cv2.connectedComponents(parecido, connectivity=4)
+    en_borde = np.unique(np.concatenate([etiquetas[0], etiquetas[-1], etiquetas[:, 0], etiquetas[:, -1]]))
+    en_borde = en_borde[en_borde != 0]
+    es_fondo = np.isin(etiquetas, en_borde) & (parecido > 0)
+    # Lo que quede suelto y diminuto dentro del fondo (motas del croma) también es fondo.
+    es_fondo = cv2.morphologyEx(es_fondo.astype(np.uint8), cv2.MORPH_OPEN, np.ones((3, 3), np.uint8)) > 0
+    quitado = float(es_fondo.mean())
+    if quitado < 0.04 or quitado > 0.985:
+        if quitado <= 0.985 and modo == 'auto':
+            return recortar(ruta, salida, modo='modelo')
+        raise SystemExit(f'No encontré un fondo que quitar (salía el {quitado * 100:.0f} % de la imagen).')
+    # Borde suave: en la franja que toca el fondo, la transparencia sigue a cuánto se parece al fondo.
+    franja = cv2.dilate(es_fondo.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+    suave = np.clip((dist - tol * 0.75) / (tol * 0.9), 0, 1)
+    alfa = np.where(es_fondo, 0.0, np.where(franja, suave, 1.0))
+    alfa = cv2.GaussianBlur(alfa.astype(np.float32), (3, 3), 0)
+    rgb = a.astype(np.float32)
+    r_, g_, b_ = (float(x) for x in cv2.cvtColor(np.uint8([[fondo]]), cv2.COLOR_LAB2RGB)[0, 0])
+    if g_ > r_ + 40 and g_ > b_ + 40:
+        # Sin halo verde: en el borde, el verde no pasa del mayor de rojo y azul.
+        tope = np.maximum(rgb[..., 0], rgb[..., 2])
+        borde_suave = (alfa < 0.98)[..., None] | franja[..., None]
+        rgb[..., 1] = np.where(borde_suave[..., 0], np.minimum(rgb[..., 1], tope), rgb[..., 1])
+    return guardar_recorte(rgb, alfa, salida, {'metodo': 'liso', 'fondo': '#%02x%02x%02x' % (round(r_), round(g_), round(b_)), 'quitado': round(quitado, 3)})
+
+
+def pedir_a_recorte(buzon, datos, espera, que, imprimir=True):
     """Deja un pedido en `<trabajo>/<buzon>/` y espera a que Recorte lo atienda (él tiene las cuentas del usuario).
 
     Devuelve la respuesta; si no salió, termina con el motivo, para que el agente siga sin ello y lo diga.
@@ -1143,7 +1414,8 @@ def pedir_a_recorte(buzon, datos, espera, que):
             time.sleep(0.2)
             with open(respuesta, encoding='utf-8-sig') as f:
                 r = json.load(f)
-            print(json.dumps(r, ensure_ascii=False))
+            if imprimir or not r.get('ok'):
+                print(json.dumps(r, ensure_ascii=False))
             if not r.get('ok'):
                 raise SystemExit(r.get('error') or f'Recorte no pudo generar {que}.')
             return r
@@ -1163,15 +1435,27 @@ def voz(archivo, espera=900):
     pedir_a_recorte('voz', {'frases': frases}, espera, 'la voz')
 
 
-def medio(tipo, prompt, referencias, espera):
+def medio(tipo, prompt, referencias, espera, para_recortar=False):
     """Pide a Recorte una imagen o un clip generado (Google Flow o ChatGPT, con las cuentas del usuario).
 
     Las referencias (fotos de entrada/ o de medios/) hacen que lo generado se parezca a ellas. Devuelve el archivo en medios/.
+    Con `para_recortar` (solo imágenes) la pide sobre verde croma y le quita el fondo: devuelve también `recorte`, el PNG
+    con transparencia listo para usar como capa.
     """
     if not prompt.strip():
         raise SystemExit('Describe qué generar.')
-    pedir_a_recorte('medios', {'tipo': tipo, 'prompt': prompt, 'referencias': referencias or []}, espera,
-                    'la imagen' if tipo == 'imagen' else 'el clip')
+    r = pedir_a_recorte('medios', {'tipo': tipo, 'prompt': prompt + (PARA_RECORTAR if para_recortar else ''), 'referencias': referencias or []},
+                        espera, 'la imagen' if tipo == 'imagen' else 'el clip', imprimir=not para_recortar)
+    if para_recortar:
+        base = os.path.join('medios', os.path.basename(r['archivo'])) if not os.path.isabs(r['archivo']) else r['archivo']
+        ruta = r['archivo'] if os.path.isfile(r['archivo']) else base
+        try:
+            hecho = recortar(ruta)
+            r['recorte'] = os.path.relpath(hecho['archivo']).replace('\\', '/')
+            r['recorte_tam'] = [hecho['ancho'], hecho['alto']]
+        except SystemExit as e:
+            r['recorte_error'] = str(e)
+        print(json.dumps(r, ensure_ascii=False))
 
 
 def main():
@@ -1206,12 +1490,22 @@ def main():
         m = sub.add_parser(nombre)
         m.add_argument('prompt', help='qué tiene que verse, bien descrito (sujeto, encuadre, luz, estilo)')
         m.add_argument('--ref', action='append', help='foto de referencia (entrada/… o medios/…); se puede repetir')
+        if nombre == 'imagen':
+            m.add_argument('--recorte', action='store_true', help='sobre verde croma y sin fondo: un PNG para usar como capa')
+    rc = sub.add_parser('recortar')
+    rc.add_argument('imagen')
+    rc.add_argument('--salida')
+    rc.add_argument('--tolerancia', type=float)
+    rc.add_argument('--modo', choices=['auto', 'liso', 'modelo'], default='auto',
+                    help='auto: fondo liso si lo es y si no el modelo (se baja una vez, 178 MB)')
     x = p.parse_args()
     if x.orden == 'voz':
         voz(x.archivo)
     elif x.orden in ('imagen', 'clip'):
         # Un clip puede tardar varios minutos en Flow.
-        medio(x.orden, x.prompt, x.ref, 900 if x.orden == 'imagen' else 1500)
+        medio(x.orden, x.prompt, x.ref, 900 if x.orden == 'imagen' else 1500, para_recortar=getattr(x, 'recorte', False))
+    elif x.orden == 'recortar':
+        print(json.dumps(recortar(x.imagen, x.salida, x.tolerancia, x.modo), ensure_ascii=False))
     elif x.orden == 'golpes':
         golpes(x.archivo, x.n)
     elif x.orden == 'hoja':

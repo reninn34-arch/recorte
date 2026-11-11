@@ -67,6 +67,13 @@ rótulos sueltos que el usuario mueve y cambia.
 - Las letras: `cursiva` (serif inclinada, la de los títulos elegantes), `serif`, `gruesa` (sans muy gruesa de titular),
   `impacto`, `normal`, `fina`.
 
+## Transiciones con movimiento
+Cada momento puede entrar con `"transicion"`: `fundido` (por defecto), `barrido-izquierda`, `barrido-derecha`, `barrido-arriba`,
+`barrido-abajo` (empuja lo de antes hacia ese lado, como un paneo rápido), `zoom`, `desenfoque`, `destello` (pasa por blanco) o
+`circulo`. Dura `entra` segundos (0.45 por defecto con estas). En el editor son las transiciones de cada corte. Úsalas con medida:
+en los cambios de tema o de escena, con un «whoosh» en el barrido; lo demás, cortes y fundidos.
+Los títulos (`titulo`) también entran `"entrada": "palabras"`: palabra a palabra, como una pregunta que se va armando.
+
 ## Reglas
 - Lo que va más abajo en la lista se dibuja encima. Cada momento entra con un fundido de `transicion` s y se queda
   ese mismo tiempo de más, para que lo siguiente entre encima sin hueco.
@@ -97,11 +104,23 @@ NUNCA los pegues con un script aparte: así quedan en las pistas «Encima» y «
 "capas": [{ "archivo": "entrada/logo.png", "desde": 2.0, "hasta": 4.5, "x": 0.5, "y": 0.32, "ancho": 0.3, "entrada": "pop" }],
 "sonidos": [{ "sonido": "pop", "en": 2.0 }, { "sonido": "whoosh", "en": 6.0, "volumen": 0.5 }, { "archivo": "entrada/campana.wav", "en": 9 }]
 ```
-- `x`, `y`: el centro de la capa (0–1 del cuadro). `ancho`: fracción del ancho (0.05–1). `entrada`: `pop`, `fundido` o `ninguna`.
+- `x`, `y`: el centro de la capa (0–1 del cuadro). `ancho`: fracción del ancho (0.05–1). `giro`: grados.
+  `entrada`: `pop`, `fundido`, `izquierda`, `derecha`, `arriba`, `abajo` (entra deslizándose desde fuera) o `ninguna`.
+- **Que se mueva**: `"fin": {"x": 1.2, "y": 0.3, "ancho": 0.3, "giro": 10}` es dónde termina (puede ser fuera del cuadro, de
+  -0.5 a 1.5); va suave de un sitio al otro durante toda la capa. Así se hace el **paralaje** (varias capas recortadas, cada
+  una con su deriva: el fondo se mueve poco, lo de delante más), un avión que **cruza** la pantalla, humo que **sube**, una
+  foto que **se acerca** o algo que **gira**. Para una escena por capas: fondo como foto, y encima cada pieza recortada (PNG
+  sin fondo) entrando en su momento, desde su lado, con un «pop» de sonido.
   Solo imágenes (un PNG con transparencia queda mejor). Que no tape caras ni subtítulos.
 - `sonido`: uno de los que trae Recorte: `whoosh` (un cambio rápido), `pop` (algo que aparece), `pop-alto` (el siguiente
   de una serie), `ding` (un dato, un acierto), `caching` (una oferta). O `archivo` con uno propio. `volumen` por defecto 0.6.
 - Un «pop» cuando entra cada logo o ícono, un «whoosh» en los cortes fuertes; sin abusar (uno cada pocos segundos).
+
+## Filtros de todo el video
+`"filtros": {"grano": 0.3, "polvo": 0.2, "trama": 0.4, "vineta": 0.5, "parpadeo": 0.1}` (0 a 1): grano de película, polvo
+y rayas, trama de puntos de imprenta, viñeta y parpadeo de proyector. Van encima de la escena y de las capas y debajo de los
+subtítulos; en el editor quedan como sus «Filtros» y el usuario los sube, los baja o los quita. Un documental de archivo:
+grano 0.3, polvo 0.25, viñeta 0.5; un aire de revista: trama 0.4. NUNCA los quemes con un script aparte.
 
 ## La voz (narración)
 Recorte genera la narración con la voz que eligió el usuario; tú solo escribes qué dice.
@@ -117,6 +136,12 @@ Recorte genera la narración con la voz que eligió el usuario; tú solo escribe
 ## Imágenes y clips generados
 Si el usuario eligió generar imágenes o clips (lo dice AGENTS.md), Recorte los hace con SUS cuentas (Google Flow o ChatGPT):
 - `python kit/kit.py imagen "descripción" [--ref entrada/01-foto.jpg]` → `{"archivo": "medios/img-….png"}` (unos segundos o un minuto).
+- `python kit/kit.py imagen "descripción" --recorte` → la pide sola sobre verde croma y le quita el fondo: además de `archivo`
+  devuelve `recorte`, un PNG con transparencia para usarlo como capa (una persona, un avión, una bandera, un cohete). Así se
+  arman las escenas por capas con paralaje: fondo como foto y cada pieza recortada encima, entrando y moviéndose.
+- `python kit/kit.py recortar <imagen>` quita el fondo de una imagen que ya tengas: si es liso (verde, blanco, un color), al
+  momento; si no (una sala, la calle), con un modelo que encuentra al sujeto principal (la primera vez se baja, 178 MB).
+  Mira el resultado antes de usarlo: si se coló algo del fondo, pide la pieza con `--recorte`.
 - `python kit/kit.py clip "descripción" [--ref …]` → `{"archivo": "medios/clip-….mp4"}` (varios minutos; GASTA créditos: solo los del guion gráfico que aprobó el usuario).
 - Describe bien: sujeto, acción, encuadre (vertical u horizontal ya va solo), luz y estilo. Sin texto escrito dentro de la imagen:
   los rótulos los pones tú en la receta (así el usuario los edita).

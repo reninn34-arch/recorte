@@ -6,8 +6,12 @@ import {
   FUENTE_PRINCIPAL,
   normalizarTimeline,
   nuevoId,
+  ENTRADAS_CAPA,
+  TRANSICIONES,
+  type TransicionClip,
   type CapaTL,
   type ClipTL,
+  type EntradaCapa,
   type PosicionTexto,
   type SonidoTL,
   type TextoTL,
@@ -155,6 +159,7 @@ export async function proyectoDesdeReceta(
   /** Un tramo del video ya hecho (lo que no se puede dejar suelto). */
   const fijo = (a: number, b: number) => {
     if (b - a < MIN) return
+    // Un tramo del video ya hecho trae su transición dibujada por el kit: el editor no le pone otra encima.
     clips.push({ id: nuevoId('clip'), fuente: FUENTE_PRINCIPAL, entrada: a, salida: b, ...(hayPistasDeAudio ? { mudo: true } : {}) })
     fijos += 1
   }
@@ -174,7 +179,10 @@ export async function proyectoDesdeReceta(
       cx: pinza(num(e.cx, 0.5), 0, 1),
       cy: pinza(num(e.cy, 0.5), 0, 1)
     }
-    const fundido = clips.length > 0 && transicion >= 0.1 ? { fundido: transicion } : {}
+    // La transición del momento (barrido, zoom…) es la del clip; su duración, la de `entra`.
+    const tipoTr = typeof m.transicion === 'string' && TRANSICIONES.some((x) => x.id === m.transicion) ? (m.transicion as TransicionClip) : undefined
+    const durTr = num(m.entra, tipoTr && tipoTr !== 'fundido' ? 0.45 : transicion)
+    const fundido = clips.length > 0 && durTr >= 0.1 ? { fundido: durTr, ...(tipoTr && tipoTr !== 'fundido' ? { transicion: tipoTr } : {}) } : {}
     if (medio && m.tipo === 'foto' && medio.tipo === 'imagen') {
       clips.push({
         id: nuevoId('clip'),
@@ -225,7 +233,8 @@ export async function proyectoDesdeReceta(
           sinCaja: true,
           tamano: tamEditor(num(l.tam, 0.06)),
           ...(color && color !== '#ffffff' ? { color } : !color && colorTexto ? { color: colorTexto } : {}),
-          fuente: letra(l.fuente ?? m.fuente, String(receta.fuente ?? 'fina'))
+          fuente: letra(l.fuente ?? m.fuente, String(receta.fuente ?? 'fina')),
+          ...(m.entrada === 'palabras' || m.entrada === 'maquina' || m.entrada === 'pop' ? { animacion: m.entrada } : { animacion: 'subir' as const })
         })
         y += altos[i]
       }
@@ -243,7 +252,8 @@ export async function proyectoDesdeReceta(
         tamano: tamEditor(num(m.tam, 0.05)),
         color: hexDe(m.color) ?? '#111111',
         caja: hexDe(m.fondo) ?? '#ffd60a',
-        fuente: letra(m.fuente, 'gruesa')
+        fuente: letra(m.fuente, 'gruesa'),
+        animacion: 'pop'
       })
       continue
     }
@@ -268,7 +278,8 @@ export async function proyectoDesdeReceta(
           sinCaja: true,
           tamano: tamEditor(num(m.tam, 0.05) * (destacar.has(i) ? 1.5 : 1)),
           ...(color ? { color } : {}),
-          fuente: letra(m.fuente, String(receta.fuente ?? 'fina'))
+          fuente: letra(m.fuente, String(receta.fuente ?? 'fina')),
+          animacion: 'subir'
         })
       }
       continue
@@ -385,7 +396,18 @@ export async function proyectoDesdeReceta(
       x: pinza(num(x.x, 0.5), 0, 1),
       y: pinza(num(x.y, 0.5), 0, 1),
       ancho: pinza(num(x.ancho, 0.3), 0.05, 1),
-      ...(x.entrada === 'fundido' ? { entrada: 'fundido' as const } : x.entrada === 'ninguna' ? {} : { entrada: 'pop' as const })
+      ...(typeof x.entrada === 'string' && ENTRADAS_CAPA.includes(x.entrada as EntradaCapa)
+        ? { entrada: x.entrada as EntradaCapa }
+        : x.entrada === 'ninguna'
+          ? {}
+          : { entrada: 'pop' as const }),
+      ...(num(x.giro, 0) ? { giro: num(x.giro, 0) } : {}),
+      ...(x.fin && typeof x.fin === 'object'
+        ? (() => {
+            const f = x.fin as Record<string, unknown>
+            return { fin: { x: num(f.x, num(x.x, 0.5)), y: num(f.y, num(x.y, 0.5)), ancho: num(f.ancho, num(x.ancho, 0.3)), giro: num(f.giro, num(x.giro, 0)) } }
+          })()
+        : {})
     })
   }
   // Los efectos de sonido: los incluidos (kit/sonidos) o los del agente, copiados al proyecto.
@@ -413,7 +435,17 @@ export async function proyectoDesdeReceta(
   }
 
   const timeline = normalizarTimeline(
-    { version: 1, clips, textos, voces, ...(musica ? { musica } : {}), ...(capas.length ? { capas } : {}), ...(sonidos.length ? { sonidos } : {}) },
+    {
+      version: 1,
+      clips,
+      textos,
+      voces,
+      ...(musica ? { musica } : {}),
+      ...(capas.length ? { capas } : {}),
+      ...(sonidos.length ? { sonidos } : {}),
+      // Los filtros del kit (grano, polvo, trama, viñeta, parpadeo) siguen siendo filtros en el editor.
+      ...(receta.filtros && typeof receta.filtros === 'object' ? { filtros: receta.filtros as Timeline['filtros'] } : {})
+    },
     duracionFinal,
     duracionesDeMedios(medios)
   )

@@ -2819,6 +2819,13 @@ button { cursor: pointer; }
 .monitor-rotulo.is-elegida, .monitor-capa.is-elegida { outline: 2px dashed var(--accent, #7aa2ff); outline-offset: 3px; }
 .monitor-capa { position: absolute; cursor: grab; transform-origin: center; }
 .monitor-capa img, .monitor-capa video { display: block; width: 100%; height: auto; pointer-events: none; }
+.monitor-capa-grupo { display: contents; }
+.monitor-capa.is-fin { opacity: .45; outline: 2px dashed var(--accent, #7aa2ff); outline-offset: 2px; }
+.monitor-capa-hueco { display: block; width: 100%; aspect-ratio: 16 / 9; background: rgba(122, 162, 255, .25); }
+.monitor-recorrido { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none !important; }
+.monitor-recorrido line { stroke: var(--accent, #7aa2ff); stroke-width: .35; stroke-dasharray: 1.2 1; vector-effect: non-scaling-stroke; }
+.monitor-filtros { position: absolute; inset: 0; pointer-events: none !important; overflow: hidden; }
+.monitor-filtro { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .monitor-capa-esquina { position: absolute; right: -7px; bottom: -7px; width: 14px; height: 14px; border-radius: 3px; background: var(--accent, #7aa2ff); border: 2px solid #fff; cursor: nwse-resize; }
 .monitor-guia { position: absolute; background: #ff4fd8; pointer-events: none !important; }
 .monitor-guia.v { left: 50%; top: 0; bottom: 0; width: 1px; }
@@ -2832,6 +2839,10 @@ button { cursor: pointer; }
 .tl-menu-ancla { position: relative; display: inline-flex; }
 .tl-boton.is-activo { color: var(--text); background: var(--panel-3); }
 .tl-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; min-width: 230px; max-width: 340px; max-height: 280px; overflow: auto; padding: 4px; display: flex; flex-direction: column; gap: 2px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 8px; box-shadow: 0 10px 30px #0008; }
+.tl-menu-filtros { min-width: 260px; max-height: none; padding: 8px 10px; gap: 8px; }
+.tl-menu-filtros .tl-ajuste { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.tl-boton.tiene { color: var(--accent); }
+.tl-transicion { font-size: 12px; padding: 1px 4px; }
 .tl-menu > .tl-dim { padding: 8px; font-size: 12px; white-space: normal; }
 .tl-menu-item { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border: none; border-radius: 6px; background: none; color: var(--text); font-size: 12px; text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tl-menu-item:hover { background: var(--panel-3); }

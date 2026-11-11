@@ -11,6 +11,7 @@ const api: RecorteApi = {
   borrarProyecto: (id) => ipcRenderer.invoke('proyecto:borrar', id),
   borrarCreacion: (id) => ipcRenderer.invoke('creacion:borrar', id),
   agregarMedios: (id) => ipcRenderer.invoke('proyecto:agregar-medios', id),
+  quitarFondo: (id, medio) => ipcRenderer.invoke('proyecto:quitar-fondo', id, medio),
   quitarMedio: (id, medio) => ipcRenderer.invoke('proyecto:quitar-medio', id, medio),
   transcribir: (id) => ipcRenderer.invoke('proyecto:transcribir', id),
   generarClips: (id) => ipcRenderer.invoke('proyecto:generar', id),

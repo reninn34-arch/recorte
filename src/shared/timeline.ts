@@ -32,9 +32,36 @@ export interface ClipTL {
   mudo?: boolean
   /** Entra fundiéndose sobre el clip anterior, en estos segundos (0.1 a 1.5). */
   fundido?: number
+  /** Cómo entra en esos segundos: barrido, zoom, desenfoque, destello, círculo (sin él, fundido). */
+  transicion?: TransicionClip
 }
 
 export const MAX_FUNDIDO = 1.5
+
+/** Cómo entra un clip sobre el anterior (con `fundido` = lo que dura). Sin tipo, un fundido cruzado. */
+export type TransicionClip =
+  | 'fundido'
+  | 'barrido-izquierda'
+  | 'barrido-derecha'
+  | 'barrido-arriba'
+  | 'barrido-abajo'
+  | 'zoom'
+  | 'desenfoque'
+  | 'destello'
+  | 'circulo'
+
+/** Las transiciones, con su nombre y la de FFmpeg (`xfade`) que la hace en el MP4. */
+export const TRANSICIONES: { id: TransicionClip; nombre: string; xfade: string }[] = [
+  { id: 'fundido', nombre: 'Fundido', xfade: 'fade' },
+  { id: 'barrido-izquierda', nombre: 'Barrido ←', xfade: 'slideleft' },
+  { id: 'barrido-derecha', nombre: 'Barrido →', xfade: 'slideright' },
+  { id: 'barrido-arriba', nombre: 'Barrido ↑', xfade: 'slideup' },
+  { id: 'barrido-abajo', nombre: 'Barrido ↓', xfade: 'slidedown' },
+  { id: 'zoom', nombre: 'Zoom', xfade: 'zoomin' },
+  { id: 'desenfoque', nombre: 'Desenfoque', xfade: 'hblur' },
+  { id: 'destello', nombre: 'Destello', xfade: 'fadewhite' },
+  { id: 'circulo', nombre: 'Círculo', xfade: 'circleopen' }
+]
 
 /** Lo que se le puede cambiar a la imagen de un clip. Los valores neutros no cambian nada. */
 export interface AjustesClip {
@@ -100,7 +127,27 @@ export interface TextoTL {
   y?: number
   /** La letra (una clave de FUENTES_TEXTO); sin ella, la normal. */
   fuente?: string
+  /** Cómo aparece: palabra a palabra, letra a letra (máquina), con rebote (pop) o subiendo. Sin ella, de golpe. */
+  animacion?: AnimacionTexto
 }
+
+export type AnimacionTexto = 'palabras' | 'maquina' | 'pop' | 'subir'
+export const ANIMACIONES_TEXTO: { id: AnimacionTexto; nombre: string }[] = [
+  { id: 'palabras', nombre: 'Palabra a palabra' },
+  { id: 'maquina', nombre: 'Letra a letra' },
+  { id: 'pop', nombre: 'Con rebote' },
+  { id: 'subir', nombre: 'Subiendo' }
+]
+
+/** Segundos entre palabra y palabra (o letra y letra) de un rótulo animado: lo mismo en el monitor y en el MP4. */
+export function pasoAnimacion(t: Pick<TextoTL, 'texto' | 'animacion'>): number {
+  if (t.animacion === 'palabras') return Math.min(0.22, 1.4 / Math.max(1, t.texto.split(/\s+/).filter(Boolean).length))
+  if (t.animacion === 'maquina') return Math.min(0.045, 1.6 / Math.max(1, t.texto.replace(/\s/g, '').length))
+  return 0
+}
+
+/** Lo que dura una palabra (o una letra) en aparecer. */
+export const APARECER_S = 0.15
 
 /**
  * Las letras de los rótulos. Son fuentes que trae Windows: el monitor (CSS) y el render
@@ -120,7 +167,7 @@ export const LIMITES_TAMANO = [0.5, 6] as const
 const COLOR_HEX = /^#[0-9a-f]{6}$/i
 
 /** El estilo de un rótulo, limpio: lo neutro no se guarda. */
-function estiloTexto(t: Partial<TextoTL>): Pick<TextoTL, 'tamano' | 'color' | 'sinCaja' | 'fuente' | 'caja'> {
+function estiloTexto(t: Partial<TextoTL>): Pick<TextoTL, 'tamano' | 'color' | 'sinCaja' | 'fuente' | 'caja' | 'animacion'> {
   const tamano = typeof t.tamano === 'number' && Number.isFinite(t.tamano) ? Math.round(pinza(t.tamano, LIMITES_TAMANO[0], LIMITES_TAMANO[1]) * 100) / 100 : 1
   const color = typeof t.color === 'string' && COLOR_HEX.test(t.color) ? t.color.toLowerCase() : '#ffffff'
   return {
@@ -128,7 +175,8 @@ function estiloTexto(t: Partial<TextoTL>): Pick<TextoTL, 'tamano' | 'color' | 's
     ...(color !== '#ffffff' ? { color } : {}),
     ...(t.sinCaja === true ? { sinCaja: true } : {}),
     ...(typeof t.caja === 'string' && COLOR_HEX.test(t.caja) ? { caja: t.caja.toLowerCase() } : {}),
-    ...(typeof t.fuente === 'string' && t.fuente !== 'normal' && t.fuente in FUENTES_TEXTO ? { fuente: t.fuente } : {})
+    ...(typeof t.fuente === 'string' && t.fuente !== 'normal' && t.fuente in FUENTES_TEXTO ? { fuente: t.fuente } : {}),
+    ...(t.animacion && ANIMACIONES_TEXTO.some((a) => a.id === t.animacion) ? { animacion: t.animacion } : {})
   }
 }
 
@@ -153,7 +201,17 @@ export interface VozTL {
 }
 
 /** Cómo entra una capa: con un pequeño rebote o fundiéndose; sin él, de golpe. */
-export type EntradaCapa = 'pop' | 'fundido'
+export type EntradaCapa = 'pop' | 'fundido' | 'izquierda' | 'derecha' | 'arriba' | 'abajo'
+export const ENTRADAS_CAPA: EntradaCapa[] = ['pop', 'fundido', 'izquierda', 'derecha', 'arriba', 'abajo']
+
+/** Dónde termina una capa que se mueve: va de su sitio, tamaño y giro de inicio a estos, suavemente. */
+export interface FinCapa {
+  x: number
+  y: number
+  ancho: number
+  /** Grados (positivo = a favor del reloj). */
+  giro: number
+}
 
 /**
  * Algo encima del video (una pista apilada): una imagen, un logo, un ícono o una toma de apoyo
@@ -174,7 +232,36 @@ export interface CapaTL {
   entrada?: EntradaCapa
   /** Si es un video: el segundo del medio desde donde se ve. */
   desde?: number
+  /** Giro al empezar, en grados (positivo = a favor del reloj). */
+  giro?: number
+  /** Si se mueve: dónde, de qué tamaño y con qué giro termina (si no, se queda quieta). */
+  fin?: FinCapa
 }
+
+/**
+ * Los filtros de todo el video, de 0 (nada) a 1 (fuerte): el aspecto de película o de imprenta
+ * de los documentales. Se ven en el monitor y salen igual en el MP4.
+ */
+export interface FiltrosTL {
+  /** Grano de película que se mueve. */
+  grano?: number
+  /** Motas de polvo y rayas que aparecen y desaparecen. */
+  polvo?: number
+  /** Trama de puntos de imprenta, como una revista. */
+  trama?: number
+  /** Bordes oscuros. */
+  vineta?: number
+  /** La luz que tiembla un poco, como un proyector. */
+  parpadeo?: number
+}
+
+export const FILTROS: { id: keyof FiltrosTL; nombre: string; para: string }[] = [
+  { id: 'grano', nombre: 'Grano', para: 'el grano de película' },
+  { id: 'polvo', nombre: 'Polvo', para: 'motas y rayas de película vieja' },
+  { id: 'trama', nombre: 'Trama', para: 'los puntos de imprenta de una revista' },
+  { id: 'vineta', nombre: 'Viñeta', para: 'los bordes oscuros' },
+  { id: 'parpadeo', nombre: 'Parpadeo', para: 'la luz que tiembla, como un proyector' }
+]
 
 /** Un efecto de sonido suelto en su segundo (su audio está en `media/`). */
 export interface SonidoTL {
@@ -201,6 +288,8 @@ export interface Timeline {
   capas?: CapaTL[]
   /** Efectos de sonido sueltos. */
   sonidos?: SonidoTL[]
+  /** Grano, polvo, trama, viñeta y parpadeo de todo el video. */
+  filtros?: FiltrosTL
 }
 
 /** Un clip con su lugar en la timeline ya calculado. */
@@ -288,7 +377,10 @@ export function normalizarTimeline(entrada: unknown, duracionFuente: number, otr
       salida: s,
       ...(ajustes ? { ajustes } : {}),
       ...(c.mudo === true ? { mudo: true } : {}),
-      ...(typeof c.fundido === 'number' && c.fundido >= 0.05 ? { fundido: Math.round(pinza(c.fundido, 0.1, Math.min(MAX_FUNDIDO, (s - e) / 2)) * 100) / 100 } : {})
+      ...(typeof c.fundido === 'number' && c.fundido >= 0.05 ? { fundido: Math.round(pinza(c.fundido, 0.1, Math.min(MAX_FUNDIDO, (s - e) / 2)) * 100) / 100 } : {}),
+      ...(typeof c.fundido === 'number' && c.fundido >= 0.05 && c.transicion && c.transicion !== 'fundido' && TRANSICIONES.some((x) => x.id === c.transicion)
+        ? { transicion: c.transicion }
+        : {})
     })
   }
   const total = clips.reduce((t, c) => t + largo(c), 0)
@@ -311,6 +403,7 @@ export function normalizarTimeline(entrada: unknown, duracionFuente: number, otr
   const voces = normalizarVoces(crudo.voces, total)
   const capas = normalizarCapas(crudo.capas, total, { [FUENTE_PRINCIPAL]: duracionFuente, ...otras })
   const sonidos = normalizarSonidos(crudo.sonidos, total)
+  const filtros = normalizarFiltros(crudo.filtros)
   return {
     version: 1,
     clips,
@@ -318,8 +411,28 @@ export function normalizarTimeline(entrada: unknown, duracionFuente: number, otr
     ...(musica ? { musica } : {}),
     ...(voces.length ? { voces } : {}),
     ...(capas.length ? { capas } : {}),
-    ...(sonidos.length ? { sonidos } : {})
+    ...(sonidos.length ? { sonidos } : {}),
+    ...(filtros ? { filtros } : {})
   }
+}
+
+/** Los filtros válidos (0 a 1); lo que está en 0 no se guarda. Sin ninguno, undefined. */
+export function normalizarFiltros(entrada: unknown): FiltrosTL | undefined {
+  if (!entrada || typeof entrada !== 'object') return undefined
+  const x = entrada as Record<string, unknown>
+  const out: FiltrosTL = {}
+  for (const { id } of FILTROS) {
+    const v = x[id]
+    if (typeof v === 'number' && Number.isFinite(v) && v > 0.005) out[id] = Math.round(pinza(v, 0, 1) * 100) / 100
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
+/** Cambia los filtros del video (un valor 0 quita ese filtro). */
+export function cambiarFiltros(tl: Timeline, cambio: FiltrosTL): Timeline {
+  const filtros = normalizarFiltros({ ...(tl.filtros ?? {}), ...cambio })
+  const { filtros: _antes, ...resto } = tl
+  return filtros ? { ...resto, filtros } : resto
 }
 
 /** La posición libre de un rótulo, si la tiene y es válida. */
@@ -344,8 +457,20 @@ export function normalizarCapas(entrada: unknown, total: number, medios: Record<
       x: Math.round(pinza(num(c.x, 0.5), 0, 1) * 1000) / 1000,
       y: Math.round(pinza(num(c.y, 0.5), 0, 1) * 1000) / 1000,
       ancho: Math.round(pinza(num(c.ancho, 0.3), 0.05, 1) * 1000) / 1000,
-      ...(c.entrada === 'pop' || c.entrada === 'fundido' ? { entrada: c.entrada } : {}),
-      ...(typeof c.desde === 'number' && c.desde > 0 ? { desde: Math.min(c.desde, Math.max(0, medios[c.fuente] - DURACION_MINIMA)) } : {})
+      ...(c.entrada && ENTRADAS_CAPA.includes(c.entrada) ? { entrada: c.entrada } : {}),
+      ...(typeof c.desde === 'number' && c.desde > 0 ? { desde: Math.min(c.desde, Math.max(0, medios[c.fuente] - DURACION_MINIMA)) } : {}),
+      ...(Math.abs(num(c.giro, 0)) > 0.05 ? { giro: Math.round(pinza(num(c.giro, 0), -720, 720) * 10) / 10 } : {}),
+      ...(c.fin && typeof c.fin === 'object'
+        ? {
+            fin: {
+              // Fuera del cuadro se puede (entrar o salir volando), hasta media pantalla.
+              x: Math.round(pinza(num(c.fin.x, num(c.x, 0.5)), -0.5, 1.5) * 1000) / 1000,
+              y: Math.round(pinza(num(c.fin.y, num(c.y, 0.5)), -0.5, 1.5) * 1000) / 1000,
+              ancho: Math.round(pinza(num(c.fin.ancho, num(c.ancho, 0.3)), 0.05, 1.5) * 1000) / 1000,
+              giro: Math.round(pinza(num(c.fin.giro, num(c.giro, 0)), -720, 720) * 10) / 10
+            }
+          }
+        : {})
     })
   }
   return capas.sort((a, b) => a.inicio - b.inicio)
@@ -461,16 +586,50 @@ export function zoomEn(a: Required<AjustesClip>, avance: number): number {
   return a.zoom * (1 + a.acercar * Math.min(1, Math.max(0, avance)))
 }
 
-/** Pone o quita el fundido de entrada de un clip (0 lo quita). */
-export function fundirClip(tl: Timeline, id: string | null, segundos: number): Timeline {
+/**
+ * Pone o quita la transición de entrada de un clip (0 segundos la quita: corte seco). `tipo` cambia
+ * cómo entra (barrido, zoom…); sin él, se queda el que tenía. Con `id` null, a todos menos el primero.
+ */
+export function fundirClip(tl: Timeline, id: string | null, segundos: number, tipo?: TransicionClip): Timeline {
   return {
     ...tl,
     clips: tl.clips.map((c, i) => {
       if ((id !== null && c.id !== id) || (id === null && i === 0)) return c
-      const { fundido: _antes, ...resto } = c
+      const { fundido: _antes, transicion: tipoAntes, ...resto } = c
       const d = Math.round(pinza(segundos, 0, Math.min(MAX_FUNDIDO, largo(c) / 2)) * 100) / 100
-      return d >= 0.1 ? { ...resto, fundido: d } : resto
+      const t = tipo ?? tipoAntes
+      return d >= 0.1 ? { ...resto, fundido: d, ...(t && t !== 'fundido' ? { transicion: t } : {}) } : resto
     })
+  }
+}
+
+/**
+ * Cómo se ve en el monitor el clip que entra con su transición, `p` de 0 (empieza) a 1 (ya entró):
+ * desplazamiento, escala, desenfoque, opacidad, recorte en círculo y un velo blanco (destello).
+ */
+export function vistaTransicion(tipo: TransicionClip | undefined, p: number): { x: number; y: number; escala: number; desenfoque: number; opacidad: number; circulo: number | null; blanco: number } {
+  const q = pinza(p, 0, 1)
+  const e = 1 - (1 - q) ** 3
+  const base = { x: 0, y: 0, escala: 1, desenfoque: 0, opacidad: 1, circulo: null as number | null, blanco: 0 }
+  switch (tipo) {
+    case 'barrido-izquierda':
+      return { ...base, x: 1 - e }
+    case 'barrido-derecha':
+      return { ...base, x: -(1 - e) }
+    case 'barrido-arriba':
+      return { ...base, y: 1 - e }
+    case 'barrido-abajo':
+      return { ...base, y: -(1 - e) }
+    case 'zoom':
+      return { ...base, escala: 1.25 - 0.25 * e, opacidad: q }
+    case 'desenfoque':
+      return { ...base, desenfoque: (1 - q) * 14, opacidad: Math.min(1, q * 1.6) }
+    case 'destello':
+      return { ...base, opacidad: q < 0.5 ? 0 : 1, blanco: 1 - Math.abs(2 * q - 1) }
+    case 'circulo':
+      return { ...base, circulo: e }
+    default:
+      return { ...base, opacidad: q }
   }
 }
 
@@ -710,7 +869,7 @@ export function cambiarTexto(tl: Timeline, id: string, cambio: Partial<Omit<Text
     ...tl,
     textos: tl.textos.map((x) => {
       if (x.id !== id) return x
-      const { tamano: _t, color: _c, sinCaja: _s, fuente: _f, caja: _k, x: _x, y: _y, ...base } = { ...x, ...cambio }
+      const { tamano: _t, color: _c, sinCaja: _s, fuente: _f, caja: _k, x: _x, y: _y, animacion: _a, ...base } = { ...x, ...cambio }
       // Elegir arriba, centro o abajo suelta la posición libre; mover el rótulo la fija.
       const libre = cambio.posicion !== undefined && cambio.x === undefined ? {} : posicionLibre({ ...x, ...cambio })
       const nuevo: TextoTL = { ...base, ...estiloTexto({ ...x, ...cambio }), ...libre }
@@ -814,8 +973,9 @@ export function cambiarCapa(tl: Timeline, id: string, cambio: Partial<Omit<CapaT
     tl.capas.map((c) => {
       if (c.id !== id) return c
       const nueva = { ...c, ...cambio }
-      // `entrada: undefined` en el cambio la quita (entra de golpe).
+      // `entrada: undefined` en el cambio la quita (entra de golpe); `fin: undefined`, el movimiento.
       if ('entrada' in cambio && !cambio.entrada) delete nueva.entrada
+      if ('fin' in cambio && !cambio.fin) delete nueva.fin
       return nueva
     }),
     duracionTimeline(tl),
@@ -830,6 +990,51 @@ export function borrarCapa(tl: Timeline, id: string): Timeline {
   const { capas: _antes, ...resto } = tl
   return capas.length ? { ...resto, capas } : resto
 }
+
+/** Lo que tarda en llegar una capa que entra desde un lado. */
+export const ENTRADA_LADO_S = 0.45
+const suave = (p: number) => 3 * p * p - 2 * p * p * p
+const frena = (p: number) => 1 - (1 - p) ** 3
+
+/** Dónde arranca una capa que entra desde un lado (fuera del cuadro). */
+export function origenLado(c: Pick<CapaTL, 'entrada' | 'ancho'>): { x?: number; y?: number } {
+  if (c.entrada === 'izquierda') return { x: -c.ancho / 2 - 0.02 }
+  if (c.entrada === 'derecha') return { x: 1 + c.ancho / 2 + 0.02 }
+  if (c.entrada === 'arriba') return { y: -0.35 }
+  if (c.entrada === 'abajo') return { y: 1.35 }
+  return {}
+}
+
+/**
+ * Dónde está una capa `dt` segundos después de aparecer: su recorrido (de su sitio a `fin`, suave) y
+ * su entrada (pop, fundido o desde un lado). `conEntrada: false` la deja sin la entrada (para editarla).
+ */
+export function estadoCapa(c: CapaTL, dt: number, conEntrada = true): { x: number; y: number; ancho: number; giro: number; escala: number; opacidad: number } {
+  const p = c.fin ? suave(pinza(dt / Math.max(DURACION_MINIMA, c.duracion), 0, 1)) : 0
+  const f = c.fin
+  let x = f ? c.x + (f.x - c.x) * p : c.x
+  let y = f ? c.y + (f.y - c.y) * p : c.y
+  const ancho = f ? c.ancho + (f.ancho - c.ancho) * p : c.ancho
+  const giro = f ? (c.giro ?? 0) + (f.giro - (c.giro ?? 0)) * p : (c.giro ?? 0)
+  if (!conEntrada) return { x, y, ancho, giro, escala: 1, opacidad: 1 }
+  const lado = origenLado(c)
+  if (lado.x !== undefined || lado.y !== undefined) {
+    const k = frena(pinza(dt / ENTRADA_LADO_S, 0, 1))
+    if (lado.x !== undefined) x = lado.x + (x - lado.x) * k
+    if (lado.y !== undefined) y = lado.y + (y - lado.y) * k
+  }
+  const { escala, opacidad } = animacionCapa(c, dt)
+  return { x, y, ancho, giro, escala, opacidad }
+}
+
+/** Movimientos de una capa listos para usar (desde su sitio actual). */
+export const MOVIMIENTOS_CAPA: { id: string; nombre: string; para: string; fin: (c: CapaTL) => FinCapa }[] = [
+  { id: 'deriva', nombre: 'Deriva lenta', para: 'paralaje: se desliza un poco, como si la cámara se moviera', fin: (c) => ({ x: c.x + 0.05, y: c.y, ancho: c.ancho * 1.06, giro: c.giro ?? 0 }) },
+  { id: 'acercar', nombre: 'Se acerca', para: 'crece despacio hacia la cámara', fin: (c) => ({ x: c.x, y: c.y, ancho: Math.min(1.5, c.ancho * 1.35), giro: c.giro ?? 0 }) },
+  { id: 'cruzar', nombre: 'Cruza volando', para: 'atraviesa la pantalla de izquierda a derecha (un avión, un pájaro)', fin: (c) => ({ x: 1 + c.ancho / 2 + 0.05, y: c.y - 0.08, ancho: c.ancho, giro: c.giro ?? 0 }) },
+  { id: 'subir', nombre: 'Sube', para: 'sube despacio (humo, un cohete)', fin: (c) => ({ x: c.x, y: c.y - 0.12, ancho: c.ancho, giro: c.giro ?? 0 }) },
+  { id: 'girar', nombre: 'Gira', para: 'gira un poco mientras está', fin: (c) => ({ x: c.x, y: c.y, ancho: c.ancho, giro: (c.giro ?? 0) + 12 }) }
+]
 
 /** Cuánto ha crecido una capa en su entrada (0 a 1) y su opacidad, `dt` segundos después de aparecer. */
 export function animacionCapa(c: CapaTL, dt: number): { escala: number; opacidad: number } {
@@ -908,8 +1113,17 @@ export function ventanaTimeline(tl: Timeline, desde: number, hasta: number): Tim
   }
   const capas = (tl.capas ?? []).map((c) => {
     const d = dentro(c)
+    if (!d) return null
+    // Si se mueve y la ventana la corta, su recorrido empieza y acaba donde va en esos segundos.
+    const recorrido = c.fin && (c.inicio < a || c.inicio + c.duracion > b)
+      ? (() => {
+          const ini = estadoCapa(c, Math.max(0, a - c.inicio), false)
+          const fin = estadoCapa(c, Math.min(c.duracion, b - c.inicio), false)
+          return { x: ini.x, y: ini.y, ancho: ini.ancho, giro: ini.giro, fin: { x: fin.x, y: fin.y, ancho: fin.ancho, giro: fin.giro } }
+        })()
+      : {}
     // Si la capa ya venía de antes, su video sigue desde donde iba y su entrada ya pasó.
-    return d && c.inicio < a ? { ...d, desde: (c.desde ?? 0) + (a - c.inicio), entrada: undefined } : d
+    return c.inicio < a ? { ...d, ...recorrido, desde: (c.desde ?? 0) + (a - c.inicio), entrada: undefined } : { ...d, ...recorrido }
   })
   const { musica: _m, ...resto } = corta
   return {

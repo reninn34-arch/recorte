@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { exportarTimeline } from '../src/main/exportar.ts'
-import { normalizarTimeline } from '../src/shared/timeline.ts'
+import { estadoCapa, normalizarTimeline } from '../src/shared/timeline.ts'
 
 const dir = mkdtempSync(join(tmpdir(), 'recorte-exportar-'))
 const ff = (args) => {
@@ -75,6 +75,69 @@ const vol = (desde) => {
 }
 assert.ok(vol(0.2) < -40, 'silencio antes del sonido')
 assert.ok(vol(1.05) > -30, 'el sonido suena en su segundo')
+
+
+// Una capa que entra desde la izquierda, cruza y gira, con todos los filtros: el MP4 la pone donde
+// el monitor dice que va (estadoCapa) y los filtros oscurecen las esquinas (viñeta).
+const blanco = join(dir, 'blanco.mp4')
+ff(['-f', 'lavfi', '-i', 'color=c=white:s=640x360:d=3:r=30', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', blanco])
+const mueve = normalizarTimeline(
+  {
+    clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 3 }],
+    textos: [],
+    capas: [{ id: 'k1', fuente: 'm1', inicio: 0.5, duracion: 2.5, x: 0.25, y: 0.5, ancho: 0.15, entrada: 'izquierda', giro: 0, fin: { x: 0.8, y: 0.4, ancho: 0.2, giro: 90 } }],
+    filtros: { grano: 0.4, polvo: 0.5, trama: 0.5, vineta: 0.8, parpadeo: 0.3 }
+  },
+  3,
+  { m1: 5 }
+)
+assert.deepEqual(mueve.capas[0].fin, { x: 0.8, y: 0.4, ancho: 0.2, giro: 90 }, 'el recorrido sobrevive a normalizar')
+assert.equal(mueve.filtros.vineta, 0.8, 'los filtros sobreviven a normalizar')
+const otro = { ...proyecto, source: { ...proyecto.source, path: blanco, duration: 3 } }
+const r2 = await exportarTimeline(otro, mueve, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas2'))
+assert.equal(r2.ok, true, r2.error)
+const mp42 = join(dir, 'salidas2', 'timeline-prueba-original.mp4')
+const color2 = (t, x, y) => {
+  const r = spawnSync('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', mp42, '-frames:v', '1', '-vf', `crop=8:8:${x}:${y},scale=1:1`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'])
+  return [...r.stdout]
+}
+for (const t of [0.7, 1.5, 2.6]) {
+  const e = estadoCapa(mueve.capas[0], t - 0.5)
+  const [x, y] = [Math.round(e.x * 640) - 4, Math.round(e.y * 360) - 4]
+  assert.ok(x > 0 && rojo(color2(t, x, y)), `en ${t} s la capa está donde dice el monitor (${x}, ${y}): ${color2(t, x, y)}`)
+}
+assert.ok(!rojo(color2(1.5, 150, 176)), 'ya no está donde empezó: se movió')
+const esquina = color2(1.5, 2, 2)
+const centro = color2(1.5, 316, 300)
+assert.ok(esquina[0] + 40 < centro[0], `la viñeta oscurece la esquina (${esquina} frente a ${centro})`)
+
+// Un barrido entre un clip blanco y uno rojo: a mitad de la transición, medio cuadro de cada uno.
+const rojoVid = join(dir, 'rojo.mp4')
+ff(['-f', 'lavfi', '-i', 'color=c=red:s=640x360:d=2:r=30', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', rojoVid])
+const conBarrido = normalizarTimeline(
+  {
+    clips: [
+      { id: 'c1', fuente: 'principal', entrada: 0, salida: 2 },
+      { id: 'c2', fuente: 'm3', entrada: 0, salida: 2, fundido: 1, transicion: 'barrido-izquierda' }
+    ],
+    textos: [{ id: 't1', texto: 'Una pregunta que se arma', inicio: 0, duracion: 3, posicion: 'centro', animacion: 'palabras' }]
+  },
+  3,
+  { m3: 2 }
+)
+assert.equal(conBarrido.clips[1].transicion, 'barrido-izquierda', 'la transición sobrevive a normalizar')
+assert.equal(conBarrido.textos[0].animacion, 'palabras', 'la animación sobrevive a normalizar')
+const otro3 = { ...otro, medios: [...proyecto.medios, { id: 'm3', ruta: rojoVid, tipo: 'video', conAudio: false, nombre: 'rojo.mp4', duracion: 2 }] }
+const r3 = await exportarTimeline(otro3, conBarrido, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas3'))
+assert.equal(r3.ok, true, r3.error)
+const mp43 = join(dir, 'salidas3', 'timeline-prueba-original.mp4')
+const color3 = (t, x, y) => {
+  const r = spawnSync('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', mp43, '-frames:v', '1', '-vf', `crop=8:8:${x}:${y},scale=1:1`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'])
+  return [...r.stdout]
+}
+// En pleno barrido hacia la izquierda: a la izquierda aún el blanco, a la derecha ya entra el rojo.
+const [izq, der] = [color3(2.5, 20, 300), color3(2.5, 610, 300)]
+assert.ok(izq[1] > 200 && rojo(der), `a mitad del barrido, blanco a la izquierda y rojo a la derecha: ${izq} / ${der}`)
 
 rmSync(dir, { recursive: true, force: true })
 console.log('exportar: ok')

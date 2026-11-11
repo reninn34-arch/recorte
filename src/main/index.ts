@@ -58,7 +58,7 @@ import { turnoAgente } from './chat'
 import { buscarActualizacion, estadoActualizacion, instalarActualizacion, prepararActualizaciones } from './actualizar'
 import { activarGustos, agregarGustos, bloqueGustos, cargarGustos, olvidarGustos, quitarGusto, senalGusto, usoCreacion } from './gustos'
 import type { MensajeChat, OperacionTL } from '../shared/chat'
-import { rutaScriptPython, transcribir } from './transcribir'
+import { buscarPython, rutaScriptPython, transcribir } from './transcribir'
 
 // El esquema tiene que declararse antes de que Electron esté listo.
 protocol.registerSchemesAsPrivileged([
@@ -1390,6 +1390,38 @@ app.whenReady().then(() => {
     }
     return { archivo: `media/${nombre}.wav`, duracion, texto: typeof texto === 'string' ? texto.replace(/\s+/g, ' ').trim().slice(0, 600) : '' }
   })
+  /**
+   * Quita el fondo de una imagen de la biblioteca con el kit (un fondo liso al momento; cualquier otra foto,
+   * con el modelo ISNet) y la agrega como un medio nuevo (un PNG con transparencia), para usarla como capa.
+   * El original no se toca.
+   */
+  async function quitarFondo(id: string, medio: string): Promise<{ project: Project; medio: string }> {
+    const p = proyectos.abrir(id)
+    if (!p) throw new Error('El proyecto ya no existe.')
+    const m = p.medios?.find((x) => x.id === medio)
+    if (!m || m.tipo !== 'imagen') throw new Error('Solo se le puede quitar el fondo a una imagen de la biblioteca.')
+    const py = await buscarPython()
+    const kit = rutaScriptPython(join('kit', 'kit.py'))
+    if (!py || !existsSync(kit)) throw new Error('Hace falta Python para quitar fondos (Ajustes › Sistema).')
+    const carpeta = join(proyectos.carpeta(id), 'recortes')
+    mkdirSync(carpeta, { recursive: true })
+    const salida = join(carpeta, `${basename(m.nombre, extname(m.nombre)).slice(0, 40)}-sin-fondo-${randomUUID().slice(0, 6)}.png`)
+    const cita = (x: string) => (/[\s"]/.test(x) ? `"${x}"` : x)
+    // La primera vez con una foto de fondo variado se baja el modelo (178 MB): hasta 15 minutos.
+    const r = await ejecutar([[py.cmd, ...py.args].map(cita).join(' '), cita(kit), 'recortar', cita(m.ruta), '--salida', cita(salida)], carpeta, 900_000)
+    if (r.codigo !== 0 || !existsSync(salida)) {
+      const motivo = r.salida.trim().split('\n').filter(Boolean).pop() ?? ''
+      throw new Error(motivo.length < 300 && motivo ? motivo : 'No pude quitarle el fondo.')
+    }
+    const agregado = await agregarRutas(id, [salida])
+    const nuevo = agregado.agregados[0]
+    if (!nuevo) throw new Error(`No pude agregar el recorte: ${agregado.fallos.join(', ')}`)
+    return { project: agregado.project, medio: nuevo }
+  }
+  ipcMain.handle('proyecto:quitar-fondo', (_evento, id: unknown, medio: unknown) => {
+    if (typeof id !== 'string' || typeof medio !== 'string') throw new Error('Datos inválidos.')
+    return quitarFondo(id, medio)
+  })
   // Una frase de narración hecha a mano en el editor: con el texto y la voz que diga el usuario,
   // sin pasar por el agente (no gasta sus créditos). El audio queda en la carpeta del proyecto.
   ipcMain.handle('proyecto:voz-frase', async (_evento, id: unknown, pedido: unknown) => {
@@ -2342,6 +2374,7 @@ app.whenReady().then(() => {
       for (const w of BrowserWindow.getAllWindows()) w.webContents.send('proyecto:externo', { proyecto: ligero, quien, conTimeline: Boolean(conTimeline) })
     },
     abrirEnApp: (id) => alFrente('proyecto:abrir', id),
+    quitarFondo: (id, medio) => quitarFondo(id, medio),
     // ===== Crear por MCP (6.3) =====
     creaciones: {
       nueva: (p) => creaciones.nueva(p),

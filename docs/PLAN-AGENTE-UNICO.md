@@ -230,3 +230,50 @@ Falta: probarlo con un agente real (que use capas y sonidos y respete los retoqu
   Claude) y sigue sola a esa hora con la app abierta; «Seguir donde iba» sigue ya, también con otro agente. Si el
   render ya había terminado, se entrega igual. Probado con un Claude de prueba (`prueba-modo-agente`).
 Falta: probarlo con un agente real; tomar del registro qué imagen se pidió para mostrar su descripción.
+
+### Fase 7 · Videos más creativos: capas en movimiento, filtros, recortes y transiciones
+
+> Lo pidió el fundador el 2026-11-10 tras comparar el video de SpaceX con su referencia: el dinamismo de esos
+> documentales sale de capas recortadas que se mueven (paralaje), transiciones con movimiento y filtros (grano, polvo,
+> trama de imprenta, destellos), y Recorte no tenía nada de eso. Por partes, cada una publicable sola.
+
+**7.1 · Movimiento de capas.** *Hecho (2026-11-10), probado exportando de verdad (`prueba:exportar` compara el MP4 con
+lo que dibuja el monitor), sin mirarlo aún en la app:* una capa tiene `giro` y un `fin` (sitio, ancho y giro donde termina,
+también fuera del cuadro) y va suave de uno al otro (`estadoCapa`; en FFmpeg, `expresionesCapa` con un lienzo cuadrado fijo
+para girar). Entradas nuevas: desde la izquierda, la derecha, arriba o abajo. En el panel: «Quieta» o un movimiento listo
+(deriva lenta para el paralaje, se acerca, cruza volando, sube, gira) y el giro al empezar y al terminar; en pausa, la capa
+elegida se ve en su inicio y en su fin (silueta punteada), las dos para arrastrar. El chat y el MCP: `fin_x`, `fin_y`,
+`fin_ancho`, `fin_giro`, `giro`, `quieta`. El kit y su conversor hacen lo mismo.
+
+**7.2 · Filtros.** *Hecho (2026-11-10), igual de probado:* `filtros` de todo el video (grano, polvo y rayas, trama de puntos,
+viñeta, parpadeo; 0 a 1) en el menú «Filtros» de la barra, la operación `filtros` del chat y el MCP, y `"filtros"` en la
+receta del kit. En el MP4 van debajo de los rótulos (`filtrosFfmpeg`: texturas generadas, sin archivos); en el monitor,
+degradados y un lienzo con grano y polvo. Los retoques (`describirRetoques`) cuentan también el recorrido y los filtros.
+Falta: filtros por clip (hoy son de todo el video) y destellos o partículas de luz.
+
+**7.3 · Recortes.** Quitar el fondo para usar personas y objetos como capas: el agente pide a Flow las piezas sobre verde
+liso y Recorte quita el verde; después, quitar el fondo de cualquier foto (descarga pesada).
+
+*Hecho (2026-11-10), probado con `prueba:kit` y `prueba:mcp` sobre imágenes sintéticas; falta probarlo con una imagen real
+de Flow (hace falta la app actualizada):* `kit.py recortar` quita un fondo liso (verde croma, blanco o un color): es fondo lo
+que se parece al color de los bordes Y toca los bordes (no agujerea lo que tenga ese color por dentro), con borde suave, sin
+halo verde y recortado al sujeto. `kit.py imagen … --recorte` y `generar_con_flow` con `para_recortar` piden la imagen sobre
+verde croma (`PARA_RECORTAR`) y devuelven también el recorte. En el editor, «Quitar fondo» en el panel de una capa de imagen
+(el recorte entra a la biblioteca y la capa pasa a usarlo; el original queda); por MCP, `quitar_fondo`. Con fondos variados
+sale mal: quitar el fondo de cualquier foto (un modelo de segmentación) queda pendiente.
+*Y cualquier foto (2026-11-10):* si el fondo no es liso, `kit.py recortar` usa el modelo ISNet (`isnet-general-use.onnx`,
+Apache 2.0, el de rembg; 178 MB que se bajan una vez a `%APPDATA%/recorte/modelos`, con onnxruntime). Probado con tres
+imágenes del video de SpaceX: el cohete en su sala sale limpio, las personas bien; a veces se queda algo pegado al sujeto
+(la bandera del retrato). `--modo liso|modelo` para forzar uno.
+
+**7.4 · Transiciones con movimiento y texto que se arma.** Barrido, nube, desenfoque, destello y zoom entre clips; texto
+palabra a palabra y palabras que se juntan en una frase.
+
+*Hecho (2026-11-10), probado exportando (`prueba:exportar`: a mitad de un barrido, medio cuadro de cada clip) y con
+`prueba:kit`; sin mirarlo aún en la app:* cada corte tiene su transición (`transicion` del clip con `fundido` = lo que dura):
+fundido, barrido hacia los cuatro lados (empuja, como un paneo rápido), zoom, desenfoque, destello y círculo; en el MP4 son
+los `xfade` de FFmpeg, en el monitor `vistaTransicion`. En el panel del clip, el menú de la transición; en el chat y el MCP,
+la operación `transicion`. Los rótulos tienen `animacion`: palabra a palabra, letra a letra, con rebote o subiendo (en el MP4,
+etiquetas de ASS por palabra o letra; en el monitor, al reproducir). El kit: `"transicion"` en cada momento y títulos con
+`"entrada": "palabras"`; el conversor lo pasa a los clips sueltos (los tramos del video ya hecho la traen dibujada) y la
+etiqueta entra con rebote. Falta: la transición de nube (necesita una textura) y palabras que se juntan en una frase.

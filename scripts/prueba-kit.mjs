@@ -186,6 +186,60 @@ try {
   if (!(Math.abs(izq - der) > 6)) throw new Error(`El objeto no entra girando en 3D: ${izq} y ${der} píxeles rojos a cada lado`)
   const conTodo = json(correr(python, ['kit/kit.py', 'armar', 'receta-docu.json'], trabajo))
   if (Math.abs(conTodo.duracion - 5) > 0.2) throw new Error(`El video de documental no salió: ${JSON.stringify(conTodo)}`)
+  // Una capa que cruza de izquierda a derecha (con giro) y los filtros: la capa está donde dice el recorrido
+  // y la viñeta oscurece la esquina.
+  correr('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=white:s=600x800', '-frames:v', '1', 'blanco.jpg'], trabajo)
+  writeFileSync(
+    join(trabajo, 'receta-mueve.json'),
+    JSON.stringify({
+      ancho: 270, alto: 480, fps: 12, duracion: 3, fundido_final: 0,
+      momentos: [{ tipo: 'foto', archivo: 'blanco.jpg', desde: 0, hasta: 3, acercar: false }],
+      capas: [{ archivo: 'logo.png', desde: 0, hasta: 3, x: 0.2, y: 0.5, ancho: 0.2, entrada: 'ninguna', fin: { x: 0.8, y: 0.5, giro: 45 } }],
+      filtros: { grano: 0.3, vineta: 0.9, trama: 0.3, polvo: 0.3, parpadeo: 0.2 }
+    })
+  )
+  json(correr(python, ['kit/kit.py', 'armar', 'receta-mueve.json', '--prueba', '0.3,2.8'], trabajo))
+  const px = (t, x, y) => {
+    const r = spawnSync('ffmpeg', ['-v', 'error', '-i', `revision/prueba-${t}.jpg`, '-vf', `crop=4:4:${x}:${y},scale=1:1`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { cwd: trabajo })
+    return [...r.stdout]
+  }
+  const rojoK = (v) => v[0] > 150 && v[1] < 90
+  if (!rojoK(px('00.30', 52, 238)) || rojoK(px('00.30', 214, 238))) throw new Error(`Al empezar, la capa debía estar a la izquierda: ${px('00.30', 52, 238)}`)
+  if (!rojoK(px('02.80', 214, 238)) || rojoK(px('02.80', 52, 238))) throw new Error(`Al terminar, la capa debía estar a la derecha: ${px('02.80', 214, 238)}`)
+  const [esq, cen] = [px('00.30', 1, 1), px('00.30', 133, 400)]
+  if (!(esq[0] + 40 < cen[0])) throw new Error(`La viñeta no oscurece la esquina: ${esq} frente a ${cen}`)
+  console.log('capas que se mueven y filtros en el kit ✓')
+
+  // Un barrido entre dos momentos: a mitad, lo de antes a un lado y lo nuevo al otro.
+  correr('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=600x800', '-frames:v', '1', 'rojo.jpg'], trabajo)
+  writeFileSync(
+    join(trabajo, 'receta-barrido.json'),
+    JSON.stringify({
+      ancho: 270, alto: 480, fps: 12, duracion: 3, fundido_final: 0,
+      momentos: [
+        { tipo: 'foto', archivo: 'blanco.jpg', desde: 0, hasta: 1.5, acercar: false },
+        { tipo: 'foto', archivo: 'rojo.jpg', desde: 1.5, hasta: 3, acercar: false, transicion: 'barrido-izquierda', entra: 0.6 },
+        { tipo: 'titulo', desde: 0, hasta: 3, entrada: 'palabras', lineas: ['una pregunta que se arma'] }
+      ]
+    })
+  )
+  json(correr(python, ['kit/kit.py', 'armar', 'receta-barrido.json', '--prueba', '1.75'], trabajo))
+  const [bi, bd] = [px('01.75', 10, 100), px('01.75', 255, 100)]
+  if (!(bi[1] > 200 && rojoK(bd))) throw new Error(`El barrido no empuja: ${bi} a la izquierda y ${bd} a la derecha`)
+  console.log('transiciones con movimiento en el kit ✓')
+
+  // Recortes: un sujeto sobre verde croma (con un bolsillo verde por dentro) queda sin fondo y sin agujeros.
+  correr('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=0x00B140:s=400x500', '-vf', "drawbox=x=100:y=80:w=200:h=340:color=0x3C2814:t=fill,drawbox=x=180:y=230:w=40:h=40:color=0x00B140:t=fill", '-frames:v', '1', 'croma.png'], trabajo)
+  const rec = json(correr(python, ['kit/kit.py', 'recortar', 'croma.png'], trabajo))
+  if (Math.abs(rec.ancho - 200) > 8 || Math.abs(rec.alto - 340) > 8) throw new Error(`El recorte no se ajustó al sujeto: ${JSON.stringify(rec)}`)
+  const alfa = (x, y) => {
+    const r = spawnSync('ffmpeg', ['-v', 'error', '-i', rec.archivo, '-vf', `crop=1:1:${x}:${y},format=rgba`, '-f', 'rawvideo', '-'], { cwd: trabajo })
+    return r.stdout[3]
+  }
+  if (alfa(100, 170) < 250) throw new Error(`El bolsillo verde dentro del sujeto no debía quitarse: alfa ${alfa(100, 170)}`)
+  const conSala = spawnSync(python, ['kit/kit.py', 'recortar', 'negro.jpg'], { cwd: trabajo, encoding: 'utf8' })
+  if (conSala.status === 0) throw new Error('Una imagen de un solo color entera no tiene sujeto: debía decirlo')
+  console.log(`recortes: el sujeto queda solo (${rec.ancho}×${rec.alto}), sin agujeros, y sin sujeto lo dice ✓`)
   console.log(`piezas de documental: título, etiqueta, palabras, objeto con giro 3D (${izq} frente a ${der}) y apiladas ✓`)
   console.log('prueba kit: ok')
 } catch (error) {

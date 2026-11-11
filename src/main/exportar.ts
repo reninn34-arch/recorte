@@ -1,7 +1,26 @@
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { ajustesDe, duracionTimeline, FUENTE_PRINCIPAL, FUENTES_TEXTO, vozEnTimeline, tramos, VOLUMEN_SONIDO, tramosDeVoces, type PosicionTexto, type Timeline } from '../shared/timeline'
+import {
+  ajustesDe,
+  duracionTimeline,
+  ENTRADA_LADO_S,
+  FUENTE_PRINCIPAL,
+  FUENTES_TEXTO,
+  origenLado,
+  vozEnTimeline,
+  tramos,
+  VOLUMEN_SONIDO,
+  tramosDeVoces,
+  TRANSICIONES,
+  APARECER_S,
+  pasoAnimacion,
+  type CapaTL,
+  type TextoTL,
+  type FiltrosTL,
+  type PosicionTexto,
+  type Timeline
+} from '../shared/timeline'
 import type { OpcionesExport } from '../shared/api'
 import type { ClipSuggestion, Project } from '../shared/types'
 
@@ -134,7 +153,8 @@ function escribirAss(
         .map((l) => escapar(l))
         .filter(Boolean)
         .join('\\N')
-      return `Dialogue: 1,${tiempoAss(t.inicio)},${tiempoAss(t.inicio + t.duracion)},${nombreEstilo[t.posicion]}${t.sinCaja ? 'Libre' : ''},,0,0,0,,{${etiquetas}}${lineas}`
+      const { inicio: entrada, cuerpo } = animarAss(t, lineas, libre ? { x: Math.round(t.x! * ancho), y: Math.round(t.y! * alto), baja: Math.round(alto * 0.03) } : null)
+      return `Dialogue: 1,${tiempoAss(t.inicio)},${tiempoAss(t.inicio + t.duracion)},${nombreEstilo[t.posicion]}${t.sinCaja ? 'Libre' : ''},,0,0,0,,{${etiquetas}${entrada}}${cuerpo}`
     })
   ].join('\n')
 
@@ -178,6 +198,12 @@ export async function exportarTimeline(
     if (f === FUENTE_PRINCIPAL) return { ruta: proyecto.source.path, tipo: 'video', conAudio: principalConAudio }
     const m = proyecto.medios?.find((x) => x.id === f)
     return m && existsSync(m.ruta) ? { ruta: m.ruta, tipo: m.tipo, conAudio: m.conAudio } : null
+  }
+  /** Alto entre ancho de un medio (para saber cuánto ocupa una capa al girar). */
+  const aspectoDe = (f: string): number => {
+    if (f === FUENTE_PRINCIPAL) return proyecto.source.width ? proyecto.source.height / proyecto.source.width : 1
+    const m = proyecto.medios?.find((x) => x.id === f)
+    return m?.ancho && m.alto ? m.alto / m.ancho : 1
   }
   const lista = tramos(timeline).filter((t) => fuenteDe(t.clip.fuente))
   if (lista.length === 0) return { ok: false, error: 'La timeline está vacía: no hay nada que exportar.' }
@@ -271,7 +297,8 @@ export async function exportarTimeline(
       const d = t.clip.fundido
       if (d) {
         partes.push(`${previo}tpad=stop_mode=clone:stop_duration=${d.toFixed(3)}[vp${i}]`)
-        partes.push(`[vp${i}][v${i}]xfade=transition=fade:duration=${d.toFixed(3)}:offset=${acumulado.toFixed(3)}${salida}`)
+        const xf = TRANSICIONES.find((x) => x.id === (t.clip.transicion ?? 'fundido'))?.xfade ?? 'fade'
+        partes.push(`[vp${i}][v${i}]xfade=transition=${xf}:duration=${d.toFixed(3)}:offset=${acumulado.toFixed(3)}${salida}`)
       } else {
         partes.push(`${previo}[v${i}]concat=n=2:v=1:a=0${salida}`)
       }
@@ -310,19 +337,32 @@ export async function exportarTimeline(
     if (f.tipo === 'imagen') entradas.push('-loop', '1', '-framerate', String(fps), '-t', c.duracion.toFixed(3), '-i', f.ruta)
     else entradas.push('-ss', (c.desde ?? 0).toFixed(3), '-t', c.duracion.toFixed(3), '-i', f.ruta)
     const k = n++
-    const w = (ancho * c.ancho).toFixed(1)
-    // El rebote del «pop»: entra al 45 %, se pasa al 117 % y se asienta en 0,24 s (animacionCapa).
-    const escala = c.entrada === 'pop' ? `if(lt(t,0.13),0.45+t/0.13*0.72,if(lt(t,0.24),1.17-(t-0.13)/0.11*0.17,1))` : '1'
+    // Lo mismo que estadoCapa (el monitor), en expresiones de FFmpeg: `T` es el segundo de la capa.
+    const ex = expresionesCapa(c)
+    const en = (expr: string, T: string) => expr.replace(/T/g, T)
     const fundido = c.entrada === 'fundido' ? ',fade=t=in:st=0:d=0.35:alpha=1' : c.entrada === 'pop' ? ',fade=t=in:st=0:d=0.08:alpha=1' : ''
+    // Con giro, la capa va en un lienzo cuadrado fijo (lo que ocupa en su punto más grande y girada).
+    const gira = Boolean(c.giro) || Boolean(c.fin?.giro)
+    const lado = Math.ceil((ancho * Math.max(c.ancho, c.fin?.ancho ?? 0) * 1.17 * Math.hypot(1, aspectoDe(c.fuente)) + 4) / 2) * 2
+    const giro = gira
+      ? `,pad=w=${lado}:h=${lado}:x='(ow-iw)/2':y='(oh-ih)/2':color=black@0:eval=frame,rotate=a='(${en(ex.giro, 't')})*PI/180':c=none:ow=${lado}:oh=${lado}`
+      : ''
     partes.push(
-      `[${k}:v]setpts=PTS-STARTPTS,fps=${fps},format=rgba,scale=w='trunc(${w}*${escala}/2)*2':h=-2:eval=frame${fundido},setpts=PTS+${c.inicio.toFixed(3)}/TB[capa${i}]`
+      `[${k}:v]setpts=PTS-STARTPTS,fps=${fps},format=rgba,scale=w='max(2,trunc(${ancho}*${en(ex.ancho, 't')}*${en(ex.escala, 't')}/2)*2)':h=-2:eval=frame${giro}${fundido},setpts=PTS+${c.inicio.toFixed(3)}/TB[capa${i}]`
     )
     const salida = `[conCapa${i}]`
+    const T = `(t-${c.inicio.toFixed(3)})`
     partes.push(
-      `${capaBase}[capa${i}]overlay=x='${(ancho * c.x).toFixed(1)}-w/2':y='${(alto * c.y).toFixed(1)}-h/2':eval=frame:eof_action=pass:enable='between(t,${c.inicio.toFixed(3)},${(c.inicio + c.duracion).toFixed(3)})'${salida}`
+      `${capaBase}[capa${i}]overlay=x='${ancho}*${en(ex.x, T)}-w/2':y='${alto}*${en(ex.y, T)}-h/2':eval=frame:eof_action=pass:enable='between(t,${c.inicio.toFixed(3)},${(c.inicio + c.duracion).toFixed(3)})'${salida}`
     )
     capaBase = salida
   })
+  // Los filtros de todo el video (grano, polvo, trama, viñeta, parpadeo): por debajo de los rótulos,
+  // para que el texto se siga leyendo nítido.
+  if (timeline.filtros) {
+    partes.push(...filtrosFfmpeg(timeline.filtros, capaBase, '[filtrado]', ancho, alto, fps, duracion))
+    capaBase = '[filtrado]'
+  }
   partes.push(ass ? `${capaBase}subtitles=${ass}[vout]` : `${capaBase}null[vout]`)
 
   if (musica) {
@@ -420,4 +460,102 @@ export async function exportarTimeline(
       })
     })
   })
+}
+
+const n3 = (v: number) => (Math.round(v * 1000) / 1000).toString()
+
+/**
+ * El recorrido de una capa en expresiones de FFmpeg (con `T` = segundos desde que aparece), igual
+ * que `estadoCapa`: de su sitio a `fin` suavemente, la entrada desde un lado y el rebote del «pop».
+ */
+export function expresionesCapa(c: CapaTL): { x: string; y: string; ancho: string; giro: string; escala: string } {
+  const f = c.fin
+  const E = f ? `(3*pow(clip(T/${n3(Math.max(0.1, c.duracion))},0,1),2)-2*pow(clip(T/${n3(Math.max(0.1, c.duracion))},0,1),3))` : '0'
+  const lerp = (a: number, b: number) => (f && Math.abs(b - a) > 1e-4 ? `(${n3(a)}+(${n3(b - a)})*${E})` : `(${n3(a)})`)
+  let x = lerp(c.x, f?.x ?? c.x)
+  let y = lerp(c.y, f?.y ?? c.y)
+  const lado = origenLado(c)
+  const K = `(1-pow(1-clip(T/${ENTRADA_LADO_S},0,1),3))`
+  if (lado.x !== undefined) x = `(${n3(lado.x)}+(${x}-(${n3(lado.x)}))*${K})`
+  if (lado.y !== undefined) y = `(${n3(lado.y)}+(${y}-(${n3(lado.y)}))*${K})`
+  return {
+    x,
+    y,
+    ancho: lerp(c.ancho, f?.ancho ?? c.ancho),
+    giro: lerp(c.giro ?? 0, f?.giro ?? c.giro ?? 0),
+    // El rebote del «pop»: entra al 45 %, se pasa al 117 % y se asienta en 0,24 s (animacionCapa).
+    escala: c.entrada === 'pop' ? 'if(lt(T,0.13),0.45+T/0.13*0.72,if(lt(T,0.24),1.17-(T-0.13)/0.11*0.17,1))' : '1'
+  }
+}
+
+/**
+ * Los filtros del video como una cadena de FFmpeg de `entrada` a `salida`. La trama y el polvo son
+ * texturas generadas (sin archivos): la trama, una rejilla de puntos fija; el polvo, motas y rayas que
+ * cambian en cada cuadro. Lo mismo que dibuja el monitor.
+ */
+export function filtrosFfmpeg(f: FiltrosTL, entrada: string, salida: string, ancho: number, alto: number, fps: number, duracion: number): string[] {
+  const partes: string[] = []
+  let base = entrada
+  const paso = (cadena: string, nombre: string) => {
+    partes.push(`${base}${cadena}${nombre}`)
+    base = nombre
+  }
+  const d = duracion.toFixed(3)
+  if (f.trama) {
+    // Puntos cada ~1/180 del ancho (6 px en 1080), mezclados en «overlay»: se ven en los medios tonos.
+    const k = ((2 * Math.PI) / Math.max(3, ancho / 180)).toFixed(4)
+    partes.push(`nullsrc=s=${ancho}x${alto}:r=${fps}:d=0.1,format=gray,geq=lum='128+127*sin(X*${k})*sin(Y*${k})',loop=loop=-1:size=1,trim=duration=${d},setpts=N/(${fps}*TB),format=gbrp[trama]`)
+    paso(`format=gbrp[conTrama0];[conTrama0][trama]blend=all_mode=overlay:all_opacity=${(0.45 * f.trama).toFixed(3)}`, '[conTrama]')
+  }
+  if (f.polvo) {
+    // Motas (algunos puntos al azar en cada cuadro) y una raya vertical que salta de sitio.
+    const motas = (1 - 0.0016 * f.polvo).toFixed(5)
+    const w3 = Math.max(16, Math.round(ancho / 3))
+    const h3 = Math.max(16, Math.round(alto / 3))
+    partes.push(
+      `nullsrc=s=${w3}x${h3}:r=${fps}:d=${d},format=gray,geq=lum='if(gt(random(1),${motas}),255,if(lt(abs(X-mod(N*97\,W)),0.6)*gt(mod(N\,7),4),170,0))',scale=${ancho}:${alto}:flags=bilinear,format=gbrp[polvo]`
+    )
+    paso(`format=gbrp[conPolvo0];[conPolvo0][polvo]blend=all_mode=screen:all_opacity=${(0.7 * f.polvo).toFixed(3)}`, '[conPolvo]')
+  }
+  const cola: string[] = []
+  if (f.grano) cola.push(`noise=alls=${Math.max(1, Math.round(30 * f.grano))}:allf=t`)
+  if (f.vineta) cola.push(`vignette=angle=${(0.2 + 0.6 * f.vineta).toFixed(3)}`)
+  if (f.parpadeo) cola.push(`eq=brightness='${(0.045 * f.parpadeo).toFixed(4)}*sin(t*31)*sin(t*7.3)':eval=frame`)
+  partes.push(`${base}${cola.length ? cola.join(',') + ',' : ''}format=yuv420p${salida}`)
+  return partes
+}
+
+/**
+ * La animación de entrada de un rótulo en ASS (igual que el monitor): palabra a palabra o letra a letra
+ * (cada una pasa de transparente a visible a su tiempo), con rebote (escala) o subiendo (\move con
+ * posición libre; si no, un fundido). Devuelve etiquetas para el inicio y el texto ya etiquetado.
+ */
+export function animarAss(t: TextoTL, lineas: string, libre: { x: number; y: number; baja: number } | null): { inicio: string; cuerpo: string } {
+  const ms = (s: number) => Math.round(s * 1000)
+  if (t.animacion === 'pop') {
+    return { inicio: '\\fscx45\\fscy45\\fad(80,0)\\t(0,130,\\fscx117\\fscy117)\\t(130,240,\\fscx100\\fscy100)', cuerpo: lineas }
+  }
+  if (t.animacion === 'subir') {
+    return { inicio: libre ? `\\move(${libre.x},${libre.y + libre.baja},${libre.x},${libre.y},0,350)\\fad(250,0)` : '\\fad(300,0)', cuerpo: lineas }
+  }
+  if (t.animacion !== 'palabras' && t.animacion !== 'maquina') return { inicio: '', cuerpo: lineas }
+  // El borde y la caja siguen a la letra: con caja, su transparencia es la del estilo (o opaca si es de color).
+  const borde = t.sinCaja ? '00' : t.caja ? '00' : '4D'
+  const sombra = t.sinCaja ? '80' : '4D'
+  const paso = pasoAnimacion(t)
+  const oculta = '\\1a&HFF&\\3a&HFF&\\4a&HFF&'
+  const visible = `\\1a&H00&\\3a&H${borde}&\\4a&H${sombra}&`
+  // Se trocea sin romper los saltos de línea (\N) ni los espacios.
+  const piezas = t.animacion === 'palabras' ? lineas.split(/(\\N|\s+)/) : lineas.split(/(\\N)|/)
+  let n = 0
+  const cuerpo = piezas
+    .filter((x) => x !== undefined && x !== '')
+    .map((x) => {
+      if (x === '\\N' || /^\s+$/.test(x)) return x
+      const a = ms(n * paso)
+      n++
+      return `{${oculta}\\t(${a},${a + ms(APARECER_S)},${visible})}${x}`
+    })
+    .join('')
+  return { inicio: '', cuerpo }
 }

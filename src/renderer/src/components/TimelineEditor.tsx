@@ -39,7 +39,15 @@ import {
   TIPO_ARRASTRE_MEDIO,
   SONIDOS_INCLUIDOS,
   VOLUMEN_SONIDO,
-  type EntradaCapa
+  cambiarFiltros,
+  FILTROS,
+  TRANSICIONES,
+  ANIMACIONES_TEXTO,
+  type AnimacionTexto,
+  type TransicionClip,
+  MOVIMIENTOS_CAPA,
+  type EntradaCapa,
+  type FinCapa
 } from '../../../shared/timeline'
 import type { OpcionesExport } from '../../../shared/api'
 import type { TranscriptSegment } from '../../../shared/types'
@@ -107,6 +115,8 @@ export function TimelineEditor({
   generarVoz,
   grabarVoz,
   onCambiarArchivo,
+  onQuitarFondo,
+  quitandoFondo,
   medios,
   duraciones,
   ponerSonido
@@ -136,6 +146,9 @@ export function TimelineEditor({
   grabarVoz?: GrabarVoz
   /** Cambia el archivo del clip por otro que elija el usuario (otra foto, otro video). */
   onCambiarArchivo?: (clipId: string) => void
+  /** Quita el fondo liso de la imagen de una capa (la cambia por su recorte). */
+  onQuitarFondo?: (capaId: string) => void
+  quitandoFondo?: boolean
   /** La biblioteca: lo que se puede poner encima del video. */
   medios?: { id: string; nombre: string; tipo: 'video' | 'imagen' }[]
   /** Lo que dura cada medio (para validar las capas). */
@@ -143,7 +156,7 @@ export function TimelineEditor({
   /** Copia un efecto de sonido al proyecto (uno incluido o, sin id, uno del equipo). */
   ponerSonido?: (incluido?: string) => Promise<{ archivo: string; nombre: string; duracion: number } | null>
 }) {
-  const [menu, setMenu] = useState<'encima' | 'sonido' | null>(null)
+  const [menu, setMenu] = useState<'encima' | 'sonido' | 'filtros' | null>(null)
   /** La pista sobre la que se está arrastrando un medio de la biblioteca. */
   const [destino, setDestino] = useState<'video' | 'encima' | null>(null)
   const [nuevaVoz, setNuevaVoz] = useState(false)
@@ -649,6 +662,42 @@ export function TimelineEditor({
             )}
           </span>
         )}
+        <span className="tl-menu-ancla" onPointerDown={(e) => e.stopPropagation()}>
+          <button
+            className={`tl-boton ${menu === 'filtros' ? 'is-activo' : ''} ${tl.filtros ? 'tiene' : ''}`}
+            onClick={() => setMenu((m) => (m === 'filtros' ? null : 'filtros'))}
+            title="Grano, polvo, trama de imprenta, viñeta y parpadeo para todo el video"
+            disabled={total <= 0}
+          >
+            <Icon name="sliders" size={16} /> Filtros
+          </button>
+          {menu === 'filtros' && (
+            <div className="tl-menu tl-menu-filtros" onPointerDown={(e) => e.stopPropagation()}>
+              {FILTROS.map((f) => (
+                <label key={f.id} className="tl-ajuste" title={`Para ${f.para}`}>
+                  <span>
+                    {f.nombre} <b>{Math.round((tl.filtros?.[f.id] ?? 0) * 100)} %</b>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={tl.filtros?.[f.id] ?? 0}
+                    onPointerDown={empezarAjuste}
+                    onFocus={empezarAjuste}
+                    onChange={(e) => deslizar(cambiarFiltros(timeline, { [f.id]: Number(e.target.value) }))}
+                  />
+                </label>
+              ))}
+              {tl.filtros && (
+                <button className="tl-menu-item" onClick={() => historial.aplicar(cambiarFiltros(timeline, { grano: 0, polvo: 0, trama: 0, vineta: 0, parpadeo: 0 }))}>
+                  Quitar todos
+                </button>
+              )}
+            </div>
+          )}
+        </span>
         <button className="tl-boton" onClick={() => void accionMusica()} title="Poner música bajo la edición">
           <Icon name="music" size={16} /> Música
         </button>
@@ -1010,9 +1059,28 @@ export function TimelineEditor({
                 Restablecer
               </button>
               {clipElegido.indice > 0 && (
-                <label className="tl-ajuste" title="Entra fundiéndose sobre el clip anterior">
+                <label className="tl-ajuste" title="Cómo entra sobre el clip anterior">
                   <span>
-                    Fundido <b>{clipElegido.clip.fundido ? `${clipElegido.clip.fundido.toFixed(1)} s` : 'corte'}</b>
+                    <select
+                      className="tl-transicion"
+                      value={clipElegido.clip.fundido ? (clipElegido.clip.transicion ?? 'fundido') : 'corte'}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        historial.aplicar(
+                          v === 'corte'
+                            ? fundirClip(timeline, clipElegido.clip.id, 0)
+                            : fundirClip(timeline, clipElegido.clip.id, Math.max(clipElegido.clip.fundido ?? 0, 0.45), v as TransicionClip)
+                        )
+                      }}
+                    >
+                      <option value="corte">Corte seco</option>
+                      {TRANSICIONES.map((x) => (
+                        <option key={x.id} value={x.id}>
+                          {x.nombre}
+                        </option>
+                      ))}
+                    </select>{' '}
+                    <b>{clipElegido.clip.fundido ? `${clipElegido.clip.fundido.toFixed(1)} s` : ''}</b>
                   </span>
                   <input
                     type="range"
@@ -1042,7 +1110,29 @@ export function TimelineEditor({
             >
               <option value="pop">Entra con pop</option>
               <option value="fundido">Entra fundiéndose</option>
+              <option value="izquierda">Entra desde la izquierda</option>
+              <option value="derecha">Entra desde la derecha</option>
+              <option value="arriba">Baja desde arriba</option>
+              <option value="abajo">Sube desde abajo</option>
               <option value="corte">Aparece de golpe</option>
+            </select>
+            <select
+              value={capaElegida.fin ? (MOVIMIENTOS_CAPA.find((m) => sinCambios(m.fin(capaElegida), capaElegida.fin!))?.id ?? 'propio') : 'quieta'}
+              title="Cómo se mueve mientras está (paralaje, cruzar, subir…). Para afinar, arrastra en el monitor su silueta punteada: es dónde termina."
+              onChange={(e) => {
+                const v = e.target.value
+                const m = MOVIMIENTOS_CAPA.find((x) => x.id === v)
+                if (v === 'propio') return
+                historial.aplicar(cambiarCapa(timeline, capaElegida.id, { fin: m ? m.fin(capaElegida) : undefined }, medidas))
+              }}
+            >
+              <option value="quieta">Quieta</option>
+              {MOVIMIENTOS_CAPA.map((m) => (
+                <option key={m.id} value={m.id} title={m.para}>
+                  {m.nombre}
+                </option>
+              ))}
+              {capaElegida.fin && <option value="propio">Recorrido propio</option>}
             </select>
             {(
               [
@@ -1067,11 +1157,49 @@ export function TimelineEditor({
                 />
               </label>
             ))}
+            {(
+              [
+                ['giro', capaElegida.fin ? 'Giro al empezar' : 'Giro', capaElegida.giro ?? 0],
+                ...(capaElegida.fin ? ([['giroFin', 'Giro al terminar', capaElegida.fin.giro]] as const) : [])
+              ] as const
+            ).map(([clave, nombre, valor]) => (
+              <label key={clave} className="tl-ajuste en-linea">
+                <span>
+                  {nombre} <b>{Math.round(valor)}°</b>
+                </span>
+                <input
+                  type="range"
+                  min={-180}
+                  max={180}
+                  step={1}
+                  value={valor}
+                  onPointerDown={empezarAjuste}
+                  onFocus={empezarAjuste}
+                  onChange={(e) => {
+                    const g = Number(e.target.value)
+                    deslizar(
+                      cambiarCapa(timeline, capaElegida.id, clave === 'giro' ? { giro: g } : { fin: { ...capaElegida.fin!, giro: g } }, medidas)
+                    )
+                  }}
+                />
+              </label>
+            ))}
             <button className="btn small ghost" onClick={() => historial.aplicar(cambiarCapa(timeline, capaElegida.id, { x: 0.5, y: 0.5 }, medidas))}>
               Centrar
             </button>
+            {onQuitarFondo && medios?.find((m) => m.id === capaElegida.fuente)?.tipo === 'imagen' && (
+              <button
+                className="btn small ghost"
+                disabled={quitandoFondo}
+                onClick={() => onQuitarFondo(capaElegida.id)}
+                title="Deja solo a la persona o al objeto. Un fondo liso sale al momento; con cualquier otra foto usa un modelo (la primera vez se baja: 178 MB)."
+              >
+                {quitandoFondo ? 'Quitando el fondo…' : 'Quitar fondo'}
+              </button>
+            )}
             <span className="tl-dim">
-              {tc(capaElegida.inicio)} · {capaElegida.duracion.toFixed(1)} s · arrástrala en el monitor
+              {tc(capaElegida.inicio)} · {capaElegida.duracion.toFixed(1)} s ·{' '}
+              {capaElegida.fin ? 'en pausa, la silueta punteada es dónde termina: arrástrala' : 'arrástrala en el monitor'}
             </span>
             <span className="tl-flex" />
             <button className="btn small ghost" onClick={accionBorrar}>
@@ -1207,6 +1335,18 @@ export function TimelineEditor({
                 </option>
               ))}
             </select>
+            <select
+              value={textoElegido.animacion ?? 'golpe'}
+              title="Cómo aparece (se ve al reproducir)"
+              onChange={(e) => historial.aplicar(cambiarTexto(timeline, textoElegido.id, { animacion: e.target.value === 'golpe' ? undefined : (e.target.value as AnimacionTexto) }))}
+            >
+              <option value="golpe">Aparece de golpe</option>
+              {ANIMACIONES_TEXTO.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.nombre}
+                </option>
+              ))}
+            </select>
             <input
               type="color"
               className="tl-color"
@@ -1249,4 +1389,9 @@ export function TimelineEditor({
       </div>
     </div>
   )
+}
+
+/** Si un recorrido es el mismo que otro (para reconocer el movimiento elegido en el menú). */
+function sinCambios(a: FinCapa, b: FinCapa): boolean {
+  return Math.abs(a.x - b.x) < 0.002 && Math.abs(a.y - b.y) < 0.002 && Math.abs(a.ancho - b.ancho) < 0.002 && Math.abs(a.giro - b.giro) < 0.1
 }

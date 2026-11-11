@@ -4,8 +4,11 @@ import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
 import {
   ajustesDe,
-  animacionCapa,
+  APARECER_S,
+  pasoAnimacion,
+  vistaTransicion,
   capaNueva,
+  estadoCapa,
   TIPO_ARRASTRE_MEDIO,
   cambiarCapa,
   cambiarTexto,
@@ -16,14 +19,16 @@ import {
   VOLUMEN_SONIDO,
   zoomEn,
   type CapaTL,
+  type FiltrosTL,
   type SonidoTL,
+  type TextoTL,
   type Timeline
 } from '../../../shared/timeline'
 import { useMusica, useSincronizar, useTamano, useVoces, type FuentesVista, type Historial, type Reproductor } from '../hooks/timeline'
 import type { Elegido } from './TimelineEditor'
 
 /** Lo que se está moviendo en el monitor, antes de soltarlo: su sitio y su ancho. */
-type Borrador = { tipo: 'capa' | 'texto'; id: string; x: number; y: number; ancho?: number } | null
+type Borrador = { tipo: 'capa' | 'texto'; id: string; x: number; y: number; ancho?: number; fin?: boolean } | null
 
 /** A menos de esto del centro, se pega al centro (y se ve la guía). */
 const IMAN = 0.02
@@ -72,15 +77,23 @@ export function Monitor({
   const largoClip = ubicado ? ubicado.fin - ubicado.inicio : 1
   const enClip = ubicado ? reproductor.tiempo - ubicado.inicio : 0
   const z = zoomEn(a, enClip / Math.max(0.01, largoClip))
-  // El fundido de entrada: el clip aparece sobre negro (en el render, sobre el clip anterior).
-  const fundido = clipActual?.fundido && ubicado && ubicado.indice > 0 ? Math.min(1, enClip / clipActual.fundido) : 1
+  // La transición de entrada: el clip entra sobre negro (en el render, sobre el clip anterior), con su tipo
+  // (fundido, barrido, zoom, desenfoque, destello, círculo).
+  const tr = clipActual?.fundido && ubicado && ubicado.indice > 0 && enClip < clipActual.fundido ? vistaTransicion(clipActual.transicion, enClip / clipActual.fundido) : null
+  const fundido = tr ? tr.opacidad : 1
   const estiloImagen: React.CSSProperties = {
     visibility: vacia ? 'hidden' : 'visible',
-    transform: z !== 1 ? `scale(${z})` : undefined,
+    transform:
+      z !== 1 || tr
+        ? `${tr && (tr.x || tr.y) ? `translate(${(tr.x * 100).toFixed(2)}%, ${(tr.y * 100).toFixed(2)}%) ` : ''}scale(${(z * (tr?.escala ?? 1)).toFixed(4)})`
+        : undefined,
+    clipPath: tr?.circulo != null ? `circle(${(tr.circulo * 75).toFixed(2)}% at 50% 50%)` : undefined,
     transformOrigin: a.cx !== 0.5 || a.cy !== 0.5 ? `${a.cx * 100}% ${a.cy * 100}%` : undefined,
     opacity: fundido < 1 ? fundido : undefined,
     filter:
-      a.brillo !== 0 || a.contraste !== 1 || a.saturacion !== 1
+      tr?.desenfoque
+        ? `blur(${tr.desenfoque.toFixed(1)}px) brightness(${(1 + a.brillo * 1.5).toFixed(3)}) contrast(${a.contraste}) saturate(${a.saturacion})`
+        : a.brillo !== 0 || a.contraste !== 1 || a.saturacion !== 1
         ? `brightness(${(1 + a.brillo * 1.5).toFixed(3)}) contrast(${a.contraste}) saturate(${a.saturacion})`
         : undefined
   }
@@ -116,7 +129,15 @@ export function Monitor({
   }
 
   /** Mueve una capa o un rótulo con el ratón (o cambia el ancho de la capa por su esquina). */
-  function arrastrar(e: React.PointerEvent, tipo: 'capa' | 'texto', id: string, inicio: { x: number; y: number; ancho?: number }, modo: 'mover' | 'ancho' = 'mover') {
+  function arrastrar(
+    e: React.PointerEvent,
+    tipo: 'capa' | 'texto',
+    id: string,
+    inicio: { x: number; y: number; ancho?: number },
+    modo: 'mover' | 'ancho' = 'mover',
+    /** Mueve dónde TERMINA una capa que se mueve (su silueta punteada). */
+    fin = false
+  ) {
     if (e.button !== 0 || !cw) return
     e.preventDefault()
     e.stopPropagation()
@@ -126,17 +147,19 @@ export function Monitor({
     let ultimo: Borrador = null
     const calcular = (ev: PointerEvent): Borrador => {
       if (modo === 'ancho') {
-        const ancho = Math.max(0.05, Math.min(1, (inicio.ancho ?? 0.3) + ((ev.clientX - x0) * 2) / cw))
-        return { tipo, id, x: inicio.x, y: inicio.y, ancho }
+        const ancho = Math.max(0.05, Math.min(fin ? 1.5 : 1, (inicio.ancho ?? 0.3) + ((ev.clientX - x0) * 2) / cw))
+        return { tipo, id, x: inicio.x, y: inicio.y, ancho, fin }
       }
-      let x = Math.max(0, Math.min(1, inicio.x + (ev.clientX - x0) / cw))
-      let y = Math.max(0, Math.min(1, inicio.y + (ev.clientY - y0) / ch))
+      // El final de un recorrido puede quedar fuera del cuadro (para salir volando).
+      const [lo, hi] = fin ? [-0.5, 1.5] : [0, 1]
+      let x = Math.max(lo, Math.min(hi, inicio.x + (ev.clientX - x0) / cw))
+      let y = Math.max(lo, Math.min(hi, inicio.y + (ev.clientY - y0) / ch))
       const v = Math.abs(x - 0.5) < IMAN
       const h = Math.abs(y - 0.5) < IMAN
       if (v) x = 0.5
       if (h) y = 0.5
       setGuia({ v, h })
-      return { tipo, id, x, y, ...(inicio.ancho !== undefined ? { ancho: inicio.ancho } : {}) }
+      return { tipo, id, x, y, ...(inicio.ancho !== undefined ? { ancho: inicio.ancho } : {}), fin }
     }
     const alMover = (ev: PointerEvent) => {
       if (!movido && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 3) return
@@ -152,9 +175,12 @@ export function Monitor({
       setGuia({ v: false, h: false })
       if (movido && ultimo) {
         const b = ultimo
+        const capa = tipo === 'capa' ? timeline.capas?.find((c) => c.id === id) : undefined
         historial.aplicar(
           tipo === 'capa'
-            ? cambiarCapa(timeline, id, { x: b.x, y: b.y, ...(b.ancho !== undefined ? { ancho: b.ancho } : {}) }, medios)
+            ? b.fin && capa?.fin
+              ? cambiarCapa(timeline, id, { fin: { ...capa.fin, x: b.x, y: b.y, ...(b.ancho !== undefined ? { ancho: b.ancho } : {}) } }, medios)
+              : cambiarCapa(timeline, id, { x: b.x, y: b.y, ...(b.ancho !== undefined ? { ancho: b.ancho } : {}) }, medios)
             : cambiarTexto(timeline, id, { x: b.x, y: b.y })
         )
       }
@@ -204,26 +230,50 @@ export function Monitor({
           {capas.map((c) => {
             const f = fuentes[c.fuente]
             if (!f) return null
-            const b = borrador?.tipo === 'capa' && borrador.id === c.id ? borrador : null
-            const x = b?.x ?? c.x
-            const y = b?.y ?? c.y
-            const ancho = b?.ancho ?? c.ancho
-            // La entrada (pop, fundido) se ve al reproducir; en pausa, la capa entera para poder editarla.
-            const { escala, opacidad } = b || !reproductor.reproduciendo ? { escala: 1, opacidad: 1 } : animacionCapa(c, reproductor.tiempo - c.inicio)
             const elegida = elegido?.tipo === 'capa' && elegido.id === c.id
+            // Elegida y en pausa, una capa que se mueve se ve en su sitio de INICIO (sólida) y en el
+            // de FIN (silueta punteada), las dos para arrastrarlas. Si no, donde va en este momento.
+            const editando = elegida && !reproductor.reproduciendo
+            const b = borrador?.tipo === 'capa' && borrador.id === c.id ? borrador : null
+            const e = editando ? estadoCapa(c, 0, false) : estadoCapa(c, reproductor.tiempo - c.inicio, reproductor.reproduciendo)
+            const x = b && !b.fin ? b.x : e.x
+            const y = b && !b.fin ? b.y : e.y
+            const ancho = b && !b.fin ? (b.ancho ?? e.ancho) : e.ancho
+            const fin = editando && c.fin ? { ...c.fin, ...(b?.fin ? { x: b.x, y: b.y, ancho: b.ancho ?? c.fin.ancho } : {}) } : null
             return (
+              <div key={c.id} className="monitor-capa-grupo">
+                {fin && (
+                  <>
+                    <svg className="monitor-recorrido" viewBox="0 0 100 100" preserveAspectRatio="none">
+                      <line x1={x * 100} y1={y * 100} x2={fin.x * 100} y2={fin.y * 100} />
+                    </svg>
+                    <div
+                      className="monitor-capa is-fin"
+                      title="Dónde termina: arrástrala"
+                      style={{ left: `${fin.x * 100}%`, top: `${fin.y * 100}%`, width: `${fin.ancho * 100}%`, transform: `translate(-50%, -50%) rotate(${fin.giro}deg)` }}
+                      onClick={(ev) => ev.stopPropagation()}
+                      onPointerDown={(ev) => arrastrar(ev, 'capa', c.id, { x: c.fin!.x, y: c.fin!.y, ancho: c.fin!.ancho }, 'mover', true)}
+                    >
+                      {f.tipo === 'imagen' ? <img src={f.url} alt="" draggable={false} /> : <span className="monitor-capa-hueco" />}
+                      <span
+                        className="monitor-capa-esquina"
+                        title="Arrastra para cambiar el tamaño final"
+                        onPointerDown={(ev) => arrastrar(ev, 'capa', c.id, { x: c.fin!.x, y: c.fin!.y, ancho: c.fin!.ancho }, 'ancho', true)}
+                      />
+                    </div>
+                  </>
+                )}
               <div
-                key={c.id}
                 className={`monitor-capa ${elegida ? 'is-elegida' : ''}`}
                 style={{
                   left: `${x * 100}%`,
                   top: `${y * 100}%`,
                   width: `${ancho * 100}%`,
-                  transform: `translate(-50%, -50%) scale(${escala})`,
-                  opacity: opacidad
+                  transform: `translate(-50%, -50%) rotate(${e.giro}deg) scale(${e.escala})`,
+                  opacity: e.opacidad
                 }}
-                onClick={(e) => e.stopPropagation()}
-                onPointerDown={(e) => arrastrar(e, 'capa', c.id, { x: c.x, y: c.y, ancho: c.ancho })}
+                onClick={(ev) => ev.stopPropagation()}
+                onPointerDown={(ev) => arrastrar(ev, 'capa', c.id, { x: c.x, y: c.y, ancho: c.ancho })}
               >
                 {f.tipo === 'imagen' ? (
                   <img src={f.url} alt="" draggable={false} />
@@ -234,12 +284,15 @@ export function Monitor({
                   <span
                     className="monitor-capa-esquina"
                     title="Arrastra para cambiar el tamaño"
-                    onPointerDown={(e) => arrastrar(e, 'capa', c.id, { x: c.x, y: c.y, ancho: c.ancho }, 'ancho')}
+                    onPointerDown={(ev) => arrastrar(ev, 'capa', c.id, { x: c.x, y: c.y, ancho: c.ancho }, 'ancho')}
                   />
                 )}
               </div>
+              </div>
             )
           })}
+          {tr && tr.blanco > 0 && <div className="monitor-filtros" style={{ background: '#fff', opacity: tr.blanco }} aria-hidden />}
+          {timeline.filtros && <FiltrosVista filtros={timeline.filtros} tiempo={reproductor.tiempo} reproduciendo={reproductor.reproduciendo} ancho={cw} alto={ch} />}
           {rotulos.map((r) => {
             const b = borrador?.tipo === 'texto' && borrador.id === r.id ? borrador : null
             const libre = b ?? (typeof r.x === 'number' && typeof r.y === 'number' ? { x: r.x, y: r.y } : null)
@@ -273,7 +326,7 @@ export function Monitor({
                   arrastrar(e, 'texto', r.id, inicio)
                 }}
               >
-                {r.texto}
+                {reproductor.reproduciendo && r.animacion ? <TextoAnimado texto={r} dt={reproductor.tiempo - r.inicio} /> : r.texto}
               </span>
             )
           })}
@@ -301,4 +354,99 @@ function SonidoVista({ sonido, url, tiempo, reproduciendo }: { sonido: SonidoTL;
   const dentro = tiempo >= sonido.inicio && tiempo < sonido.inicio + sonido.duracion
   useSincronizar(ref, dentro ? tiempo - sonido.inicio : null, reproduciendo, sonido.volumen ?? VOLUMEN_SONIDO)
   return <audio ref={ref} src={url} preload="auto" />
+}
+
+/**
+ * Los filtros del video en el monitor, como en el MP4: la viñeta y la trama son degradados; el
+ * grano y el polvo, un lienzo que cambia en cada cuadro al reproducir; el parpadeo, un velo que tiembla.
+ */
+function FiltrosVista({ filtros, tiempo, reproduciendo, ancho, alto }: { filtros: FiltrosTL; tiempo: number; reproduciendo: boolean; ancho: number; alto: number }) {
+  const lienzo = useRef<HTMLCanvasElement>(null)
+  const { grano = 0, polvo = 0, trama = 0, vineta = 0, parpadeo = 0 } = filtros
+  useEffect(() => {
+    const cv = lienzo.current
+    if (!cv || (!grano && !polvo)) return
+    const w = Math.max(16, Math.round(ancho / 3))
+    const h = Math.max(16, Math.round(alto / 3))
+    cv.width = w
+    cv.height = h
+    const ctx = cv.getContext('2d')
+    if (!ctx) return
+    let cuadro = 0
+    let vivo = true
+    const pintar = () => {
+      const img = ctx.createImageData(w, h)
+      const d = img.data
+      for (let i = 0; i < d.length; i += 4) {
+        // Grano: gris al azar alrededor del medio (se mezcla en «overlay»); polvo: alguna mota blanca.
+        const g = 128 + (Math.random() - 0.5) * 255 * grano
+        const mota = polvo && Math.random() > 1 - 0.0016 * polvo
+        const v = mota ? 255 : g
+        d[i] = d[i + 1] = d[i + 2] = v
+        d[i + 3] = mota ? 255 : grano ? 255 : 0
+      }
+      ctx.putImageData(img, 0, 0)
+      // La raya vertical que salta de sitio, como en el MP4.
+      if (polvo && cuadro % 7 > 4) {
+        ctx.fillStyle = 'rgba(255,255,255,0.65)'
+        ctx.fillRect((cuadro * 97) % w, 0, 1, h)
+      }
+      cuadro++
+    }
+    pintar()
+    if (!reproduciendo) return
+    const id = window.setInterval(() => vivo && pintar(), 1000 / 24)
+    return () => {
+      vivo = false
+      window.clearInterval(id)
+    }
+  }, [grano, polvo, reproduciendo, ancho, alto])
+  const brillo = parpadeo ? 0.045 * parpadeo * Math.sin(tiempo * 31) * Math.sin(tiempo * 7.3) : 0
+  const punto = Math.max(2, ancho / 180)
+  return (
+    <div className="monitor-filtros" aria-hidden>
+      {trama > 0 && (
+        <div
+          className="monitor-filtro"
+          style={{
+            backgroundImage: 'radial-gradient(circle, rgba(0,0,0,0.85) 30%, rgba(255,255,255,0.6) 62%)',
+            backgroundSize: `${punto}px ${punto}px`,
+            mixBlendMode: 'overlay',
+            opacity: 0.45 * trama
+          }}
+        />
+      )}
+      {(grano > 0 || polvo > 0) && <canvas ref={lienzo} className="monitor-filtro" style={{ mixBlendMode: grano ? 'overlay' : 'screen', opacity: Math.min(1, 0.35 + 0.5 * Math.max(grano, polvo)) }} />}
+      {vineta > 0 && (
+        <div className="monitor-filtro" style={{ background: `radial-gradient(ellipse at center, rgba(0,0,0,0) ${Math.round(70 - 30 * vineta)}%, rgba(0,0,0,${(0.9 * vineta).toFixed(2)}) 100%)` }} />
+      )}
+      {brillo !== 0 && <div className="monitor-filtro" style={{ background: brillo > 0 ? '#fff' : '#000', opacity: Math.abs(brillo) }} />}
+    </div>
+  )
+}
+
+/** Un rótulo que aparece palabra a palabra, letra a letra, con rebote o subiendo (como en el MP4). */
+function TextoAnimado({ texto, dt }: { texto: TextoTL; dt: number }) {
+  if (texto.animacion === 'pop' || texto.animacion === 'subir') {
+    const e = texto.animacion === 'pop' ? (dt < 0.13 ? 0.45 + (dt / 0.13) * 0.72 : dt < 0.24 ? 1.17 - ((dt - 0.13) / 0.11) * 0.17 : 1) : 1
+    const sube = texto.animacion === 'subir' ? Math.max(0, 1 - dt / 0.35) : 0
+    const op = Math.min(1, dt / (texto.animacion === 'pop' ? 0.08 : 0.25))
+    return <span style={{ display: 'inline-block', transform: `translateY(${(sube * 0.6).toFixed(3)}em) scale(${e.toFixed(3)})`, opacity: op }}>{texto.texto}</span>
+  }
+  const paso = pasoAnimacion(texto)
+  const piezas = texto.animacion === 'palabras' ? texto.texto.split(/(\s+)/) : Array.from(texto.texto)
+  let n = 0
+  return (
+    <>
+      {piezas.map((x, i) => {
+        if (!x || /^\s+$/.test(x)) return x
+        const op = Math.max(0, Math.min(1, (dt - n++ * paso) / APARECER_S))
+        return (
+          <span key={i} style={{ opacity: op }}>
+            {x}
+          </span>
+        )
+      })}
+    </>
+  )
 }

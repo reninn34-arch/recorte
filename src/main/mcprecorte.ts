@@ -9,6 +9,10 @@ import { COSTO_CLIP, MAX_CLIPS_VEO, textoMuestra, VOCES_GEMINI, type Creacion, t
 import { MODELOS_IMAGEN, modelosVideoVigentes, type PedidoFlow, type ResultadoFlow } from '../shared/flow'
 import { duracionesDeMedios, duracionTimeline, normalizarTimeline, timelineInicial, ventanaTimeline, type Timeline } from '../shared/timeline'
 import type { Project } from '../shared/types'
+
+/** Lo que se añade a un pedido de imagen «para recortar» (lo mismo que PARA_RECORTAR del kit). */
+const PARA_RECORTAR =
+  ' Aislado sobre un fondo verde croma liso y uniforme (#00B140), sin degradados, sin sombras ni suelo en el fondo, el sujeto entero dentro del encuadre con un poco de margen, sin texto.'
 import { exportarTimeline } from './exportar'
 import { rutaFfmpeg } from './ffmpeg'
 import type { HerramientaMcp, ResultadoHerramienta } from './mcp'
@@ -33,6 +37,8 @@ export interface ContextoMcp {
   avisarCambio: (proyecto: Project, quien: string, conTimeline?: boolean) => void
   /** Trae la ventana de Recorte al frente con el proyecto abierto en el editor. */
   abrirEnApp: (id: string) => void
+  /** Quita el fondo liso de una imagen de la biblioteca y la agrega como medio nuevo. */
+  quitarFondo: (id: string, medio: string) => Promise<{ project: Project; medio: string }>
   // ===== Crear por MCP (6.3) =====
   creaciones: {
     nueva: (p: PeticionCreacion) => Promise<Creacion>
@@ -353,6 +359,22 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
       }
     },
     {
+      nombre: 'quitar_fondo',
+      descripcion:
+        'Quita el fondo de una imagen de la biblioteca y la agrega como un medio nuevo con transparencia, recortado al sujeto: así ' +
+        'una persona, un objeto o un avión se pone como capa encima y se mueve (paralaje, cruzar volando). Un fondo liso (verde, ' +
+        'blanco) sale al momento y perfecto; cualquier otra foto, con un modelo que encuentra al sujeto principal (la primera vez ' +
+        'lo baja: 178 MB, unos minutos). Para piezas nuevas, mejor generar_con_flow con "para_recortar": true. Devuelve el id del recorte.',
+      esquema: { type: 'object', properties: { proyecto: proyectoArg, medio: { type: 'string', description: 'El id de la imagen en la biblioteca (ver_proyecto).' } }, required: ['proyecto', 'medio'] },
+      correr: async (args, sesion) => {
+        const p = buscar(args.proyecto)
+        const r = await ctx.quitarFondo(p.id, texto(args.medio))
+        ctx.avisarCambio(r.project, sesion.cliente)
+        const m = r.project.medios?.find((x) => x.id === r.medio)
+        return ok(`Listo: ${r.medio} = imagen «${m?.nombre ?? 'recorte'}» sin fondo. Úsala con editar_timeline («anadir_capa»).`)
+      }
+    },
+    {
       nombre: 'crear_proyecto',
       descripcion: 'Crea un proyecto nuevo en el editor a partir de un video del equipo (su ruta completa). La timeline empieza con el video entero.',
       esquema: { type: 'object', properties: { ruta: { type: 'string', description: 'Ruta completa del video.' } }, required: ['ruta'] },
@@ -633,6 +655,7 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
             prompt: { type: 'string', description: 'Qué se ve, en detalle (sujeto, encuadre, luz, estilo, movimiento si es clip).' },
             modelo: { type: 'string', description: `Imagen: ${MODELOS_IMAGEN.join(', ')}. Video: ${modelosVideoVigentes().join(', ')}. Por defecto, el primero.` },
             formato: { type: 'string', enum: ['9:16', '16:9', '1:1'], description: 'Por defecto, el del video del proyecto.' },
+            para_recortar: { type: 'boolean', description: 'Solo imágenes: la pide sobre verde croma y le quita el fondo (para usarla como capa). Devuelve también el id del recorte.' },
             confirmacion: confirmacionArg
           },
           required: ['proyecto', 'tipo', 'prompt']
@@ -652,14 +675,26 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
             const clave = `flow:${p.id}:${modelo}:${formato}:${prompt}`
             if (!confirmado(clave, args)) return pedirPermiso(clave, `un clip de ${modelo} en Google Flow: unos ${costo} créditos de tus cuentas.`)
           }
+          const recortar = tipo === 'imagen' && args.para_recortar === true
           const tmp = mkdtempSync(join(tmpdir(), 'recorte-flow-'))
           try {
-            const r = await ctx.flow.generar({ tipo, prompt, formato, modelo, ...(costo ? { tope: costo } : {}) }, tmp)
+            const pedido = recortar ? `${prompt}${PARA_RECORTAR}` : prompt
+            const r = await ctx.flow.generar({ tipo, prompt: pedido, formato: recortar ? '1:1' : formato, modelo, ...(costo ? { tope: costo } : {}) }, tmp)
             const agregado = await ctx.agregarRutas(p.id, [r.archivo])
             ctx.avisarCambio(agregado.project, sesion.cliente)
             const medio = (agregado.project.medios ?? []).find((m) => agregado.agregados.includes(m.id))
             if (!medio) return fallo(`Se generó pero no pude agregarlo: ${agregado.fallos.join(', ') || 'archivo inválido'}.`)
-            return ok(`Listo: ${medio.id} = ${medio.tipo} «${medio.nombre}»${r.creditos ? ` (gastó ${r.creditos} créditos de ${r.correo})` : ''}. Úsalo con editar_timeline.`)
+            let recorte = ''
+            if (recortar) {
+              try {
+                const sin = await ctx.quitarFondo(p.id, medio.id)
+                ctx.avisarCambio(sin.project, sesion.cliente)
+                recorte = ` Sin fondo: ${sin.medio} (úsalo como capa).`
+              } catch (e) {
+                recorte = ` No pude quitarle el fondo: ${e instanceof Error ? e.message : String(e)}`
+              }
+            }
+            return ok(`Listo: ${medio.id} = ${medio.tipo} «${medio.nombre}»${r.creditos ? ` (gastó ${r.creditos} créditos de ${r.correo})` : ''}.${recorte} Úsalo con editar_timeline.`)
           } catch (e) {
             return fallo(`Flow no pudo: ${e instanceof Error ? e.message : String(e)}`)
           } finally {

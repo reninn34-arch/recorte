@@ -21,6 +21,16 @@ import {
   MAX_IMAGEN,
   SONIDOS_INCLUIDOS,
   type EntradaCapa,
+  type CapaTL,
+  type FinCapa,
+  cambiarFiltros,
+  ENTRADAS_CAPA,
+  FILTROS,
+  TRANSICIONES,
+  ANIMACIONES_TEXTO,
+  fundirClip,
+  type AnimacionTexto,
+  type TransicionClip,
   FUENTES_TEXTO,
   dividir,
   duracionTimeline,
@@ -63,14 +73,17 @@ export type OperacionTL =
       sin_caja?: boolean
       caja?: string
       fuente?: string
+      animacion?: AnimacionTexto | 'golpe'
       /** Posición libre: el centro del rótulo, en fracción del cuadro (0–1). */
       x?: number
       y?: number
     }
   | { op: 'borrar_texto'; texto_n: number }
   /** Lo que va encima del video: un medio de la biblioteca (por su id), en su sitio y su tamaño. */
-  | { op: 'anadir_capa'; medio: string; inicio: number; duracion?: number; x?: number; y?: number; ancho?: number; entrada?: EntradaCapa | 'corte' }
-  | { op: 'cambiar_capa'; capa_n: number; inicio?: number; duracion?: number; x?: number; y?: number; ancho?: number; entrada?: EntradaCapa | 'corte' }
+  | ({ op: 'anadir_capa'; medio: string; inicio: number } & CamposCapa)
+  | ({ op: 'cambiar_capa'; capa_n: number; inicio?: number } & CamposCapa)
+  | { op: 'filtros'; grano?: number; polvo?: number; trama?: number; vineta?: number; parpadeo?: number }
+  | { op: 'transicion'; clip?: number; tipo: TransicionClip | 'corte'; duracion?: number }
   | { op: 'borrar_capa'; capa_n: number }
   /** Un efecto de sonido incluido. Recorte copia su audio ANTES de aplicarla y le pone `audio`. */
   | { op: 'anadir_sonido'; sonido: string; inicio: number; volumen?: number; audio?: { archivo: string; duracion: number; nombre: string } }
@@ -163,17 +176,39 @@ export function pausasEnTimeline(tl: Timeline, transcript: TranscriptSegment[] |
   return pausas
 }
 
-/** Valida la forma de lo que devolvió el agente. Lo que no encaja se descarta. */
-/** Lo que se puede cambiar de una capa, validado (sin `inicio`). */
-function camposCapa(x: Record<string, unknown>): { duracion?: number; x?: number; y?: number; ancho?: number; entrada?: EntradaCapa | 'corte' } {
+type CamposCapa = { duracion?: number; x?: number; y?: number; ancho?: number; entrada?: EntradaCapa | 'corte'; giro?: number; fin?: Partial<FinCapa> | null }
+
+/** Lo que se puede cambiar de una capa, validado (sin `inicio`). `fin: null` quita el movimiento. */
+function camposCapa(x: Record<string, unknown>): CamposCapa {
+  const fin = x.fin && typeof x.fin === 'object' ? (x.fin as Record<string, unknown>) : null
+  const finX = num(x.fin_x) ?? (fin ? num(fin.x) : null)
+  const finY = num(x.fin_y) ?? (fin ? num(fin.y) : null)
+  const finAncho = num(x.fin_ancho) ?? (fin ? num(fin.ancho) : null)
+  const finGiro = num(x.fin_giro) ?? (fin ? num(fin.giro) : null)
+  const hayFin = finX !== null || finY !== null || finAncho !== null || finGiro !== null
   return {
     ...(num(x.duracion) !== null ? { duracion: num(x.duracion)! } : {}),
     ...(num(x.x) !== null ? { x: num(x.x)! } : {}),
     ...(num(x.y) !== null ? { y: num(x.y)! } : {}),
     ...(num(x.ancho) !== null ? { ancho: num(x.ancho)! } : {}),
-    ...(x.entrada === 'pop' || x.entrada === 'fundido' || x.entrada === 'corte' ? { entrada: x.entrada } : {})
+    ...(num(x.giro) !== null ? { giro: num(x.giro)! } : {}),
+    ...(x.entrada === 'corte' || (typeof x.entrada === 'string' && ENTRADAS_CAPA.includes(x.entrada as EntradaCapa)) ? { entrada: x.entrada as EntradaCapa | 'corte' } : {}),
+    ...(x.fin === null || x.quieta === true
+      ? { fin: null }
+      : hayFin
+        ? {
+            fin: {
+              ...(finX !== null ? { x: finX } : {}),
+              ...(finY !== null ? { y: finY } : {}),
+              ...(finAncho !== null ? { ancho: finAncho } : {}),
+              ...(finGiro !== null ? { giro: finGiro } : {})
+            }
+          }
+        : {})
   }
 }
+
+/** Valida la forma de lo que devolvió el agente. Lo que no encaja se descarta. */
 
 export function validarOperaciones(crudo: unknown): OperacionTL[] {
   if (!Array.isArray(crudo)) return []
@@ -233,9 +268,22 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
             sin_caja: typeof x.sin_caja === 'boolean' ? x.sin_caja : undefined,
             caja: typeof x.caja === 'string' && /^#[0-9a-f]{6}$/i.test(x.caja) ? x.caja : undefined,
             fuente: typeof x.fuente === 'string' && x.fuente in FUENTES_TEXTO ? x.fuente : undefined,
+            animacion: x.animacion === 'golpe' || ANIMACIONES_TEXTO.some((a) => a.id === x.animacion) ? (x.animacion as AnimacionTexto | 'golpe') : undefined,
             ...(num(x.x) !== null && num(x.y) !== null ? { x: num(x.x)!, y: num(x.y)! } : {})
           })
         }
+        break
+      }
+      case 'transicion': {
+        const tipo = x.tipo === 'corte' || TRANSICIONES.some((t) => t.id === x.tipo) ? (x.tipo as TransicionClip | 'corte') : null
+        if (!tipo) break
+        ops.push({ op: 'transicion', tipo, ...(num(x.clip) !== null ? { clip: num(x.clip)! } : {}), ...(num(x.duracion) !== null ? { duracion: num(x.duracion)! } : {}) })
+        break
+      }
+      case 'filtros': {
+        const f: Record<string, number> = {}
+        for (const id of ['grano', 'polvo', 'trama', 'vineta', 'parpadeo']) if (num(x[id]) !== null) f[id] = num(x[id])!
+        if (Object.keys(f).length) ops.push({ op: 'filtros', ...f })
         break
       }
       case 'anadir_capa': {
@@ -456,6 +504,7 @@ export function aplicarOperaciones(
         if (o.sin_caja !== undefined) cambio.sinCaja = o.sin_caja
         if (o.caja !== undefined) cambio.caja = o.caja
         if (o.fuente !== undefined) cambio.fuente = o.fuente
+        if (o.animacion !== undefined) cambio.animacion = o.animacion === 'golpe' ? undefined : o.animacion
         if (o.x !== undefined && o.y !== undefined && o.posicion === undefined) {
           cambio.x = o.x
           cambio.y = o.y
@@ -485,7 +534,8 @@ export function aplicarOperaciones(
           break
         }
         const { inicio: _i, ...resto } = o
-        tl = cambiarCapa(r.timeline, r.id, cambioDeCapa(resto), medios)
+        const nueva = r.timeline.capas?.find((c) => c.id === r.id)
+        tl = cambiarCapa(r.timeline, r.id, cambioDeCapa(resto, nueva), medios)
         cambios.push(`Puse encima «${o.medio}» en ${mmss(o.inicio)}`)
         break
       }
@@ -495,8 +545,25 @@ export function aplicarOperaciones(
           fallos.push(`No existe la capa ${o.capa_n}.`)
           break
         }
-        tl = cambiarCapa(tl, c.id, { ...(o.inicio !== undefined ? { inicio: o.inicio } : {}), ...cambioDeCapa(o) }, medios)
+        tl = cambiarCapa(tl, c.id, { ...(o.inicio !== undefined ? { inicio: o.inicio } : {}), ...cambioDeCapa(o, c) }, medios)
         cambios.push(`Cambié la capa ${o.capa_n}`)
+        break
+      }
+      case 'transicion': {
+        const c = o.clip !== undefined ? tl.clips[Math.round(o.clip) - 1] : null
+        if (o.clip !== undefined && (!c || Math.round(o.clip) === 1)) {
+          fallos.push(!c ? `No existe el clip ${o.clip}.` : 'El primer clip no tiene nada antes: no lleva transición.')
+          break
+        }
+        tl = fundirClip(tl, c ? c.id : null, o.tipo === 'corte' ? 0 : (o.duracion ?? 0.45), o.tipo === 'corte' ? undefined : o.tipo)
+        cambios.push(o.tipo === 'corte' ? `Corte seco ${c ? `en el clip ${o.clip}` : 'en todos los cortes'}` : `Transición «${o.tipo}» ${c ? `al entrar el clip ${o.clip}` : 'en todos los cortes'}`)
+        break
+      }
+      case 'filtros': {
+        const { op: _op, ...f } = o
+        tl = cambiarFiltros(tl, f)
+        const puestos = FILTROS.filter((x) => (tl.filtros?.[x.id] ?? 0) > 0).map((x) => `${x.nombre.toLowerCase()} ${Math.round((tl.filtros?.[x.id] ?? 0) * 100)} %`)
+        cambios.push(puestos.length ? `Filtros: ${puestos.join(', ')}` : 'Quité los filtros')
         break
       }
       case 'borrar_capa': {
@@ -644,14 +711,24 @@ export function aplicarOperaciones(
   return { timeline: tl, cambios, fallos }
 }
 
-/** Los campos de una operación de capa como cambio de `cambiarCapa` («corte» = sin entrada). */
-function cambioDeCapa(o: { duracion?: number; x?: number; y?: number; ancho?: number; entrada?: EntradaCapa | 'corte' }) {
+/**
+ * Los campos de una operación de capa como cambio de `cambiarCapa` («corte» = sin entrada). Lo que
+ * falte del final del recorrido sale de lo que ya tenía (o de cómo empieza: así basta con «fin_x»).
+ */
+function cambioDeCapa(o: CamposCapa, actual?: CapaTL): Partial<Omit<CapaTL, 'id'>> {
+  const x = o.x ?? actual?.x ?? 0.5
+  const y = o.y ?? actual?.y ?? 0.5
+  const ancho = o.ancho ?? actual?.ancho ?? 0.3
+  const giro = o.giro ?? actual?.giro ?? 0
+  const base = actual?.fin ?? { x, y, ancho, giro }
   return {
     ...(o.duracion !== undefined ? { duracion: o.duracion } : {}),
     ...(o.x !== undefined ? { x: o.x } : {}),
     ...(o.y !== undefined ? { y: o.y } : {}),
     ...(o.ancho !== undefined ? { ancho: o.ancho } : {}),
-    ...(o.entrada !== undefined ? { entrada: o.entrada === 'corte' ? undefined : o.entrada } : {})
+    ...(o.giro !== undefined ? { giro: o.giro } : {}),
+    ...(o.entrada !== undefined ? { entrada: o.entrada === 'corte' ? undefined : o.entrada } : {}),
+    ...(o.fin === null ? { fin: undefined } : o.fin ? { fin: { ...base, ...o.fin } } : {})
   }
 }
 
@@ -699,10 +776,12 @@ export function describirTimelineParaAgente(
     lineas.push('Encima del video (capas, de abajo a arriba; x, y = su centro y ancho, en fracción del cuadro):')
     tl.capas.forEach((c, i) =>
       lineas.push(
-        `  ${i + 1}. ${c.inicio.toFixed(2)}–${(c.inicio + c.duracion).toFixed(2)} ${nombres[c.fuente] ?? c.fuente} (${c.fuente}) en x ${c.x} y ${c.y}, ancho ${c.ancho}, ${c.entrada ?? 'sin entrada'}`
+        `  ${i + 1}. ${c.inicio.toFixed(2)}–${(c.inicio + c.duracion).toFixed(2)} ${nombres[c.fuente] ?? c.fuente} (${c.fuente}) en x ${c.x} y ${c.y}, ancho ${c.ancho}${c.giro ? `, giro ${c.giro}°` : ''}, ${c.entrada ?? 'sin entrada'}` +
+          (c.fin ? ` → termina en x ${c.fin.x} y ${c.fin.y}, ancho ${c.fin.ancho}${c.fin.giro ? `, giro ${c.fin.giro}°` : ''}` : '')
       )
     )
   }
+  if (tl.filtros) lineas.push(`Filtros de todo el video: ${FILTROS.filter((f) => tl.filtros?.[f.id]).map((f) => `${f.id} ${tl.filtros![f.id]}`).join(', ')}.`)
   if (tl.sonidos?.length) {
     lineas.push('Efectos de sonido:')
     tl.sonidos.forEach((s, i) => lineas.push(`  ${i + 1}. ${s.inicio.toFixed(2)} «${s.nombre}»${s.volumen !== undefined ? ` volumen ${s.volumen}` : ''}`))
@@ -775,13 +854,16 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
 - {"op":"musica","volumen":V,"ducking":true|false}  volumen 0 a 1 de la música ya puesta (bajo la voz suele ir bien 0.2–0.4); ducking hace que baje sola cuando hay voz.
 - {"op":"quitar_musica"}
 - {"op":"sonido_clip","clip":N,"sonido":true|false}  quita o devuelve el sonido propio del clip N.
-- {"op":"cambiar_texto","texto_n":N,"tamano":1.5,"color":"#ffcc00","sin_caja":true,"caja":"#0a2540","fuente":"gruesa"}  también cambia el estilo del rótulo: tamano 0.5–6 (1 normal; 4–6 para una palabra que llena la pantalla), color #rrggbb, sin_caja (solo la letra con borde), caja (el color de la caja, #rrggbb), fuente: normal, gruesa, impacto, elegante, cursiva, maquina. Para varias líneas usa \\n en "texto".
+- {"op":"cambiar_texto","texto_n":N,"tamano":1.5,"color":"#ffcc00","sin_caja":true,"caja":"#0a2540","fuente":"gruesa"}  también cambia el estilo del rótulo: tamano 0.5–6 (1 normal; 4–6 para una palabra que llena la pantalla), color #rrggbb, sin_caja (solo la letra con borde), caja (el color de la caja, #rrggbb), fuente: normal, gruesa, impacto, elegante, cursiva, maquina. Para varias líneas usa \\n en "texto". "animacion": cómo aparece: "palabras" (palabra a palabra), "maquina" (letra a letra), "pop" (rebota), "subir" o "golpe" (de golpe).
 - {"op":"cambiar_voz","voz_n":N,"texto":"…","voz":"Kore","inicio":T,"volumen":V}  cambia la frase de narración N. Con "texto" o "voz", Recorte vuelve a generar SOLO esa frase (con la voz que ya tenía si no das otra). "inicio" la mueve, "volumen" 0–1.5.
 - {"op":"anadir_voz","inicio":T,"texto":"…","voz":"Kore"}  añade una frase de narración nueva en el segundo T (sin "voz", la de las demás frases).
 - {"op":"borrar_voz","voz_n":N}
 - {"op":"cambiar_texto","texto_n":N,"x":0.5,"y":0.3}  pone el rótulo donde quieras: x, y son su centro en fracción del cuadro (0 izquierda/arriba, 1 derecha/abajo). Para volver a arriba, centro o abajo, usa "posicion".
-- {"op":"anadir_capa","medio":"ID","inicio":T,"duracion":S,"x":0.5,"y":0.5,"ancho":0.25,"entrada":"pop|fundido|corte"}  pone encima del video un medio de la biblioteca (un logo, un ícono, una foto, una toma de apoyo), por su id. x, y = su centro y ancho = su ancho, en fracción del cuadro. "pop" (por defecto) entra rebotando; úsalo para logos e íconos que aparecen cuando se nombran. No tapes caras ni manos que importan.
+- {"op":"anadir_capa","medio":"ID","inicio":T,"duracion":S,"x":0.5,"y":0.5,"ancho":0.25,"giro":0,"entrada":"pop|fundido|izquierda|derecha|arriba|abajo|corte"}  pone encima del video un medio de la biblioteca (un logo, un ícono, una foto, una toma de apoyo), por su id. x, y = su centro y ancho = su ancho, en fracción del cuadro; giro en grados. "pop" (por defecto) entra rebotando; úsalo para logos e íconos que aparecen cuando se nombran. "izquierda/derecha/arriba/abajo" entra deslizándose desde fuera. No tapes caras ni manos que importan.
+  Para que SE MUEVA mientras está, di dónde termina: "fin_x","fin_y","fin_ancho","fin_giro" (lo que no pongas, igual que al empezar; se puede terminar fuera del cuadro, de -0.5 a 1.5). Va suave de un sitio al otro durante toda su duración. Ejemplos: un avión que cruza ("x":-0.2 → "fin_x":1.2), paralaje (un fondo que se desliza 0.04 y crece 1.05), una foto que se acerca ("fin_ancho" 1.3 veces el ancho), algo que gira ("fin_giro":15). Con "quieta":true deja de moverse.
 - {"op":"cambiar_capa","capa_n":N, …los mismos campos…}  y {"op":"borrar_capa","capa_n":N}
+- {"op":"transicion","clip":N,"tipo":"fundido|barrido-izquierda|barrido-derecha|barrido-arriba|barrido-abajo|zoom|desenfoque|destello|circulo|corte","duracion":0.45}  cómo entra el clip N sobre el anterior (sin "clip": en todos los cortes). Los barridos empujan la imagen hacia ese lado (como un paneo rápido); destello pasa por blanco; corte = sin transición. Con medida: un documental rápido usa cortes secos y alguna transición en los cambios de tema.
+- {"op":"filtros","grano":0.3,"polvo":0.2,"trama":0.4,"vineta":0.5,"parpadeo":0.1}  filtros para TODO el video, de 0 (nada) a 1 (fuerte): grano de película, polvo y rayas, trama de puntos de imprenta, viñeta (bordes oscuros) y parpadeo de proyector. Un 0 quita ese filtro. Para un aire de documental o de archivo: grano 0.3, polvo 0.2, viñeta 0.5; trama 0.4 para un aire de revista.
 - {"op":"anadir_sonido","sonido":"whoosh|pop|pop-alto|ding|caching","inicio":T,"volumen":0.6}  un efecto de sonido: whoosh (un cambio rápido), pop y pop-alto (algo que aparece), ding (un dato, un acierto), caching (una oferta, un precio). Úsalos con medida: en lo que aparece, no en cada corte.
 - {"op":"cambiar_sonido","sonido_n":N,"inicio":T,"volumen":V}  y {"op":"borrar_sonido","sonido_n":N}
 Las voces son de Gemini: Kore, Puck, Charon, Zephyr, Fenrir, Leda, Orus, Aoede, Callirrhoe, Autonoe, Enceladus, Iapetus, Umbriel, Algieba, Despina, Erinome, Algenib, Rasalgethi, Laomedeia, Achernar, Alnilam, Schedar, Gacrux, Pulcherrima, Achird, Zubenelgenubi, Vindemiatrix, Sadachbia, Sadaltager, Sulafat. Cambia solo las frases que el usuario pide: cada frase nueva gasta voz.`
