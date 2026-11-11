@@ -177,7 +177,7 @@ const rejilla = join(dir, 'media', 'rejilla.png')
 ff(['-f', 'lavfi', '-i', 'color=c=0x224466:s=1280x720,drawgrid=w=40:h=40:c=white', '-frames:v', '1', rejilla])
 const escena = normalizarTimeline(
   {
-    clips: [{ id: 'c1', fuente: 'm5', entrada: 0, salida: 3, ajustes: { zoom: 1.4, cx: 0.4, panx: 0.2 } }],
+    clips: [{ id: 'c1', fuente: 'm5', entrada: 0, salida: 3, ajustes: { zoom: 1.4, cx: 0.4, panx: 0.2, temblor: 0.6, campo: 0.3, foco: 0.5 } }],
     textos: [],
     capas: [
       { id: 'k1', fuente: 'm1', inicio: 0, duracion: 3, x: 0.5, y: 0.25, ancho: 0.08, profundidad: 0 },

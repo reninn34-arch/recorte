@@ -90,7 +90,7 @@ export type OperacionTL =
   | { op: 'cambiar_sonido'; sonido_n: number; inicio?: number; volumen?: number }
   | { op: 'borrar_sonido'; sonido_n: number }
   | { op: 'reconstruir'; cortes: { entrada: number; salida: number }[] }
-  | { op: 'zoom'; clip?: number; zoom?: number; acercar?: number; cx?: number; cy?: number; panx?: number; pany?: number }
+  | { op: 'zoom'; clip?: number; zoom?: number; acercar?: number; cx?: number; cy?: number; panx?: number; pany?: number; temblor?: number; campo?: number; foco?: number }
   | { op: 'color'; clip?: number; brillo?: number; contraste?: number; saturacion?: number }
   | { op: 'musica'; volumen?: number; ducking?: boolean }
   | { op: 'quitar_musica' }
@@ -338,7 +338,7 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
       }
       case 'zoom': {
         // La cámara del clip: zoom, acercamiento lento, hacia dónde y paneo (lo que no venga no cambia).
-        const campos = (['zoom', 'acercar', 'cx', 'cy', 'panx', 'pany'] as const).filter((k) => num(x[k]) !== null)
+        const campos = (['zoom', 'acercar', 'cx', 'cy', 'panx', 'pany', 'temblor', 'campo', 'foco'] as const).filter((k) => num(x[k]) !== null)
         if (campos.length) ops.push({ op: 'zoom', clip: num(x.clip) ?? undefined, ...Object.fromEntries(campos.map((k) => [k, num(x[k])!])) })
         break
       }
@@ -628,7 +628,9 @@ export function aplicarOperaciones(
         }
         const cambio =
           o.op === 'zoom'
-            ? Object.fromEntries((['zoom', 'acercar', 'cx', 'cy', 'panx', 'pany'] as const).filter((k) => o[k] !== undefined).map((k) => [k, o[k]]))
+            ? Object.fromEntries(
+                (['zoom', 'acercar', 'cx', 'cy', 'panx', 'pany', 'temblor', 'campo', 'foco'] as const).filter((k) => o[k] !== undefined).map((k) => [k, o[k]])
+              )
             : {
                 ...(o.brillo !== undefined ? { brillo: o.brillo } : {}),
                 ...(o.contraste !== undefined ? { contraste: o.contraste } : {}),
@@ -873,7 +875,7 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
 - {"op":"borrar_texto","texto_n":N}
 - {"op":"reconstruir","cortes":[{"entrada":F,"salida":F}, …]}  rehace la pista de video con estos tramos de la FUENTE, en este orden (para resúmenes, versiones cortas o reordenar por contenido). Los clips nuevos salen sin zoom ni color.
 - {"op":"zoom","clip":N,"zoom":Z}  acercamiento centrado del clip N, de 1 (nada) a 2 (el doble). Sin "clip", a todos. Para enfatizar una frase: divide antes y después y pon zoom 1.15–1.3 a ese clip (punch-in).
-  La misma op mueve la CÁMARA del clip (lo que no pongas no cambia): "acercar" (acercamiento lento durante el clip, 0 a 0.3), "cx","cy" (hacia qué punto, 0 a 1) y "panx","pany" (paneo: cuánto se desplaza ese punto al acabar, -0.5 a 0.5; necesita zoom 1.15 o más para tener imagen de sobra). Ej.: {"op":"zoom","clip":3,"zoom":1.2,"acercar":0.06,"panx":0.2}.
+  La misma op mueve la CÁMARA del clip (lo que no pongas no cambia): "acercar" (acercamiento lento durante el clip, 0 a 0.3; negativo se ALEJA, hasta -0.3, con zoom 1.3 o más), "cx","cy" (hacia qué punto, 0 a 1) y "panx","pany" (paneo: cuánto se desplaza ese punto al acabar, -0.5 a 0.5; necesita zoom 1.15 o más para tener imagen de sobra). "temblor" (cámara en mano, 0 a 1; 0.3 es sutil) y "campo" + "foco" (profundidad de campo: "foco" es la distancia nítida, 0 el fondo a 1 lo más cercano; lo demás se desenfoca según "campo", 0 a 1). Con capas con profundidad encima, todo esto se ve en 3D. Ej.: {"op":"zoom","clip":3,"zoom":1.2,"acercar":0.06,"panx":0.2,"temblor":0.3,"campo":0.6,"foco":0.6}.
 - {"op":"color","clip":N,"brillo":B,"contraste":C,"saturacion":S}  brillo -0.3 a 0.3 (0 neutro), contraste 0.5 a 1.8 (1 neutro), saturación 0 (blanco y negro) a 2 (1 neutro). Sin "clip", a todos. Pon solo lo que cambies.
 - {"op":"musica","volumen":V,"ducking":true|false}  volumen 0 a 1 de la música ya puesta (bajo la voz suele ir bien 0.2–0.4); ducking hace que baje sola cuando hay voz.
 - {"op":"quitar_musica"}

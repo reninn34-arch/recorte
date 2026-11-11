@@ -162,6 +162,21 @@ lejano. Así se arma:
 - Usa la escena 2.5D en los momentos clave (la presentación del protagonista, el lugar donde pasa todo), no en cada foto.
 - En el editor llega igual: la foto con su paneo y cada pieza en «Encima» con su profundidad (el usuario la cambia).
 
+### Cámara 3D (tomas, cámara en mano y profundidad de campo)
+La cámara de la `foto` de fondo es la de toda la escena: las capas con `profundidad` la siguen según su distancia, así
+que cada toma se ve en 3D. Elige la toma por lo que cuenta la frase:
+- **Acercarse (dolly in)**: `"encuadre": {"zoom": 1.1}`, `"camara": {"zoom": 1.3}`: tensión, entrar en el tema.
+- **Alejarse (dolly out)**: `"encuadre": {"zoom": 1.35}`, `"camara": {"zoom": 1.05}`: revelar el lugar, cerrar una idea.
+- **Travelling**: el mismo zoom (1.25) y `cx` de 0.35 a 0.65: lo cercano pasa más rápido que lo lejano.
+- **Grúa**: `cy` de 0.75 a 0.3 (sube de los pies al cielo) o al revés (baja hacia el protagonista).
+- **Empuje a un detalle**: de zoom 1.05 a 1.4 hacia el punto (`cx`, `cy`) que importa.
+- `"temblor": 0.3` en la foto: **cámara en mano** (un vaivén suave e irregular; 0.2–0.4 da atmósfera de documental, más
+  marea). Lo cercano tiembla más. No en todas: en los momentos de tensión o de «reportaje».
+- `"campo": 0.6, "foco": 0.55` en la foto: **profundidad de campo**. Lo que está a la profundidad del `foco` (0 el fondo, 1 lo
+  más cercano) se ve nítido y lo demás se desenfoca según `campo` (0 a 1). Enfoca al protagonista (su `profundidad`): el
+  fondo se va a bokeh y la escena gana distancia. Lo hace solo; no pongas además `desenfoque` en cada capa.
+- Una toma por momento, lenta y en una dirección; cambia de toma con el corte, como un operador de cámara.
+
 ## Filtros de todo el video
 `"filtros": {"grano": 0.3, "polvo": 0.2, "trama": 0.4, "vineta": 0.5, "parpadeo": 0.1}` (0 a 1): grano de película, polvo
 y rayas, trama de puntos de imprenta, viñeta y parpadeo de proyector. Van encima de la escena y de las capas y debajo de los
@@ -192,6 +207,23 @@ Si el usuario eligió generar imágenes o clips (lo dice AGENTS.md), Recorte los
   Úsalo en casi todas las piezas recortadas: la bandera ondea, el personaje respira o se balancea, el humo se agita. En el
   editor llega animada (el usuario cambia el movimiento o la deja quieta). `python kit/kit.py animar <png> --tipo ondear`
   la deja como WebM si la necesitas suelta.
+- **Marioneta (una persona que se mueve por huesos, SIN créditos)**: como el «Puppet» o Duik de After Effects. Un modelo
+  local (134 MB, se baja una vez) encuentra el esqueleto (cabeza, cuello, hombros, codos, muñecas, manos, caderas,
+  rodillas) y la figura se deforma por huesos. En la capa, `"animar"` con un gesto:
+  `"hablar"` (cabeza y manos al contar algo: el de la narración), `"asentir"`, `"ladear"` (la cabeza: duda, escucha),
+  `"peso"` (pasa el peso de un pie al otro), y con los brazos separados del cuerpo `"saludar"`, `"senalar"` (a un lado) y
+  `"explicar"` (abre los brazos al hablar). `{"tipo": "senalar", "lado": "derecha", "fuerza": 0.6}` elige el brazo (en
+  pantalla) y la fuerza (0 a 1).
+  1. Genera al personaje PARA la marioneta: `kit.py imagen "… de frente, cuerpo entero, los brazos relajados y separados
+     del cuerpo (las manos a un palmo de las caderas), piernas algo abiertas, fondo liso" --recorte`. Con los brazos
+     cruzados o pegados solo puede mover la cabeza, el tronco y el peso.
+  2. `python kit/kit.py esqueleto medios/persona-recorte.png` → `dibujo` (el esqueleto pintado encima: MÍRALO), `puntos` y
+     `gestos` (los que puede hacer). Si un punto está mal, corrígelo en la capa: `"animar": {"tipo": "hablar", "puntos":
+     {"codo_d": [0.2, 0.41]}}` (en fracción de la imagen; los nombres son los de `puntos`).
+  3. La capa animada es más ancha que la imagen (deja sitio a los brazos): el kit lo ajusta solo; tú pon el `ancho` de la
+     persona como siempre.
+  Límites: la cabeza no gira de perfil ni los dedos se articulan. Para eso (y para caminar) hace falta un clip de Flow
+  con créditos. Combina la marioneta con la escena 2.5D: la persona como capa con `profundidad` y su gesto.
 - **Un personaje que se mueve de verdad** (gesticula, camina; solo si el usuario acepta gastar créditos): `python kit/kit.py clip
   "descripción del movimiento" --ref medios/personaje.png --recorte` pide a Flow un clip de 8 s sobre verde croma a partir
   de su imagen y le quita el verde: devuelve `recorte`, un WebM con transparencia. Úsalo como cualquier capa

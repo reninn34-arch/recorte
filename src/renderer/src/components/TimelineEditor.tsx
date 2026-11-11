@@ -44,6 +44,7 @@ import {
   TRANSICIONES,
   ANIMACIONES_TEXTO,
   ANIMAR_CAPA,
+  TOMAS_CAMARA,
   type TipoAnimar,
   type AnimacionTexto,
   type TransicionClip,
@@ -1026,9 +1027,12 @@ export function TimelineEditor({
                   ['saturacion', 'Saturación', 0, 2, 0.01, (v: number) => `${Math.round(v * 100)} %`],
                   ['cx', 'Centro ↔', 0, 1, 0.01, (v: number) => `${Math.round(v * 100)} %`],
                   ['cy', 'Centro ↕', 0, 1, 0.01, (v: number) => `${Math.round(v * 100)} %`],
-                  ['acercar', 'Acercar despacio', 0, 0.3, 0.01, (v: number) => (v ? `+${Math.round(v * 100)} %` : 'no')],
+                  ['acercar', 'Acercar / alejar', -0.3, 0.3, 0.01, (v: number) => (v ? `${v > 0 ? '+' : '−'}${Math.round(Math.abs(v) * 100)} %` : 'no')],
                   ['panx', 'Paneo ↔', -0.5, 0.5, 0.01, (v: number) => (v ? `${v > 0 ? '→' : '←'} ${Math.round(Math.abs(v) * 100)} %` : 'no')],
-                  ['pany', 'Paneo ↕', -0.5, 0.5, 0.01, (v: number) => (v ? `${v > 0 ? '↓' : '↑'} ${Math.round(Math.abs(v) * 100)} %` : 'no')]
+                  ['pany', 'Paneo ↕', -0.5, 0.5, 0.01, (v: number) => (v ? `${v > 0 ? '↓' : '↑'} ${Math.round(Math.abs(v) * 100)} %` : 'no')],
+                  ['temblor', 'Cámara en mano', 0, 1, 0.05, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no')],
+                  ['campo', 'Profundidad de campo', 0, 1, 0.05, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no')],
+                  ['foco', 'Foco', 0, 1, 0.05, (v: number) => (v < 0.15 ? 'fondo' : v > 0.85 ? 'muy cerca' : `${Math.round(v * 100)} %`)]
                 ] as const
               ).map(([clave, nombre, min, max, paso, formato]) => {
                 const valor = ajustesDe(clipElegido.clip)[clave]
@@ -1050,6 +1054,21 @@ export function TimelineEditor({
                   </label>
                 )
               })}
+              <select
+                value=""
+                title="Un movimiento de cámara para el clip; con capas con profundidad encima se ve en 3D"
+                onChange={(e) => {
+                  const toma = TOMAS_CAMARA.find((x) => x.id === e.target.value)
+                  if (toma) historial.aplicar(ajustarClip(timeline, clipElegido.clip.id, toma.ajustes))
+                }}
+              >
+                <option value="">Toma de cámara…</option>
+                {TOMAS_CAMARA.map((x) => (
+                  <option key={x.id} value={x.id} title={x.para}>
+                    {x.nombre}
+                  </option>
+                ))}
+              </select>
               <button
                 className="btn small ghost"
                 onClick={() => historial.aplicar(ajustarClip(timeline, clipElegido.clip.id, { saturacion: 0, contraste: 1.15 }))}
@@ -1060,7 +1079,7 @@ export function TimelineEditor({
                 className="btn small ghost"
                 disabled={!clipElegido.clip.ajustes}
                 onClick={() =>
-                  historial.aplicar(ajustarClip(timeline, clipElegido.clip.id, { zoom: 1, brillo: 0, contraste: 1, saturacion: 1, cx: 0.5, cy: 0.5, acercar: 0, panx: 0, pany: 0 }))
+                  historial.aplicar(ajustarClip(timeline, clipElegido.clip.id, { zoom: 1, brillo: 0, contraste: 1, saturacion: 1, cx: 0.5, cy: 0.5, acercar: 0, panx: 0, pany: 0, temblor: 0, campo: 0, foco: 0.5 }))
                 }
               >
                 Restablecer

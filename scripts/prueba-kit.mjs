@@ -277,6 +277,64 @@ try {
   if (!(lejos < -15 && Math.abs(fija) < 2 && cerca < lejos * 2)) throw new Error(`El paralaje no va bien: lejos ${lejos}, fija ${fija}, cerca ${cerca} px`)
   console.log(`escena 2.5D en el kit: el fondo y lo lejano se mueven ${Math.round(lejos)} px, lo cercano ${Math.round(cerca)} px, lo fijo ${Math.round(fija)} ✓`)
 
+  // Marioneta: una figura dibujada (tronco gris, brazo derecho rojo separado del cuerpo) con su esqueleto dado
+  // (sin el modelo). Al saludar, el brazo rojo se levanta y sale hacia fuera: hay rojo más allá del borde de la imagen.
+  writeFileSync(
+    join(trabajo, 'figura.py'),
+    [
+      'from PIL import Image, ImageDraw',
+      "im = Image.new('RGBA', (200, 400), (0, 0, 0, 0))",
+      'd = ImageDraw.Draw(im)',
+      "d.ellipse((75, 10, 125, 70), fill=(220, 180, 150, 255))",
+      "d.rectangle((60, 80, 140, 220), fill=(90, 90, 90, 255))",
+      "d.rectangle((70, 220, 95, 380), fill=(40, 40, 60, 255))",
+      "d.rectangle((105, 220, 130, 380), fill=(40, 40, 60, 255))",
+      "d.rectangle((20, 85, 38, 230), fill=(90, 90, 90, 255))",
+      "d.rectangle((162, 85, 180, 230), fill=(230, 20, 20, 255))",
+      "d.rectangle((140, 82, 180, 100), fill=(230, 20, 20, 255))",
+      "d.rectangle((38, 82, 60, 100), fill=(90, 90, 90, 255))",
+      "im.save('figura.png')"
+    ].join('\n')
+  )
+  correr(python, ['figura.py'], trabajo)
+  const puntos = {
+    nariz: [0.5, 0.1], ojo_i: [0.55, 0.09], ojo_d: [0.45, 0.09], hombro_i: [0.85, 0.23], hombro_d: [0.15, 0.23],
+    codo_i: [0.855, 0.4], codo_d: [0.145, 0.4], muneca_i: [0.855, 0.55], muneca_d: [0.145, 0.55], mano_i: [0.855, 0.575],
+    mano_d: [0.145, 0.575], cadera_i: [0.6, 0.55], cadera_d: [0.4, 0.55], rodilla_i: [0.6, 0.75], rodilla_d: [0.4, 0.75],
+    tobillo_i: [0.6, 0.93], tobillo_d: [0.4, 0.93]
+  }
+  writeFileSync(join(trabajo, 'puntos.json'), JSON.stringify(puntos))
+  const mar = json(correr(python, ['kit/kit.py', 'animar', 'figura.png', '--tipo', 'saludar', '--lado', 'derecha', '--puntos', 'puntos.json', '--duracion', '2', '--salida', 'saluda.webm'], trabajo))
+  if (!(mar.escala > 1.4) || !existsSync(join(trabajo, 'saluda.webm'))) throw new Error(`La marioneta no salió: ${JSON.stringify(mar)}`)
+  const rojoArriba = (t) => {
+    const r = spawnSync('ffmpeg', ['-v', 'error', '-c:v', 'libvpx-vp9', '-ss', String(t), '-i', 'saluda.webm', '-frames:v', '1', '-vf', `crop=iw-${Math.round(mar.margen * 200) + 206}:ih:${Math.round(mar.margen * 200) + 206}:0`, '-f', 'rawvideo', '-pix_fmt', 'rgba', '-'], { cwd: trabajo })
+    let n = 0
+    for (let i = 0; i < r.stdout.length; i += 4) if (r.stdout[i + 3] > 128 && r.stdout[i] > 170 && r.stdout[i + 1] < 80) n++
+    return n
+  }
+  const [quieto, saluda] = [rojoArriba(0), rojoArriba(1.2)]
+  if (!(quieto === 0 && saluda > 30)) throw new Error(`Al saludar, el brazo no sale: ${quieto} px rojos fuera al empezar y ${saluda} saludando`)
+  console.log(`marioneta: con el esqueleto dado, el brazo se levanta a saludar (${saluda} px fuera de la imagen), capa ${mar.escala}× más ancha ✓`)
+
+  // Cámara en mano y profundidad de campo en el kit: el fondo se mueve solo (con la foto quieta) y se desenfoca.
+  writeFileSync(
+    join(trabajo, 'receta-camara.json'),
+    JSON.stringify({
+      ancho: 270, alto: 480, fps: 12, duracion: 3, fundido_final: 0,
+      momentos: [{ tipo: 'foto', archivo: 'cielo.jpg', desde: 0, hasta: 3, acercar: false, encuadre: { zoom: 1.2 }, temblor: 1, campo: 1, foco: 1 }]
+    })
+  )
+  json(correr(python, ['kit/kit.py', 'armar', 'receta-camara.json', '--prueba', '0.6,1.6'], trabajo))
+  const filaGris = (t) => {
+    const r = spawnSync('ffmpeg', ['-v', 'error', '-i', `revision/prueba-${t}.jpg`, '-vf', 'crop=270:2:0:240,scale=270:1', '-f', 'rawvideo', '-pix_fmt', 'gray', '-'], { cwd: trabajo })
+    return [...r.stdout]
+  }
+  const [f1, f2] = [filaGris('00.60'), filaGris('01.60')]
+  const cambia = f1.reduce((s, v, i) => s + Math.abs(v - f2[i]), 0) / f1.length
+  const salto = Math.max(...f1.slice(1).map((v, i) => Math.abs(v - f1[i])))
+  if (!(cambia > 1 && salto < 60)) throw new Error(`Cámara en mano y foco: cambio ${cambia.toFixed(1)}, borde más duro ${salto} (la rejilla debía verse movida y borrosa)`)
+  console.log(`cámara en mano y profundidad de campo en el kit (el fondo se mueve ${cambia.toFixed(1)} y su borde más duro es ${salto}) ✓`)
+
   // Recortes: un sujeto sobre verde croma (con un hueco por dentro) queda sin fondo, y el hueco también.
   correr('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=0x00B140:s=400x500', '-vf', "drawbox=x=100:y=80:w=200:h=340:color=0x3C2814:t=fill,drawbox=x=180:y=230:w=40:h=40:color=0x00B140:t=fill", '-frames:v', '1', 'croma.png'], trabajo)
   const rec = json(correr(python, ['kit/kit.py', 'recortar', 'croma.png'], trabajo))

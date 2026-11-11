@@ -77,7 +77,10 @@ export interface AjustesClip {
   cx?: number
   /** Lo mismo en vertical: 0 (arriba) a 1 (abajo); 0.5 neutro. */
   cy?: number
-  /** Acercamiento lento durante el clip (Ken Burns): cuánto crece al final, 0 a 0.3; 0 quieto. */
+  /**
+   * Acercamiento lento durante el clip (Ken Burns, o un dolly de cámara): cuánto crece al final, 0 a 0.3; 0 quieto.
+   * Negativo, se aleja (hasta -0.3): necesita zoom para tener de dónde alejarse.
+   */
   acercar?: number
   /**
    * Paneo: cuánto se desplaza el centro del encuadre al acabar el clip, -0.5 (izquierda) a 0.5 (derecha);
@@ -86,6 +89,15 @@ export interface AjustesClip {
   panx?: number
   /** Lo mismo en vertical: -0.5 (sube) a 0.5 (baja). */
   pany?: number
+  /** Cámara en mano: un vaivén suave e irregular, 0 a 1; 0 trípode. Lo cercano (capas con profundidad) se mueve más. */
+  temblor?: number
+  /**
+   * Profundidad de campo, 0 a 1 (0 todo nítido): lo que está lejos del `foco` se desenfoca, más cuanto más lejos.
+   * El fondo (el clip) está a profundidad 0; las capas, a la suya.
+   */
+  campo?: number
+  /** La distancia enfocada, 0 (el fondo) a 1 (lo más cercano). */
+  foco?: number
 }
 
 export const LIMITES_AJUSTES = {
@@ -95,9 +107,12 @@ export const LIMITES_AJUSTES = {
   saturacion: [0, 2, 1],
   cx: [0, 1, 0.5],
   cy: [0, 1, 0.5],
-  acercar: [0, 0.3, 0],
+  acercar: [-0.3, 0.3, 0],
   panx: [-0.5, 0.5, 0],
-  pany: [-0.5, 0.5, 0]
+  pany: [-0.5, 0.5, 0],
+  temblor: [0, 1, 0],
+  campo: [0, 1, 0],
+  foco: [0, 1, 0.5]
 } as const satisfies Record<keyof AjustesClip, readonly [number, number, number]>
 
 /** Una pista de música bajo toda la edición (se repite si es corta y se funde al final). */
@@ -250,7 +265,7 @@ export interface CapaTL {
    * Una imagen recortada animada (respira, se balancea, ondea, flota, humo): `fuente` es su animación en
    * bucle (un WebM con transparencia) y `base` la imagen de la que sale, para cambiarla o volver a ella.
    */
-  animada?: { tipo: TipoAnimar; base: FuenteId }
+  animada?: { tipo: TipoAnimar; base: FuenteId; escala?: number }
   /**
    * Escena 2.5D: a qué distancia está la capa, 0 (pegada al fondo: se mueve con él) a 1 (muy cerca de la
    * cámara: se mueve y crece 2,5 veces más que el fondo). Sin ella, la capa no sigue a la cámara.
@@ -260,16 +275,43 @@ export interface CapaTL {
   desenfoque?: number
 }
 
-export type TipoAnimar = 'respirar' | 'balanceo' | 'ondear' | 'flotar' | 'humo'
-export const ANIMAR_CAPA: { id: TipoAnimar; nombre: string; para: string }[] = [
+export type TipoAnimar =
+  | 'respirar'
+  | 'balanceo'
+  | 'ondear'
+  | 'flotar'
+  | 'humo'
+  | 'hablar'
+  | 'asentir'
+  | 'ladear'
+  | 'peso'
+  | 'saludar'
+  | 'senalar'
+  | 'explicar'
+/**
+ * Cómo se puede animar una imagen recortada sin gastar créditos: deformándola (respira, ondea…) o, si es una
+ * persona, como marioneta por huesos (`marioneta`: mueve la cabeza, los brazos, el peso del cuerpo).
+ */
+export const ANIMAR_CAPA: { id: TipoAnimar; nombre: string; para: string; marioneta?: boolean }[] = [
   { id: 'respirar', nombre: 'Respira', para: 'una persona quieta que respira' },
   { id: 'balanceo', nombre: 'Se balancea', para: 'una persona de pie que se mece' },
   { id: 'ondear', nombre: 'Ondea', para: 'una bandera o una tela al viento' },
   { id: 'flotar', nombre: 'Flota', para: 'algo que sube y baja despacio' },
-  { id: 'humo', nombre: 'Humo', para: 'humo, nubes o fuego que se agitan' }
+  { id: 'humo', nombre: 'Humo', para: 'humo, nubes o fuego que se agitan' },
+  { id: 'hablar', nombre: 'Marioneta: habla', para: 'una persona que cuenta algo: mueve la cabeza y las manos', marioneta: true },
+  { id: 'asentir', nombre: 'Marioneta: asiente', para: 'una persona que dice que sí con la cabeza', marioneta: true },
+  { id: 'ladear', nombre: 'Marioneta: ladea la cabeza', para: 'una persona que duda o escucha', marioneta: true },
+  { id: 'peso', nombre: 'Marioneta: cambia el peso', para: 'una persona de pie que pasa el peso de un pie al otro', marioneta: true },
+  { id: 'saludar', nombre: 'Marioneta: saluda', para: 'una persona que saluda con la mano (brazos separados del cuerpo)', marioneta: true },
+  { id: 'senalar', nombre: 'Marioneta: señala', para: 'una persona que señala a un lado (brazos separados del cuerpo)', marioneta: true },
+  { id: 'explicar', nombre: 'Marioneta: explica', para: 'una persona que abre los brazos al explicar (brazos separados)', marioneta: true }
 ]
 /** La animación deja un margen del 8 % por lado: la capa animada mide esto más para que la imagen se vea igual. */
 export const MARGEN_ANIMAR = 1.16
+/** Cuánto más ancha que su imagen es una capa animada (la marioneta deja sitio a los brazos según el gesto). */
+export function escalaAnimada(c: Pick<CapaTL, 'animada'>): number {
+  return c.animada?.escala ?? MARGEN_ANIMAR
+}
 
 /**
  * Los filtros de todo el video, de 0 (nada) a 1 (fuerte): el aspecto de película o de imprenta
@@ -504,7 +546,15 @@ export function normalizarCapas(entrada: unknown, total: number, medios: Record<
             }
           }
         : {}),
-      ...(c.animada && medios[c.animada.base] !== undefined && ANIMAR_CAPA.some((a) => a.id === c.animada!.tipo) ? { animada: c.animada } : {}),
+      ...(c.animada && medios[c.animada.base] !== undefined && ANIMAR_CAPA.some((a) => a.id === c.animada!.tipo)
+        ? {
+            animada: {
+              tipo: c.animada.tipo,
+              base: c.animada.base,
+              ...(typeof c.animada.escala === 'number' && c.animada.escala >= 1 && c.animada.escala <= 4 ? { escala: c.animada.escala } : {})
+            }
+          }
+        : {}),
       ...(typeof c.profundidad === 'number' && Number.isFinite(c.profundidad) ? { profundidad: Math.round(pinza(c.profundidad, 0, 1) * 100) / 100 } : {}),
       ...(num(c.desenfoque, 0) > 0.005 ? { desenfoque: Math.round(pinza(num(c.desenfoque, 0), 0, 1) * 100) / 100 } : {})
     })
@@ -615,23 +665,50 @@ export function ajustesDe(clip: ClipTL | undefined): Required<AjustesClip> {
     cy: clip?.ajustes?.cy ?? 0.5,
     acercar: clip?.ajustes?.acercar ?? 0,
     panx: clip?.ajustes?.panx ?? 0,
-    pany: clip?.ajustes?.pany ?? 0
+    pany: clip?.ajustes?.pany ?? 0,
+    temblor: clip?.ajustes?.temblor ?? 0,
+    campo: clip?.ajustes?.campo ?? 0,
+    foco: clip?.ajustes?.foco ?? 0.5
   }
+}
+
+/** Cámara en mano: cuánto se mueve (fracción del cuadro con temblor 1) y cuánto zoom de más le deja sitio. */
+export const TEMBLOR_AMPLITUD = 0.007
+export const TEMBLOR_ZOOM = 0.04
+/**
+ * El vaivén de la cámara en mano en el segundo `s` del clip, de -1 a 1 en cada eje: tres ondas lentas que no
+ * se repiten a la vista. Igual en el monitor, el MP4 (las mismas ondas en FFmpeg) y el kit.
+ */
+export function vaiven(s: number): { x: number; y: number } {
+  const P = 2 * Math.PI
+  return {
+    x: 0.6 * Math.sin(P * 0.53 * s) + 0.3 * Math.sin(P * 1.37 * s + 1.3) + 0.1 * Math.sin(P * 3.1 * s + 2.1),
+    y: 0.6 * Math.sin(P * 0.41 * s + 0.7) + 0.3 * Math.sin(P * 1.13 * s + 2.4) + 0.1 * Math.sin(P * 2.7 * s + 0.4)
+  }
+}
+
+/** Cuánto se desenfoca algo a la profundidad `p` con la profundidad de campo del clip (0 a 1). */
+export function desenfoqueDeCampo(a: Required<AjustesClip>, p: number): number {
+  return a.campo > 0 ? Math.min(1, a.campo * Math.abs(p - a.foco) * 1.5) : 0
 }
 
 /**
  * La cámara de un clip en un punto de su recorrido (0 al empezar, 1 al acabar): el zoom y el punto
  * hacia el que se acerca (cx, cy), con el paneo suave (empieza y acaba despacio). Igual en el MP4.
  */
-export function camaraEn(a: Required<AjustesClip>, avance: number): { z: number; cx: number; cy: number } {
+export function camaraEn(a: Required<AjustesClip>, avance: number, segundos = 0): { z: number; cx: number; cy: number } {
   const q = Math.min(1, Math.max(0, avance))
   const e = 3 * q * q - 2 * q * q * q
-  return { z: zoomEn(a, q), cx: Math.min(1, Math.max(0, a.cx + a.panx * e)), cy: Math.min(1, Math.max(0, a.cy + a.pany * e)) }
+  const z = zoomEn(a, q)
+  // La cámara en mano mueve el encuadre una fracción fija del cuadro: en el punto de zoom, eso es más cuanto menos zoom.
+  const v = a.temblor ? vaiven(segundos) : { x: 0, y: 0 }
+  const k = a.temblor ? (TEMBLOR_AMPLITUD * a.temblor) / Math.max(1e-3, z - 1) : 0
+  return { z, cx: Math.min(1, Math.max(0, a.cx + a.panx * e + k * v.x)), cy: Math.min(1, Math.max(0, a.cy + a.pany * e + k * v.y)) }
 }
 
 /** Cuánto zoom lleva el clip en un punto de su recorrido (0 al empezar, 1 al acabar). */
 export function zoomEn(a: Required<AjustesClip>, avance: number): number {
-  return a.zoom * (1 + a.acercar * Math.min(1, Math.max(0, avance)))
+  return Math.max(1, a.zoom * (1 + a.acercar * Math.min(1, Math.max(0, avance)))) * (1 + TEMBLOR_ZOOM * a.temblor)
 }
 
 /**
@@ -1121,14 +1198,37 @@ export function aplicarParalaje(
   t: number,
   e: { x: number; y: number; ancho: number }
 ): { x: number; y: number; ancho: number } {
-  const r = camaraEn(ref.ajustes, (inicioCapa - ref.inicio) / ref.largo)
-  const k = camaraEn(ref.ajustes, (t - ref.inicio) / ref.largo)
+  const r = camaraEn(ref.ajustes, (inicioCapa - ref.inicio) / ref.largo, inicioCapa - ref.inicio)
+  const k = camaraEn(ref.ajustes, (t - ref.inicio) / ref.largo, Math.min(ref.largo, Math.max(0, t - ref.inicio)))
   const A = k.z / r.z
   const bx = A * (r.z - 1) * r.cx - (k.z - 1) * k.cx
   const by = A * (r.z - 1) * r.cy - (k.z - 1) * k.cy
   const m = 1 + PARALAJE * Math.min(1, Math.max(0, profundidad))
   return { x: e.x + m * (A * e.x + bx - e.x), y: e.y + m * (A * e.y + by - e.y), ancho: e.ancho * Math.pow(A, m) }
 }
+
+/**
+ * El desenfoque con que se ve una capa: el suyo más el de la profundidad de campo del clip de debajo (si la
+ * capa tiene profundidad).
+ */
+export function desenfoqueCapa(tl: Timeline, c: CapaTL): number {
+  const ref = referenciaParalaje(tl, c)
+  return Math.min(1, (c.desenfoque ?? 0) + (ref ? desenfoqueDeCampo(ref.ajustes, c.profundidad ?? 0) : 0))
+}
+
+/**
+ * Tomas de cámara listas para un clip (con sus capas con profundidad, se ven en 3D): cambian zoom, acercamiento
+ * y paneo. Lo demás del clip (color, temblor, foco) se queda.
+ */
+export const TOMAS_CAMARA: { id: string; nombre: string; para: string; ajustes: AjustesClip }[] = [
+  { id: 'dolly-in', nombre: 'Acercarse (dolly in)', para: 'la cámara avanza hacia la escena: lo cercano crece más', ajustes: { zoom: 1.1, acercar: 0.18, panx: 0, pany: 0, cx: 0.5, cy: 0.5 } },
+  { id: 'dolly-out', nombre: 'Alejarse (dolly out)', para: 'la cámara retrocede y revela', ajustes: { zoom: 1.35, acercar: -0.22, panx: 0, pany: 0, cx: 0.5, cy: 0.5 } },
+  { id: 'travelling-derecha', nombre: 'Travelling →', para: 'la cámara se desliza a la derecha: lo cercano pasa más rápido', ajustes: { zoom: 1.25, acercar: 0.03, panx: 0.35, pany: 0, cx: 0.3, cy: 0.5 } },
+  { id: 'travelling-izquierda', nombre: 'Travelling ←', para: 'la cámara se desliza a la izquierda', ajustes: { zoom: 1.25, acercar: 0.03, panx: -0.35, pany: 0, cx: 0.7, cy: 0.5 } },
+  { id: 'grua-arriba', nombre: 'Grúa ↑', para: 'la cámara sube (de los pies al cielo)', ajustes: { zoom: 1.25, acercar: 0.02, panx: 0, pany: -0.4, cx: 0.5, cy: 0.75 } },
+  { id: 'grua-abajo', nombre: 'Grúa ↓', para: 'la cámara baja hacia el protagonista', ajustes: { zoom: 1.25, acercar: 0.04, panx: 0, pany: 0.4, cx: 0.5, cy: 0.25 } },
+  { id: 'empuje', nombre: 'Empuje a un detalle', para: 'avanza hacia un punto y lo encuadra', ajustes: { zoom: 1.05, acercar: 0.3, panx: 0.12, pany: -0.1, cx: 0.45, cy: 0.5 } }
+]
 
 /** Movimientos de una capa listos para usar (desde su sitio actual). */
 export const MOVIMIENTOS_CAPA: { id: string; nombre: string; para: string; fin: (c: CapaTL) => FinCapa }[] = [

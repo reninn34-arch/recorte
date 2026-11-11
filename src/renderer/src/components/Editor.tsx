@@ -8,7 +8,7 @@ import { RenderQueue } from './RenderQueue'
 import { SourceCard } from './SourceCard'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
-import { capaNueva, cambiarCapa, cambiarFuente, MARGEN_ANIMAR, type TipoAnimar, duracionTimeline, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, type Timeline } from '../../../shared/timeline'
+import { capaNueva, cambiarCapa, cambiarFuente, escalaAnimada, type TipoAnimar, duracionTimeline, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, type Timeline } from '../../../shared/timeline'
 import { useHistorial, useReproductor, type FuentesVista } from '../hooks/timeline'
 import { Monitor } from './Monitor'
 import { MediosPanel } from './MediosPanel'
@@ -168,7 +168,7 @@ export function Editor({
     const capa = timeline.capas?.find((c) => c.id === capaId)
     if (!capa || quitandoFondo) return
     const base = capa.animada?.base ?? capa.fuente
-    const anchoBase = capa.animada ? capa.ancho / MARGEN_ANIMAR : capa.ancho
+    const anchoBase = capa.animada ? capa.ancho / escalaAnimada(capa) : capa.ancho
     if (!tipo) {
       if (capa.animada) historial.aplicar(cambiarCapa(timeline, capaId, { fuente: base, animada: undefined, ancho: anchoBase }, duraciones))
       return
@@ -178,8 +178,10 @@ export function Editor({
       const r = await window.recorte.animarImagen(proyecto.id, base, tipo)
       onMedios(r.project.medios ?? [])
       const largo = r.project.medios?.find((m) => m.id === r.medio)?.duracion ?? 4
-      historial.aplicar(cambiarCapa(timeline, capaId, { fuente: r.medio, animada: { tipo, base }, ancho: Math.min(1.5, anchoBase * MARGEN_ANIMAR) }, { ...duraciones, [r.medio]: largo }))
-      onAviso('Listo: la capa ya se mueve. Vuelve a «Quieta» cuando quieras.')
+      historial.aplicar(
+        cambiarCapa(timeline, capaId, { fuente: r.medio, animada: { tipo, base, escala: r.escala || escalaAnimada({}) }, ancho: Math.min(2, anchoBase * (r.escala || escalaAnimada({}))) }, { ...duraciones, [r.medio]: largo })
+      )
+      onAviso(r.avisos?.length ? r.avisos.join(' ') : 'Listo: la capa ya se mueve. Vuelve a «Quieta» cuando quieras.')
     } catch (error) {
       onAviso(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error))
     } finally {

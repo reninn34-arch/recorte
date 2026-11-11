@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, extname, join, resolve, sep } from 'node:path'
 import {
   duracionesDeMedios,
@@ -398,18 +398,18 @@ export async function proyectoDesdeReceta(
     const tipoAnimar = typeof x.animar === 'string' ? x.animar : x.animar && typeof x.animar === 'object' ? (x.animar as Record<string, unknown>).tipo : null
     const animada =
       medio.tipo === 'imagen' && typeof tipoAnimar === 'string' && ANIMAR_CAPA.some((t) => t.id === tipoAnimar) && ruta
-        ? await animarConKit(trabajo, ruta, tipoAnimar, carpetaProyecto)
+        ? await animarConKit(trabajo, ruta, tipoAnimar, carpetaProyecto, x.animar && typeof x.animar === 'object' ? (x.animar as Record<string, unknown>) : {})
         : null
-    const medioAnimado = animada ? await medioDe(animada) : null
+    const medioAnimado = animada ? await medioDe(animada.ruta) : null
     capas.push({
       id: nuevoId('capa'),
       fuente: medioAnimado?.id ?? medio.id,
-      ...(medioAnimado ? { animada: { tipo: tipoAnimar as TipoAnimar, base: medio.id } } : {}),
+      ...(medioAnimado && animada ? { animada: { tipo: tipoAnimar as TipoAnimar, base: medio.id, escala: animada.escala } } : {}),
       inicio: a,
       duracion: b - a,
       x: pinza(num(x.x, 0.5), 0, 1),
       y: pinza(num(x.y, 0.5), 0, 1),
-      ancho: pinza(num(x.ancho, 0.3) * (medioAnimado ? MARGEN_ANIMAR : 1), 0.05, 2),
+      ancho: pinza(num(x.ancho, 0.3) * (medioAnimado && animada ? animada.escala : 1), 0.05, 2),
       ...(typeof x.entrada === 'string' && ENTRADAS_CAPA.includes(x.entrada as EntradaCapa)
         ? { entrada: x.entrada as EntradaCapa }
         : x.entrada === 'ninguna'
@@ -480,20 +480,37 @@ function camaraFoto(m: Record<string, unknown>, encuadre: { zoom: number; cx: nu
   const haciaEditor = (c: number, z: number) => (z > 1.001 ? pinza((c - 1 / (2 * z)) / (1 - 1 / z), 0, 1) : 0.5)
   const z0 = encuadre.zoom
   const inicio = { zoom: z0, cx: haciaEditor(encuadre.cx, z0), cy: haciaEditor(encuadre.cy, z0) }
+  // Cámara en mano y profundidad de campo, tal cual.
+  const extra = {
+    ...(num(m.temblor, 0) > 0 ? { temblor: pinza(num(m.temblor, 0), 0, 1) } : {}),
+    ...(num(m.campo, 0) > 0 ? { campo: pinza(num(m.campo, 0), 0, 1), foco: pinza(num(m.foco, 0.5), 0, 1) } : {})
+  }
   const cam = m.camara && typeof m.camara === 'object' ? (m.camara as Record<string, unknown>) : null
-  if (!cam) return { ...inicio, ...(m.acercar === false ? {} : { acercar: 0.06 }) }
+  if (!cam) return { ...inicio, ...extra, ...(m.acercar === false ? {} : { acercar: 0.06 }) }
   const z1 = Math.max(1, num(cam.zoom, z0))
-  const acercar = pinza(z1 / z0 - 1, 0, 0.3)
+  // Alejarse también (acercar negativo): la cámara retrocede desde el zoom del encuadre.
+  const acercar = pinza(z1 / z0 - 1, -0.3, 0.3)
   const zFin = z0 * (1 + acercar)
   return {
     ...inicio,
+    ...extra,
     acercar,
     panx: pinza(haciaEditor(num(cam.cx, encuadre.cx), zFin) - inicio.cx, -0.5, 0.5),
     pany: pinza(haciaEditor(num(cam.cy, encuadre.cy), zFin) - inicio.cy, -0.5, 0.5)
   }
 }
 
-async function animarConKit(trabajo: string, imagen: string, tipo: string, carpetaProyecto: string): Promise<string | null> {
+/**
+ * Anima una imagen con el kit (deformación o marioneta). Devuelve el WebM y cuánto más ancho es que la imagen.
+ * De la receta pasan la fuerza y, en la marioneta, el brazo que hace el gesto y el esqueleto corregido.
+ */
+async function animarConKit(
+  trabajo: string,
+  imagen: string,
+  tipo: string,
+  carpetaProyecto: string,
+  opciones: Record<string, unknown> = {}
+): Promise<{ ruta: string; escala: number } | null> {
   const kit = join(trabajo, 'kit', 'kit.py')
   const py = await buscarPython()
   if (!py || !existsSync(kit)) return null
@@ -501,6 +518,23 @@ async function animarConKit(trabajo: string, imagen: string, tipo: string, carpe
   mkdirSync(carpeta, { recursive: true })
   const salida = join(carpeta, `${basename(imagen, extname(imagen)).slice(0, 40)}-${tipo}-${randomUUID().slice(0, 6)}.webm`)
   const cita = (v: string) => (/[\s"]/.test(v) ? `"${v}"` : v)
-  const r = await ejecutar([[py.cmd, ...py.args].map(cita).join(' '), cita(kit), 'animar', cita(imagen), '--tipo', tipo, '--salida', cita(salida)], carpeta, 600_000)
-  return r.codigo === 0 && existsSync(salida) ? salida : null
+  const extra: string[] = []
+  if (typeof opciones.fuerza === 'number' && Number.isFinite(opciones.fuerza)) extra.push('--fuerza', String(pinza(opciones.fuerza, 0, 1.5)))
+  if (opciones.lado === 'izquierda' || opciones.lado === 'derecha') extra.push('--lado', opciones.lado)
+  if (opciones.puntos && typeof opciones.puntos === 'object') {
+    // El esqueleto corregido por el agente, en un archivo (en la línea de órdenes las comillas se pierden).
+    const archivo = join(carpeta, `puntos-${randomUUID().slice(0, 6)}.json`)
+    writeFileSync(archivo, JSON.stringify(opciones.puntos), 'utf8')
+    extra.push('--puntos', cita(archivo))
+  }
+  const r = await ejecutar([[py.cmd, ...py.args].map(cita).join(' '), cita(kit), 'animar', cita(imagen), '--tipo', tipo, ...extra, '--salida', cita(salida)], carpeta, 900_000)
+  if (r.codigo !== 0 || !existsSync(salida)) return null
+  let escala = MARGEN_ANIMAR
+  try {
+    const info = JSON.parse(r.salida.trim().split(/\r?\n/).filter((l) => l.startsWith('{')).pop() ?? '{}') as { escala?: unknown }
+    if (typeof info.escala === 'number' && info.escala >= 1) escala = info.escala
+  } catch {
+    // Sin respuesta legible: el margen de las deformaciones.
+  }
+  return { ruta: salida, escala }
 }

@@ -139,6 +139,9 @@ function clips(antes: Timeline, ahora: Timeline, ctx: ContextoRetoques): string[
     const extra = [
       clip.ajustes?.zoom && clip.ajustes.zoom !== 1 ? `zoom ${clip.ajustes.zoom.toFixed(2)}` : '',
       clip.ajustes?.panx || clip.ajustes?.pany ? `paneo ${(clip.ajustes.panx ?? 0).toFixed(2)}, ${(clip.ajustes.pany ?? 0).toFixed(2)}` : '',
+      clip.ajustes?.acercar ? `${clip.ajustes.acercar > 0 ? 'se acerca' : 'se aleja'} ${Math.abs(clip.ajustes.acercar).toFixed(2)}` : '',
+      clip.ajustes?.temblor ? `cámara en mano ${clip.ajustes.temblor.toFixed(2)}` : '',
+      clip.ajustes?.campo ? `profundidad de campo ${clip.ajustes.campo.toFixed(2)} con foco en ${(clip.ajustes.foco ?? 0.5).toFixed(2)}` : '',
       clip.fundido ? `entra con ${clip.transicion ?? 'fundido'} de ${s(clip.fundido)}` : ''
     ].filter(Boolean)
     return `  ${i + 1}. ${s(inicio)}–${s(fin)}: ${que}${extra.length ? ` (${extra.join(', ')})` : ''}`

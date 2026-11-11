@@ -13,6 +13,8 @@ import {
   camaraEn,
   referenciaParalaje,
   DESENFOQUE_MAX,
+  desenfoqueCapa,
+  desenfoqueDeCampo,
   TIPO_ARRASTRE_MEDIO,
   cambiarCapa,
   cambiarTexto,
@@ -80,7 +82,7 @@ export function Monitor({
   const largoClip = ubicado ? ubicado.fin - ubicado.inicio : 1
   const enClip = ubicado ? reproductor.tiempo - ubicado.inicio : 0
   // La cámara del clip: zoom, acercamiento lento y paneo (el punto hacia el que se acerca se desplaza).
-  const cam = camaraEn(a, enClip / Math.max(0.01, largoClip))
+  const cam = camaraEn(a, enClip / Math.max(0.01, largoClip), enClip)
   const z = cam.z
   // La transición de entrada: el clip entra sobre negro (en el render, sobre el clip anterior), con su tipo
   // (fundido, barrido, zoom, desenfoque, destello, círculo).
@@ -111,6 +113,9 @@ export function Monitor({
   const proporcion = (proyecto.source.width || 16) / (proyecto.source.height || 9)
   const cw = tam ? Math.min(tam.w, tam.h * proporcion) : 0
   const ch = cw / proporcion
+  // Profundidad de campo: el fondo (a profundidad 0) se desenfoca si el foco está más cerca.
+  const fondoBorroso = desenfoqueDeCampo(a, 0)
+  if (fondoBorroso > 0.005) estiloImagen.filter = `${estiloImagen.filter ?? ''} blur(${(fondoBorroso * DESENFOQUE_MAX * cw).toFixed(2)}px)`.trim()
   // El tamaño de letra sigue al de la exportación (una fracción del lado corto).
   const letra = Math.min(cw, ch) * (ch > cw ? 0.06 : 0.065) * 0.93
 
@@ -298,7 +303,7 @@ export function Monitor({
                   width: `${ancho * 100}%`,
                   transform: `translate(-50%, -50%) rotate(${e.giro}deg) scale(${e.escala})`,
                   opacity: e.opacidad,
-                  filter: c.desenfoque ? `blur(${(c.desenfoque * DESENFOQUE_MAX * cw).toFixed(2)}px)` : undefined
+                  filter: desenfoqueCapa(timeline, c) > 0.005 ? `blur(${(desenfoqueCapa(timeline, c) * DESENFOQUE_MAX * cw).toFixed(2)}px)` : undefined
                 }}
                 onClick={(ev) => ev.stopPropagation()}
                 onPointerDown={(ev) => arrastrar(ev, 'capa', c.id, { x: c.x, y: c.y, ancho: c.ancho })}

@@ -318,9 +318,10 @@ def leer_capas(lista, L):
             'entrada': entrada if entrada in ('pop', 'fundido', 'ninguna', 'izquierda', 'derecha', 'arriba', 'abajo') else 'pop',
             'video': video, 'desde_video': float(c.get('inicio', 0)),
             # Animar una imagen recortada (respirar, balanceo, ondear, flotar, humo), sin gastar créditos.
-            'animada': (Animada(im.resize((max(w, round(L.W * float(fin.get('ancho', ancho)))) if fin else w,
+            'animada': (animacion_capa(im.resize((max(w, round(L.W * float(fin.get('ancho', ancho)))) if fin else w,
                                            max(1, round(im.height * (max(w, round(L.W * float(fin.get('ancho', ancho)))) if fin else w) / im.width))), Image.LANCZOS),
-                                *((c['animar'], 0.5) if isinstance(c.get('animar'), str) else (c['animar'].get('tipo'), c['animar'].get('fuerza', 0.5))))
+                                *((c['animar'], 0.5) if isinstance(c.get('animar'), str) else (c['animar'].get('tipo'), c['animar'].get('fuerza', 0.5))),
+                                c['animar'] if isinstance(c.get('animar'), dict) else None)
                         if c.get('animar') and not video else None),
             # Escena 2.5D: a qué distancia está (0 pegada al fondo, 1 muy cerca); sin ella, fija en la pantalla.
             'profundidad': min(1.0, max(0.0, float(c['profundidad']))) if isinstance(c.get('profundidad'), (int, float)) else None,
@@ -400,15 +401,24 @@ class Animada:
         return Image.fromarray(out, 'RGBA')
 
 
-def animar_imagen(ruta, tipo, fuerza=0.5, salida=None, duracion=CICLO_S, fps=30):
+def animacion_capa(im, tipo, fuerza=0.5, extra=None):
+    """La animación de una capa: deformación (respirar, ondear…) o marioneta por huesos (hablar, saludar…)."""
+    if tipo in GESTOS:
+        e = extra or {}
+        return Marioneta(im, tipo, fuerza, e.get('puntos'), e.get('lado'))
+    return Animada(im, tipo, fuerza)
+
+
+def animar_imagen(ruta, tipo, fuerza=0.5, salida=None, duracion=CICLO_S, fps=30, puntos=None, lado=None):
     """La imagen recortada, animada en bucle (un WebM con transparencia): para usarla como capa en el editor."""
     im = Image.open(ruta).convert('RGBA')
     # Hasta 1080 de lado: suficiente para una capa y rápido de animar.
     if max(im.size) > 1080:
         im.thumbnail((1080, 1080), Image.LANCZOS)
-    an = Animada(im, tipo, fuerza)
+    marioneta = tipo in GESTOS
+    an = Marioneta(im, tipo, fuerza, puntos, lado) if marioneta else Animada(im, tipo, fuerza)
     W, H = an.W - an.W % 2, an.H - an.H % 2
-    salida = salida or os.path.splitext(ruta)[0] + f'-{an.tipo}.webm'
+    salida = salida or os.path.splitext(ruta)[0] + f'-{an.gesto if marioneta else an.tipo}.webm'
     escribe = subprocess.Popen([FFMPEG, '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', f'{W}x{H}', '-r', str(fps), '-i', '-',
                                 '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-b:v', '0', '-crf', '26', '-row-mt', '1', '-auto-alt-ref', '0',
                                 salida], stdin=subprocess.PIPE)
@@ -418,9 +428,374 @@ def animar_imagen(ruta, tipo, fuerza=0.5, salida=None, duracion=CICLO_S, fps=30)
     escribe.stdin.close()
     if escribe.wait() != 0:
         raise SystemExit('No pude escribir la animación.')
-    return {'archivo': salida, 'ancho': W, 'alto': H, 'tipo': an.tipo, 'duracion': round(n / fps, 2),
-            # El margen que se le dejó alrededor: la capa animada es un 16 % más grande que la imagen.
-            'margen': 0.08}
+    return {'archivo': salida, 'ancho': W, 'alto': H, 'tipo': an.gesto if marioneta else an.tipo, 'duracion': round(n / fps, 2),
+            # El margen que se le dejó a cada lado (fracción del ancho) y cuánto más ancha es la capa que la imagen:
+            # un 16 % al deformar; con la marioneta depende del gesto (un brazo que saluda necesita sitio).
+            'margen': round(an.mx / an.w, 4) if marioneta else 0.08, 'escala': round(W / an.w, 4),
+            **({'avisos': an.avisos} if marioneta and an.avisos else {})}
+
+
+# >>> marioneta
+# ---------------------------------------------------------------------------
+# Marioneta: el personaje recortado se mueve por huesos (como el «Puppet» o Duik de After Effects), sin créditos
+# ---------------------------------------------------------------------------
+
+# DWPose (cuerpo, cara y manos, 133 puntos), local. Se baja una vez.
+MODELO_POSE = ('dwpose-ll-ucoco-384.onnx', 'https://huggingface.co/yzd-v/DWPose/resolve/main/dw-ll_ucoco_384.onnx', 134399116)
+GESTOS = ('hablar', 'asentir', 'ladear', 'saludar', 'senalar', 'peso', 'explicar')
+# Los puntos del cuerpo que usa (los del formato COCO).
+PUNTOS = {'nariz': 0, 'ojo_i': 1, 'ojo_d': 2, 'oreja_i': 3, 'oreja_d': 4, 'hombro_i': 5, 'hombro_d': 6, 'codo_i': 7, 'codo_d': 8,
+          'muneca_i': 9, 'muneca_d': 10, 'cadera_i': 11, 'cadera_d': 12, 'rodilla_i': 13, 'rodilla_d': 14, 'tobillo_i': 15,
+          'tobillo_d': 16}
+# Los gestos que levantan un brazo: la imagen necesita margen a los lados del largo del brazo para que no se corte.
+GESTOS_BRAZO = ('saludar', 'senalar', 'explicar')
+
+
+def esqueleto(im):
+    """Los puntos del cuerpo de una persona recortada (RGBA), en píxeles, con su confianza (0 a 1); y la
+    punta de cada mano (de los puntos de los dedos)."""
+    import cv2
+    sesion = sesion_modelo(MODELO_POSE, 'para ver el esqueleto de los personajes')
+    a = np.asarray(im.convert('RGBA'), dtype=np.float32)
+    al = a[..., 3:4] / 255
+    ys, xs = np.nonzero(a[..., 3] > 128)
+    if not len(xs):
+        raise SystemExit('La imagen no tiene a nadie: hace falta una persona recortada (sin fondo).')
+    cx, cy = (xs.min() + xs.max()) / 2, (ys.min() + ys.max()) / 2
+    w, h = (xs.max() - xs.min()) * 1.25 + 1, (ys.max() - ys.min()) * 1.25 + 1
+    W, H = 288, 384
+    if w / h > W / H:
+        h = w * H / W
+    else:
+        w = h * W / H
+    # Sobre gris neutro (el modelo conoce fotos, no transparencias).
+    rgb = a[..., :3] * al + 127 * (1 - al)
+    M = np.array([[W / w, 0, W / 2 - cx * W / w], [0, H / h, H / 2 - cy * H / h]], np.float32)
+    x = cv2.warpAffine(rgb, M, (W, H), flags=cv2.INTER_LINEAR, borderValue=(127, 127, 127))
+    x = (x - np.array([123.675, 116.28, 103.53])) / np.array([58.395, 57.12, 57.375])
+    sx, sy = sesion.run(None, {sesion.get_inputs()[0].name: x.transpose(2, 0, 1)[None].astype(np.float32)})
+    px, py = sx[0].argmax(1) / 2, sy[0].argmax(1) / 2
+    conf = np.minimum(sx[0].max(1), sy[0].max(1))
+    kx, ky = (px - M[0, 2]) / M[0, 0], (py - M[1, 2]) / M[1, 1]
+    puntos = {n: (float(kx[i]), float(ky[i]), float(conf[i])) for n, i in PUNTOS.items()}
+    # La punta de cada mano: el promedio de los dedos que se ven (91–111 izquierda, 112–132 derecha).
+    for lado, ini in (('i', 91), ('d', 112)):
+        sel = [j for j in range(ini, ini + 21) if conf[j] > 0.3]
+        if len(sel) >= 5:
+            puntos[f'mano_{lado}'] = (float(np.mean(kx[sel])), float(np.mean(ky[sel])), float(np.mean(conf[sel])))
+    return puntos
+
+
+def _rot(ang, px, py, sx=1.0, sy=1.0, dx=0.0, dy=0.0):
+    """Matriz 3×3: escala y giro (grados, a favor del reloj en pantalla) alrededor de (px, py), y luego un desplazamiento."""
+    a = math.radians(ang)
+    c, s = math.cos(a), math.sin(a)
+    return np.array([[c * sx, -s * sy, px - (c * sx) * px + s * sy * py + dx],
+                     [s * sx, c * sy, py - s * sx * px - (c * sy) * py + dy],
+                     [0, 0, 1]], dtype=np.float64)
+
+
+def _dentro(p, poligono):
+    """Si el punto p cae dentro del polígono (lista de puntos)."""
+    import cv2
+    return cv2.pointPolygonTest(np.array(poligono, np.float32), (float(p[0]), float(p[1])), False) >= 0
+
+
+class Marioneta:
+    """Una persona recortada que se mueve por huesos: la cabeza asiente o se ladea, los brazos saludan o
+    señalan, el cuerpo respira y cambia el peso de un pie al otro. Cada píxel sigue a sus huesos con pesos
+    suaves que van por dentro de la silueta (la mano no se queda pegada a la cadera). `puntos` corrige o
+    da el esqueleto ({"hombro_d": [x, y], …} en fracción de la imagen); si no, lo detecta un modelo local."""
+
+    def __init__(self, im, gesto='hablar', fuerza=0.5, puntos=None, lado=None):
+        import cv2
+        self.cv2 = cv2
+        self.gesto = gesto if gesto in GESTOS else 'hablar'
+        self.f = max(0.0, min(1.5, float(fuerza)))
+        w, h = im.size
+        # El esqueleto, en píxeles de la imagen.
+        det = esqueleto(im) if not puntos or len(puntos) < 8 else {}
+        P0 = {n: np.array([x, y]) for n, (x, y, c) in det.items() if c > 0.3}
+        for n, v in (puntos or {}).items():
+            if isinstance(v, (list, tuple)) and len(v) >= 2:
+                P0[n] = np.array([float(v[0]) * w, float(v[1]) * h])
+        # El margen alrededor: con un gesto de brazo, lo que mide el brazo (estirado no se sale); si no, poco.
+        brazo = max([np.linalg.norm(P0[f'mano_{l}' if f'mano_{l}' in P0 else f'muneca_{l}'] - P0[f'hombro_{l}'])
+                     for l in ('i', 'd') if f'hombro_{l}' in P0 and (f'mano_{l}' in P0 or f'muneca_{l}' in P0)] or [0.3 * h])
+        if self.gesto in GESTOS_BRAZO:
+            hombros_x = [P0[f'hombro_{l}'][0] for l in ('i', 'd') if f'hombro_{l}' in P0] or [w / 2]
+            sobra = max(brazo * 1.12 - min(hombros_x), brazo * 1.12 - (w - max(hombros_x)), 0.1 * w)
+            hombro_y = min([P0[f'hombro_{l}'][1] for l in ('i', 'd') if f'hombro_{l}' in P0] or [0.25 * h])
+            self.mx, self.my = round(sobra), round(max(0.06 * h, brazo * 1.05 - hombro_y))
+        else:
+            self.mx, self.my = round(0.12 * w), round(0.06 * h)
+        base = Image.new('RGBA', (w + 2 * self.mx, h + 2 * self.my), (0, 0, 0, 0))
+        base.paste(im, (self.mx, self.my))
+        self.W, self.H, self.w, self.h = base.width, base.height, w, h
+        a = np.asarray(base, dtype=np.float32)
+        self.alfa = a[..., 3] / 255
+        # El color se extiende un poco fuera de la silueta: al deformar, el borde no se ensucia de negro.
+        pre = a[..., :3] * self.alfa[..., None]
+        bp, ba = cv2.GaussianBlur(pre, (0, 0), 6), cv2.GaussianBlur(self.alfa, (0, 0), 6)[..., None]
+        relleno = bp / np.maximum(ba, 1e-4)
+        k = np.clip(self.alfa * 4, 0, 1)[..., None]
+        self.rgb = (a[..., :3] * k + relleno * (1 - k)).astype(np.float32)
+        # El esqueleto en píxeles del lienzo con margen.
+        P = {n: v + np.array([self.mx, self.my]) for n, v in P0.items()}
+        if not all(n in P for n in ('hombro_i', 'hombro_d')):
+            raise SystemExit('No encuentro los hombros del personaje: usa una persona de frente, entera o de medio cuerpo.')
+        cuello_base = (P['hombro_i'] + P['hombro_d']) / 2
+        cara = [P[n] for n in ('nariz', 'ojo_i', 'ojo_d', 'oreja_i', 'oreja_d') if n in P]
+        cabeza = np.mean(cara, axis=0) if cara else cuello_base - np.array([0, 0.6 * np.linalg.norm(P['hombro_i'] - P['hombro_d'])])
+        P['cuello'] = cuello_base + 0.3 * (cabeza - cuello_base)
+        P['cabeza'] = cabeza + 0.6 * (cabeza - P['cuello'])
+        caderas = [P[n] for n in ('cadera_i', 'cadera_d') if n in P]
+        P['pelvis'] = np.mean(caderas, axis=0) if caderas else cuello_base + np.array([0, 1.6 * np.linalg.norm(P['hombro_i'] - P['hombro_d'])])
+        for lado_ in ('i', 'd'):
+            # La mano: hasta la punta de los dedos, o un poco más allá de la muñeca.
+            if f'muneca_{lado_}' in P and f'mano_{lado_}' not in P and f'codo_{lado_}' in P:
+                P[f'mano_{lado_}'] = P[f'muneca_{lado_}'] + 0.35 * (P[f'muneca_{lado_}'] - P[f'codo_{lado_}'])
+        self.P = P
+        self.ancho_hombros = float(np.linalg.norm(P['hombro_i'] - P['hombro_d']))
+        # Los huesos: (nombre, de, a, padre). El orden es el de dibujo: lo de atrás primero, los brazos al final.
+        huesos = [('torso', 'pelvis', 'cuello', None), ('cabeza', 'cuello', 'cabeza', 'torso')]
+        for l in ('i', 'd'):
+            if f'rodilla_{l}' in P and f'cadera_{l}' in P:
+                huesos.append((f'muslo_{l}', f'cadera_{l}', f'rodilla_{l}', None))
+                if f'tobillo_{l}' in P:
+                    huesos.append((f'pierna_{l}', f'rodilla_{l}', f'tobillo_{l}', f'muslo_{l}'))
+        for l in ('i', 'd'):
+            if f'codo_{l}' in P:
+                huesos.append((f'brazo_{l}', f'hombro_{l}', f'codo_{l}', 'torso'))
+                if f'mano_{l}' in P:
+                    huesos.append((f'antebrazo_{l}', f'codo_{l}', f'mano_{l}', f'brazo_{l}'))
+        self.huesos = huesos
+        # Por dónde pasa cada hueso para repartir los pesos: el tronco también por sus costados (hombro → cadera)
+        # y la cintura; así el costado del saco no se va con el brazo.
+        self.segmentos = {n: [(P[a], P[b])] for n, a, b, _ in huesos}
+        for l in ('i', 'd'):
+            if f'cadera_{l}' in P:
+                self.segmentos['torso'].append((P[f'hombro_{l}'] + 0.15 * (P['cuello'] - P[f'hombro_{l}']), P[f'cadera_{l}']))
+        if 'cadera_i' in P and 'cadera_d' in P:
+            self.segmentos['torso'].append((P['cadera_i'], P['cadera_d']))
+        # Un brazo está libre si el codo y la muñeca quedan fuera del tronco (si no, va cruzado delante del cuerpo
+        # y moverlo dejaría un hueco): los gestos con brazo solo usan los libres.
+        tronco = [P[n] for n in ('hombro_i', 'hombro_d', 'cadera_d', 'cadera_i') if n in P]
+        self.libres = []
+        for l in ('i', 'd'):
+            if f'antebrazo_{l}' in [b[0] for b in huesos]:
+                pts = [P[f'codo_{l}'], P.get(f'muneca_{l}', P[f'mano_{l}'])]
+                if len(tronco) < 4 or not any(_dentro(p, tronco) for p in pts):
+                    self.libres.append(l)
+        # El lado que hace el gesto: el que se pida, si no el de la derecha de la pantalla (si está libre).
+        derecha_pantalla = 'i' if P['hombro_i'][0] > P['hombro_d'][0] else 'd'
+        quiero = {'izquierda': 'd' if derecha_pantalla == 'i' else 'i', 'derecha': derecha_pantalla}.get(lado or '', derecha_pantalla)
+        self.lado = quiero if quiero in self.libres else (self.libres[0] if self.libres else None)
+        self.avisos = []
+        if self.gesto in ('saludar', 'senalar', 'explicar') and not self.lado:
+            self.avisos.append(f'Con los brazos pegados o cruzados delante del cuerpo no puede «{self.gesto}»: hace «hablar».')
+            self.gesto = 'hablar'
+        self._pesos()
+
+    def _pesos(self):
+        """El peso de cada hueso en cada píxel, por la distancia por DENTRO de la silueta a cada hueso."""
+        cv2 = self.cv2
+        k = 220 / max(self.W, self.H)
+        cw, ch = max(8, round(self.W * k)), max(8, round(self.H * k))
+        masc = (cv2.resize(self.alfa, (cw, ch), interpolation=cv2.INTER_AREA) > 0.2).astype(np.uint8)
+        masc = cv2.dilate(masc, np.ones((3, 3), np.uint8))
+        crucero = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], np.uint8)
+        dists = []
+        yy, xx = np.mgrid[0:ch, 0:cw].astype(np.float32)
+        for nombre, a, b, _ in self.huesos:
+            sem = np.zeros((ch, cw), np.uint8)
+            for pa, pb in self.segmentos[nombre]:
+                cv2.line(sem, tuple(int(round(v)) for v in pa * k), tuple(int(round(v)) for v in pb * k), 1, 1)
+            d = np.full((ch, cw), np.inf, np.float32)
+            frente = sem.copy()
+            d[frente > 0] = 0
+            # Distancia geodésica aproximada: crece paso a paso, solo por dentro de la silueta.
+            paso = 0
+            while frente.any() and paso < 400:
+                paso += 1
+                nuevo = cv2.dilate(frente, crucero) & masc
+                nuevo[np.isfinite(d)] = 0
+                if not nuevo.any():
+                    break
+                d[nuevo > 0] = paso
+                frente = nuevo
+            # Fuera de la silueta (o donde no llegó): la distancia en línea recta, más lejos.
+            recta = np.full((ch, cw), np.inf, np.float32)
+            for pa, pb in self.segmentos[nombre]:
+                pa, pb = pa * k, pb * k
+                v = pb - pa
+                t = np.clip(((xx - pa[0]) * v[0] + (yy - pa[1]) * v[1]) / max(1e-6, float(v @ v)), 0, 1)
+                recta = np.minimum(recta, np.hypot(xx - (pa[0] + t * v[0]), yy - (pa[1] + t * v[1])))
+            d = np.where(np.isfinite(d), d, recta * 1.5 + 4)
+            dists.append(d)
+        s = self.ancho_hombros * k
+        w = np.stack([(d / max(1.0, s) + 0.05) ** -7 for d in dists])
+        # Dentro del tronco (entre hombros y caderas) los brazos no se llevan nada: si un brazo se roza con el
+        # costado, al levantarlo deja el saco entero en vez de un hueco.
+        # El tronco: de hombro a hombro y hacia abajo, recto, hasta un poco más allá de las caderas (el saco cuelga
+        # de los hombros, más ancho que la cadera).
+        tronco = []
+        if all(n in self.P for n in ('hombro_i', 'hombro_d', 'cadera_i', 'cadera_d')):
+            hi, hd = self.P['hombro_i'], self.P['hombro_d']
+            baja = (self.P['cadera_i'][1] + self.P['cadera_d'][1]) / 2 + 0.25 * ((self.P['cadera_i'][1] + self.P['cadera_d'][1]) / 2 - (hi[1] + hd[1]) / 2)
+            hacia = lambda p: p + 0.06 * (self.P['cuello'] - p)
+            tronco = [hacia(hi) * k, hacia(hd) * k, np.array([hacia(hd)[0], baja]) * k, np.array([hacia(hi)[0], baja]) * k]
+        if len(tronco) == 4:
+            dentro = np.zeros((ch, cw), np.uint8)
+            cv2.fillPoly(dentro, [np.round(np.array(tronco)).astype(np.int32)], 1)
+            dentro = cv2.GaussianBlur(dentro.astype(np.float32), (5, 5), 0)
+            for i, (n, *_r) in enumerate(self.huesos):
+                if n.startswith(('brazo', 'antebrazo')):
+                    w[i] *= 1 - dentro
+        w /= w.sum(0, keepdims=True)
+        # A tamaño completo, y por la transparencia: lo que cada hueso «lleva» de la imagen.
+        self.peso = [cv2.resize(x.astype(np.float32), (self.W, self.H), interpolation=cv2.INTER_LINEAR) * self.alfa for x in w]
+        self.yy, self.xx = np.mgrid[0:self.H, 0:self.W].astype(np.float32)
+
+    def _angulo_reposo(self, a, b):
+        """Hacia dónde apunta un hueso en reposo: grados, 0 = hacia abajo, a favor del reloj en pantalla."""
+        v = self.P[b] - self.P[a]
+        return math.degrees(math.atan2(-v[0], v[1]))
+
+    def _hacia(self, hueso, abs_deg, padre_deg=0.0):
+        """El giro que lleva un hueso a apuntar a `abs_deg` (0 abajo, a favor del reloj), sabiendo cuánto giró su padre."""
+        a, b = {h[0]: (h[1], h[2]) for h in self.huesos}[hueso]
+        g = abs_deg - self._angulo_reposo(a, b) - padre_deg
+        return (g + 180) % 360 - 180
+
+    def poses(self, t):
+        """Los giros (grados) y ajustes de cada hueso en el segundo t del ciclo."""
+        f = self.f
+        fase = 2 * math.pi * (t % CICLO_S) / CICLO_S
+        g = {}
+        extra = {}
+        # Siempre: respira (el pecho sube y los hombros con él) y la cabeza no está nunca del todo quieta.
+        resp = math.sin(fase * 2)
+        extra['torso'] = {'sy': 1 + 0.008 * f * resp}
+        g['cabeza'] = 1.2 * f * math.sin(fase + 0.7)
+        for l in ('i', 'd'):
+            g[f'brazo_{l}'] = 0.8 * f * resp * (1 if l == 'i' else -1)
+        gesto = self.gesto
+        # Hacia fuera para cada brazo (en pantalla): el de la izquierda gira a favor del reloj.
+        fuera = {l: (1 if self.P[f'hombro_{l}'][0] < self.P['cuello'][0] else -1) for l in ('i', 'd')}
+        if gesto == 'hablar':
+            g['cabeza'] += 3.5 * f * (math.sin(fase * 2 + 0.3) + 0.5 * math.sin(fase * 5 + 1.1))
+            extra['cabeza'] = {'dy': 0.012 * f * self.ancho_hombros * math.sin(fase * 4)}
+            g['torso'] = 1.2 * f * math.sin(fase)
+            for l in self.libres:
+                g[f'antebrazo_{l}'] = 7 * f * fuera[l] * (0.5 + 0.5 * math.sin(fase * 3 + (0 if l == 'i' else 2)))
+        elif gesto == 'asentir':
+            # De perfil no se puede: en 2D, asentir es bajar la cabeza y acortarla un poco, dos veces por ciclo.
+            k = max(0.0, math.sin(fase * 2)) ** 2
+            extra['cabeza'] = {'dy': 0.06 * f * self.ancho_hombros * k, 'sy': 1 - 0.05 * f * k}
+        elif gesto == 'ladear':
+            g['cabeza'] += 9 * f * ease_in_out(min(1, 0.5 + 0.5 * math.sin(fase))) - 4 * f
+            g['torso'] = -1.5 * f * math.sin(fase)
+        elif gesto == 'peso':
+            # El peso de un pie al otro: el tronco se mece desde la cadera y la cabeza compensa.
+            g['torso'] = 3 * f * math.sin(fase)
+            g['cabeza'] -= 2.2 * f * math.sin(fase)
+            extra['torso']['dx'] = 0.03 * f * self.ancho_hombros * math.sin(fase)
+        elif gesto in ('saludar', 'senalar', 'explicar'):
+            l = self.lado
+            fu = fuera[l]
+            # Sube en 0,7 s, aguanta y baja al final del ciclo (el bucle vuelve a empezar quieto).
+            ct = t % CICLO_S
+            sube = ease_in_out(tramo(ct, 0.15, 0.85)) * (1 - ease_in_out(tramo(ct, CICLO_S - 0.9, CICLO_S - 0.15)))
+            if gesto == 'saludar':
+                brazo = self._hacia(f'brazo_{l}', fu * (40 + 25 * f))
+                g[f'brazo_{l}'] = g.get(f'brazo_{l}', 0) + brazo * sube
+                ante = self._hacia(f'antebrazo_{l}', fu * (150 + 15 * math.sin(fase * 6)), brazo) * sube
+                g[f'antebrazo_{l}'] = ante
+                g['cabeza'] += 3 * f * sube * fu
+            elif gesto == 'senalar':
+                brazo = self._hacia(f'brazo_{l}', fu * (50 + 12 * f))
+                g[f'brazo_{l}'] = g.get(f'brazo_{l}', 0) + brazo * sube
+                g[f'antebrazo_{l}'] = self._hacia(f'antebrazo_{l}', fu * (68 + 12 * f), brazo) * sube
+                g['cabeza'] += 4 * f * sube * fu
+            else:
+                # Explicar: los antebrazos libres suben al frente y se mueven como al hablar con las manos.
+                for m in self.libres:
+                    fm = fuera[m]
+                    ante = fm * (35 + 20 * f + 12 * math.sin(fase * 3 + (0 if m == l else 1.6)))
+                    g[f'brazo_{m}'] = g.get(f'brazo_{m}', 0) + self._hacia(f'brazo_{m}', fm * 12) * sube
+                    g[f'antebrazo_{m}'] = self._hacia(f'antebrazo_{m}', ante, self._hacia(f'brazo_{m}', fm * 12) * sube) * sube
+                g['cabeza'] += 2.5 * f * math.sin(fase * 2)
+        return g, extra
+
+    def transformaciones(self, t):
+        """La matriz de cada hueso (de la imagen en reposo a la pose del momento t), padres primero."""
+        giros, extra = self.poses(t)
+        T = {}
+        for nombre, a, b, padre in self.huesos:
+            e = extra.get(nombre, {})
+            local = _rot(giros.get(nombre, 0.0), *self.P[a], e.get('sx', 1.0), e.get('sy', 1.0), e.get('dx', 0.0), e.get('dy', 0.0))
+            T[nombre] = (T[padre] @ local) if padre in T else local
+        return T
+
+    def cuadro(self, t):
+        cv2 = self.cv2
+        T = self.transformaciones(t)
+        quietos, moviles = [], []
+        for i, (nombre, *_r) in enumerate(self.huesos):
+            (quietos if np.allclose(T[nombre], np.eye(3), atol=1e-4) else moviles).append((i, nombre))
+        rgb_acc = np.zeros((self.H, self.W, 3), np.float32)
+        a_acc = np.zeros((self.H, self.W), np.float32)
+        total = np.zeros((self.H, self.W), np.float32)
+        capas = []
+        if quietos:
+            p = sum(self.peso[i] for i, _ in quietos)
+            capas.append((min(i for i, _ in quietos), self.rgb, p))
+        for i, nombre in moviles:
+            inv = np.linalg.inv(T[nombre])
+            mx = (inv[0, 0] * self.xx + inv[0, 1] * self.yy + inv[0, 2]).astype(np.float32)
+            my = (inv[1, 0] * self.xx + inv[1, 1] * self.yy + inv[1, 2]).astype(np.float32)
+            col = cv2.remap(self.rgb, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+            p = cv2.remap(self.peso[i], mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+            capas.append((i, col, p))
+        # Cada hueso es una capa: lo de delante (los brazos, al final) tapa lo de atrás; la opacidad es la suma.
+        for _, col, p in sorted(capas, key=lambda x: x[0]):
+            rgb_acc = col * p[..., None] + rgb_acc * (1 - p[..., None])
+            a_acc = p + a_acc * (1 - p)
+            total += p
+        rgb = rgb_acc / np.maximum(a_acc, 1e-4)[..., None]
+        alfa = np.clip(total, 0, 1)
+        return Image.fromarray(np.dstack([np.clip(rgb, 0, 255), alfa * 255]).astype(np.uint8), 'RGBA')
+
+    def dibujo(self):
+        """La imagen con el esqueleto encima, para revisar que los huesos están bien puestos."""
+        d = Image.new('RGBA', (self.W, self.H), (70, 70, 70, 255))
+        d.alpha_composite(Image.fromarray(np.dstack([self.rgb, self.alfa * 255]).astype(np.uint8), 'RGBA'))
+        g = ImageDraw.Draw(d)
+        r = max(3, round(self.ancho_hombros / 30))
+        for nombre, a, b, _ in self.huesos:
+            col = (255, 80, 60) if nombre.startswith(('brazo', 'antebrazo')) else (60, 200, 255)
+            g.line([tuple(self.P[a]), tuple(self.P[b])], fill=col, width=r)
+            for p in (self.P[a], self.P[b]):
+                g.ellipse((p[0] - r * 1.4, p[1] - r * 1.4, p[0] + r * 1.4, p[1] + r * 1.4), fill=(255, 255, 255))
+        return d.crop((self.mx, self.my, self.mx + self.w, self.my + self.h))
+
+
+def info_esqueleto(ruta, salida=None):
+    """Para revisar una marioneta antes de usarla: el esqueleto dibujado, los puntos y qué gestos puede hacer."""
+    im = Image.open(ruta).convert('RGBA')
+    if max(im.size) > 1080:
+        im.thumbnail((1080, 1080), Image.LANCZOS)
+    m = Marioneta(im, 'hablar')
+    salida = salida or os.path.splitext(ruta)[0] + '-esqueleto.png'
+    m.dibujo().convert('RGB').save(salida)
+    puntos = {n: [round((p[0] - m.mx) / m.w, 3), round((p[1] - m.my) / m.h, 3)] for n, p in m.P.items()}
+    con_brazo = ['saludar', 'senalar', 'explicar'] if m.libres else []
+    return {'dibujo': salida, 'puntos': puntos, 'brazos_libres': len(m.libres),
+            'gestos': ['hablar', 'asentir', 'ladear', 'peso'] + con_brazo,
+            **({'aviso': 'Los brazos van pegados o cruzados delante del cuerpo: solo cabeza, respiración y peso. Para '
+                         'saludar o señalar, genera al personaje con los brazos separados del cuerpo.'} if not m.libres else {})}
+# <<< marioneta
 
 
 class VideoCapa:
@@ -496,6 +871,22 @@ def pegar_suave(lienzo, im, cx, cy, ancho, giro=0.0, alfa=1.0):
 # lo que el fondo; el desenfoque más fuerte es esta fracción del ancho del cuadro.
 PARALAJE = 1.5
 DESENFOQUE_MAX = 0.012
+# Cámara en mano: cuánto se mueve el encuadre (fracción del cuadro con temblor 1) y el zoom de más que le deja sitio.
+TEMBLOR_AMPLITUD = 0.007
+TEMBLOR_ZOOM = 0.04
+
+
+def vaiven(s):
+    """El vaivén de la cámara en mano en el segundo `s`, de -1 a 1 en cada eje (igual que en el editor)."""
+    P = 2 * math.pi
+    return (0.6 * math.sin(P * 0.53 * s) + 0.3 * math.sin(P * 1.37 * s + 1.3) + 0.1 * math.sin(P * 3.1 * s + 2.1),
+            0.6 * math.sin(P * 0.41 * s + 0.7) + 0.3 * math.sin(P * 1.13 * s + 2.4) + 0.1 * math.sin(P * 2.7 * s + 0.4))
+
+
+def desenfoque_de_campo(m, p):
+    """Con profundidad de campo en una foto («campo» y «foco»), cuánto se desenfoca lo que está a la profundidad p."""
+    campo = float(m.get('campo') or 0)
+    return min(1.0, campo * abs(p - float(m.get('foco', 0.5))) * 1.5) if campo > 0 else 0.0
 
 
 def paralaje(c, t, x, y, ancho):
@@ -704,8 +1095,11 @@ class Foto(Momento):
         self.ini = (float(e.get('zoom', 1)), float(e.get('cx', 0.5)), float(e.get('cy', 0.5)))
         self.fin = (float(cam.get('zoom', self.ini[0])), float(cam.get('cx', self.ini[1])), float(cam.get('cy', self.ini[2]))) if cam else None
         self.margen = 1.06 if m.get('acercar', True) and not cam else 1.0
+        # Cámara en mano (0 a 1) y profundidad de campo (el fondo está a profundidad 0).
+        self.temblor = min(1.0, max(0.0, float(m.get('temblor') or 0)))
+        self.borroso = desenfoque_de_campo(m, 0)
         # La foto, al tamaño justo para el zoom más grande (más grande no gana nitidez y es más lenta).
-        zmax = max(self.ini[0], self.fin[0] if self.fin else 0) * self.margen
+        zmax = max(self.ini[0], self.fin[0] if self.fin else 0) * self.margen * (1 + TEMBLOR_ZOOM * self.temblor)
         esc = max(L.W / im.width, L.H / im.height) * zmax
         if esc < 1:
             im = im.resize((max(1, round(im.width * esc)), max(1, round(im.height * esc))), Image.LANCZOS)
@@ -721,11 +1115,20 @@ class Foto(Momento):
         else:
             zoom, cx, cy = self.ini
             zoom *= 1 + (self.margen - 1) * ease_out(p)
-        return ventana(self.img.width, self.img.height, L.W, L.H, zoom, cx, cy)
+        if not self.temblor:
+            return ventana(self.img.width, self.img.height, L.W, L.H, zoom, cx, cy)
+        # La cámara en mano: un poco de zoom de más para tener sitio y el encuadre que va y viene.
+        x0, y0, cw, ch = ventana(self.img.width, self.img.height, L.W, L.H, zoom * (1 + TEMBLOR_ZOOM * self.temblor), cx, cy)
+        vx, vy = vaiven(min(max(0.0, t - self.desde), self.hasta - self.desde))
+        x0 = min(max(0.0, x0 + TEMBLOR_AMPLITUD * self.temblor * vx * cw), self.img.width - cw)
+        y0 = min(max(0.0, y0 + TEMBLOR_AMPLITUD * self.temblor * vy * ch), self.img.height - ch)
+        return x0, y0, cw, ch
 
     def cuadro(self, t):
         L = self.L
         im = recorte_suave(self.img, L.W, L.H, *self.ventana_en(t))
+        if self.borroso > 0.005:
+            im = im.filter(ImageFilter.GaussianBlur(self.borroso * DESENFOQUE_MAX * L.W))
         a = np.asarray(im, dtype=np.float32)
         if self.m.get('brillo'):
             a = barrido(a, (t - self.desde - 0.15) / 0.8 * 1.4 - 0.2)
@@ -1318,6 +1721,9 @@ def cargar(ruta):
     for c in L.capas:
         if c['profundidad'] is not None:
             c['base'] = foto_de_fondo(momentos, c['desde'])
+            # Con profundidad de campo en esa foto, lo que está lejos del foco se desenfoca.
+            if c['base'] is not None:
+                c['desenfoque'] = min(1.0, c['desenfoque'] + desenfoque_de_campo(c['base'].m, c['profundidad']))
     fin = max([m.hasta for m in momentos] or [1.0])
     dur = float(r.get('duracion', fin))
     return r, L, momentos, dur
@@ -2017,7 +2423,12 @@ def main():
                        help='sobre verde croma y sin fondo: un PNG (imagen) o un WebM con transparencia (clip) para usar como capa')
     an = sub.add_parser('animar')
     an.add_argument('imagen')
-    an.add_argument('--tipo', choices=TIPOS_ANIMAR, default='respirar')
+    an.add_argument('--tipo', choices=TIPOS_ANIMAR + GESTOS, default='respirar')
+    an.add_argument('--puntos', help='JSON con el esqueleto corregido: {"hombro_d": [x, y], …} en fracción de la imagen')
+    an.add_argument('--lado', choices=['izquierda', 'derecha'], help='qué brazo hace el gesto (en pantalla)')
+    es = sub.add_parser('esqueleto')
+    es.add_argument('imagen')
+    es.add_argument('--salida')
     an.add_argument('--fuerza', type=float, default=0.5)
     an.add_argument('--duracion', type=float, default=CICLO_S)
     an.add_argument('--salida')
@@ -2041,7 +2452,10 @@ def main():
         # Un clip puede tardar varios minutos en Flow.
         medio(x.orden, x.prompt, x.ref, 900 if x.orden == 'imagen' else 1500, para_recortar=getattr(x, 'recorte', False))
     elif x.orden == 'animar':
-        print(json.dumps(animar_imagen(x.imagen, x.tipo, x.fuerza, x.salida, x.duracion), ensure_ascii=False))
+        puntos = json.loads(open(x.puntos, encoding='utf-8').read() if os.path.isfile(x.puntos) else x.puntos) if x.puntos else None
+        print(json.dumps(animar_imagen(x.imagen, x.tipo, x.fuerza, x.salida, x.duracion, puntos=puntos, lado=x.lado), ensure_ascii=False))
+    elif x.orden == 'esqueleto':
+        print(json.dumps(info_esqueleto(x.imagen, x.salida), ensure_ascii=False))
     elif x.orden == 'recortar-video':
         print(json.dumps(recortar_video(x.clip, x.salida), ensure_ascii=False))
     elif x.orden == 'separar':

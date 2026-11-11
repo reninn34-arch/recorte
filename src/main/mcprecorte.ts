@@ -7,7 +7,7 @@ import { aplicarOperaciones, describirTimelineParaAgente, OPERACIONES_DOC, valid
 import type { RenderResultado, TranscripcionResultado } from '../shared/api'
 import { COSTO_CLIP, MAX_CLIPS_VEO, textoMuestra, VOCES_GEMINI, type Creacion, type PeticionCreacion } from '../shared/creacion'
 import { MODELOS_IMAGEN, modelosVideoVigentes, type PedidoFlow, type ResultadoFlow } from '../shared/flow'
-import { cambiarCapa, duracionesDeMedios, duracionTimeline, MARGEN_ANIMAR, normalizarTimeline, timelineInicial, ventanaTimeline, type Timeline, type TipoAnimar } from '../shared/timeline'
+import { ANIMAR_CAPA, cambiarCapa, duracionesDeMedios, duracionTimeline, escalaAnimada, normalizarTimeline, timelineInicial, ventanaTimeline, type Timeline, type TipoAnimar } from '../shared/timeline'
 import type { Project } from '../shared/types'
 
 /** Lo que se añade a un pedido de imagen «para recortar» (lo mismo que PARA_RECORTAR del kit). */
@@ -40,7 +40,7 @@ export interface ContextoMcp {
   /** Quita el fondo liso de una imagen de la biblioteca y la agrega como medio nuevo. */
   quitarFondo: (id: string, medio: string) => Promise<{ project: Project; medio: string }>
   /** Anima una imagen de la biblioteca (respirar, balanceo, ondear, flotar, humo): la animación como medio nuevo. */
-  animarImagen: (id: string, medio: string, tipo: string) => Promise<{ project: Project; medio: string }>
+  animarImagen: (id: string, medio: string, tipo: string) => Promise<{ project: Project; medio: string; escala: number; avisos?: string[] }>
   // ===== Crear por MCP (6.3) =====
   creaciones: {
     nueva: (p: PeticionCreacion) => Promise<Creacion>
@@ -381,13 +381,15 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
       descripcion:
         'Anima la imagen de una capa como en After Effects, SIN gastar créditos: «respirar» (una persona quieta), «balanceo» (de pie, ' +
         'se mece desde los pies), «ondear» (una bandera o tela), «flotar» (sube y baja) o «humo» (humo, nubes, fuego). Mejor con la ' +
-        'imagen ya sin fondo (quitar_fondo). La capa pasa a usar la animación en bucle; «quieta» la devuelve a la imagen.',
+        'imagen ya sin fondo (quitar_fondo). Una PERSONA se mueve además como marioneta por huesos (detecta su esqueleto): ' +
+        '«hablar» (cabeza y manos al contar algo), «asentir», «ladear» (la cabeza), «peso» (de un pie al otro) y, con los brazos ' +
+        'separados del cuerpo, «saludar», «senalar» y «explicar». La capa pasa a usar la animación en bucle; «quieta» la devuelve a la imagen.',
       esquema: {
         type: 'object',
         properties: {
           proyecto: proyectoArg,
           capa: { type: 'number', description: 'El número de la capa (ver_proyecto).' },
-          tipo: { type: 'string', enum: ['respirar', 'balanceo', 'ondear', 'flotar', 'humo', 'quieta'] }
+          tipo: { type: 'string', enum: [...ANIMAR_CAPA.map((a) => a.id), 'quieta'] }
         },
         required: ['proyecto', 'capa', 'tipo']
       },
@@ -397,7 +399,8 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
         const capa = tl.capas?.[Math.round(Number(args.capa)) - 1]
         if (!capa) return fallo(`No existe la capa ${String(args.capa)}.`)
         const base = capa.animada?.base ?? capa.fuente
-        const anchoBase = capa.animada ? capa.ancho / MARGEN_ANIMAR : capa.ancho
+        const anchoBase = capa.animada ? capa.ancho / escalaAnimada(capa) : capa.ancho
+        let avisos: string[] = []
         let nueva: Timeline
         let proyecto = p
         if (args.tipo === 'quieta') {
@@ -405,7 +408,13 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
         } else {
           const r = await ctx.animarImagen(p.id, base, texto(args.tipo))
           proyecto = r.project
-          nueva = cambiarCapa(tl, capa.id, { fuente: r.medio, animada: { tipo: texto(args.tipo) as TipoAnimar, base }, ancho: Math.min(1.5, anchoBase * MARGEN_ANIMAR) }, duracionesDeMedios(r.project.medios))
+          avisos = r.avisos ?? []
+          nueva = cambiarCapa(
+            tl,
+            capa.id,
+            { fuente: r.medio, animada: { tipo: texto(args.tipo) as TipoAnimar, base, escala: r.escala || escalaAnimada({}) }, ancho: Math.min(2, anchoBase * (r.escala || escalaAnimada({}))) },
+            duracionesDeMedios(r.project.medios)
+          )
         }
         const actual = ctx.proyectos.get(p.id)!
         actual.medios = proyecto.medios
@@ -413,7 +422,11 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
         delete actual.timelinePendiente
         ctx.proyectos.save(actual)
         ctx.avisarCambio(actual, sesion.cliente, true)
-        return ok(args.tipo === 'quieta' ? `La capa ${String(args.capa)} vuelve a ser la imagen quieta.` : `La capa ${String(args.capa)} ya se mueve («${texto(args.tipo)}», en bucle).`)
+        return ok(
+          args.tipo === 'quieta'
+            ? `La capa ${String(args.capa)} vuelve a ser la imagen quieta.`
+            : `La capa ${String(args.capa)} ya se mueve («${texto(args.tipo)}», en bucle).${avisos.length ? ` ${avisos.join(' ')}` : ''}`
+        )
       }
     },
     {

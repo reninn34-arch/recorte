@@ -6,7 +6,11 @@ import {
   ajustesDe,
   camaraEn,
   DESENFOQUE_MAX,
+  desenfoqueCapa,
+  desenfoqueDeCampo,
   PARALAJE,
+  TEMBLOR_AMPLITUD,
+  TEMBLOR_ZOOM,
   referenciaParalaje,
   type AjustesClip,
   duracionTimeline,
@@ -264,7 +268,8 @@ export async function exportarTimeline(
     // Zoom: recorte hacia el punto (cx, cy) antes de encuadrar. Color: eq. Lo mismo que el monitor.
     const a = ajustesDe(t.clip)
     // Con paneo, todo (zoom, acercamiento y desplazamiento) va en el zoompan: el centro se mueve en cada cuadro.
-    const paneo = Math.abs(a.panx) > 0.001 || Math.abs(a.pany) > 0.001
+    // También al alejarse y con la cámara en mano (el encuadre se mueve en cada cuadro).
+    const paneo = Math.abs(a.panx) > 0.001 || Math.abs(a.pany) > 0.001 || a.acercar < -0.001 || a.temblor > 0.001
     const zoom =
       a.zoom > 1.001 && !paneo
         ? `crop=trunc(iw/${a.zoom}/2)*2:trunc(ih/${a.zoom}/2)*2:(iw-ow)*${a.cx.toFixed(3)}:(ih-oh)*${a.cy.toFixed(3)},`
@@ -272,8 +277,15 @@ export async function exportarTimeline(
     // Acercamiento lento: zoompan cuadro a cuadro, al doble de tamaño para que no tiemble.
     const cuadros = Math.max(1, Math.round(largo * fps))
     const E = `(3*pow(on/${cuadros},2)-2*pow(on/${cuadros},3))`
+    // La cámara en mano (vaiven): las mismas ondas que el monitor, en el segundo del clip.
+    const S = `(on/${fps})`
+    const k = a.temblor > 0.001 ? `${(TEMBLOR_AMPLITUD * a.temblor).toFixed(5)}/max(0.001,zoom-1)` : '0'
+    const vx = `(0.6*sin(2*PI*0.53*${S})+0.3*sin(2*PI*1.37*${S}+1.3)+0.1*sin(2*PI*3.1*${S}+2.1))`
+    const vy = `(0.6*sin(2*PI*0.41*${S}+0.7)+0.3*sin(2*PI*1.13*${S}+2.4)+0.1*sin(2*PI*2.7*${S}+0.4))`
     const lento = paneo
-      ? `,scale=${ancho * 2}:${alto * 2},zoompan=z='${a.zoom.toFixed(4)}*(1+${a.acercar.toFixed(4)}*on/${cuadros})':x='(iw-iw/zoom)*clip(${a.cx.toFixed(4)}+(${a.panx.toFixed(4)})*${E},0,1)':y='(ih-ih/zoom)*clip(${a.cy.toFixed(4)}+(${a.pany.toFixed(4)})*${E},0,1)':d=1:s=${ancho}x${alto}:fps=${fps}`
+      ? `,scale=${ancho * 2}:${alto * 2},zoompan=z='max(1,${a.zoom.toFixed(4)}*(1+(${a.acercar.toFixed(4)})*on/${cuadros}))*${(1 + TEMBLOR_ZOOM * a.temblor).toFixed(4)}'` +
+        `:x='(iw-iw/zoom)*clip(${a.cx.toFixed(4)}+(${a.panx.toFixed(4)})*${E}+${k}*${vx},0,1)'` +
+        `:y='(ih-ih/zoom)*clip(${a.cy.toFixed(4)}+(${a.pany.toFixed(4)})*${E}+${k}*${vy},0,1)':d=1:s=${ancho}x${alto}:fps=${fps}`
       : a.acercar > 0.001
         ? `,scale=${ancho * 2}:${alto * 2},zoompan=z='1+${a.acercar.toFixed(4)}*on/${cuadros}':x='(iw-iw/zoom)*${a.cx.toFixed(3)}':y='(ih-ih/zoom)*${a.cy.toFixed(3)}':d=1:s=${ancho}x${alto}:fps=${fps}`
         : ''
@@ -281,7 +293,10 @@ export async function exportarTimeline(
       a.brillo !== 0 || a.contraste !== 1 || a.saturacion !== 1
         ? `,eq=brightness=${a.brillo.toFixed(3)}:contrast=${a.contraste.toFixed(3)}:saturation=${a.saturacion.toFixed(3)}`
         : ''
-    partes.push(`[${iv}:v]setpts=PTS-STARTPTS,fps=${fps},${zoom}${encuadre}${lento},setsar=1${color},format=yuv420p,settb=AVTB[v${i}]`)
+    // Profundidad de campo: el fondo (profundidad 0) desenfocado si el foco está más cerca.
+    const borroso = desenfoqueDeCampo(a, 0)
+    const fondoBorroso = borroso > 0.005 ? `,gblur=sigma=${(borroso * DESENFOQUE_MAX * ancho).toFixed(2)}` : ''
+    partes.push(`[${iv}:v]setpts=PTS-STARTPTS,fps=${fps},${zoom}${encuadre}${lento}${fondoBorroso},setsar=1${color},format=yuv420p,settb=AVTB[v${i}]`)
     if (conAudio) {
       if (f.conAudio && !t.clip.mudo) {
         // apad + atrim: cada tramo de audio dura exactamente lo que su video, o concat se desfasa.
@@ -368,7 +383,7 @@ export async function exportarTimeline(
       ? `,pad=w=${lado}:h=${lado}:x='(ow-iw)/2':y='(oh-ih)/2':color=black@0:eval=frame,rotate=a='(${en(ex.giro, 't')})*PI/180':c=none:ow=${lado}:oh=${lado}`
       : ''
     partes.push(
-      `[${k}:v]setpts=PTS-STARTPTS,fps=${fps},format=rgba,scale=w='max(2,trunc(${anchoC}*${en(ex.ancho, 't')}*${en(ex.escala, 't')}/2)*2)':h=-2:eval=frame:flags=bicubic${giro}${desenfoque(c, anchoC)}${fundido},setpts=PTS+${c.inicio.toFixed(3)}/TB[capa${i}]`
+      `[${k}:v]setpts=PTS-STARTPTS,fps=${fps},format=rgba,scale=w='max(2,trunc(${anchoC}*${en(ex.ancho, 't')}*${en(ex.escala, 't')}/2)*2)':h=-2:eval=frame:flags=bicubic${giro}${desenfoque(desenfoqueCapa(timeline, c), anchoC)}${fundido},setpts=PTS+${c.inicio.toFixed(3)}/TB[capa${i}]`
     )
     const salida = `[conCapa${i}]`
     const T = `(t-${c.inicio.toFixed(3)})`
@@ -489,9 +504,9 @@ export async function exportarTimeline(
 const n3 = (v: number) => (Math.round(v * 1000) / 1000).toString()
 
 /** El desenfoque de una capa: con margen transparente alrededor, para que el borde se difumine sin cortarse. */
-function desenfoque(c: CapaTL, anchoC: number): string {
-  if (!c.desenfoque) return ''
-  const sigma = c.desenfoque * DESENFOQUE_MAX * anchoC
+function desenfoque(valor: number, anchoC: number): string {
+  if (valor < 0.005) return ''
+  const sigma = valor * DESENFOQUE_MAX * anchoC
   const m = Math.ceil(sigma * 3 / 2) * 2
   return `,pad=w=iw+${2 * m}:h=ih+${2 * m}:x=${m}:y=${m}:color=black@0:eval=frame,gblur=sigma=${sigma.toFixed(2)}`
 }
@@ -518,12 +533,21 @@ export function expresionesCapa(
     // Escena 2.5D (aplicarParalaje): la cámara del clip de debajo, de cuando aparece la capa a ahora.
     const a = ref.ajustes
     const n6 = (v: number) => (Math.round(v * 1e6) / 1e6).toString()
-    const r = camaraEn(a, (c.inicio - ref.inicio) / ref.largo)
+    const r = camaraEn(a, (c.inicio - ref.inicio) / ref.largo, c.inicio - ref.inicio)
     const q = `clip((${n6(c.inicio - ref.inicio)}+T)/${n6(ref.largo)},0,1)`
     const e = `(3*pow(${q},2)-2*pow(${q},3))`
-    const z = `(${n6(a.zoom)}*(1+${n6(a.acercar)}*${q}))`
-    const cx = `clip(${n6(a.cx)}+(${n6(a.panx)})*${e},0,1)`
-    const cy = `clip(${n6(a.cy)}+(${n6(a.pany)})*${e},0,1)`
+    const z = `(max(1,${n6(a.zoom)}*(1+(${n6(a.acercar)})*${q}))*${n6(1 + TEMBLOR_ZOOM * a.temblor)})`
+    // La cámara en mano (vaiven), en el segundo del clip: igual que camaraEn.
+    let cx = `clip(${n6(a.cx)}+(${n6(a.panx)})*${e},0,1)`
+    let cy = `clip(${n6(a.cy)}+(${n6(a.pany)})*${e},0,1)`
+    if (a.temblor > 0.001) {
+      const S = `clip(${n6(c.inicio - ref.inicio)}+T,0,${n6(ref.largo)})`
+      const k = `(${n6(TEMBLOR_AMPLITUD * a.temblor)}/max(0.001,${z}-1))`
+      const vx = `(0.6*sin(2*PI*0.53*${S})+0.3*sin(2*PI*1.37*${S}+1.3)+0.1*sin(2*PI*3.1*${S}+2.1))`
+      const vy = `(0.6*sin(2*PI*0.41*${S}+0.7)+0.3*sin(2*PI*1.13*${S}+2.4)+0.1*sin(2*PI*2.7*${S}+0.4))`
+      cx = `clip(${n6(a.cx)}+(${n6(a.panx)})*${e}+${k}*${vx},0,1)`
+      cy = `clip(${n6(a.cy)}+(${n6(a.pany)})*${e}+${k}*${vy},0,1)`
+    }
     const A = `(${z}/${n6(r.z)})`
     const m = 1 + PARALAJE * Math.min(1, Math.max(0, c.profundidad ?? 0))
     const bx = `(${A}*${n6((r.z - 1) * r.cx)}-(${z}-1)*${cx})`

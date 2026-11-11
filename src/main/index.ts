@@ -1432,7 +1432,7 @@ app.whenReady().then(() => {
    * Anima una imagen recortada de la biblioteca (respira, se balancea, ondea, flota, humo) con el kit: un
    * WebM con transparencia en bucle que entra a la biblioteca. Como el «Puppet» de After Effects: sin créditos.
    */
-  async function animarImagen(id: string, medio: string, tipo: string): Promise<{ project: Project; medio: string }> {
+  async function animarImagen(id: string, medio: string, tipo: string): Promise<{ project: Project; medio: string; escala: number; avisos?: string[] }> {
     const p = proyectos.abrir(id)
     if (!p) throw new Error('El proyecto ya no existe.')
     const m = p.medios?.find((x) => x.id === medio)
@@ -1453,7 +1453,19 @@ app.whenReady().then(() => {
     const agregado = await agregarRutas(id, [salida])
     const nuevo = agregado.agregados[0]
     if (!nuevo) throw new Error(`No pude agregar la animación: ${agregado.fallos.join(', ')}`)
-    return { project: agregado.project, medio: nuevo }
+    // Lo que contesta el kit: cuánto más ancha es la animación que la imagen y, en la marioneta, sus avisos.
+    let info: { escala?: number; avisos?: string[] } = {}
+    try {
+      info = JSON.parse(r.salida.trim().split(/\r?\n/).filter((l) => l.startsWith('{')).pop() ?? '{}')
+    } catch {
+      info = {}
+    }
+    return {
+      project: agregado.project,
+      medio: nuevo,
+      escala: typeof info.escala === 'number' && info.escala >= 1 ? info.escala : 1.16,
+      ...(Array.isArray(info.avisos) && info.avisos.length ? { avisos: info.avisos.map(String) } : {})
+    }
   }
   ipcMain.handle('proyecto:animar-imagen', (_evento, id: unknown, medio: unknown, tipo: unknown) => {
     if (typeof id !== 'string' || typeof medio !== 'string' || typeof tipo !== 'string') throw new Error('Datos inválidos.')
