@@ -1,7 +1,9 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import React, { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ajustarClip,
+  anadirCapa,
+  cambiarTexto as cambiarTextoTL,
   ajustesDe,
   anadirTexto,
   cambiarMusica,
@@ -58,6 +60,7 @@ import type { OpcionesExport } from '../../../shared/api'
 import type { TranscriptSegment } from '../../../shared/types'
 import type { Historial } from '../hooks/timeline'
 import { Icon, type IconName } from '../Icons'
+import { Onda } from './Onda'
 import { InspectorVoz, type GenerarVoz, type GrabarVoz } from './InspectorVoz'
 
 /**
@@ -128,8 +131,14 @@ export function TimelineEditor({
   ponerSonido,
   paneles,
   panelMedios,
-  pestanasExtra
+  pestanasExtra,
+  miniaturaDe,
+  urlDe
 }: {
+  /** La miniatura de una fuente (el video principal o un medio), para verla dentro de sus clips. */
+  miniaturaDe?: (fuente: string) => string | undefined
+  /** La dirección de un archivo del proyecto (para dibujar la onda de un audio). */
+  urlDe?: (archivo: string) => string
   /** Dónde se dibuja cada parte del editor: la biblioteca (izquierda), el inspector (derecha) y el transporte (bajo el monitor). */
   paneles: { biblioteca: HTMLElement | null; inspector: HTMLElement | null; transporte: HTMLElement | null }
   /** La pestaña «Medios» de la biblioteca (los archivos del proyecto). */
@@ -539,6 +548,56 @@ export function TimelineEditor({
     if (elegido?.tipo === 'clip') historial.aplicar(duplicarClip(timeline, elegido.id))
   }
 
+  // ===== Copiar, cortar y pegar (lo elegido; se pega en el cabezal) =====
+
+  const portapapeles = useRef<
+    | { tipo: 'clip'; fuente: string; entrada: number; salida: number; ajustes?: AjustesClip }
+    | { tipo: 'texto'; dato: (typeof tl.textos)[number] }
+    | { tipo: 'capa'; dato: NonNullable<typeof tl.capas>[number] }
+    | { tipo: 'sonido'; dato: NonNullable<typeof tl.sonidos>[number] }
+    | null
+  >(null)
+
+  function accionCopiar(): boolean {
+    if (clipElegido) {
+      const c = clipElegido.clip
+      portapapeles.current = { tipo: 'clip', fuente: c.fuente, entrada: c.entrada, salida: c.salida, ...(c.ajustes ? { ajustes: c.ajustes } : {}) }
+    } else if (textoElegido) portapapeles.current = { tipo: 'texto', dato: textoElegido }
+    else if (capaElegida) portapapeles.current = { tipo: 'capa', dato: capaElegida }
+    else if (sonidoElegido) portapapeles.current = { tipo: 'sonido', dato: sonidoElegido }
+    else return false
+    return true
+  }
+
+  function accionPegar() {
+    const p = portapapeles.current
+    if (!p) return
+    if (p.tipo === 'clip') {
+      const r = insertarClip(timeline, { fuente: p.fuente, entrada: p.entrada, salida: p.salida }, tiempo)
+      if (r.timeline === timeline) return
+      historial.aplicar(p.ajustes ? ajustarClip(r.timeline, r.id, p.ajustes) : r.timeline)
+      onElegir({ tipo: 'clip', id: r.id })
+    } else if (p.tipo === 'texto') {
+      const { id: _id, inicio: _inicio, ...resto } = p.dato
+      const r = anadirTexto(timeline, tiempo, p.dato.texto)
+      if (r.timeline === timeline) return
+      historial.aplicar(cambiarTextoTL(r.timeline, r.id, resto))
+      onElegir({ tipo: 'texto', id: r.id })
+    } else if (p.tipo === 'capa') {
+      const { id: _id, ...resto } = p.dato
+      const r = anadirCapa(timeline, { ...resto, inicio: tiempo }, medidas)
+      if (r.timeline === timeline) return
+      historial.aplicar(r.timeline)
+      onElegir({ tipo: 'capa', id: r.id })
+    } else {
+      const { id: _id, ...resto } = p.dato
+      const r = anadirSonido(timeline, { ...resto, inicio: tiempo })
+      if (r.timeline === timeline) return
+      historial.aplicar(r.timeline)
+      onElegir({ tipo: 'sonido', id: r.id })
+    }
+  }
+
   // ===== Teclado =====
 
   const teclas = useRef<(e: KeyboardEvent) => void>(() => {})
@@ -549,7 +608,20 @@ export function TimelineEditor({
     if (ctrl && tecla === 'z' && !e.shiftKey) historial.deshacer()
     else if (ctrl && (tecla === 'y' || (tecla === 'z' && e.shiftKey))) historial.rehacer()
     else if (ctrl && tecla === 'd') accionDuplicar()
+    else if (ctrl && tecla === 'c') {
+      if (!accionCopiar()) return
+    } else if (ctrl && tecla === 'x') {
+      if (!accionCopiar()) return
+      accionBorrar()
+    } else if (ctrl && tecla === 'v') {
+      if (!portapapeles.current) return
+      accionPegar()
+    }
+    // Dividir, como en CapCut (Ctrl+B) y en Premiere (Ctrl+K).
+    else if (ctrl && (tecla === 'b' || tecla === 'k')) accionDividir()
     else if (ctrl) return
+    else if (e.key === '+' || e.key === '=') setZoom((z) => Math.min(zoomMax, z * 1.25))
+    else if (e.key === '-') setZoom((z) => Math.max(1, z * 0.8))
     else if (e.key === ' ') {
       // Si un botón tenía el foco, Espacio también lo pulsaría: se le quita el foco.
       if ((e.target as HTMLElement | null)?.tagName === 'BUTTON') (e.target as HTMLElement).blur()
@@ -586,6 +658,14 @@ export function TimelineEditor({
   }
 
   const valorZoom = zoomMax > 1 ? Math.round((Math.log(zoom) / Math.log(zoomMax)) * 100) : 0
+
+  /** La miniatura de una fuente como tira de fotogramas dentro de su bloque (oscurecida para leer el texto). */
+  const fondoMini = (fuente: string): React.CSSProperties => {
+    const mini = miniaturaDe?.(fuente)
+    return mini
+      ? { backgroundImage: `linear-gradient(#0b0c0a99, #0b0c0a99), url("${mini}")`, backgroundSize: 'auto 100%', backgroundRepeat: 'repeat-x' }
+      : {}
+  }
 
   // ===== Regla =====
 
@@ -797,7 +877,7 @@ export function TimelineEditor({
                   <div
                     key={c.id}
                     className={`tl-rotulo tl-capa ${elegido?.tipo === 'capa' && elegido.id === c.id ? 'is-elegido' : ''}`}
-                    style={{ left: c.inicio * pps, width: Math.max(4, anchoCapa) }}
+                    style={{ left: c.inicio * pps, width: Math.max(4, anchoCapa), ...fondoMini(c.fuente) }}
                     onPointerDown={(e) => arrastrarCapa(e, c.id, 'mover')}
                     title={`${nombre} · ${c.duracion.toFixed(1)} s`}
                   >
@@ -817,7 +897,7 @@ export function TimelineEditor({
                   <div
                     key={t.clip.id}
                     className={`tl-clip ${t.clip.fuente !== 'principal' ? 'otra-fuente' : ''} ${elegido?.id === t.clip.id ? 'is-elegido' : ''}`}
-                    style={{ left: t.inicio * pps, width: anchoClip }}
+                    style={{ left: t.inicio * pps, width: anchoClip, ...fondoMini(t.clip.fuente) }}
                     onPointerDown={(e) => arrastrarClip(e, t.clip.id)}
                     title={`Clip ${t.indice + 1} · ${nombreDe ? nombreDe(t.clip.fuente) : 'fuente'} ${tc(t.clip.entrada)}–${tc(t.clip.salida)}`}
                   >
@@ -877,6 +957,7 @@ export function TimelineEditor({
                     title={v.texto || 'Narración'}
                     onPointerDown={(e) => arrastrarFrase(e, v.id)}
                   >
+                    {urlDe && v.archivo && <Onda url={urlDe(v.archivo)} duracion={v.duracion} />}
                     {anchoFrase > 30 && <span className="tl-clip-texto">{v.texto || 'Narración'}</span>}
                   </div>
                 )
@@ -915,6 +996,7 @@ export function TimelineEditor({
                     title={s.nombre}
                     onPointerDown={(e) => arrastrarSonido(e, s.id)}
                   >
+                    {urlDe && <Onda url={urlDe(s.archivo)} duracion={s.duracion} />}
                     {anchoSonido > 30 && <span className="tl-clip-texto">{s.nombre}</span>}
                   </div>
                 )
@@ -932,6 +1014,7 @@ export function TimelineEditor({
                   }}
                   title={tl.musica.nombre}
                 >
+                  {urlDe && <Onda url={urlDe(tl.musica.archivo)} duracion={total} />}
                   <span className="tl-clip-texto">
                     <Icon name="music" size={11} /> {tl.musica.nombre} · {Math.round(tl.musica.volumen * 100)} %
                     {tl.musica.ducking ? ' · baja con la voz' : ''}
@@ -1190,7 +1273,7 @@ export function TimelineEditor({
           <>
             <Icon name="layers" size={14} />
             <b className="tl-musica-nombre">{nombreDe ? nombreDe(capaElegida.fuente) : 'Capa'}</b>
-            <select
+            <label className="ed-campo"><span>Entrada</span><select
               value={capaElegida.entrada ?? 'corte'}
               title="Cómo aparece"
               onChange={(e) => {
@@ -1205,8 +1288,8 @@ export function TimelineEditor({
               <option value="arriba">Baja desde arriba</option>
               <option value="abajo">Sube desde abajo</option>
               <option value="corte">Aparece de golpe</option>
-            </select>
-            <select
+            </select></label>
+            <label className="ed-campo"><span>Movimiento</span><select
               value={capaElegida.fin ? (MOVIMIENTOS_CAPA.find((m) => sinCambios(m.fin(capaElegida), capaElegida.fin!))?.id ?? 'propio') : 'quieta'}
               title="Cómo se mueve mientras está (paralaje, cruzar, subir…). Para afinar, arrastra en el monitor su silueta punteada: es dónde termina."
               onChange={(e) => {
@@ -1223,7 +1306,7 @@ export function TimelineEditor({
                 </option>
               ))}
               {capaElegida.fin && <option value="propio">Recorrido propio</option>}
-            </select>
+            </select></label>
             {(
               [
                 ['ancho', 'Tamaño', 0.05, 1],
@@ -1314,7 +1397,7 @@ export function TimelineEditor({
               />
             </label>
             {onAnimarCapa && (capaElegida.animada || medios?.find((m) => m.id === capaElegida.fuente)?.tipo === 'imagen') && (
-              <select
+              <label className="ed-campo"><span>Animación</span><select
                 value={capaElegida.animada?.tipo ?? 'quieta'}
                 disabled={quitandoFondo}
                 title="Anima la imagen como en After Effects (sin gastar créditos): mejor con la imagen ya sin fondo"
@@ -1326,7 +1409,7 @@ export function TimelineEditor({
                     {a.nombre}
                   </option>
                 ))}
-              </select>
+              </select></label>
             )}
             {onQuitarFondo && medios?.find((m) => m.id === capaElegida.fuente)?.tipo === 'imagen' && (
               <button
@@ -1437,7 +1520,7 @@ export function TimelineEditor({
                 escribiendo.current = true
               }}
             />
-            <select
+            <label className="ed-campo"><span>Posición</span><select
               value={typeof textoElegido.x === 'number' ? 'libre' : textoElegido.posicion}
               title="Dónde va; arrástralo en el monitor para ponerlo donde quieras"
               onChange={(e) =>
@@ -1449,7 +1532,7 @@ export function TimelineEditor({
               <option value="arriba">Arriba</option>
               <option value="centro">Centro</option>
               <option value="abajo">Abajo</option>
-            </select>
+            </select></label>
             <label className="tl-ajuste en-linea">
               <span>
                 Tamaño <b>{Math.round((textoElegido.tamano ?? 1) * 100)} %</b>
@@ -1465,7 +1548,7 @@ export function TimelineEditor({
                 onChange={(e) => deslizar(cambiarTexto(timeline, textoElegido.id, { tamano: Number(e.target.value) }))}
               />
             </label>
-            <select
+            <label className="ed-campo"><span>Letra</span><select
               value={textoElegido.fuente ?? 'normal'}
               title="La letra"
               onChange={(e) => historial.aplicar(cambiarTexto(timeline, textoElegido.id, { fuente: e.target.value }))}
@@ -1475,8 +1558,8 @@ export function TimelineEditor({
                   {f.nombre}
                 </option>
               ))}
-            </select>
-            <select
+            </select></label>
+            <label className="ed-campo"><span>Animación</span><select
               value={textoElegido.animacion ?? 'golpe'}
               title="Cómo aparece (se ve al reproducir)"
               onChange={(e) => historial.aplicar(cambiarTexto(timeline, textoElegido.id, { animacion: e.target.value === 'golpe' ? undefined : (e.target.value as AnimacionTexto) }))}
@@ -1487,7 +1570,7 @@ export function TimelineEditor({
                   {a.nombre}
                 </option>
               ))}
-            </select>
+            </select></label>
             <input
               type="color"
               className="tl-color"
@@ -1527,8 +1610,14 @@ export function TimelineEditor({
             <dl className="ed-atajos">
               <dt>Espacio</dt>
               <dd>Reproducir o pausar</dd>
-              <dt>S</dt>
+              <dt>S · Ctrl+B</dt>
               <dd>Dividir en el cabezal</dd>
+              <dt>Ctrl+C · X · V</dt>
+              <dd>Copiar, cortar y pegar en el cabezal</dd>
+              <dt>Ctrl+D</dt>
+              <dd>Duplicar el clip</dd>
+              <dt>+ · −</dt>
+              <dd>Acercar o alejar la línea de tiempo</dd>
               <dt>T</dt>
               <dd>Añadir un texto</dd>
               <dt>Supr</dt>

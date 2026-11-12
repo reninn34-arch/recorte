@@ -85,6 +85,21 @@ export default function App() {
   const [creando, setCreando] = useState(false)
   const [creaciones, setCreaciones] = useState<Creacion[]>([])
   const [creacion, setCreacion] = useState<Creacion | null>(null)
+  // El chat del agente, plegado para dejar más sitio al editor (se recuerda).
+  const [chatPlegado, setChatPlegado] = useState(() => {
+    try {
+      return localStorage.getItem('recorte.chatPlegado') === '1'
+    } catch {
+      return false
+    }
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem('recorte.chatPlegado', chatPlegado ? '1' : '0')
+    } catch {
+      // Sin almacenamiento: no se recuerda.
+    }
+  }, [chatPlegado])
   /** Las creaciones en las que trabaja el agente, con cuándo empezó cada una (puede haber varias a la vez). */
   const [enCurso, setEnCurso] = useState<Record<string, number>>({})
   /** El último aviso de progreso de cada creación (uno por creación: no se pisan entre ellas). */
@@ -1046,9 +1061,18 @@ export default function App() {
           onInicio={() => setVista('inicio')}
         />
 
-        <div className={`content ${vista === 'proyectos' ? 'is-editor' : 'is-wide'}`}>
+        <div className={`content ${vista === 'proyectos' ? `is-editor ${chatPlegado ? 'is-chat-plegado' : ''}` : 'is-wide'}`}>
           {vista === 'proyectos' ? (
             <>
+              <button
+                className="chat-plegar"
+                onClick={() => setChatPlegado((v) => !v)}
+                title={chatPlegado ? 'Mostrar el chat del agente' : 'Ocultar el chat del agente: más sitio para editar'}
+                aria-label={chatPlegado ? 'Mostrar el chat del agente' : 'Ocultar el chat del agente'}
+                aria-expanded={!chatPlegado}
+              >
+                <Icon name={chatPlegado ? 'sparkles' : 'chevron'} size={14} />
+              </button>
               <Editor
                 proyecto={proyecto}
                 progreso={progresoActual}

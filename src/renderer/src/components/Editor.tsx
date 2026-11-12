@@ -129,6 +129,15 @@ export function Editor({
   }, [proyecto.source.duration, proyecto.medios])
   const nombreDe = (fuente: string) => (fuente === 'principal' ? proyecto.source.name : (proyecto.medios?.find((x) => x.id === fuente)?.nombre ?? '?'))
 
+  /** La miniatura de cada fuente, para verla dentro de sus clips en la línea de tiempo. */
+  const miniaturaDe = (fuente: string): string | undefined => {
+    if (proyecto.demo) return undefined
+    if (fuente === 'principal') return proyecto.thumbnail ? mediaUrl(proyecto.id, proyecto.thumbnail) : undefined
+    const m = proyecto.medios?.find((x) => x.id === fuente)
+    if (!m) return undefined
+    return m.tipo === 'imagen' ? mediaUrl(proyecto.id, `medio/${m.id}`) : m.miniatura ? mediaUrl(proyecto.id, m.miniatura) : undefined
+  }
+
   /** Pone un medio en la timeline (entero; una imagen, 4 s) o encima del video. Se puede deshacer. */
   function poner(fuente: string, donde: 'final' | 'cabezal' | 'encima', base = timeline) {
     const m = proyecto.medios?.find((x) => x.id === fuente)
@@ -285,6 +294,8 @@ export function Editor({
       <TimelineEditor
         key={proyecto.id}
         paneles={{ biblioteca: panelBiblioteca, inspector: panelInspector, transporte: panelTransporte }}
+        miniaturaDe={miniaturaDe}
+        urlDe={proyecto.demo ? undefined : (archivo) => mediaUrl(proyecto.id, archivo)}
         panelMedios={
           <>
             <MediosPanel
