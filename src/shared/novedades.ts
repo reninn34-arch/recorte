@@ -24,6 +24,33 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.40',
+    fecha: '2026-11-12',
+    resumen: 'Personajes que se mueven enteros: caminan, corren, saltan y se sientan, como muñecos articulados.',
+    novedades: [
+      {
+        icono: 'layers',
+        titulo: 'Muñeco por piezas',
+        texto: 'El agente corta al personaje en cabeza, torso, brazos, manos, piernas y pies, y cada pieza gira sobre su bisagra sin estirarse. Ideal para juguetes, figuras y dibujos.'
+      },
+      {
+        icono: 'play',
+        titulo: 'Camina, corre, salta y se sienta',
+        texto: 'Movimientos nuevos para los personajes de cuerpo entero: caminar, correr, saltar, agacharse, sentarse, patear y bailar. Los pies siguen en el suelo. En el editor están en el menú de animar de cada capa.'
+      },
+      {
+        icono: 'image',
+        titulo: 'Escenarios por planos',
+        texto: 'El agente arma cada lugar con su fondo y, por separado, lo que va delante (una mesa, una valla, plantas). El personaje queda entre ellos y la cámara 3D da sensación de espacio.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Duración exacta',
+        texto: 'Con tarjetas AMD, los videos del agente ya no duran medio segundo de más al final.'
+      }
+    ]
+  },
+  {
     version: '0.1.39',
     fecha: '2026-11-12',
     resumen: 'Música y efectos de sonido incluidos, videos más rápidos con tu tarjeta gráfica y una voz que ya no falla.',
