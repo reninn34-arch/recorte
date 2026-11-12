@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { EstadoSistema, Herramienta, Preferencias } from '../../../shared/api'
+import type { EstadoSistema, Herramienta, MedidaRender, Preferencias } from '../../../shared/api'
 import type { AjustesIA } from '../../../shared/types'
 import type { Agentes } from '../hooks/agentes'
 import { Icon } from '../Icons'
@@ -193,6 +193,19 @@ export function Opciones({
 }) {
   const [sistema, setSistema] = useState<EstadoSistema | null>(null)
   const [midiendo, setMidiendo] = useState(false)
+  const [medida, setMedida] = useState<MedidaRender | null>(null)
+  const [midiendoRender, setMidiendoRender] = useState(false)
+
+  async function medirRender() {
+    setMidiendoRender(true)
+    try {
+      setMedida(await window.recorte.sistemaMedirRender())
+    } catch (error) {
+      onAviso(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error))
+    } finally {
+      setMidiendoRender(false)
+    }
+  }
   const [instalando, setInstalando] = useState<string | null>(null)
   const [voz, setVoz] = useState<EstadoVoz | null>(null)
   const [pidiendoClave, setPidiendoClave] = useState(false)
@@ -436,6 +449,22 @@ export function Opciones({
               <span>FFmpeg exporta la timeline en H.264; HyperFrames renderiza lo que crea la IA.</span>
             </div>
           </div>
+          <div className="op-fila">
+            <span className="op-icono"><Icon name="clock" size={16} /></span>
+            <div className="op-fila-texto">
+              <strong>{veredictoEquipo(sistema, medida)}</strong>
+              <span>
+                {medida
+                  ? `Un documental de 50 s con escenas 3D y personajes animados: unos ${Math.max(1, Math.round(medida.minutos_documental))} min ` +
+                    `(${medida.hilos} ${medida.hilos === 1 ? 'núcleo' : 'núcleos'} a la vez · codifica con ${nombreCodificador(medida.codificador)} · ` +
+                    `modelos de IA con ${medida.modelos_gpu ? 'la tarjeta gráfica' : 'el procesador'}).`
+                  : 'Mide cuánto tardaría tu equipo en renderizar un video del agente (unos segundos).'}
+              </span>
+            </div>
+            <button className="btn small ghost" onClick={() => void medirRender()} disabled={midiendoRender}>
+              {midiendoRender ? 'Midiendo…' : medida ? 'Medir otra vez' : 'Medir velocidad'}
+            </button>
+          </div>
         </Seccion>
 
         <Seccion titulo="Versión">
@@ -491,4 +520,27 @@ export function Opciones({
       </div>
     </div>
   )
+}
+
+/** El codificador por su nombre para el usuario. */
+function nombreCodificador(c: string): string {
+  return { h264_amf: 'la tarjeta AMD', h264_nvenc: 'la tarjeta NVIDIA', h264_qsv: 'la gráfica de Intel' }[c] ?? 'el procesador'
+}
+
+/**
+ * Si este equipo alcanza para los videos del agente: por la memoria, los núcleos y el disco y, si ya se midió, por lo que
+ * tardaría un documental (el agente tiene 30 min por comando: más cerca de eso, más riesgo de que se corte).
+ */
+function veredictoEquipo(s: EstadoSistema | null, m: MedidaRender | null): string {
+  if (!s) return 'Videos del agente'
+  const gbMem = s.memoria / 1e9
+  const problemas: string[] = []
+  if (gbMem < 7.5) problemas.push('poca memoria (menos de 8 GB)')
+  if (s.hilos < 4) problemas.push('pocos núcleos')
+  if (s.disco && s.disco.libre / 1e9 < 15) problemas.push('poco disco libre (menos de 15 GB)')
+  if (m && m.minutos_documental > 28) return 'Videos del agente: tu equipo va justo (un video largo puede no terminar)'
+  if (problemas.length) return `Videos del agente: ${problemas.join(', ')}`
+  if (m && m.minutos_documental > 15) return 'Videos del agente: tu equipo alcanza, aunque tarda'
+  if (m) return 'Videos del agente: tu equipo va bien'
+  return gbMem >= 15 && s.hilos >= 8 ? 'Videos del agente: tu equipo debería ir bien' : 'Videos del agente'
 }

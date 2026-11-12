@@ -49,6 +49,21 @@ export interface EstadoSistema {
   herramientas: Herramienta[]
 }
 
+/** Lo que mide el kit en este equipo (Ajustes › Tu equipo › Medir velocidad). */
+export interface MedidaRender {
+  /** Segundos por cuadro de prueba, en un núcleo. */
+  por_cuadro: number
+  /** Cuadros que dibuja a la vez (núcleos libres, según la memoria). */
+  hilos: number
+  /** El codificador H.264: h264_amf, h264_nvenc, h264_qsv o libx264 (el procesador). */
+  codificador: string
+  /** Si los modelos de IA (recortes, esqueleto, profundidad) van con la tarjeta gráfica. */
+  modelos_gpu: boolean
+  /** Lo que tardaría un documental de 50 s con escenas 3D y personajes animados, en minutos. */
+  minutos_documental: number
+  memoria_libre_gb: number
+}
+
 export interface Preferencias {
   avisoNotificacion: boolean
   avisoSonido: boolean
@@ -249,6 +264,8 @@ export interface RecorteApi {
   /** Pagar con la suscripción o con una llave de API (`llave` vacía la borra). */
   agentesPago: (id: string, cambio: { pago?: 'suscripcion' | 'llave'; llave?: string }) => Promise<EstadoAgente[]>
   sistemaEstado: () => Promise<EstadoSistema>
+  /** Mide cuánto tardaría este equipo en renderizar un video del agente (unos segundos). */
+  sistemaMedirRender: () => Promise<MedidaRender>
   sistemaInstalar: (id: string) => Promise<{ ok: boolean; error?: string }>
   sistemaAbrirDatos: () => Promise<void>
   /** Dónde quedan tus videos: la carpeta elegida (o la propuesta) y si ya la elegiste. */

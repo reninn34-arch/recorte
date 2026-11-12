@@ -212,7 +212,8 @@ Escribe código propio solo para lo que el kit no tenga, y aun así usa el kit p
      saltos, estelas, capas que se descuadran), tu video al lado de la referencia y \`revisar.md\` con medidas (cortes por
      segundo frente a la referencia, tramos casi vacíos, destellos) y la lista de lo que hay que mirar. ÁBRELAS y amplía
      (recorta y agranda) los bordes de cada recorte y cada texto: los defectos se ven de cerca.
-   - **Ojos frescos**: si puedes lanzar otro agente (la herramienta Task o Agent), pídele que revise SOLO viendo las
+   - **Ojos frescos**: si puedes lanzar otro agente (la herramienta Task o Agent; con Claude Code, con el modelo más
+     capaz: \`model: "opus"\`), pídele que revise SOLO viendo las
      imágenes de \`revision/\`, \`revisar.md\`, la referencia y el pedido del usuario (sin la receta ni tus notas), y que te
      devuelva la lista de defectos concretos con su segundo. Quien hizo el video ve lo que quiso hacer; el revisor ve lo
      que hay. Si no puedes lanzarlo, haz tú la revisión punto por punto de \`revisar.md\` como si fuera el video de otro.

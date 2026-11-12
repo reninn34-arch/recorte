@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, copyFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -184,7 +185,11 @@ export function generarVozGoogle(texto: string, voz: string, salida: string): Pr
 
 async function generarVozGoogleYa(texto: string, voz: string, salida: string): Promise<void> {
   if (!correo) throw new Error('Conecta tu cuenta de Google para generar la voz sin llave.')
-  const bajada = join(carpeta(), 'descarga')
+  // Cada frase baja a su propia carpeta: si Edge aún escribe una descarga anterior, no se pisan (antes, la carpeta
+  // compartida no se podía borrar —«directorio no vacío»— y la frase fallaba entera).
+  const descargas = join(carpeta(), 'descargas')
+  limpiarDescargasViejas(descargas)
+  const bajada = join(descargas, randomUUID().slice(0, 8))
   let b: Browser | null = null
   try {
     b = await abrirEdge()
@@ -193,7 +198,6 @@ async function generarVozGoogleYa(texto: string, voz: string, salida: string): P
     await ponerVoz(page, voz)
     await caja.fill(texto)
 
-    rmSync(bajada, { recursive: true, force: true })
     mkdirSync(bajada, { recursive: true })
     await (await b.newBrowserCDPSession()).send('Browser.setDownloadBehavior', {
       behavior: 'allowAndName',
@@ -215,18 +219,61 @@ async function generarVozGoogleYa(texto: string, voz: string, salida: string): P
     for (let i = 0; i < 10 && !wav; i++) {
       await page.mouse.move(5, 5)
       await bajar.click({ force: true })
-      for (let k = 0; k < 10 && !wav; k++) {
+      for (let k = 0; k < 20 && !wav; k++) {
         await espera(300)
-        wav = readdirSync(bajada).map((f) => join(bajada, f)).find((f) => statSync(f).size > 44) ?? null
+        wav = await descargaCompleta(bajada)
       }
     }
     if (!wav) throw new Error('El WAV de AI Studio no bajó.')
     mkdirSync(dirname(salida), { recursive: true })
     copyFileSync(wav, salida)
   } finally {
-    rmSync(bajada, { recursive: true, force: true })
+    try {
+      rmSync(bajada, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    } catch {
+      // Si Edge aún la tiene abierta, se borra en la próxima frase (limpiarDescargasViejas).
+    }
     await b?.close().catch(() => {})
     await cerrarEdge().catch(() => {})
+  }
+}
+
+/**
+ * Un WAV ya bajado del todo: no el temporal de Edge (.crdownload) y con el tamaño quieto entre dos miradas (si sigue
+ * creciendo, aún se está escribiendo).
+ */
+async function descargaCompleta(carpeta: string): Promise<string | null> {
+  const lista = (): { ruta: string; tam: number }[] => {
+    try {
+      return readdirSync(carpeta)
+        .filter((f) => !/\.(crdownload|tmp|partial)$/i.test(f))
+        .map((f) => ({ ruta: join(carpeta, f), tam: statSync(join(carpeta, f)).size }))
+        .filter((x) => x.tam > 44)
+    } catch {
+      return []
+    }
+  }
+  const antes = lista()
+  if (!antes.length) return null
+  await espera(250)
+  const ahora = lista()
+  const quieto = antes.find((a) => ahora.some((x) => x.ruta === a.ruta && x.tam === a.tam))
+  return quieto?.ruta ?? null
+}
+
+/** Borra las carpetas de descarga de frases de hace más de una hora (las que Edge no dejó borrar). */
+function limpiarDescargasViejas(descargas: string): void {
+  try {
+    for (const n of readdirSync(descargas)) {
+      const ruta = join(descargas, n)
+      try {
+        if (Date.now() - statSync(ruta).mtimeMs > 3_600_000) rmSync(ruta, { recursive: true, force: true })
+      } catch {
+        // En uso: la próxima vez.
+      }
+    }
+  } catch {
+    // Aún no existe.
   }
 }
 

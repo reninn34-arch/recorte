@@ -593,7 +593,13 @@ app.whenReady().then(() => {
       delete c.agente.paso
       creaciones.guardar(c)
       const carpeta = creaciones.carpeta(c.id)
-      const config = await configParaTarea(c.tareas?.video)
+      const base = await configParaTarea(c.tareas?.video)
+      // Hacer el video (planificar escenas por piezas, revisar con criterio) rinde mucho más con el modelo más capaz: con
+      // Claude Code y sin una elección del usuario para esta tarea, va con Opus (la charla del plan sigue con el de siempre).
+      const config =
+        !c.tareas?.video && base.proveedor === 'cli' && /^\s*claude/.test(base.comandoCli ?? '') && !/--model/.test(base.comandoCli ?? '')
+          ? { ...base, comandoCli: `${(base.comandoCli ?? '').trim()} --model opus` }
+          : base
       // Mientras trabaja, Recorte atiende sus pedidos de voz, imágenes y clips.
       const dejarDeAtender = atenderPedidos(c, senal)
       let desdeHacer = Date.now()
@@ -1698,6 +1704,17 @@ app.whenReady().then(() => {
     }
   }
   ipcMain.handle('sistema:estado', () => estadoSistema())
+  // Cuánto tardaría este equipo en un video del agente: el kit dibuja unos cuadros de prueba (unos segundos).
+  ipcMain.handle('sistema:medir-render', async () => {
+    const py = await buscarPython()
+    const kit = rutaScriptPython(join('kit', 'kit.py'))
+    if (!py || !existsSync(kit)) throw new Error('Hace falta Python para medirlo (instálalo justo arriba).')
+    const cita = (x: string) => (/[\s"]/.test(x) ? `"${x}"` : x)
+    const r = await ejecutar([[py.cmd, ...py.args].map(cita).join(' '), cita(kit), 'medir'], app.getPath('temp'), 180_000)
+    const linea = r.salida.trim().split(/\r?\n/).filter((l) => l.startsWith('{')).pop()
+    if (r.codigo !== 0 || !linea) throw new Error(r.salida.trim().split(/\r?\n/).pop() || 'No pude medirlo.')
+    return JSON.parse(linea)
+  })
   ipcMain.handle('sistema:abrir-datos', async () => {
     await shell.openPath(app.getPath('userData'))
   })

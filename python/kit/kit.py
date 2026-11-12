@@ -3579,6 +3579,59 @@ def componer(fondo, persona, x=0.5, pies=0.9, alto=0.6, zoom=1.15, ancho_video=1
                    'desde/hasta. "pies" > 1 es un plano medio (cortado por abajo, sin sombra); "alto" más grande, más cerca.'}
 
 
+# ---------------------------------------------------------------------------
+# Medir este equipo: cuánto tardaría en renderizar un documental de 50 s
+# ---------------------------------------------------------------------------
+
+# Cuánto más pesado es un cuadro de un documental completo (escena 2.5D, marioneta, profundidad de campo, filtros) que el
+# cuadro de prueba de `medir_equipo`. Calibrado con el video de SpaceX en un Xeon E3-1281 v3 (7 núcleos: 7,7 min).
+PESO_DOCUMENTAL = 4.0
+
+
+def medir_equipo():
+    """Dibuja unos cuadros de prueba (1080×1920, con foto en movimiento, capas con profundidad, una capa animada y
+    filtros) en un solo núcleo y calcula cuánto tardaría aquí un documental de 50 s con todos los núcleos que se usarían."""
+    import cv2
+    import tempfile
+    import time
+    cv2.setNumThreads(1)
+    carpeta = tempfile.mkdtemp(prefix='kit-medir-')
+    try:
+        rng = np.random.default_rng(1)
+        Image.fromarray((rng.random((1366, 768, 3)) * 255).astype(np.uint8)).save(os.path.join(carpeta, 'fondo.jpg'))
+        capa = np.zeros((900, 500, 4), np.uint8)
+        cv2.ellipse(capa, (250, 450), (200, 420), 0, 0, 360, (200, 150, 120, 255), -1)
+        Image.fromarray(capa, 'RGBA').save(os.path.join(carpeta, 'capa.png'))
+        receta = {'ancho': 1080, 'alto': 1920, 'fps': 30, 'duracion': 3, 'fundido_final': 0,
+                  'momentos': [{'tipo': 'foto', 'archivo': 'fondo.jpg', 'desde': 0, 'hasta': 3, 'encuadre': {'zoom': 1.2},
+                                'camara': {'zoom': 1.3, 'cx': 0.55}, 'campo': 0.4, 'foco': 0.5}],
+                  'capas': [{'archivo': 'capa.png', 'desde': 0, 'hasta': 3, 'x': 0.5, 'y': 0.6, 'ancho': 1.3, 'entrada': 'ninguna', 'profundidad': 0.3},
+                            {'archivo': 'capa.png', 'desde': 0, 'hasta': 3, 'x': 0.4, 'y': 0.6, 'ancho': 0.5, 'entrada': 'ninguna',
+                             'profundidad': 0.6, 'animar': 'respirar'}],
+                  'filtros': {'grano': 0.3, 'polvo': 0.2, 'vineta': 0.5}}
+        ruta = os.path.join(carpeta, 'receta.json')
+        with open(ruta, 'w', encoding='utf-8') as f:
+            json.dump(receta, f)
+        _r, L, momentos, dur = cargar(ruta)
+        cuadro(L, momentos, 0.5, dur, 0)
+        a = time.time()
+        for k in range(6):
+            cuadro(L, momentos, 1 + k / 10, dur, 0)
+        por_cuadro = (time.time() - a) / 6
+    finally:
+        shutil.rmtree(carpeta, ignore_errors=True)
+    hilos = hilos_render()
+    codif = codificador_video()
+    minutos = 1470 * por_cuadro * PESO_DOCUMENTAL / max(1, hilos) / 60
+    try:
+        import onnxruntime as ort
+        modelos_gpu = any(p in ort.get_available_providers() for p in ('DmlExecutionProvider', 'CUDAExecutionProvider'))
+    except Exception:
+        modelos_gpu = False
+    return {'por_cuadro': round(por_cuadro, 3), 'hilos': hilos, 'codificador': codif, 'modelos_gpu': modelos_gpu,
+            'minutos_documental': round(minutos, 1), 'memoria_libre_gb': round(_memoria_libre_gb() or 0, 1)}
+
+
 def main():
     # En Windows la consola no es UTF-8: sin esto, las tildes de lo que se imprime llegan rotas al agente.
     for flujo in (sys.stdout, sys.stderr):
@@ -3638,6 +3691,7 @@ def main():
     dn = sub.add_parser('donde')
     dn.add_argument('consulta', help='lo que nombra el usuario: «la bandera», «el título 2002», «cuando dice órbita»')
     dn.add_argument('--receta', default='receta.json')
+    sub.add_parser('medir', help='cuánto tardaría este equipo en renderizar un documental de 50 s')
     co = sub.add_parser('componer')
     co.add_argument('fondo', help='el decorado vacío (una foto sin gente)')
     co.add_argument('persona', help='el personaje sin fondo (PNG)')
@@ -3687,6 +3741,8 @@ def main():
         print(json.dumps(revisar(x.video, x.referencia, receta=x.receta), ensure_ascii=False))
     elif x.orden == 'donde':
         print(json.dumps(donde(x.receta, x.consulta), ensure_ascii=False))
+    elif x.orden == 'medir':
+        print(json.dumps(medir_equipo(), ensure_ascii=False))
     elif x.orden == 'componer':
         print(json.dumps(componer(x.fondo, x.persona, x.x, x.pies, x.alto, x.zoom, igualar=x.igualar, sombra=not x.sin_sombra,
                                   planos=x.planos, gesto=x.gesto, salida=x.salida), ensure_ascii=False))

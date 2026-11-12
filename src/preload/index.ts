@@ -26,6 +26,7 @@ const api: RecorteApi = {
   agentesVersiones: () => ipcRenderer.invoke('agentes:versiones'),
   agentesPago: (id, cambio) => ipcRenderer.invoke('agentes:pago', id, cambio),
   sistemaEstado: () => ipcRenderer.invoke('sistema:estado'),
+  sistemaMedirRender: () => ipcRenderer.invoke('sistema:medir-render'),
   sistemaInstalar: (id) => ipcRenderer.invoke('sistema:instalar', id),
   sistemaAbrirDatos: () => ipcRenderer.invoke('sistema:abrir-datos'),
   carpetaEstado: () => ipcRenderer.invoke('carpeta:estado'),
