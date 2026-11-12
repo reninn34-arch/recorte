@@ -350,6 +350,8 @@ Si el usuario eligió generar imágenes o clips (lo dice AGENTS.md), Recorte los
   3. **Que avance**: caminar y correr son en el sitio (como en una cinta); para que cruce la escena, mueve la capa con
      `"fin": {"x": …}` en la dirección en que mira. Velocidad creíble: caminando, cruza el cuadro en 5–7 s; corriendo, en
      2–3 s. Al revés (mirando a un lado y avanzando al otro) parece que patina.
+     Con `componer … --gesto caminar` la capa ya sale como muñeco; si le pones `fin`, ponle el MISMO desplazamiento en
+     x a su sombra (la capa anterior), o la sombra se queda atrás.
   4. Secuencias en UNA capa, como la marioneta: `"animar": [{"tipo": "caminar", "hasta": 3}, {"tipo": "hablar"}]`
      (llega caminando y se pone a hablar; para que se pare donde habla, que el `fin` de la capa llegue ahí y la capa
      siguiente empiece en ese sitio). Un personaje de perfil que habla gira la cabeza poco: para hablarle a la cámara,

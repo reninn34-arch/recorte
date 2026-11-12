@@ -39,6 +39,8 @@ export function VersionesCreacion({
   const numeros = Array.from({ length: c.version }, (_, i) => i + 1)
   const datos = c.versiones?.find((v) => v.n === viendo)
   const base = c.aprobada ?? vigente
+  // Las entregas de antes de este historial no están en `versiones`: su video se llama igual.
+  const archivo = datos?.archivo ?? `salidas/agente-v${viendo}.mp4`
   const bloqueado = ocupado || haciendo
 
   async function hacer<T>(f: () => Promise<T>, despues: (r: T) => void) {
@@ -75,7 +77,11 @@ export function VersionesCreacion({
 
       {viendo !== vigente && (
         <div className="cr-version-ver">
-          <video key={viendo} className={c.formato} src={mediaUrl(`c-${c.id}`, `salidas/agente-v${viendo}.mp4`)} controls preload="metadata" />
+          {/\.(png|jpe?g)$/i.test(archivo) ? (
+            <img key={viendo} className={c.formato} src={mediaUrl(`c-${c.id}`, archivo)} alt={`Versión ${viendo}`} />
+          ) : (
+            <video key={viendo} className={c.formato} src={mediaUrl(`c-${c.id}`, archivo)} controls preload="metadata" />
+          )}
           <button
             className="btn small"
             disabled={bloqueado}

@@ -2362,7 +2362,9 @@ def avisos_escena(r, L, momentos):
     # Textos donde se mueven los brazos de una marioneta que saluda, señala o explica.
     for j, c in enumerate(L.capas):
         an = c.get('animada')
-        if not isinstance(an, Marioneta) or an.gesto not in GESTOS_BRAZO:
+        # (Cualquier gesto de la secuencia que mueva brazos o piernas lejos del cuerpo.)
+        amplios = GESTOS_BRAZO + ('saltar', 'patear', 'bailar', 'correr')
+        if not isinstance(an, Marioneta) or not any(x['tipo'] in amplios for x in an.secuencia):
             continue
         # Por dónde pasan los brazos: lo que la animación cubre en algún momento y en reposo no (unos cuadros del ciclo).
         reposo = an.alfa > 0.5
@@ -3900,7 +3902,7 @@ def sombra_contacto(ancho_px, alto_px, fuerza=0.55):
 
 
 def componer(fondo, persona, x=0.5, pies=0.9, alto=0.6, zoom=1.15, ancho_video=1080, alto_video=1920, igualar=0.6,
-             sombra=True, planos=0, gesto=None, salida=None):
+             sombra=True, planos=0, gesto=None, salida=None, piezas=False):
     """Pone un personaje recortado (PNG sin fondo, p. ej. de `kit.py imagen … --recorte`) dentro de un decorado vacío:
     de pie en el suelo (`pies`: a qué altura del cuadro van sus pies, 0 arriba a 1 abajo; más de 1 = cortado por abajo,
     un plano medio), con su tamaño (`alto`: lo que mide, en fracción del alto del cuadro), con el color y la luz del
@@ -3949,6 +3951,8 @@ def componer(fondo, persona, x=0.5, pies=0.9, alto=0.6, zoom=1.15, ancho_video=1
             'profundidad': prof}
     if gesto:
         capa['animar'] = gesto
+    if piezas or gesto in GESTOS_PIERNAS:
+        capa['piezas'] = True
     capas.append(capa)
     return {'momento': momento, 'capas': capas, 'personaje': ruta_pers, 'fondo': archivo_fondo,
             'uso': 'Pon "momento" (con su desde/hasta) y las "capas" en ese orden (planos, sombra, personaje) con los mismos '
@@ -4140,7 +4144,8 @@ def main():
     co.add_argument('--igualar', type=float, default=0.6, help='cuánto se lleva su color al del decorado (0 a 1)')
     co.add_argument('--sin-sombra', action='store_true')
     co.add_argument('--planos', type=int, default=0, help='partir el decorado en planos (2 o 3)')
-    co.add_argument('--gesto', choices=GESTOS)
+    co.add_argument('--gesto', choices=GESTOS + GESTOS_PIERNAS)
+    co.add_argument('--piezas', action='store_true', help='animarlo como muñeco por piezas rígidas (con caminar, correr… ya lo hace solo)')
     co.add_argument('--salida')
     es2 = sub.add_parser('escena')
     es2.add_argument('imagen')
@@ -4191,7 +4196,7 @@ def main():
         print(json.dumps(medir_equipo(), ensure_ascii=False))
     elif x.orden == 'componer':
         print(json.dumps(componer(x.fondo, x.persona, x.x, x.pies, x.alto, x.zoom, igualar=x.igualar, sombra=not x.sin_sombra,
-                                  planos=x.planos, gesto=x.gesto, salida=x.salida), ensure_ascii=False))
+                                  planos=x.planos, gesto=x.gesto, salida=x.salida, piezas=x.piezas), ensure_ascii=False))
     elif x.orden == 'escena':
         print(json.dumps(escena(x.imagen, x.salida, x.planos, x.zoom, x.limpio, x.sin_flow, x.gesto), ensure_ascii=False))
     elif x.orden == 'separar':
