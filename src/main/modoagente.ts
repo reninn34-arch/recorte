@@ -101,6 +101,9 @@ function copiarKit(trabajo: string): boolean {
     mkdirSync(join(destino, 'fuentes'), { recursive: true })
     for (const n of readdirSync(letras)) copyFileSync(join(letras, n), join(destino, 'fuentes', n))
   }
+  // La biblioteca de música libre: se deja apuntada (son decenas de MB; el kit copia solo la pista elegida).
+  const musica = rutaScriptPython('musica')
+  if (existsSync(join(musica, 'catalogo.json'))) writeFileSync(join(destino, 'biblioteca.json'), JSON.stringify({ musica }), 'utf8')
   // Los efectos de sonido incluidos, para `"sonidos": [{ "sonido": "pop" }]` en la receta.
   const sonidos = rutaScriptPython('sonidos')
   if (existsSync(sonidos)) {
@@ -188,6 +191,8 @@ de museo bajo un foco que entra girando en 3D y fotos de archivo que caen apilad
   con la luz del decorado y su sombra, animado como marioneta. Varía acción y plano entre escenas (lee «Por piezas» en
   kit/RECETA.md). Si ya tienes una imagen entera con la persona, \`kit.py escena <imagen>\` la separa. \`armar\` avisa
   si el video es casi todo fotos planas o si la misma pose se repite.
+- **Música**: si el usuario no trae, elige de la biblioteca libre de Recorte (\`python kit/kit.py musica --animo tensa\`,
+  luego \`--usar <archivo>\`). No la sintetices tú.
 - \`python kit/kit.py golpes <audio-o-video>\`: los golpes de la música y el tempo, para poner cada momento en su golpe.
 - \`python kit/kit.py encuadre <foto> --zoom 1.3 --cx .5 --cy .5\`: cómo queda una foto a pantalla completa.
 - \`python kit/kit.py armar receta.json --prueba 0.5,3,8\`: solo esos fotogramas, en segundos, para corregir antes.

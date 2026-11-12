@@ -381,6 +381,13 @@ try {
   const altoPers = 0.5
   if (!(comp.capas.length === 2 && /sombra/.test(sombra.archivo) && Math.abs(pers.y + altoPers / 2 - 0.9) < 0.02 && pers.animar === 'peso' && existsSync(join(trabajo, pers.archivo))))
     throw new Error(`componer no puso la figura en su suelo: ${JSON.stringify(comp)}`)
+  // La biblioteca de música libre: por ánimo, y la elegida se copia a medios/.
+  writeFileSync(join(trabajo, 'kit', 'biblioteca.json'), JSON.stringify({ musica: join(raiz, 'python', 'musica') }))
+  const tensas = json(correr(python, ['kit/kit.py', 'musica', '--animo', 'tensa', '--duracion', '60'], trabajo))
+  if (!(tensas.pistas.length >= 3 && tensas.pistas.every((p) => p.animo === 'tensa'))) throw new Error(`musica no filtró por ánimo: ${JSON.stringify(tensas)}`)
+  const usada = json(correr(python, ['kit/kit.py', 'musica', '--usar', tensas.pistas[0].archivo], trabajo))
+  if (!existsSync(join(trabajo, usada.archivo))) throw new Error(`musica --usar no la copió: ${JSON.stringify(usada)}`)
+  console.log(`música libre: ${tensas.pistas.length} pistas tensas; «${usada.titulo}» lista en ${usada.archivo} ✓`)
   console.log(`componer: la figura de pie en el decorado (pies en y ${(pers.y + altoPers / 2).toFixed(2)}), con su sombra ✓`)
   // Velocidad: una escena 2.5D con cámara, capas y filtros a 1080×1920 no puede tardar más de 1,5 s por cuadro en un
   // núcleo (antes de OpenCV tardaba más del doble). Si sube, algo volvió a hacerse lento.

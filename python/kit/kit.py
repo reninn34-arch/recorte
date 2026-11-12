@@ -3632,6 +3632,57 @@ def medir_equipo():
             'minutos_documental': round(minutos, 1), 'memoria_libre_gb': round(_memoria_libre_gb() or 0, 1)}
 
 
+# ---------------------------------------------------------------------------
+# La biblioteca de música libre que trae Recorte (CC0: se puede usar en cualquier video, sin dar crédito)
+# ---------------------------------------------------------------------------
+
+ANIMOS_MUSICA = ('tensa', 'epica', 'emotiva', 'alegre', 'calma', 'misterio')
+
+
+def carpeta_musica():
+    """Dónde está la biblioteca: la que dejó Recorte apuntada en kit/biblioteca.json, o junto al kit (pruebas)."""
+    aqui = os.path.dirname(os.path.abspath(__file__))
+    try:
+        with open(os.path.join(aqui, 'biblioteca.json'), encoding='utf-8') as f:
+            ruta = json.load(f).get('musica')
+        if ruta and os.path.isfile(os.path.join(ruta, 'catalogo.json')):
+            return ruta
+    except (OSError, ValueError):
+        pass
+    for r in (os.path.join(aqui, 'musica'), os.path.join(os.path.dirname(aqui), 'musica')):
+        if os.path.isfile(os.path.join(r, 'catalogo.json')):
+            return r
+    return None
+
+
+def musica(animo=None, duracion=None, usar=None):
+    """Sin `usar`: la lista de pistas (filtradas por ánimo), con su estilo, ritmo, energía y duración. Con `usar` (el
+    nombre del archivo): la copia a medios/ y devuelve su ruta para la receta ("musica": {"archivo": …})."""
+    base = carpeta_musica()
+    if not base:
+        raise SystemExit('No encuentro la biblioteca de música de Recorte. Sigue sin música o con la que traiga el usuario.')
+    with open(os.path.join(base, 'catalogo.json'), encoding='utf-8') as f:
+        catalogo = json.load(f)
+    if usar:
+        elegida = next((c for c in catalogo if c['archivo'] == usar or c['archivo'].rsplit('.', 1)[0] == usar), None)
+        if not elegida:
+            raise SystemExit(f'No hay una pista «{usar}» en la biblioteca: mira la lista con `kit.py musica`.')
+        destino = os.path.join(_trabajo(), 'medios', 'musica-' + elegida['archivo'])
+        os.makedirs(os.path.dirname(destino), exist_ok=True)
+        shutil.copyfile(os.path.join(base, elegida['archivo']), destino)
+        return {'archivo': os.path.relpath(destino, _trabajo()).replace(os.sep, '/'), 'duracion': elegida['duracion'],
+                'titulo': elegida['titulo'], 'licencia': elegida['licencia'],
+                'nota': 'Si el video dura más que la pista, ponla dos veces seguidas o elige otra más larga.'}
+    lista = [c for c in catalogo if not animo or c['animo'] == animo]
+    if duracion:
+        # Primero las que alcanzan para todo el video.
+        lista.sort(key=lambda c: c['duracion'] < float(duracion))
+    return {'animos': list(ANIMOS_MUSICA), 'pistas': [{k: c[k] for k in ('archivo', 'animo', 'titulo', 'estilo', 'duracion')
+                                                          if k in c} for c in lista],
+            'uso': 'Elige por el ánimo de la historia y su estilo (clásica para documentales y relatos; moderna para '
+                   'promociones, tecnología o redes); `kit.py musica --usar <archivo>` la deja en medios/.'}
+
+
 def main():
     # En Windows la consola no es UTF-8: sin esto, las tildes de lo que se imprime llegan rotas al agente.
     for flujo in (sys.stdout, sys.stderr):
@@ -3692,6 +3743,10 @@ def main():
     dn.add_argument('consulta', help='lo que nombra el usuario: «la bandera», «el título 2002», «cuando dice órbita»')
     dn.add_argument('--receta', default='receta.json')
     sub.add_parser('medir', help='cuánto tardaría este equipo en renderizar un documental de 50 s')
+    mu = sub.add_parser('musica', help='la biblioteca de música libre (CC0) de Recorte')
+    mu.add_argument('--animo', choices=ANIMOS_MUSICA)
+    mu.add_argument('--duracion', type=float, help='lo que dura el video (primero las pistas que alcanzan)')
+    mu.add_argument('--usar', help='el archivo elegido: se copia a medios/')
     co = sub.add_parser('componer')
     co.add_argument('fondo', help='el decorado vacío (una foto sin gente)')
     co.add_argument('persona', help='el personaje sin fondo (PNG)')
@@ -3741,6 +3796,8 @@ def main():
         print(json.dumps(revisar(x.video, x.referencia, receta=x.receta), ensure_ascii=False))
     elif x.orden == 'donde':
         print(json.dumps(donde(x.receta, x.consulta), ensure_ascii=False))
+    elif x.orden == 'musica':
+        print(json.dumps(musica(x.animo, x.duracion, x.usar), ensure_ascii=False))
     elif x.orden == 'medir':
         print(json.dumps(medir_equipo(), ensure_ascii=False))
     elif x.orden == 'componer':

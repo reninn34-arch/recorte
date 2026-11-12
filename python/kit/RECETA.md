@@ -247,6 +247,15 @@ y rayas, trama de puntos de imprenta, viñeta y parpadeo de proyector. Van encim
 subtítulos; en el editor quedan como sus «Filtros» y el usuario los sube, los baja o los quita. Un documental de archivo:
 grano 0.3, polvo 0.25, viñeta 0.5; un aire de revista: trama 0.4. NUNCA los quemes con un script aparte.
 
+## La música (si el usuario no trae)
+Recorte trae una biblioteca de música libre (CC0: sirve para cualquier video, sin dar crédito ni pagar). No sintetices
+música propia salvo que no haya otra cosa:
+- `python kit/kit.py musica [--animo tensa|epica|emotiva|alegre|calma|misterio] [--duracion 50]` → las pistas con su
+  estilo (clásica o moderna) y su duración.
+- `python kit/kit.py musica --usar <archivo>` → la copia a `medios/` y te da su ruta para `"musica": {"archivo": …}`.
+- Clásica para documentales, historia y relatos; moderna para promociones, tecnología y redes. Pon cada cambio de escena
+  en un golpe de la música (`kit.py golpes <la pista>`).
+
 ## La voz (narración)
 Recorte genera la narración con la voz que eligió el usuario; tú solo escribes qué dice.
 1. Escribe `voz/narracion.txt` con UNA frase por línea (una por momento, natural y hablada, ~2,5 palabras por segundo).
