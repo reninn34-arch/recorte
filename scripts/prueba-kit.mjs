@@ -390,6 +390,16 @@ try {
   const golpes = json(correr(python, ['kit/kit.py', 'sonidos', '--tipo', 'impacto'], trabajo)).sonidos
   if (!(golpes.length >= 3 && golpes.every((e) => e.tipo === 'impacto'))) throw new Error(`sonidos --tipo no filtró: ${JSON.stringify(golpes)}`)
   console.log(`efectos de sonido: ${efectos.length} en el catálogo, ${golpes.length} golpes ✓`)
+  // El muñeco por piezas: una minifigura de perfil camina (abre las piernas sin hundirse ni flotar), salta y se sienta.
+  const mu = json(correr(python, [join(raiz, 'scripts', 'prueba-muneco.py'), join(trabajo, 'kit'), trabajo], trabajo))
+  if (mu.vista !== 'perfil' || mu.mira !== 1 || !mu.piezas.includes('pie_d') || !mu.piezas.includes('mano_i'))
+    throw new Error(`muñeco: no vio el perfil o le faltan piezas: ${JSON.stringify(mu)}`)
+  if (!(mu.ancho_max_caminando > mu.ancho_quieto * 1.5)) throw new Error(`muñeco: al caminar no abre las piernas: ${JSON.stringify(mu)}`)
+  if (!(Math.abs(mu.suelo_caminando[0] - mu.suelo_quieto) <= 6 && Math.abs(mu.suelo_caminando[1] - mu.suelo_quieto) <= 6))
+    throw new Error(`muñeco: al caminar los pies se salen del suelo: ${JSON.stringify(mu)}`)
+  if (!(mu.suelo_saltando < -60 && mu.cabeza_sentado > 40)) throw new Error(`muñeco: no salta o no se sienta: ${JSON.stringify(mu)}`)
+  if (!existsSync(mu.info.dibujo) || !mu.info.gestos.includes('caminar')) throw new Error(`muñeco: la revisión de piezas falló: ${JSON.stringify(mu.info)}`)
+  console.log(`muñeco por piezas: ${mu.piezas.length} piezas de perfil; camina (${mu.ancho_quieto}→${mu.ancho_max_caminando} px, pies en el suelo), salta ${-mu.suelo_saltando} px y se sienta ✓`)
   const tensas = json(correr(python, ['kit/kit.py', 'musica', '--animo', 'tensa', '--duracion', '60'], trabajo))
   if (!(tensas.pistas.length >= 3 && tensas.pistas.every((p) => p.animo === 'tensa'))) throw new Error(`musica no filtró por ánimo: ${JSON.stringify(tensas)}`)
   const usada = json(correr(python, ['kit/kit.py', 'musica', '--usar', tensas.pistas[0].archivo], trabajo))

@@ -142,9 +142,15 @@ NUNCA los pegues con un script aparte: así quedan en las pistas «Encima» y «
 ## Por piezas: así se hace un documental con personas (el método normal)
 Como un editor con sus recursos sueltos: no pidas escenas enteras con la persona dentro; pide las PIEZAS y compón.
 1. **Reparto**: cada personaje, una vez, sobre verde: `kit.py imagen "<quién es, ropa, época, estilo>, full body, standing,
-   facing camera, arms slightly away from the body, neutral pose" --recorte`. Es su imagen principal (la marioneta).
+   facing camera, arms slightly away from the body, legs slightly apart, feet visible, neutral pose" --recorte`. Es su
+   imagen principal (la marioneta). Si en la historia camina, corre o se sienta, pide también su versión DE PERFIL con la
+   principal de `--ref` y anímala como **muñeco por piezas** (`"piezas": true`, ver «Muñeco por piezas»).
 2. **Decorados**: cada lugar, VACÍO: `kit.py imagen "<el lugar>, empty, no people, <estilo>"`. Un decorado sirve para
-   varias escenas (otro encuadre, otra luz no).
+   varias escenas (otro encuadre, otra luz no). Para que tenga espacio de verdad, ármalo POR PLANOS: el fondo lejano
+   (cielo, pared del fondo), el plano medio (la casa, el taller) y lo de delante (una mesa, una valla, plantas) como
+   piezas sueltas sobre verde con `--recorte`, cada una en su capa con su `profundidad` (0.1 el fondo, 0.4–0.6 el medio,
+   0.8–1 lo de delante, con algo de `desenfoque`). Así la cámara 3D separa los planos y el personaje queda ENTRE ellos.
+   Si ya tienes el decorado entero, `kit.py separar` lo parte en planos solo.
 3. **Acciones**: si en una escena hace algo concreto (tallar, mirar el fuego, empujar una máquina), pide al personaje
    haciéndolo, sobre verde y con su imagen principal de referencia: `kit.py imagen "the same man as in the reference,
    <acción>, full body" --ref medios/ole-recorte.png --recorte`. Misma cara, otra pose.
@@ -316,8 +322,40 @@ Si el usuario eligió generar imágenes o clips (lo dice AGENTS.md), Recorte los
      gesto hacia el otro lado); `armar` avisa si el brazo sale del cuadro.
   6. Los textos, lejos de sus brazos: con `saludar`, `senalar` o `explicar`, `armar` avisa si una palabra o un título cae
      donde se mueven (el brazo lo taparía). Ponlos por encima de la cabeza o a un lado, fuera de su alcance.
-  Límites: la cabeza no gira de perfil ni los dedos se articulan. Para eso (y para caminar) hace falta un clip de Flow
-  con créditos. Combina la marioneta con la escena 2.5D: la persona como capa con `profundidad` y su gesto.
+  Límites: la cabeza no gira de perfil ni los dedos se articulan, y la marioneta no mueve las piernas: para caminar,
+  correr, saltar o sentarse usa el **muñeco por piezas** (abajo). Combina la marioneta con la escena 2.5D: la persona
+  como capa con `profundidad` y su gesto.
+- **Muñeco por piezas (el personaje ENTERO se mueve, SIN créditos)**: como un muñeco articulado o el «cut-out» de los
+  animadores. El kit corta al personaje en piezas rígidas (cabeza, torso, brazos, antebrazos, manos, muslos, piernas y
+  pies), cada una gira sobre su bisagra sin estirarse, y cada unión lleva una tapa redonda (al girar no se abre un hueco).
+  El cuerpo sube o baja solo para que los pies sigan en el suelo. Es lo mejor para juguetes (LEGO, figuras), dibujos y
+  personajes de cuerpo entero; la marioneta suave queda mejor para una persona real hablando de medio cuerpo.
+  En la capa: `"piezas": true` y `"animar"` con cualquier gesto de la marioneta o uno de piernas: `"caminar"`,
+  `"correr"`, `"saltar"` (se agacha, salta con los brazos arriba y cae), `"agacharse"`, `"sentarse"` (pon la silla o
+  el banco en el decorado, detrás), `"patear"` y `"bailar"`. Los de piernas ya usan las piezas solos.
+  1. **Dos imágenes del mismo personaje** (la segunda con la primera de `--ref`, misma cara y ropa):
+     - DE FRENTE, para hablar, saludar, saltar o bailar: `kit.py imagen "<personaje>, full body, standing, facing camera,
+       arms slightly away from the body, legs slightly apart, feet visible, plain background" --recorte`.
+     - DE PERFIL, para caminar, correr, patear o sentarse (de frente, caminar apenas se nota): `kit.py imagen "the same
+       <personaje> as in the reference, full body, side view facing right, standing straight, arms slightly away from the
+       body, both legs and feet visible" --ref medios/<de-frente>.png --recorte`. Si va hacia la izquierda, `"espejo"` no
+       hace falta: pide `facing left`.
+     Cuerpo entero SIEMPRE (con los pies dentro de la imagen): sin pies no puede mover las piernas.
+  2. `python kit/kit.py muneco medios/<personaje>.png` → `dibujo` (cada pieza en un color, con sus bisagras en círculos:
+     MÍRALO), `vista` (frente o perfil), `mira_a` y `gestos`. Si una pieza quedó mal (un brazo cortado por el codo
+     equivocado), corrige sus puntos como en la marioneta: `"animar": {"tipo": "caminar", "puntos": {"rodilla_d": [0.4,
+     0.7]}}`. Con un juguete o un dibujo el modelo puede fallar: si `muneco` no encuentra las piernas o los puntos están
+     fuera de sitio, dáselos TODOS en `puntos` (nariz, hombro_i/d, codo_i/d, muneca_i/d, mano_i/d, cadera_i/d,
+     rodilla_i/d, tobillo_i/d, punta_i/d), mirando la imagen.
+  3. **Que avance**: caminar y correr son en el sitio (como en una cinta); para que cruce la escena, mueve la capa con
+     `"fin": {"x": …}` en la dirección en que mira. Velocidad creíble: caminando, cruza el cuadro en 5–7 s; corriendo, en
+     2–3 s. Al revés (mirando a un lado y avanzando al otro) parece que patina.
+  4. Secuencias en UNA capa, como la marioneta: `"animar": [{"tipo": "caminar", "hasta": 3}, {"tipo": "hablar"}]`
+     (llega caminando y se pone a hablar; para que se pare donde habla, que el `fin` de la capa llegue ahí y la capa
+     siguiente empiece en ese sitio). Un personaje de perfil que habla gira la cabeza poco: para hablarle a la cámara,
+     cambia a la imagen de frente en el corte siguiente.
+  5. Escena 2.5D: el muñeco va como una capa más, con su `profundidad`, delante del decorado y detrás de lo que tenga
+     delante (una mesa, una valla).
 - **Un personaje que se mueve de verdad** (gesticula, camina; solo si el usuario acepta gastar créditos): `python kit/kit.py clip
   "descripción del movimiento" --ref medios/personaje.png --recorte` pide a Flow un clip de 8 s sobre verde croma a partir
   de su imagen y le quita el verde: devuelve `recorte`, un WebM con transparencia. Úsalo como cualquier capa

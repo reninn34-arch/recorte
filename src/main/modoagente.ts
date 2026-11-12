@@ -189,6 +189,13 @@ de museo bajo un foco que entra girando en 3D y fotos de archivo que caen apilad
   con la luz del decorado y su sombra, animado como marioneta. Varía acción y plano entre escenas (lee «Por piezas» en
   kit/RECETA.md). Si ya tienes una imagen entera con la persona, \`kit.py escena <imagen>\` la separa. \`armar\` avisa
   si el video es casi todo fotos planas o si la misma pose se repite.
+- **Muñeco por piezas**: si un personaje de cuerpo entero camina, corre, salta, se agacha, se sienta o patea (y siempre
+  con juguetes, figuras o dibujos), anímalo como muñeco por piezas: \`"piezas": true\` y \`"animar": "caminar"\` (o una
+  secuencia) en su capa. Pide su imagen de frente y, para caminar o correr, la de perfil con la de frente de --ref;
+  revisa cada una con \`kit.py muneco <png>\` (mira el dibujo de piezas) y hazlo cruzar la escena con el \`fin\` de la capa.
+- **Decorado por planos**: el lugar vacío de fondo y, sueltas sobre verde, las piezas de delante (una mesa, una valla,
+  plantas, una estantería), cada una en su capa con su \`profundidad\`; el personaje queda entre ellas y la cámara 3D
+  separa los planos. Así se siente el espacio.
 - **Música**: si el usuario no trae, elige de la biblioteca libre de Recorte (\`python kit/kit.py musica --animo tensa\`,
   luego \`--usar <archivo>\`). No la sintetices tú.
 - \`python kit/kit.py golpes <audio-o-video>\`: los golpes de la música y el tempo, para poner cada momento en su golpe.
@@ -622,10 +629,12 @@ function comoGuionGrafico(c: Creacion): string {
   cuerpo entero o medio cuerpo, los brazos un poco separados del cuerpo) y en cada escena donde vuelve a salir pasas esa
   imagen con --ref y lo dices en el prompt ("the same man as in the reference"). Sin eso, cada imagen trae otra cara.
 - **Por piezas, no escenas enteras**: en un documental, una historia o un explicativo con personas, el guion gráfico
-  empieza por las PIEZAS: el reparto (cada personaje, una vez, de frente y con los brazos algo separados, sobre verde),
-  los decorados (cada lugar vacío, sin gente) y la utilería que se mueve; y para cada escena, qué decorado, qué
+  empieza por las PIEZAS: el reparto (cada personaje, una vez, de frente, cuerpo entero con los pies, los brazos algo
+  separados, sobre verde; y de perfil si camina o corre), los decorados (cada lugar vacío, sin gente, y lo que va
+  delante como pieza suelta para los planos) y la utilería que se mueve; y para cada escena, qué decorado, qué
   personaje haciendo qué (una acción nueva con --ref de su imagen principal si hace algo concreto) y qué plano (entero,
-  medio o primer plano), variando de una escena a otra. Así se compone cada escena (\`kit.py componer\`) con la persona
+  medio o primer plano) y qué movimiento (un gesto de marioneta o, si camina, corre, salta o se sienta, el muñeco por
+  piezas), variando de una escena a otra. Así se compone cada escena (\`kit.py componer\`) con la persona
   animada delante de su escenario en 3D. Un video de solo fotos con zoom se ve barato: eso es lo que hay que evitar.
 ${m.clips ? `- En "mensaje" dile cuántos clips son y lo que cuestan (${m.clips}: ${costoClips(c)} por clip), y que solo se generan cuando diga «Hazlo». Como mucho ${MAX_CLIPS_GUION} clips.` : ''}`
 }

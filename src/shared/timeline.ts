@@ -288,6 +288,13 @@ export type TipoAnimar =
   | 'saludar'
   | 'senalar'
   | 'explicar'
+  | 'caminar'
+  | 'correr'
+  | 'saltar'
+  | 'agacharse'
+  | 'sentarse'
+  | 'patear'
+  | 'bailar'
 /**
  * Cómo se puede animar una imagen recortada sin gastar créditos: deformándola (respira, ondea…) o, si es una
  * persona, como marioneta por huesos (`marioneta`: mueve la cabeza, los brazos, el peso del cuerpo).
@@ -304,7 +311,15 @@ export const ANIMAR_CAPA: { id: TipoAnimar; nombre: string; para: string; marion
   { id: 'peso', nombre: 'Marioneta: cambia el peso', para: 'una persona de pie que pasa el peso de un pie al otro', marioneta: true },
   { id: 'saludar', nombre: 'Marioneta: saluda', para: 'una persona que saluda con la mano (brazos separados del cuerpo)', marioneta: true },
   { id: 'senalar', nombre: 'Marioneta: señala', para: 'una persona que señala a un lado (brazos separados del cuerpo)', marioneta: true },
-  { id: 'explicar', nombre: 'Marioneta: explica', para: 'una persona que abre los brazos al explicar (brazos separados)', marioneta: true }
+  { id: 'explicar', nombre: 'Marioneta: explica', para: 'una persona que abre los brazos al explicar (brazos separados)', marioneta: true },
+  // Las del muñeco por piezas (rígidas, con bisagras): mueven también las piernas; los pies siguen en el suelo.
+  { id: 'caminar', nombre: 'Muñeco: camina', para: 'un personaje de cuerpo entero que camina (de perfil se ve mejor)', marioneta: true },
+  { id: 'correr', nombre: 'Muñeco: corre', para: 'un personaje de cuerpo entero que corre (de perfil se ve mejor)', marioneta: true },
+  { id: 'saltar', nombre: 'Muñeco: salta', para: 'un personaje que se agacha y salta con los brazos arriba', marioneta: true },
+  { id: 'agacharse', nombre: 'Muñeco: se agacha', para: 'un personaje que se agacha a mirar o a recoger algo', marioneta: true },
+  { id: 'sentarse', nombre: 'Muñeco: se sienta', para: 'un personaje que se sienta (pon la silla o el banco en el decorado)', marioneta: true },
+  { id: 'patear', nombre: 'Muñeco: patea', para: 'un personaje que da una patada (a un balón, a una puerta)', marioneta: true },
+  { id: 'bailar', nombre: 'Muñeco: baila', para: 'un personaje que baila y celebra', marioneta: true }
 ]
 /** La animación deja un margen del 8 % por lado: la capa animada mide esto más para que la imagen se vea igual. */
 export const MARGEN_ANIMAR = 1.16

@@ -415,7 +415,9 @@ export async function proyectoDesdeReceta(
     const animada =
       medio.tipo === 'imagen' && typeof tipoAnimar === 'string' && ANIMAR_CAPA.some((t) => t.id === tipoAnimar) && ruta
         ? await (() => {
-            const opciones = secuencia ? { secuencia, duracion: b - a } : x.animar && typeof x.animar === 'object' ? (x.animar as Record<string, unknown>) : {}
+            const base = secuencia ? { secuencia, duracion: b - a } : x.animar && typeof x.animar === 'object' ? (x.animar as Record<string, unknown>) : {}
+            // «piezas»: el muñeco por piezas rígidas (también se puede poner en la capa).
+            const opciones = x.piezas === true ? { ...base, piezas: true } : base
             const clave = JSON.stringify([ruta, tipoAnimar, opciones])
             if (!animadas.has(clave)) animadas.set(clave, animarConKit(trabajo, ruta, tipoAnimar, carpetaProyecto, opciones))
             return animadas.get(clave)!
@@ -551,6 +553,7 @@ async function animarConKit(
   }
   if (typeof opciones.fuerza === 'number' && Number.isFinite(opciones.fuerza)) extra.push('--fuerza', String(pinza(opciones.fuerza, 0, 1.5)))
   if (opciones.lado === 'izquierda' || opciones.lado === 'derecha') extra.push('--lado', opciones.lado)
+  if (opciones.piezas === true) extra.push('--piezas')
   if (opciones.puntos && typeof opciones.puntos === 'object') {
     // El esqueleto corregido por el agente, en un archivo (en la línea de órdenes las comillas se pierden).
     const archivo = join(carpeta, `puntos-${randomUUID().slice(0, 6)}.json`)

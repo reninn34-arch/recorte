@@ -356,7 +356,7 @@ def leer_capas(lista, L):
             'animada': (animacion_capa(im.resize((max(w, round(L.W * float(fin.get('ancho', ancho)))) if fin else w,
                                            max(1, round(im.height * (max(w, round(L.W * float(fin.get('ancho', ancho)))) if fin else w) / im.width))), Image.LANCZOS),
                                 *((c['animar'], 0.5) if isinstance(c.get('animar'), (str, list)) else (c['animar'].get('tipo'), c['animar'].get('fuerza', 0.5))),
-                                c['animar'] if isinstance(c.get('animar'), dict) else None)
+                                {**(c['animar'] if isinstance(c.get('animar'), dict) else {}), **({'piezas': True} if c.get('piezas') else {})})
                         if c.get('animar') and not video else None),
             # Escena 2.5D: a qué distancia está (0 pegada al fondo, 1 muy cerca); sin ella, fija en la pantalla.
             'profundidad': min(1.0, max(0.0, float(c['profundidad']))) if isinstance(c.get('profundidad'), (int, float)) else None,
@@ -438,22 +438,31 @@ class Animada:
 
 def animacion_capa(im, tipo, fuerza=0.5, extra=None):
     """La animación de una capa: deformación (respirar, ondear…) o marioneta por huesos (hablar, saludar…)."""
-    if isinstance(tipo, list) or tipo in GESTOS:
+    if isinstance(tipo, list) or tipo in GESTOS + GESTOS_PIERNAS:
         e = extra or {}
-        return Marioneta(im, tipo, fuerza, e.get('puntos'), e.get('lado'))
+        clase = Muneco if e.get('piezas') or _pide_piernas(tipo) else Marioneta
+        return clase(im, tipo, fuerza, e.get('puntos'), e.get('lado'))
     return Animada(im, tipo, fuerza)
 
 
-def animar_imagen(ruta, tipo, fuerza=0.5, salida=None, duracion=CICLO_S, fps=30, puntos=None, lado=None):
+def _pide_piernas(tipo):
+    """Si un gesto (o una secuencia) mueve las piernas: solo lo hace el muñeco por piezas."""
+    lista = tipo if isinstance(tipo, list) else [tipo]
+    return any((x.get('tipo') if isinstance(x, dict) else x) in GESTOS_PIERNAS for x in lista)
+
+
+def animar_imagen(ruta, tipo, fuerza=0.5, salida=None, duracion=CICLO_S, fps=30, puntos=None, lado=None, piezas=False):
     """La imagen recortada, animada en bucle (un WebM con transparencia): para usarla como capa en el editor."""
     im = Image.open(ruta).convert('RGBA')
     # Hasta 1080 de lado: suficiente para una capa y rápido de animar.
     if max(im.size) > 1080:
         im.thumbnail((1080, 1080), Image.LANCZOS)
-    marioneta = isinstance(tipo, list) or tipo in GESTOS
-    an = Marioneta(im, tipo, fuerza, puntos, lado) if marioneta else Animada(im, tipo, fuerza)
+    marioneta = isinstance(tipo, list) or tipo in GESTOS + GESTOS_PIERNAS
+    clase = Muneco if piezas or _pide_piernas(tipo) else Marioneta
+    an = clase(im, tipo, fuerza, puntos, lado) if marioneta else Animada(im, tipo, fuerza)
     W, H = an.W - an.W % 2, an.H - an.H % 2
-    salida = salida or os.path.splitext(ruta)[0] + f'-{an.gesto if marioneta else an.tipo}{"-secuencia" if isinstance(tipo, list) else ""}.webm'
+    salida = salida or os.path.splitext(ruta)[0] + (f'-{an.gesto if marioneta else an.tipo}{"-secuencia" if isinstance(tipo, list) else ""}'
+                                                     f'{"-piezas" if marioneta and isinstance(an, Muneco) else ""}.webm')
     escribe = subprocess.Popen([FFMPEG, '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', f'{W}x{H}', '-r', str(fps), '-i', '-',
                                 '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-b:v', '0', '-crf', '26', '-row-mt', '1', '-auto-alt-ref', '0',
                                 salida], stdin=subprocess.PIPE)
@@ -481,9 +490,11 @@ GESTOS = ('hablar', 'asentir', 'ladear', 'saludar', 'senalar', 'peso', 'explicar
 # Los puntos del cuerpo que usa (los del formato COCO).
 PUNTOS = {'nariz': 0, 'ojo_i': 1, 'ojo_d': 2, 'oreja_i': 3, 'oreja_d': 4, 'hombro_i': 5, 'hombro_d': 6, 'codo_i': 7, 'codo_d': 8,
           'muneca_i': 9, 'muneca_d': 10, 'cadera_i': 11, 'cadera_d': 12, 'rodilla_i': 13, 'rodilla_d': 14, 'tobillo_i': 15,
-          'tobillo_d': 16}
+          'tobillo_d': 16, 'punta_i': 17, 'talon_i': 19, 'punta_d': 20, 'talon_d': 22}
 # Los gestos que levantan un brazo: la imagen necesita margen a los lados del largo del brazo para que no se corte.
 GESTOS_BRAZO = ('saludar', 'senalar', 'explicar')
+# Los del muñeco por piezas: mueven las piernas (y con ellas todo el cuerpo, con los pies en el suelo).
+GESTOS_PIERNAS = ('caminar', 'correr', 'saltar', 'agacharse', 'sentarse', 'patear', 'bailar')
 
 
 def esqueleto(im):
@@ -555,6 +566,8 @@ class Marioneta:
     suaves que van por dentro de la silueta (la mano no se queda pegada a la cadera). `puntos` corrige o
     da el esqueleto ({"hombro_d": [x, y], …} en fracción de la imagen); si no, lo detecta un modelo local."""
 
+    VALIDOS = GESTOS
+
     def __init__(self, im, gesto='hablar', fuerza=0.5, puntos=None, lado=None):
         import cv2
         self.cv2 = cv2
@@ -564,7 +577,7 @@ class Marioneta:
         self.secuencia = []
         for x in lista:
             x = x if isinstance(x, dict) else {'tipo': x}
-            self.secuencia.append({'tipo': x.get('tipo') if x.get('tipo') in GESTOS else 'hablar',
+            self.secuencia.append({'tipo': x.get('tipo') if x.get('tipo') in self.VALIDOS else 'hablar',
                                    'hasta': float(x['hasta']) if isinstance(x.get('hasta'), (int, float)) else None,
                                    'fuerza': max(0.0, min(1.5, float(x.get('fuerza', fuerza)))), 'lado': x.get('lado', lado)})
         if not self.secuencia:
@@ -581,13 +594,7 @@ class Marioneta:
         # El margen alrededor: con un gesto de brazo, lo que mide el brazo (estirado no se sale); si no, poco.
         brazo = max([np.linalg.norm(P0[f'mano_{l}' if f'mano_{l}' in P0 else f'muneca_{l}'] - P0[f'hombro_{l}'])
                      for l in ('i', 'd') if f'hombro_{l}' in P0 and (f'mano_{l}' in P0 or f'muneca_{l}' in P0)] or [0.3 * h])
-        if any(x['tipo'] in GESTOS_BRAZO for x in self.secuencia):
-            hombros_x = [P0[f'hombro_{l}'][0] for l in ('i', 'd') if f'hombro_{l}' in P0] or [w / 2]
-            sobra = max(brazo * 1.12 - min(hombros_x), brazo * 1.12 - (w - max(hombros_x)), 0.1 * w)
-            hombro_y = min([P0[f'hombro_{l}'][1] for l in ('i', 'd') if f'hombro_{l}' in P0] or [0.25 * h])
-            self.mx, self.my = round(sobra), round(max(0.06 * h, brazo * 1.05 - hombro_y))
-        else:
-            self.mx, self.my = round(0.12 * w), round(0.06 * h)
+        self.mx, self.my = self._margen(P0, w, h, brazo)
         base = Image.new('RGBA', (w + 2 * self.mx, h + 2 * self.my), (0, 0, 0, 0))
         base.paste(im, (self.mx, self.my))
         self.W, self.H, self.w, self.h = base.width, base.height, w, h
@@ -661,8 +668,17 @@ class Marioneta:
         self.gesto = self.secuencia[0]['tipo']
         self._pesos()
 
-    def _pesos(self):
-        """El peso de cada hueso en cada píxel, por la distancia por DENTRO de la silueta a cada hueso."""
+    def _margen(self, P0, w, h, brazo):
+        """El margen alrededor de la imagen (x, y): con un gesto de brazo, lo que mide el brazo; si no, poco."""
+        if any(x['tipo'] in GESTOS_BRAZO for x in self.secuencia):
+            hombros_x = [P0[f'hombro_{l}'][0] for l in ('i', 'd') if f'hombro_{l}' in P0] or [w / 2]
+            sobra = max(brazo * 1.12 - min(hombros_x), brazo * 1.12 - (w - max(hombros_x)), 0.1 * w)
+            hombro_y = min([P0[f'hombro_{l}'][1] for l in ('i', 'd') if f'hombro_{l}' in P0] or [0.25 * h])
+            return round(sobra), round(max(0.06 * h, brazo * 1.05 - hombro_y))
+        return round(0.12 * w), round(0.06 * h)
+
+    def _pesos_suaves(self):
+        """Los pesos de cada hueso a poca resolución (y la escala a la que están)."""
         cv2 = self.cv2
         k = 220 / max(self.W, self.H)
         cw, ch = max(8, round(self.W * k)), max(8, round(self.H * k))
@@ -714,11 +730,20 @@ class Marioneta:
             cv2.fillPoly(dentro, [np.round(np.array(tronco)).astype(np.int32)], 1)
             dentro = cv2.GaussianBlur(dentro.astype(np.float32), (5, 5), 0)
             for i, (n, *_r) in enumerate(self.huesos):
-                if n.startswith(('brazo', 'antebrazo')):
+                if n.startswith(('brazo', 'antebrazo', 'mano')):
                     w[i] *= 1 - dentro
         w /= w.sum(0, keepdims=True)
+        return w
+
+    def _pesos(self):
+        """El peso de cada hueso en cada píxel, por la distancia por DENTRO de la silueta a cada hueso."""
+        cv2 = self.cv2
+        w = self._pesos_suaves()
         # A tamaño completo, y por la transparencia: lo que cada hueso «lleva» de la imagen.
         self.peso = [cv2.resize(x.astype(np.float32), (self.W, self.H), interpolation=cv2.INTER_LINEAR) * self.alfa for x in w]
+        self._cajas()
+
+    def _cajas(self):
         # La zona que ocupa cada hueso (donde pesa algo): al dibujar, cada uno se calcula solo ahí.
         self.cajas = []
         for p in self.peso:
@@ -848,8 +873,8 @@ class Marioneta:
         cq = [self.cajas[i] for i, _ in quietos if self.cajas[i]]
         if cq:
             x0, y0, x1, y1 = min(c[0] for c in cq), min(c[1] for c in cq), max(c[2] for c in cq), max(c[3] for c in cq)
-            p = sum(self.peso[i][y0:y1, x0:x1] for i, _ in quietos)
-            capas.append((min(i for i, _ in quietos), (x0, y0, x1, y1), self.rgb[y0:y1, x0:x1], p))
+            p = np.minimum(sum(self.peso[i][y0:y1, x0:x1] for i, _ in quietos), self.alfa[y0:y1, x0:x1])
+            capas.append((min(self._rango(i) for i, _ in quietos), (x0, y0, x1, y1), self.rgb[y0:y1, x0:x1], p))
         for i, nombre in moviles:
             caja = self.cajas[i]
             if not caja:
@@ -866,7 +891,7 @@ class Marioneta:
             col = cv2.warpAffine(self.rgb, M, (x1 - x0, y1 - y0), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_REPLICATE)
             p = cv2.warpAffine(self.peso[i], M, (x1 - x0, y1 - y0), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
                                borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-            capas.append((i, (x0, y0, x1, y1), col, p))
+            capas.append((self._rango(i), (x0, y0, x1, y1), col, p))
         # Cada hueso es una capa: lo de delante (los brazos, al final) tapa lo de atrás; la opacidad es la suma.
         for _, (x0, y0, x1, y1), col, p in sorted(capas, key=lambda x: x[0]):
             pp = p[..., None]
@@ -881,6 +906,10 @@ class Marioneta:
         alfa = np.clip(total, 0, 1)
         return Image.fromarray(np.dstack([np.clip(rgb, 0, 255), alfa * 255]).astype(np.uint8), 'RGBA')
 
+    def _rango(self, i):
+        """En qué orden se dibuja el hueso i (lo de atrás primero)."""
+        return i
+
     def dibujo(self):
         """La imagen con el esqueleto encima, para revisar que los huesos están bien puestos."""
         d = Image.new('RGBA', (self.W, self.H), (70, 70, 70, 255))
@@ -888,11 +917,323 @@ class Marioneta:
         g = ImageDraw.Draw(d)
         r = max(3, round(self.ancho_hombros / 30))
         for nombre, a, b, _ in self.huesos:
-            col = (255, 80, 60) if nombre.startswith(('brazo', 'antebrazo')) else (60, 200, 255)
+            col = (255, 80, 60) if nombre.startswith(('brazo', 'antebrazo', 'mano')) else (60, 200, 255)
             g.line([tuple(self.P[a]), tuple(self.P[b])], fill=col, width=r)
             for p in (self.P[a], self.P[b]):
                 g.ellipse((p[0] - r * 1.4, p[1] - r * 1.4, p[0] + r * 1.4, p[1] + r * 1.4), fill=(255, 255, 255))
         return d.crop((self.mx, self.my, self.mx + self.w, self.my + self.h))
+
+
+class Muneco(Marioneta):
+    """El personaje por PIEZAS rígidas, como un muñeco articulado (un LEGO, un títere de recortes, Cut-out de
+    After Effects): cabeza, torso, brazos, antebrazos, manos, muslos, piernas y pies, cada uno girando sobre su
+    bisagra sin estirarse. Las piezas salen de UNA imagen del personaje entero: cada píxel va a su pieza, y cada
+    unión lleva una tapa redonda que comparten las dos piezas (al girar no se abre un hueco). Además de los
+    gestos de la marioneta, mueve las piernas (caminar, correr, saltar, agacharse, sentarse, patear, bailar), y el
+    cuerpo baja o sube solo para que los pies sigan en el suelo. De frente o de perfil (se ve solo)."""
+
+    VALIDOS = GESTOS + GESTOS_PIERNAS
+
+    def _margen(self, P0, w, h, brazo):
+        mx, my = Marioneta._margen(self, P0, w, h, brazo)
+        tipos = {x['tipo'] for x in self.secuencia}
+        pierna = max([np.linalg.norm(P0[f'tobillo_{l}'] - P0[f'cadera_{l}']) for l in ('i', 'd')
+                      if f'tobillo_{l}' in P0 and f'cadera_{l}' in P0] or [0.45 * h])
+        if tipos & {'patear', 'correr', 'caminar', 'bailar', 'sentarse'}:
+            mx = max(mx, round(0.7 * pierna))
+        if tipos & {'saltar', 'bailar'}:
+            my = max(my, round(0.45 * pierna))
+        if tipos & {'saltar', 'bailar', 'correr'}:
+            # Los brazos arriba (y al saltar, además, todo el cuerpo sube).
+            my = max(my, round(brazo * 0.9 + (0.4 * pierna if 'saltar' in tipos else 0)))
+            mx = max(mx, round(brazo * 0.6))
+        return mx, my
+
+    def _pesos(self):
+        cv2 = self.cv2
+        P = self.P
+        # Los huesos del muñeco: la mano y el pie aparte, y las piernas cuelgan de la cadera (del cuerpo entero).
+        huesos = [('torso', 'pelvis', 'cuello', None), ('cabeza', 'cuello', 'cabeza', 'torso')]
+        for l in ('i', 'd'):
+            if f'rodilla_{l}' in P and f'cadera_{l}' in P:
+                huesos.append((f'muslo_{l}', f'cadera_{l}', f'rodilla_{l}', None))
+                if f'tobillo_{l}' in P:
+                    huesos.append((f'pierna_{l}', f'rodilla_{l}', f'tobillo_{l}', f'muslo_{l}'))
+                    if f'punta_{l}' in P:
+                        huesos.append((f'pie_{l}', f'tobillo_{l}', f'punta_{l}', f'pierna_{l}'))
+            if f'codo_{l}' in P:
+                huesos.append((f'brazo_{l}', f'hombro_{l}', f'codo_{l}', 'torso'))
+                if f'muneca_{l}' in P:
+                    huesos.append((f'antebrazo_{l}', f'codo_{l}', f'muneca_{l}', f'brazo_{l}'))
+                    if f'mano_{l}' in P and np.linalg.norm(P[f'mano_{l}'] - P[f'muneca_{l}']) > 2:
+                        huesos.append((f'mano_{l}', f'muneca_{l}', f'mano_{l}', f'antebrazo_{l}'))
+                elif f'mano_{l}' in P:
+                    huesos.append((f'antebrazo_{l}', f'codo_{l}', f'mano_{l}', f'brazo_{l}'))
+        self.huesos = huesos
+        self._nombres = {h[0] for h in huesos}
+        self.segmentos = {n: [(P[a], P[b])] for n, a, b, _ in huesos}
+        for l in ('i', 'd'):
+            if f'cadera_{l}' in P:
+                self.segmentos['torso'].append((P[f'hombro_{l}'] + 0.15 * (P['cuello'] - P[f'hombro_{l}']), P[f'cadera_{l}']))
+        if 'cadera_i' in P and 'cadera_d' in P:
+            self.segmentos['torso'].append((P['cadera_i'], P['cadera_d']))
+        # De frente o de perfil: de perfil los hombros casi se juntan.
+        largo_torso = float(np.linalg.norm(P['cuello'] - P['pelvis'])) or 1.0
+        self.perfil = self.ancho_hombros < 0.45 * largo_torso
+        mira = (P['nariz'][0] - P['cuello'][0]) if 'nariz' in P else 0.0
+        self.adelante = 1 if mira >= 0 else -1
+        # De perfil, el lado de atrás (el más lejos de la cámara): mirando a la derecha se ve el lado izquierdo.
+        self.atras = ('d' if self.adelante > 0 else 'i') if self.perfil else None
+        # El orden de dibujo (lo de atrás primero): de frente, las piernas detrás del torso y los brazos delante;
+        # de perfil, el brazo y la pierna de atrás detrás de todo.
+        def rango(n):
+            l = n[-1] if n[-2:] in ('_i', '_d') else None
+            parte = n[:-2] if l else n
+            sub = {'muslo': 0, 'pierna': 1, 'pie': 2, 'brazo': 0, 'antebrazo': 1, 'mano': 2}.get(parte, 0)
+            if self.perfil:
+                if l == self.atras:
+                    return (0 if parte in ('brazo', 'antebrazo', 'mano') else 10) + sub
+                if parte in ('muslo', 'pierna', 'pie'):
+                    return 30 + sub
+                if parte in ('brazo', 'antebrazo', 'mano'):
+                    return 50 + sub
+                return {'torso': 20, 'cabeza': 40}[parte]
+            if parte in ('muslo', 'pierna', 'pie'):
+                return (0 if l == 'i' else 5) + sub
+            if parte in ('brazo', 'antebrazo', 'mano'):
+                return (30 if l == 'i' else 35) + sub
+            return {'torso': 20, 'cabeza': 25}[parte]
+        self.rangos = [rango(n) for n, *_r in huesos]
+        # Cada píxel, a UNA pieza: la de más peso (a tamaño completo, para que el corte no salga en escalera).
+        w = self._pesos_suaves()
+        grande = np.stack([cv2.resize(x.astype(np.float32), (self.W, self.H), interpolation=cv2.INTER_LINEAR) for x in w])
+        etiqueta = grande.argmax(0)
+        del grande
+        masc = [(etiqueta == i).astype(np.float32) for i in range(len(huesos))]
+        # Las tapas de cada unión: un círculo del ancho de la pieza en la bisagra, en las dos piezas que se tocan.
+        dentro = (self.alfa > 0.5).astype(np.uint8)
+        hasta_borde = cv2.distanceTransform(dentro, cv2.DIST_L2, 5)
+        padre_visual = {n: (p or 'torso') for n, a, b, p in huesos if n != 'torso'}
+        indice = {n: i for i, (n, *_r) in enumerate(huesos)}
+        self.tapas = {}
+        for n, a, b, _ in huesos:
+            if n not in padre_visual:
+                continue
+            x, y = P[a]
+            xi, yi = int(round(min(self.W - 1, max(0, x)))), int(round(min(self.H - 1, max(0, y))))
+            r = float(hasta_borde[max(0, yi - 2):yi + 3, max(0, xi - 2):xi + 3].max()) * 1.15
+            # Con tope: en el cuello o la cadera la distancia al borde es la del tronco (un saco, un mandil), no la del hueso.
+            tope = {'cabeza': 0.2, 'muslo': 0.24, 'brazo': 0.2}.get(n[:-2] if n[-2:] in ('_i', '_d') else n)
+            r = max(3.0, min(r, 0.5 * np.linalg.norm(P[b] - P[a]) + 2, tope * self.ancho_hombros if tope else 1e9))
+            self.tapas[n] = r
+            disco = np.zeros((self.H, self.W), np.float32)
+            cv2.circle(disco, (xi, yi), int(round(r)), 1.0, -1, cv2.LINE_AA)
+            for m in (n, padre_visual[n]):
+                if m in indice:
+                    masc[indice[m]] = np.maximum(masc[indice[m]], disco)
+        # Un borde de un píxel suave (sin escalones) y solo donde hay personaje.
+        self.peso = [cv2.GaussianBlur(m, (0, 0), 0.7) * self.alfa for m in masc]
+        # Dónde están los pies en reposo (para mantenerlos en el suelo).
+        self.suelo_reposo = max([P[f'{q}_{l}'][1] for l in ('i', 'd') for q in ('tobillo', 'punta', 'talon') if f'{q}_{l}' in P] or [0])
+        self._cajas()
+
+    def _rango(self, i):
+        return self.rangos[i]
+
+    def transformaciones(self, t):
+        """Como la marioneta, y además el cuerpo entero (la raíz, en la pelvis): sube, baja, se mece; y lo justo
+        para que el pie más bajo siga en el suelo."""
+        giros, extra = self.poses(t)
+        T = {}
+        for nombre, a, b, padre in self.huesos:
+            e = extra.get(nombre, {})
+            local = _rot(giros.get(nombre, 0.0), *self.P[a], e.get('sx', 1.0), e.get('sy', 1.0), e.get('dx', 0.0), e.get('dy', 0.0))
+            T[nombre] = (T[padre] @ local) if padre in T else local
+        # Los pies en el suelo: el punto más bajo de los pies vuelve a la altura que tenía.
+        bajo = None
+        for l in ('i', 'd'):
+            for q in ('tobillo', 'punta', 'talon'):
+                n = f'{q}_{l}'
+                hueso = f'pie_{l}' if f'pie_{l}' in T else f'pierna_{l}'
+                if n in self.P and hueso in T:
+                    y = (T[hueso] @ np.array([*self.P[n], 1.0]))[1]
+                    bajo = y if bajo is None else max(bajo, y)
+        suelo = (self.suelo_reposo - bajo) if bajo is not None and self.suelo_reposo else 0.0
+        r = extra.get('raiz', {})
+        raiz = _rot(giros.get('raiz', 0.0), *self.P['pelvis'], 1.0, 1.0, r.get('dx', 0.0), suelo + r.get('dy', 0.0))
+        return {n: raiz @ m for n, m in T.items()}
+
+    def _pierna(self, g, extra, l, avance, rodilla, levanta=0.0):
+        """Una pierna: `avance` grados hacia delante desde la cadera, `rodilla` grados de rodilla doblada (hacia
+        atrás). De frente, avanzar es acortarse (la pierna viene hacia la cámara) y `levanta` (0 a 1) la sube."""
+        if f'muslo_{l}' not in self._nombres:
+            return
+        if self.perfil:
+            # A ángulos fijos (no sumados a la pose de la imagen: puede venir a medio paso): el muslo a `avance`
+            # grados de la vertical y la pierna, `rodilla` grados más atrás; el pie vuelve a quedar como estaba.
+            fw = -self.adelante
+            gm = self._hacia(f'muslo_{l}', fw * avance)
+            gp = self._hacia(f'pierna_{l}', fw * (avance - rodilla), gm) if f'pierna_{l}' in self._nombres else 0.0
+            g[f'muslo_{l}'] = gm
+            g[f'pierna_{l}'] = gp
+            g[f'pie_{l}'] = -(gm + gp) + fw * 0.25 * max(0.0, rodilla - avance)
+        else:
+            muslo = math.cos(math.radians(min(85.0, abs(avance))))
+            pierna = math.cos(math.radians(min(85.0, max(0.0, rodilla - abs(avance)) * 0.6)))
+            extra[f'muslo_{l}'] = {**extra.get(f'muslo_{l}', {}), 'sy': muslo * (1 - 0.35 * levanta)}
+            extra[f'pierna_{l}'] = {**extra.get(f'pierna_{l}', {}), 'sy': pierna}
+
+    def _brazo_vaiven(self, g, extra, l, k, codo=12.0):
+        """El brazo que va y viene al caminar: k de -1 (atrás) a 1 (adelante)."""
+        if f'brazo_{l}' not in self._nombres:
+            return
+        if self.perfil:
+            fw = -self.adelante
+            g[f'brazo_{l}'] = g.get(f'brazo_{l}', 0.0) + fw * 28 * k
+            g[f'antebrazo_{l}'] = g.get(f'antebrazo_{l}', 0.0) + fw * (codo + 10 * max(0.0, k))
+        else:
+            fuera = 1 if self.P[f'hombro_{l}'][0] < self.P['cuello'][0] else -1
+            g[f'brazo_{l}'] = g.get(f'brazo_{l}', 0.0) + fuera * 3 * abs(k)
+            extra[f'brazo_{l}'] = {**extra.get(f'brazo_{l}', {}), 'sy': 1 - 0.12 * max(0.0, k)}
+            g[f'antebrazo_{l}'] = g.get(f'antebrazo_{l}', 0.0) - fuera * codo * 0.4 * max(0.0, k)
+
+    def _pose(self, gesto, t, local, lado, f):
+        if gesto not in GESTOS_PIERNAS:
+            return Marioneta._pose(self, gesto, t, local, lado, f)
+        g, extra = {}, {}
+        alto = self.suelo_reposo - self.P['cabeza'][1] if self.suelo_reposo else self.h
+        f2 = 0.5 + f
+        fw = -self.adelante if self.perfil else 0
+        g['cabeza'] = 1.2 * f * math.sin(2 * math.pi * t / CICLO_S + 0.7)
+        if gesto in ('caminar', 'correr'):
+            # Un paso por pierna en cada ciclo; el ciclo divide al bucle de 4 s (se repite sin salto).
+            periodo = CICLO_S / round(CICLO_S / (1.1 if gesto == 'caminar' else 0.66))
+            fase = 2 * math.pi * t / periodo
+            corre = gesto == 'correr'
+            for l, off in (('i', 0.0), ('d', math.pi)):
+                s_ = math.sin(fase + off)
+                adelante = max(0.0, math.cos(fase + off))
+                self._pierna(g, extra, l, (34 if corre else 22) * f2 * s_, (80 if corre else 38) * f2 * adelante ** 1.5,
+                             levanta=adelante * (1.0 if corre else 0.6) * min(1.0, f2))
+                self._brazo_vaiven(g, extra, l, -s_ * min(1.0, f2), codo=70 if corre else 12)
+            # El cuerpo sube en cada paso y se inclina hacia delante (corriendo, más).
+            extra['raiz'] = {'dy': -(0.02 if corre else 0.008) * alto * f2 * abs(math.sin(fase))}
+            if self.perfil:
+                g['torso'] = fw * (9 if corre else 3) * f2
+                g['cabeza'] -= fw * (5 if corre else 1.5) * f2
+            else:
+                g['raiz'] = 1.6 * f2 * math.sin(fase)
+                g['cabeza'] -= 1.2 * f2 * math.sin(fase)
+        elif gesto in ('agacharse', 'sentarse'):
+            ct = (t % CICLO_S) if local is None else local
+            baja = ease_in_out(tramo(ct, 0.1, 0.7))
+            if local is None:
+                baja *= 1 - ease_in_out(tramo(ct, CICLO_S - 0.8, CICLO_S - 0.1))
+            av, rod = (85, 85) if gesto == 'sentarse' else (55, 100)
+            for l in ('i', 'd'):
+                self._pierna(g, extra, l, av * baja, rod * baja)
+            if self.perfil:
+                g['torso'] = fw * (8 if gesto == 'sentarse' else 22) * baja
+                g['cabeza'] -= fw * (4 if gesto == 'sentarse' else 14) * baja
+            elif gesto == 'agacharse':
+                extra['torso'] = {'sy': 1 - 0.04 * baja}
+            for l in self.libres:
+                self._brazo_vaiven(g, extra, l, 0.5 * baja, codo=40 * baja)
+        elif gesto == 'saltar':
+            # Se agacha, salta con los brazos arriba, cae flexionando y se queda quieto: en 1,7 s (en bucle, cada 4 s).
+            ct = (t % CICLO_S) if local is None else (local % CICLO_S)
+            agacha = ease_in_out(tramo(ct, 0.0, 0.35)) * (1 - ease_in_out(tramo(ct, 0.35, 0.5))) \
+                + ease_in_out(tramo(ct, 1.15, 1.3)) * (1 - ease_in_out(tramo(ct, 1.3, 1.7)))
+            vuelo = tramo(ct, 0.45, 1.25)
+            arriba = math.sin(math.pi * vuelo) if 0 < vuelo < 1 else 0.0
+            for l in ('i', 'd'):
+                self._pierna(g, extra, l, 45 * agacha + 15 * arriba, 85 * agacha + 30 * arriba)
+            extra['raiz'] = {'dy': -0.32 * alto * f2 * arriba}
+            brazos = ease_in_out(min(1.0, arriba * 1.6))
+            for l in self.libres:
+                fuera = 1 if self.P[f'hombro_{l}'][0] < self.P['cuello'][0] else -1
+                giro = self._hacia(f'brazo_{l}', (fw or fuera) * 150 if not self.perfil else -self.adelante * 160)
+                g[f'brazo_{l}'] = giro * brazos
+            if self.perfil:
+                g['torso'] = fw * 14 * agacha
+        elif gesto == 'patear':
+            l = lado or ('i' if self.atras == 'd' else 'd') if self.perfil else (lado or self.lado or 'd')
+            if l not in ('i', 'd'):
+                l = 'd'
+            ct = (t % CICLO_S) if local is None else (local % CICLO_S)
+            prepara = ease_in_out(tramo(ct, 0.1, 0.55)) * (1 - ease_in_out(tramo(ct, 0.55, 0.7)))
+            patada = ease_in_out(tramo(ct, 0.55, 0.75)) * (1 - ease_in_out(tramo(ct, 1.1, 1.7)))
+            self._pierna(g, extra, l, -25 * prepara + 75 * f2 * patada, 70 * prepara + 5 * patada, levanta=patada)
+            otra = 'i' if l == 'd' else 'd'
+            self._pierna(g, extra, otra, 0, 12 * (prepara + patada))
+            for m in self.libres:
+                self._brazo_vaiven(g, extra, m, (0.6 if m == otra else -0.6) * patada, codo=30)
+            if self.perfil:
+                g['torso'] = -fw * 10 * patada + fw * 6 * prepara
+        elif gesto == 'bailar':
+            periodo = CICLO_S / round(CICLO_S / 0.8)
+            fase = 2 * math.pi * t / periodo
+            for l, off in (('i', 0.0), ('d', math.pi)):
+                sube = max(0.0, math.sin(fase + off))
+                self._pierna(g, extra, l, 20 * sube, 45 * sube, levanta=sube)
+            extra['raiz'] = {'dy': -0.025 * alto * f2 * abs(math.sin(fase)), 'dx': 0.02 * alto * f2 * math.sin(fase / 2)}
+            g['raiz'] = 4 * f2 * math.sin(fase / 2)
+            g['cabeza'] += 7 * f2 * math.sin(fase / 2 + 0.6)
+            for l in self.libres:
+                fuera = 1 if self.P[f'hombro_{l}'][0] < self.P['cuello'][0] else -1
+                arriba = 0.5 + 0.5 * math.sin(fase + (0 if l == 'i' else math.pi))
+                g[f'brazo_{l}'] = self._hacia(f'brazo_{l}', fuera * (60 + 70 * arriba)) * min(1.0, f2)
+                g[f'antebrazo_{l}'] = fuera * 40 * arriba
+        # Respira siempre un poco.
+        extra.setdefault('torso', {})
+        extra['torso'] = {**extra['torso'], 'sy': extra['torso'].get('sy', 1.0) * (1 + 0.006 * f * math.sin(4 * math.pi * t / CICLO_S))}
+        return g, extra
+
+    def piezas(self):
+        """Las piezas separadas un poco (vista explotada) y en colores, para revisar el corte."""
+        cv2 = self.cv2
+        fondo = Image.new('RGBA', (self.W, self.H), (60, 60, 60, 255))
+        base = np.zeros((self.H, self.W, 3), np.float32)
+        tinta = [(230, 80, 70), (80, 160, 240), (90, 200, 120), (240, 190, 60), (180, 110, 230), (60, 210, 210), (240, 140, 60)]
+        a = np.zeros((self.H, self.W), np.float32)
+        for k, i in enumerate(sorted(range(len(self.huesos)), key=self._rango)):
+            p = self.peso[i][..., None]
+            col = self.rgb * 0.55 + np.array(tinta[k % len(tinta)], np.float32) * 0.45
+            base = base * (1 - p) + col * p
+            a = a * (1 - self.peso[i]) + self.peso[i]
+        g = Image.fromarray(np.dstack([np.clip(base / np.maximum(a, 1e-4)[..., None], 0, 255), a * 255]).astype(np.uint8), 'RGBA')
+        fondo.alpha_composite(g)
+        d = ImageDraw.Draw(fondo)
+        for n, r in self.tapas.items():
+            x, y = self.P[{h[0]: h[1] for h in self.huesos}[n]]
+            d.ellipse((x - r, y - r, x + r, y + r), outline=(255, 255, 255), width=2)
+        return fondo.crop((self.mx, self.my, self.mx + self.w, self.my + self.h))
+
+
+def info_muneco(ruta, salida=None, puntos=None):
+    """Para revisar un muñeco por piezas: cada pieza en un color con sus bisagras, si está de frente o de perfil y
+    qué gestos puede hacer."""
+    im = Image.open(ruta).convert('RGBA')
+    if max(im.size) > 1080:
+        im.thumbnail((1080, 1080), Image.LANCZOS)
+    m = Muneco(im, 'hablar', 0.5, puntos)
+    salida = salida or os.path.splitext(ruta)[0] + '-piezas.png'
+    m.piezas().convert('RGB').save(salida)
+    nombres = [h[0] for h in m.huesos]
+    faltan = [n for n in ('muslo_i', 'muslo_d', 'pierna_i', 'pierna_d') if n not in nombres]
+    gestos = ['hablar', 'asentir', 'ladear', 'peso'] + (['saludar', 'senalar', 'explicar'] if m.libres else [])
+    if not faltan:
+        gestos += list(GESTOS_PIERNAS)
+    avisos = []
+    if faltan:
+        avisos.append('No veo las piernas enteras: solo puede mover la parte de arriba. Genera al personaje de cuerpo '
+                      'entero, de pie, con los pies en la imagen.')
+    if not m.libres:
+        avisos.append('Los brazos van pegados al cuerpo: no puede saludar ni señalar (al moverlos dejarían un hueco). '
+                      'Genéralo con los brazos un poco separados.')
+    return {'dibujo': salida, 'piezas': nombres, 'vista': 'perfil' if m.perfil else 'frente',
+            **({'mira_a': 'derecha' if m.adelante > 0 else 'izquierda'} if m.perfil else {}),
+            'gestos': gestos, **({'avisos': avisos} if avisos else {})}
 
 
 def info_esqueleto(ruta, salida=None):
@@ -2461,7 +2802,9 @@ def armar(ruta, prueba=None, todo=False):
     orden = [FFMPEG, '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', f'{L.W}x{L.H}', '-r', str(L.fps), '-i', '-',
              *entrada_audio, *filtro_audio,
              '-vf', 'format=yuv420p', *args_codificador(codificador_video(), r.get('crf', 16), r.get('preset', 'veryfast')),
-             '-movflags', '+faststart', salida]
+             # La duración exacta: con la tarjeta gráfica el video llega con retraso al final y el silencio de relleno
+             # (apad) seguiría creciendo mientras tanto (el MP4 duraba medio segundo de más).
+             '-t', f'{round(dur * L.fps) / L.fps:.3f}', '-movflags', '+faststart', salida]
     # Render quirúrgico: si hay un render anterior de esta misma receta con otros cambios, solo se vuelven a dibujar los
     # segundos que cambiaron; el resto se copia de aquel video (minutos en vez de media hora).
     memoria = memoria_render(L.base, ruta)
@@ -3755,13 +4098,18 @@ def main():
         m.add_argument('--nuevo', action='store_true', help='generar otra versión aunque ya exista una con el mismo pedido')
     an = sub.add_parser('animar')
     an.add_argument('imagen')
-    an.add_argument('--tipo', choices=TIPOS_ANIMAR + GESTOS, default='respirar')
+    an.add_argument('--tipo', choices=TIPOS_ANIMAR + GESTOS + GESTOS_PIERNAS, default='respirar')
+    an.add_argument('--piezas', action='store_true', help='el muñeco por piezas rígidas (un LEGO, un títere): también mueve las piernas')
     an.add_argument('--puntos', help='JSON con el esqueleto corregido: {"hombro_d": [x, y], …} en fracción de la imagen')
     an.add_argument('--lado', choices=['izquierda', 'derecha'], help='qué brazo hace el gesto (en pantalla)')
     an.add_argument('--secuencia', help='JSON (o archivo) con gestos seguidos: [{"tipo": "hablar", "hasta": 1.2}, {"tipo": "senalar"}]')
     es = sub.add_parser('esqueleto')
     es.add_argument('imagen')
     es.add_argument('--salida')
+    mu_ = sub.add_parser('muneco', help='revisa un personaje para usarlo por piezas: sus piezas, bisagras y gestos')
+    mu_.add_argument('imagen')
+    mu_.add_argument('--salida')
+    mu_.add_argument('--puntos', help='JSON (o archivo) con los puntos que haya que corregir o dar, en fracción de la imagen')
     an.add_argument('--fuerza', type=float, default=0.5)
     an.add_argument('--duracion', type=float, default=CICLO_S)
     an.add_argument('--salida')
@@ -3822,7 +4170,11 @@ def main():
     elif x.orden == 'animar':
         puntos = json.loads(open(x.puntos, encoding='utf-8').read() if os.path.isfile(x.puntos) else x.puntos) if x.puntos else None
         secuencia = json.loads(open(x.secuencia, encoding='utf-8').read() if os.path.isfile(x.secuencia) else x.secuencia) if x.secuencia else None
-        print(json.dumps(animar_imagen(x.imagen, secuencia or x.tipo, x.fuerza, x.salida, x.duracion, puntos=puntos, lado=x.lado), ensure_ascii=False))
+        print(json.dumps(animar_imagen(x.imagen, secuencia or x.tipo, x.fuerza, x.salida, x.duracion, puntos=puntos, lado=x.lado,
+                                       piezas=x.piezas), ensure_ascii=False))
+    elif x.orden == 'muneco':
+        puntos = json.loads(open(x.puntos, encoding='utf-8').read() if os.path.isfile(x.puntos) else x.puntos) if x.puntos else None
+        print(json.dumps(info_muneco(x.imagen, x.salida, puntos), ensure_ascii=False))
     elif x.orden == 'esqueleto':
         print(json.dumps(info_esqueleto(x.imagen, x.salida), ensure_ascii=False))
     elif x.orden == 'recortar-video':
