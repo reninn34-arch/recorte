@@ -24,6 +24,33 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.41',
+    fecha: '2026-11-12',
+    resumen: 'Sigue trabajando tus videos como en una charla: aprueba una versión, vuelve a otra y haz más videos con el mismo estilo.',
+    novedades: [
+      {
+        icono: 'check',
+        titulo: 'Así está bien',
+        texto: 'Debajo del video ves todas sus versiones. Marca la buena: los cambios que pidas después parten de ella y conservan lo demás.'
+      },
+      {
+        icono: 'undo',
+        titulo: 'Volver a una versión',
+        texto: 'Si un cambio empeoró el video, vuelve a una versión anterior con un clic. El agente sigue desde ahí, sin rehacer nada.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Otro video así',
+        texto: 'Cuenta de qué trata el siguiente y el agente lo hace con el mismo estilo: letras, colores, ritmo, cámara, música, personajes y todo lo que corregiste.'
+      },
+      {
+        icono: 'layers',
+        titulo: 'Mis estilos',
+        texto: 'Guarda el estilo de un video que te gustó con un nombre y elígelo en «Crear con IA» cuando quieras.'
+      }
+    ]
+  },
+  {
     version: '0.1.40',
     fecha: '2026-11-12',
     resumen: 'Personajes que se mueven enteros: caminan, corren, saltan y se sientan, como muñecos articulados.',
