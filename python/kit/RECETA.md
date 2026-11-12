@@ -125,7 +125,26 @@ NUNCA los pegues con un script aparte: así quedan en las pistas «Encima» y «
   de una serie), `ding` (un dato, un acierto), `caching` (una oferta). O `archivo` con uno propio. `volumen` por defecto 0.6.
 - Un «pop» cuando entra cada logo o ícono, un «whoosh» en los cortes fuertes; sin abusar (uno cada pocos segundos).
 
-## Escenas vivas: de una imagen plana a una escena con la persona animada (úsalo SIEMPRE con personas)
+## Por piezas: así se hace un documental con personas (el método normal)
+Como un editor con sus recursos sueltos: no pidas escenas enteras con la persona dentro; pide las PIEZAS y compón.
+1. **Reparto**: cada personaje, una vez, sobre verde: `kit.py imagen "<quién es, ropa, época, estilo>, full body, standing,
+   facing camera, arms slightly away from the body, neutral pose" --recorte`. Es su imagen principal (la marioneta).
+2. **Decorados**: cada lugar, VACÍO: `kit.py imagen "<el lugar>, empty, no people, <estilo>"`. Un decorado sirve para
+   varias escenas (otro encuadre, otra luz no).
+3. **Acciones**: si en una escena hace algo concreto (tallar, mirar el fuego, empujar una máquina), pide al personaje
+   haciéndolo, sobre verde y con su imagen principal de referencia: `kit.py imagen "the same man as in the reference,
+   <acción>, full body" --ref medios/ole-recorte.png --recorte`. Misma cara, otra pose.
+4. **Utilería**: los objetos que se mueven o entran solos (un juguete, un ladrillo, humo), sobre verde con `--recorte`.
+5. **Componer** cada escena: `python kit/kit.py componer <decorado> <personaje.png> --x 0.4 --pies 0.93 --alto 0.62
+   [--gesto peso] [--planos 2]` pone al personaje en el suelo del decorado, con el color y la luz del decorado y su sombra,
+   y te da el "momento" y las "capas" listos. Varía el plano entre escenas: entero (`--pies 0.92 --alto 0.6`), medio
+   (`--pies 1.3 --alto 1.05`: cortado por la cintura, sin sombra) y, para un primer plano, pide un retrato suyo con --ref.
+- **Que no se repita**: la misma pose del personaje en muchas escenas se ve pegada; cambia de acción, de plano o de lado
+  (`armar` avisa si la misma silueta sale en muchas capas). Lo normal: imagen principal para 1–2 escenas y una acción
+  distinta para cada escena importante.
+- Las piezas son gratis (Nano Banana) pero tardan un minuto cada una: reutiliza decorados y acciones.
+
+## Escenas vivas: de una imagen plana a una escena con la persona animada (cuando ya tienes la imagen entera)
 `python kit/kit.py escena medios/img-x.jpg [--gesto peso] [--planos 2] [--zoom 1.15]` hace en una orden lo que un editor
 haría a mano en After Effects:
 1. recorta a la persona (o al sujeto principal) de la imagen,
@@ -138,8 +157,8 @@ persona con su gesto), calzados como en la imagen original. Cópialos a la recet
 la cámara (movimientos cortos), el gesto, una secuencia de gestos o añadir su entrada.
 - El gesto por lo que hace: `peso` (por defecto: trabaja, mira, posa), `hablar` (cuenta algo a cámara), `asentir`,
   `ladear`, y con los brazos libres `senalar`, `saludar`, `explicar`.
-- Hazlo en casi TODAS las escenas con personas: una sucesión de fotos con zoom se ve barata. Deja como foto sola solo los
-  objetos, los detalles y los planos generales sin nadie. `armar` avisa si el video es casi todo fotos planas.
+- Úsalo con imágenes enteras que ya tengas (las del usuario, una foto de archivo). Para lo que vas a generar, mejor por
+  piezas (arriba). Una sucesión de fotos con zoom se ve barata: `armar` avisa si el video es casi todo fotos planas.
 - **La misma persona, la misma cara**: genera primero al protagonista (de frente, brazos algo separados) y pasa esa
   imagen con `--ref` en cada escena donde vuelva a salir ("the same man as in the reference"). Sin eso, cada imagen trae
   otra cara.

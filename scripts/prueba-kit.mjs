@@ -373,6 +373,15 @@ try {
   if (!(existsSync(join(trabajo, viva.personaje)) && existsSync(join(trabajo, viva.fondo)) && viva.momento.tipo === 'foto' && capaPers.archivo === viva.personaje && Math.abs(capaPers.x - 0.5) < 0.1))
     throw new Error(`escena no separó la figura de su escenario: ${JSON.stringify(viva)}`)
   console.log(`escena viva: la figura (${capaPers.ancho} de ancho, x ${capaPers.x}) separada de su escenario ✓`)
+  // Componer por piezas: la figura dentro de un decorado vacío, de pie en su suelo, con sombra.
+  correr('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=0x8a6040:s=400x711,drawgrid=w=40:h=40:c=0xb08050', '-frames:v', '1', 'deco.png'], trabajo)
+  const comp = json(correr(python, ['kit/kit.py', 'componer', 'deco.png', 'figura.png', '--x', '0.4', '--pies', '0.9', '--alto', '0.5', '--gesto', 'peso'], trabajo))
+  const [sombra, pers] = comp.capas
+  // Pidió --alto 0.5: los pies quedan en y + 0.25.
+  const altoPers = 0.5
+  if (!(comp.capas.length === 2 && /sombra/.test(sombra.archivo) && Math.abs(pers.y + altoPers / 2 - 0.9) < 0.02 && pers.animar === 'peso' && existsSync(join(trabajo, pers.archivo))))
+    throw new Error(`componer no puso la figura en su suelo: ${JSON.stringify(comp)}`)
+  console.log(`componer: la figura de pie en el decorado (pies en y ${(pers.y + altoPers / 2).toFixed(2)}), con su sombra ✓`)
   // Velocidad: una escena 2.5D con cámara, capas y filtros a 1080×1920 no puede tardar más de 1,5 s por cuadro en un
   // núcleo (antes de OpenCV tardaba más del doble). Si sube, algo volvió a hacerse lento.
   writeFileSync(

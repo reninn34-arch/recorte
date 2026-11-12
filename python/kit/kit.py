@@ -2035,6 +2035,33 @@ def avisos_escena(r, L, momentos):
             avisos.append(f'El video es casi todo fotos planas: solo el {round(100 * con_vida / total_fotos)} % de las fotos tiene capas '
                           'con profundidad o un personaje animado. En las escenas con personas usa `kit.py escena <imagen>` (la persona '
                           'recortada y animada delante de su escenario en 3D); deja como foto sola solo objetos y detalles.')
+    # La misma pose del personaje en muchas escenas (aunque sean archivos distintos): se ve pegado y repetido. Se compara
+    # la silueta (la transparencia) de las capas grandes, a un tamaño fijo.
+    siluetas = []
+    for j, c in enumerate(L.capas):
+        if c['video'] or c['ancho'] < 0.2:
+            continue
+        a = np.asarray(c['im'].getchannel('A').resize((48, 96)), dtype=np.uint8) > 128
+        if a.mean() < 0.08 or a.mean() > 0.9:
+            continue
+        siluetas.append((j, c, a))
+    grupos = []
+    for j, c, a in siluetas:
+        for g in grupos:
+            b = g[0][2]
+            if (a & b).sum() / max(1, (a | b).sum()) > 0.82:
+                g.append((j, c, a))
+                break
+        else:
+            grupos.append([(j, c, a)])
+    for g in grupos:
+        # Cuántas escenas distintas (capas que no se tocan en el tiempo).
+        tramos_ = sorted((c['desde'], c['hasta']) for _, c, _ in g)
+        escenas = 1 + sum(1 for k in range(1, len(tramos_)) if tramos_[k][0] > tramos_[k - 1][1] + 0.05)
+        if escenas >= 4:
+            avisos.append(f'La misma pose del personaje sale en {escenas} escenas (capas {", ".join(str(j + 1) for j, _, _ in g[:8])}): '
+                          'se ve pegado y repetido. Pídelo haciendo otras cosas (kit.py imagen "the same man as in the reference, '
+                          '<acción>" --ref <su imagen> --recorte) o cambia el plano (medio, primer plano) o el lado.')
     # La misma imagen en dos capas seguidas que vuelve a entrar con fundido o pop: parpadea en el corte.
     for j, c in enumerate(L.capas):
         for k2, d in enumerate(L.capas):
@@ -3338,6 +3365,97 @@ def escena(ruta, salida=None, planos=2, zoom=1.15, limpio=None, sin_flow=False, 
                    'secuencia de gestos.'}
 
 
+# ---------------------------------------------------------------------------
+# Componer por piezas: el personaje (recortado) dentro de un decorado vacío, de forma creíble
+# ---------------------------------------------------------------------------
+
+def igualar_color(persona, fondo_zona, fuerza=0.6):
+    """Lleva el color y la luz del personaje (RGBA) hacia los del fondo que tendrá detrás (en Lab: media y contraste
+    de cada canal), con `fuerza` de 0 a 1. Así no parece pegado de otra foto."""
+    import cv2
+    a = np.asarray(persona, dtype=np.uint8)
+    alfa = a[..., 3] > 128
+    if alfa.sum() < 50:
+        return persona
+    lab = cv2.cvtColor(a[..., :3], cv2.COLOR_RGB2LAB).astype(np.float32)
+    ref = cv2.cvtColor(np.asarray(fondo_zona.convert('RGB'), dtype=np.uint8), cv2.COLOR_RGB2LAB).astype(np.float32).reshape(-1, 3)
+    m1, s1 = lab[alfa].mean(0), lab[alfa].std(0) + 1e-3
+    m2, s2 = ref.mean(0), ref.std(0) + 1e-3
+    # La luz (L) se acerca menos que el color: un personaje claro sobre un fondo oscuro sigue siendo claro, pero con su tono.
+    peso = np.array([0.45, 1.0, 1.0], np.float32) * fuerza
+    escala = 1 + (np.clip(s2 / s1, 0.6, 1.6) - 1) * peso
+    nuevo = (lab - m1) * escala + m1 + (m2 - m1) * peso
+    rgb = cv2.cvtColor(np.clip(nuevo, 0, 255).astype(np.uint8), cv2.COLOR_LAB2RGB)
+    return Image.fromarray(np.dstack([rgb, a[..., 3]]), 'RGBA')
+
+
+def sombra_contacto(ancho_px, alto_px, fuerza=0.55):
+    """Una sombra suave y alargada en el suelo, para que lo que se apoya no flote."""
+    import cv2
+    w, h = max(8, int(ancho_px)), max(4, int(alto_px))
+    lienzo = np.zeros((h * 3, w * 2), np.float32)
+    cv2.ellipse(lienzo, (w, int(h * 1.5)), (int(w * 0.45), int(h * 0.5)), 0, 0, 360, 1.0, -1)
+    lienzo = cv2.GaussianBlur(lienzo, (0, 0), max(2.0, h * 0.35))
+    a = (lienzo / max(1e-3, lienzo.max()) * 255 * fuerza).astype(np.uint8)
+    return Image.fromarray(np.dstack([np.zeros_like(a), np.zeros_like(a), np.zeros_like(a), a]), 'RGBA')
+
+
+def componer(fondo, persona, x=0.5, pies=0.9, alto=0.6, zoom=1.15, ancho_video=1080, alto_video=1920, igualar=0.6,
+             sombra=True, planos=0, gesto=None, salida=None):
+    """Pone un personaje recortado (PNG sin fondo, p. ej. de `kit.py imagen … --recorte`) dentro de un decorado vacío:
+    de pie en el suelo (`pies`: a qué altura del cuadro van sus pies, 0 arriba a 1 abajo; más de 1 = cortado por abajo,
+    un plano medio), con su tamaño (`alto`: lo que mide, en fracción del alto del cuadro), con el color y la luz del
+    decorado y con una sombra en el suelo. Devuelve el «momento» (el decorado con su cámara) y las «capas» (la sombra y
+    el personaje, con su profundidad y su gesto) listos para la receta."""
+    base = salida or os.path.splitext(persona)[0]
+    pers = Image.open(persona).convert('RGBA')
+    bbox = pers.getchannel('A').point(lambda v: 255 if v > 20 else 0).getbbox()
+    if not bbox:
+        raise SystemExit('El personaje no tiene nada visible (¿es un PNG sin fondo?).')
+    pers = pers.crop(bbox)
+    W, H = ancho_video, alto_video
+    alto_px = alto * H
+    ancho_px = alto_px * pers.width / pers.height
+    ancho = ancho_px / W
+    cy = pies - alto / 2
+    # El trozo del decorado que tendrá detrás (como se verá con el encuadre de la foto), para igualar su color.
+    deco = abrir_foto(fondo)
+    esc = max(W / deco.width, H / deco.height) * zoom
+    vw, vh = W / esc, H / esc
+    ox, oy = (deco.width - vw) / 2, (deco.height - vh) / 2
+    caja = (ox + (x - ancho / 2) * vw, oy + max(0.0, cy - alto / 2) * vh, ox + (x + ancho / 2) * vw, oy + min(1.0, pies) * vh)
+    caja = tuple(int(v) for v in (max(0, caja[0]), max(0, caja[1]), min(deco.width, caja[2]), min(deco.height, caja[3])))
+    if igualar and caja[2] - caja[0] > 4 and caja[3] - caja[1] > 4:
+        pers = igualar_color(pers, deco.crop(caja), float(igualar))
+    ruta_pers = f'{base}-compuesto.png'
+    pers.save(ruta_pers)
+    momento = {'tipo': 'foto', 'archivo': fondo, 'encuadre': {'zoom': zoom, 'cx': 0.5, 'cy': 0.5},
+               'camara': {'zoom': round(zoom + 0.08, 3), 'cx': 0.5, 'cy': 0.5}}
+    capas = []
+    archivo_fondo = fondo
+    if planos and planos >= 2:
+        partes = separar(fondo, planos, os.path.splitext(fondo)[0] + '-deco')
+        momento['archivo'] = archivo_fondo = partes['fondo']
+        for p in partes['planos']:
+            capas.append({'archivo': p['archivo'], 'x': 0.5, 'y': 0.5, 'ancho': round(zoom * partes['ancho_capa'], 3),
+                          'entrada': 'ninguna', 'profundidad': p['profundidad']})
+    prof = 0.45
+    if sombra and pies <= 1.02:
+        s = sombra_contacto(ancho_px * 1.1, max(6, ancho_px * 0.14))
+        ruta_s = f'{base}-sombra.png'
+        s.save(ruta_s)
+        capas.append({'archivo': ruta_s, 'x': round(x, 3), 'y': round(pies - 0.004, 3), 'ancho': round(ancho * 2.2, 3),
+                      'entrada': 'ninguna', 'profundidad': prof})
+    capa = {'archivo': ruta_pers, 'x': round(x, 3), 'y': round(cy, 3), 'ancho': round(ancho, 3), 'entrada': 'ninguna',
+            'profundidad': prof}
+    if gesto:
+        capa['animar'] = gesto
+    capas.append(capa)
+    return {'momento': momento, 'capas': capas, 'personaje': ruta_pers, 'fondo': archivo_fondo,
+            'uso': 'Pon "momento" (con su desde/hasta) y las "capas" en ese orden (planos, sombra, personaje) con los mismos '
+                   'desde/hasta. "pies" > 1 es un plano medio (cortado por abajo, sin sombra); "alto" más grande, más cerca.'}
+
+
 def main():
     # En Windows la consola no es UTF-8: sin esto, las tildes de lo que se imprime llegan rotas al agente.
     for flujo in (sys.stdout, sys.stderr):
@@ -3397,6 +3515,18 @@ def main():
     dn = sub.add_parser('donde')
     dn.add_argument('consulta', help='lo que nombra el usuario: «la bandera», «el título 2002», «cuando dice órbita»')
     dn.add_argument('--receta', default='receta.json')
+    co = sub.add_parser('componer')
+    co.add_argument('fondo', help='el decorado vacío (una foto sin gente)')
+    co.add_argument('persona', help='el personaje sin fondo (PNG)')
+    co.add_argument('--x', type=float, default=0.5, help='dónde va, de izquierda (0) a derecha (1)')
+    co.add_argument('--pies', type=float, default=0.9, help='a qué altura del cuadro van sus pies (más de 1: plano medio)')
+    co.add_argument('--alto', type=float, default=0.6, help='lo que mide, en fracción del alto del cuadro')
+    co.add_argument('--zoom', type=float, default=1.15)
+    co.add_argument('--igualar', type=float, default=0.6, help='cuánto se lleva su color al del decorado (0 a 1)')
+    co.add_argument('--sin-sombra', action='store_true')
+    co.add_argument('--planos', type=int, default=0, help='partir el decorado en planos (2 o 3)')
+    co.add_argument('--gesto', choices=GESTOS)
+    co.add_argument('--salida')
     es2 = sub.add_parser('escena')
     es2.add_argument('imagen')
     es2.add_argument('--planos', type=int, default=2, help='en cuántos planos partir el fondo (0: sin partir)')
@@ -3434,6 +3564,9 @@ def main():
         print(json.dumps(revisar(x.video, x.referencia, receta=x.receta), ensure_ascii=False))
     elif x.orden == 'donde':
         print(json.dumps(donde(x.receta, x.consulta), ensure_ascii=False))
+    elif x.orden == 'componer':
+        print(json.dumps(componer(x.fondo, x.persona, x.x, x.pies, x.alto, x.zoom, igualar=x.igualar, sombra=not x.sin_sombra,
+                                  planos=x.planos, gesto=x.gesto, salida=x.salida), ensure_ascii=False))
     elif x.orden == 'escena':
         print(json.dumps(escena(x.imagen, x.salida, x.planos, x.zoom, x.limpio, x.sin_flow, x.gesto), ensure_ascii=False))
     elif x.orden == 'separar':
