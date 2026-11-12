@@ -36,7 +36,7 @@ import type { ClipSuggestion, Project } from '../shared/types'
 
 /** Igual que en el monitor (`DUCKING_FACTOR` de la interfaz): la música baja a un cuarto con voz. */
 const DUCKING_FACTOR = 0.25
-import { probeVideo, rutaFfmpeg } from './ffmpeg'
+import { argsH264, codificadorH264, probeVideo, rutaFfmpeg } from './ffmpeg'
 import {
   colorAss,
   construirBloques,
@@ -446,12 +446,8 @@ export async function exportarTimeline(
     '-map',
     '[vout]',
     ...(salidaAudio ? ['-map', '[aout]', '-c:a', 'aac', '-b:a', '160k'] : ['-an']),
-    '-c:v',
-    'libx264',
-    '-preset',
-    'veryfast',
-    '-crf',
-    '20',
+    // Con la tarjeta gráfica si la hay (más rápido y deja el procesador para los filtros).
+    ...argsH264(await codificadorH264(), 20),
     '-pix_fmt',
     'yuv420p',
     '-movflags',

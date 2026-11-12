@@ -2286,6 +2286,74 @@ def _dibujar(i):
     return np.asarray(cuadro(w['L'], w['momentos'], i / w['L'].fps, w['dur'], w['ff']), dtype=np.uint8).tobytes()
 
 
+# ---------------------------------------------------------------------------
+# Codificar con la tarjeta gráfica (AMD AMF, NVIDIA NVENC o Intel Quick Sync), si la hay; si no, el procesador
+# ---------------------------------------------------------------------------
+
+_CODIFICADOR = None
+
+
+def codificador_video():
+    """El codificador H.264 que funciona en este equipo: el de la tarjeta gráfica si hay uno que de verdad codifique
+    (se prueba una vez y se recuerda), o libx264. KIT_CODIFICADOR=cpu fuerza el del procesador."""
+    global _CODIFICADOR
+    if _CODIFICADOR is not None:
+        return _CODIFICADOR
+    if os.environ.get('KIT_CODIFICADOR', '').lower() in ('cpu', 'libx264'):
+        _CODIFICADOR = 'libx264'
+        return _CODIFICADOR
+    memoria = os.path.join(carpeta_modelos(), 'codificador.json')
+    try:
+        st = os.stat(shutil.which(FFMPEG) or FFMPEG)
+        firma = f'{st.st_size}-{int(st.st_mtime)}'
+    except OSError:
+        firma = '?'
+    try:
+        with open(memoria, encoding='utf-8') as f:
+            m = json.load(f)
+        if m.get('ffmpeg') == firma:
+            _CODIFICADOR = m['codificador']
+            return _CODIFICADOR
+    except (OSError, ValueError, KeyError):
+        pass
+    import tempfile
+    _CODIFICADOR = 'libx264'
+    for nombre in ('h264_nvenc', 'h264_amf', 'h264_qsv'):
+        prueba = os.path.join(tempfile.gettempdir(), f'kit-codif-{nombre}.mp4')
+        try:
+            r = subprocess.run([FFMPEG, '-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=1080x1920:d=0.3:r=30', '-pix_fmt',
+                                'yuv420p', *args_codificador(nombre, 16, 'veryfast'), prueba], capture_output=True, timeout=60)
+            if r.returncode == 0 and os.path.isfile(prueba) and os.path.getsize(prueba) > 1000:
+                _CODIFICADOR = nombre
+                break
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        finally:
+            try:
+                os.remove(prueba)
+            except OSError:
+                pass
+    try:
+        os.makedirs(os.path.dirname(memoria), exist_ok=True)
+        with open(memoria, 'w', encoding='utf-8') as f:
+            json.dump({'ffmpeg': firma, 'codificador': _CODIFICADOR}, f)
+    except OSError:
+        pass
+    return _CODIFICADOR
+
+
+def args_codificador(nombre, crf, preset):
+    """Los argumentos de FFmpeg de cada codificador, con una calidad parecida a la de libx264 con ese `crf`."""
+    crf = int(crf)
+    if nombre == 'h264_nvenc':
+        return ['-c:v', 'h264_nvenc', '-preset', 'p5', '-rc', 'vbr', '-cq', str(crf + 2), '-b:v', '0']
+    if nombre == 'h264_amf':
+        return ['-c:v', 'h264_amf', '-quality', 'quality', '-rc', 'cqp', '-qp_i', str(crf), '-qp_p', str(crf + 2), '-qp_b', str(crf + 4)]
+    if nombre == 'h264_qsv':
+        return ['-c:v', 'h264_qsv', '-global_quality', str(crf + 2)]
+    return ['-c:v', 'libx264', '-preset', preset, '-crf', str(crf)]
+
+
 def memoria_render(base, receta):
     """Dónde se recuerda el último render de una receta: una memoria por receta (la copia «limpia» que Recorte arma
     para el editor, con otra receta, no pisa la del video)."""
@@ -2359,7 +2427,7 @@ def armar(ruta, prueba=None, todo=False):
                         '-map', '0:v', '-map', '[a]', '-c:a', 'aac', '-b:a', '192k', '-shortest']
     orden = [FFMPEG, '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', f'{L.W}x{L.H}', '-r', str(L.fps), '-i', '-',
              *entrada_audio, *filtro_audio,
-             '-vf', 'format=yuv420p', '-c:v', 'libx264', '-preset', r.get('preset', 'veryfast'), '-crf', str(r.get('crf', 16)),
+             '-vf', 'format=yuv420p', *args_codificador(codificador_video(), r.get('crf', 16), r.get('preset', 'veryfast')),
              '-movflags', '+faststart', salida]
     # Render quirúrgico: si hay un render anterior de esta misma receta con otros cambios, solo se vuelven a dibujar los
     # segundos que cambiaron; el resto se copia de aquel video (minutos en vez de media hora).
@@ -2545,14 +2613,63 @@ MODELO_PROFUNDIDAD = ('depth-anything-v2-small.onnx',
                       'https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main/onnx/model.onnx', 99060839)
 
 
+_ORT_REVISADO = False
+_SESIONES = {}
+
+
+def _preparar_onnxruntime():
+    """onnxruntime, con la tarjeta gráfica si se puede: en Windows, la versión DirectML (cualquier tarjeta: AMD, NVIDIA o
+    Intel; los modelos van de 3 a 15 veces más rápido). Se cambia una sola vez; si no se puede, la del procesador."""
+    from importlib import metadata
+
+    def instalado(n):
+        try:
+            metadata.version(n)
+            return True
+        except metadata.PackageNotFoundError:
+            return False
+
+    pip = [sys.executable, '-m', 'pip', '--disable-pip-version-check', '--quiet']
+    # Solo se apunta si NO se pudo: así no se reintenta en cada uso, pero si algo la pisa (faster-whisper trae la del
+    # procesador y comparten módulo), se vuelve a poner.
+    fallo = os.path.join(carpeta_modelos(), 'directml-no-funciona')
+    quiere_dml = os.name == 'nt' and os.environ.get('KIT_SIN_GPU') != '1' and not os.path.isfile(fallo)
+    if quiere_dml and instalado('onnxruntime') and not _ORT_REVISADO:
+        # ¿Ya funciona con la tarjeta? (se mira en otro proceso: aquí el módulo aún no está cargado)
+        r = subprocess.run([sys.executable, '-c', 'import onnxruntime as o; print("Dml" in str(o.get_available_providers()))'],
+                           capture_output=True, text=True)
+        if 'True' not in r.stdout:
+            print('Preparando los modelos para usar la tarjeta gráfica (una vez)…', file=sys.stderr, flush=True)
+            # Las dos versiones comparten el mismo módulo: primero se quita la del procesador y se pone la de la tarjeta.
+            subprocess.run([*pip, 'uninstall', '-y', 'onnxruntime', 'onnxruntime-directml'], capture_output=True)
+            if subprocess.run([*pip, 'install', '--force-reinstall', '--no-deps', 'onnxruntime-directml'], capture_output=True).returncode != 0:
+                os.makedirs(carpeta_modelos(), exist_ok=True)
+                open(fallo, 'w').close()
+                subprocess.run([*pip, 'install', 'onnxruntime'], capture_output=True)
+    globals()['_ORT_REVISADO'] = True
+    if not instalado('onnxruntime') and not instalado('onnxruntime-directml'):
+        print('Preparando los modelos (una vez)…', file=sys.stderr, flush=True)
+        subprocess.run([*pip, 'install', 'onnxruntime-directml' if quiere_dml else 'onnxruntime'], check=False)
+        if not instalado('onnxruntime') and not instalado('onnxruntime-directml'):
+            subprocess.run([*pip, 'install', 'onnxruntime'], check=True)
+    import onnxruntime as ort
+    return ort
+
+
+def proveedores_onnx(ort):
+    """La tarjeta gráfica (DirectML o CUDA) si está, y el procesador detrás por si un paso no se puede en ella."""
+    disponibles = ort.get_available_providers()
+    if os.environ.get('KIT_SIN_GPU') == '1':
+        return ['CPUExecutionProvider']
+    return [p for p in ('CUDAExecutionProvider', 'DmlExecutionProvider') if p in disponibles][:1] + ['CPUExecutionProvider']
+
+
 def sesion_modelo(modelo, para):
-    """La sesión de un modelo ONNX del kit: lo baja la primera vez (y prepara onnxruntime)."""
-    try:
-        import onnxruntime as ort
-    except ImportError:
-        print('Preparando el quitafondos (una vez)…', file=sys.stderr, flush=True)
-        subprocess.run([sys.executable, '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check', 'onnxruntime'], check=True)
-        import onnxruntime as ort
+    """La sesión de un modelo ONNX del kit: lo baja la primera vez (y prepara onnxruntime, con la tarjeta si se puede).
+    Una vez cargado, se reutiliza en el mismo proceso (cargarlo cuesta casi un segundo)."""
+    if modelo[0] in _SESIONES:
+        return _SESIONES[modelo[0]]
+    ort = _preparar_onnxruntime()
     nombre, url, tam = modelo
     ruta = os.path.join(carpeta_modelos(), nombre)
     if not os.path.isfile(ruta) or os.path.getsize(ruta) != tam:
@@ -2575,7 +2692,13 @@ def sesion_modelo(modelo, para):
             os.remove(temporal)
             raise SystemExit(f'El modelo {para} no se bajó entero. Revisa la conexión y vuelve a probar.')
         os.replace(temporal, ruta)
-    return ort.InferenceSession(ruta, providers=['CPUExecutionProvider'])
+    try:
+        sesion = ort.InferenceSession(ruta, providers=proveedores_onnx(ort))
+    except Exception:
+        # Si la tarjeta no puede con este modelo, el procesador.
+        sesion = ort.InferenceSession(ruta, providers=['CPUExecutionProvider'])
+    _SESIONES[modelo[0]] = sesion
+    return sesion
 
 
 def mascara_modelo(im):

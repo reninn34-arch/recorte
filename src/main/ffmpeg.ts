@@ -14,6 +14,44 @@ export interface VideoInfo {
 export const rutaFfmpeg = (): string => process.env.RECORTE_FFMPEG ?? 'ffmpeg'
 export const rutaFfprobe = (): string => process.env.RECORTE_FFPROBE ?? 'ffprobe'
 
+/**
+ * El codificador H.264 de este equipo: el de la tarjeta gráfica (NVIDIA NVENC, AMD AMF o Intel Quick Sync) si de verdad
+ * codifica (se prueba una vez por sesión con un video corto), o libx264 (el procesador). RECORTE_CODIFICADOR=cpu lo fuerza.
+ */
+let codificador: Promise<string> | null = null
+export function codificadorH264(): Promise<string> {
+  if (codificador) return codificador
+  if ((process.env.RECORTE_CODIFICADOR ?? '').toLowerCase() === 'cpu') return (codificador = Promise.resolve('libx264'))
+  codificador = (async () => {
+    for (const nombre of ['h264_nvenc', 'h264_amf', 'h264_qsv']) {
+      const ok = await new Promise<boolean>((resolver) => {
+        const p = spawn(
+          rutaFfmpeg(),
+          ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=1080x1920:d=0.3:r=30', '-pix_fmt', 'yuv420p', ...argsH264(nombre, 20), '-f', 'null', '-'],
+          { windowsHide: true }
+        )
+        const reloj = setTimeout(() => p.kill(), 30_000)
+        p.on('error', () => resolver(false))
+        p.on('close', (codigo) => {
+          clearTimeout(reloj)
+          resolver(codigo === 0)
+        })
+      })
+      if (ok) return nombre
+    }
+    return 'libx264'
+  })()
+  return codificador
+}
+
+/** Los argumentos de cada codificador, con una calidad parecida a libx264 con ese `crf` (preset veryfast). */
+export function argsH264(nombre: string, crf: number): string[] {
+  if (nombre === 'h264_nvenc') return ['-c:v', 'h264_nvenc', '-preset', 'p5', '-rc', 'vbr', '-cq', String(crf + 2), '-b:v', '0']
+  if (nombre === 'h264_amf') return ['-c:v', 'h264_amf', '-quality', 'quality', '-rc', 'cqp', '-qp_i', String(crf), '-qp_p', String(crf + 2), '-qp_b', String(crf + 4)]
+  if (nombre === 'h264_qsv') return ['-c:v', 'h264_qsv', '-global_quality', String(crf + 2)]
+  return ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', String(crf)]
+}
+
 function fpsDe(cadena?: string): number {
   if (!cadena) return 0
   const [num, den] = cadena.split('/').map(Number)

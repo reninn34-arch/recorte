@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { ClipSuggestion, Project, RecetaEdicion, Word } from '../shared/types'
 import { duracionReceta, FUNDIDO_S } from '../shared/receta'
 import { detectarCaras, type PuntoCara } from './caras'
-import { rutaFfmpeg } from './ffmpeg'
+import { rutaFfmpeg, argsH264, codificadorH264 } from './ffmpeg'
 
 export interface ResultadoRender {
   ok: boolean
@@ -290,6 +290,8 @@ export async function renderClip(
     filtro = filtroCentro(nombreAss)
   }
 
+  // Con la tarjeta gráfica si la hay (más rápido).
+  const codif = await codificadorH264()
   return new Promise((resolver) => {
     const argumentos = [
       '-y',
@@ -308,12 +310,7 @@ export async function renderClip(
       '0:a?',
       '-vf',
       filtro,
-      '-c:v',
-      'libx264',
-      '-preset',
-      'veryfast',
-      '-crf',
-      '20',
+      ...argsH264(codif, 20),
       '-pix_fmt',
       'yuv420p',
       '-r',
@@ -541,6 +538,8 @@ export async function renderReceta(
 
   const filtro = filtroReceta(receta, nombreAss)
 
+  // Con la tarjeta gráfica si la hay (más rápido).
+  const codif = await codificadorH264()
   return new Promise((resolver) => {
     const argumentos = [
       '-y',
@@ -555,12 +554,7 @@ export async function renderReceta(
       '[vout]',
       '-map',
       '[aout]',
-      '-c:v',
-      'libx264',
-      '-preset',
-      'veryfast',
-      '-crf',
-      '20',
+      ...argsH264(codif, 20),
       '-pix_fmt',
       'yuv420p',
       '-r',
