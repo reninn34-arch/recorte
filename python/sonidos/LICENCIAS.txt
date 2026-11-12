@@ -1,0 +1,38 @@
+Efectos de sonido incluidos en Recorte. Todos tienen licencia CC0 1.0 (dominio público): se pueden usar,
+modificar y distribuir, también con fines comerciales, sin pedir permiso ni dar crédito.
+https://creativecommons.org/publicdomain/zero/1.0/
+
+whoosh.wav: «Whoosh» — Recorte — CC0 1.0 — hecho para Recorte
+swish.wav: «Swish» — artisticdude — CC0 1.0 — https://opengameart.org/content/swishes-sound-pack
+reversa.wav: «Reversa» — Recorte (sintetizado) — CC0 1.0 — hecho para Recorte
+glitch.wav: «Glitch» — Recorte (sintetizado) — CC0 1.0 — hecho para Recorte
+pop.wav: «Pop» — Recorte — CC0 1.0 — hecho para Recorte
+pop-alto.wav: «Pop agudo» — Recorte — CC0 1.0 — hecho para Recorte
+ding.wav: «Ding» — Recorte — CC0 1.0 — hecho para Recorte
+caching.wav: «Caja registradora» — Recorte — CC0 1.0 — hecho para Recorte
+campana.wav: «Campana» — rubberduck — CC0 1.0 — https://opengameart.org/content/100-cc0-sfx
+interruptor.wav: «Interruptor» — rubberduck — CC0 1.0 — https://opengameart.org/content/100-cc0-sfx
+gong.wav: «Gong» — rubberduck — CC0 1.0 — https://opengameart.org/content/100-cc0-sfx
+golpe.wav: «Golpe» — rubberduck — CC0 1.0 — https://opengameart.org/content/100-cc0-sfx
+cristal.wav: «Cristal roto» — rubberduck — CC0 1.0 — https://opengameart.org/content/100-cc0-sfx
+impacto.wav: «Impacto de cine» — Recorte (sintetizado) — CC0 1.0 — hecho para Recorte
+explosion.wav: «Explosión» — rubberduck y Recorte — CC0 1.0 — https://opengameart.org/content/100-cc0-sfx
+latido.wav: «Latido» — bart — CC0 1.0 — https://opengameart.org/content/heartbeat-sounds
+alarma.wav: «Alarma» — rubberduck — CC0 1.0 — https://opengameart.org/content/30-cc0-sfx-loops
+subida.wav: «Subida» — Recorte (sintetizado) — CC0 1.0 — hecho para Recorte
+tension.wav: «Zumbido de tensión» — Recorte (sintetizado) — CC0 1.0 — hecho para Recorte
+camara-foto.wav: «Cámara de fotos» — themightyglider — CC0 1.0 — https://opengameart.org/content/camera
+pagina.wav: «Página» — StarNinjas — CC0 1.0 — https://opengameart.org/content/10-book-page-flips
+papel.wav: «Papel» — rubberduck — CC0 1.0 — https://opengameart.org/content/100-cc0-sfx
+puerta.wav: «Puerta» — rubberduck — CC0 1.0 — https://opengameart.org/content/100-cc0-sfx
+monedas.wav: «Monedas» — OwlishMedia — CC0 1.0 — https://opengameart.org/content/202-more-sound-effects
+telefono.wav: «Teléfono» — OwlishMedia — CC0 1.0 — https://opengameart.org/content/202-more-sound-effects
+maquina-escribir.wav: «Máquina de escribir» — Cassie-OrbitGames — CC0 1.0 — https://opengameart.org/content/typewriter-sounds
+reloj.wav: «Tic tac» — cemkalyoncu — CC0 1.0 — https://opengameart.org/content/tick-and-tock
+pasos.wav: «Pasos» — rubberduck — CC0 1.0 — https://opengameart.org/content/100-cc0-sfx-2
+trueno.wav: «Trueno» — rubberduck — CC0 1.0 — https://opengameart.org/content/100-cc0-sfx-2
+lluvia.wav: «Lluvia» — Kresiek The Furry — CC0 1.0 — https://opengameart.org/content/amb-rain-loop-1
+trafico.wav: «Tráfico» — rubberduck — CC0 1.0 — https://opengameart.org/content/100-cc0-sfx-2
+obra.wav: «Obra en construcción» — rubberduck — CC0 1.0 — https://opengameart.org/content/100-cc0-sfx-2
+maquinas.wav: «Máquinas» — rubberduck — CC0 1.0 — https://opengameart.org/content/100-cc0-sfx-2
+multitud.wav: «Multitud» — StarNinjas — CC0 1.0 — https://opengameart.org/content/crowd-shoutingspeaking-ambience

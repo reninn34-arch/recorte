@@ -1,0 +1,342 @@
+[
+ {
+  "id": "whoosh",
+  "nombre": "Whoosh",
+  "tipo": "transicion",
+  "para": "un cambio rápido, algo que entra volando",
+  "duracion": 0.5,
+  "autor": "Recorte",
+  "licencia": "CC0 1.0",
+  "fuente": "hecho para Recorte"
+ },
+ {
+  "id": "swish",
+  "nombre": "Swish",
+  "tipo": "transicion",
+  "para": "un movimiento corto y suave: una tarjeta que pasa, un dato que entra",
+  "duracion": 0.11,
+  "autor": "artisticdude",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/swishes-sound-pack"
+ },
+ {
+  "id": "reversa",
+  "nombre": "Reversa",
+  "tipo": "transicion",
+  "para": "el aire que se recoge antes de un corte (termina en seco, como la subida pero más corta)",
+  "duracion": 1.6,
+  "autor": "Recorte (sintetizado)",
+  "licencia": "CC0 1.0",
+  "fuente": "hecho para Recorte"
+ },
+ {
+  "id": "glitch",
+  "nombre": "Glitch",
+  "tipo": "transicion",
+  "para": "un fallo digital: tecnología, internet, algo que se corrompe o un salto brusco",
+  "duracion": 0.7,
+  "autor": "Recorte (sintetizado)",
+  "licencia": "CC0 1.0",
+  "fuente": "hecho para Recorte"
+ },
+ {
+  "id": "pop",
+  "nombre": "Pop",
+  "tipo": "interfaz",
+  "para": "un logo o un ícono que aparece",
+  "duracion": 0.14,
+  "autor": "Recorte",
+  "licencia": "CC0 1.0",
+  "fuente": "hecho para Recorte"
+ },
+ {
+  "id": "pop-alto",
+  "nombre": "Pop agudo",
+  "tipo": "interfaz",
+  "para": "otro ícono, o el siguiente de una serie",
+  "duracion": 0.12,
+  "autor": "Recorte",
+  "licencia": "CC0 1.0",
+  "fuente": "hecho para Recorte"
+ },
+ {
+  "id": "ding",
+  "nombre": "Ding",
+  "tipo": "interfaz",
+  "para": "un dato, un acierto, un precio",
+  "duracion": 1.1,
+  "autor": "Recorte",
+  "licencia": "CC0 1.0",
+  "fuente": "hecho para Recorte"
+ },
+ {
+  "id": "caching",
+  "nombre": "Caja registradora",
+  "tipo": "interfaz",
+  "para": "una oferta, un descuento, una venta",
+  "duracion": 1.2,
+  "autor": "Recorte",
+  "licencia": "CC0 1.0",
+  "fuente": "hecho para Recorte"
+ },
+ {
+  "id": "campana",
+  "nombre": "Campana",
+  "tipo": "interfaz",
+  "para": "un logro, el inicio de algo, una buena noticia",
+  "duracion": 1.32,
+  "autor": "rubberduck",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/100-cc0-sfx"
+ },
+ {
+  "id": "interruptor",
+  "nombre": "Interruptor",
+  "tipo": "interfaz",
+  "para": "encender una idea, un cambio de escena seco",
+  "duracion": 0.17,
+  "autor": "rubberduck",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/100-cc0-sfx"
+ },
+ {
+  "id": "gong",
+  "nombre": "Gong",
+  "tipo": "impacto",
+  "para": "una revelación solemne, un título importante",
+  "duracion": 1.41,
+  "autor": "rubberduck",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/100-cc0-sfx"
+ },
+ {
+  "id": "golpe",
+  "nombre": "Golpe",
+  "tipo": "impacto",
+  "para": "algo que cae, un sello, un dato que pega fuerte",
+  "duracion": 0.56,
+  "autor": "rubberduck",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/100-cc0-sfx"
+ },
+ {
+  "id": "cristal",
+  "nombre": "Cristal roto",
+  "tipo": "impacto",
+  "para": "algo que se rompe, un récord que cae",
+  "duracion": 0.38,
+  "autor": "rubberduck",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/100-cc0-sfx"
+ },
+ {
+  "id": "impacto",
+  "nombre": "Impacto de cine",
+  "tipo": "impacto",
+  "para": "un golpe grave y largo: el título, la gran cifra, el giro de la historia",
+  "duracion": 3.5,
+  "autor": "Recorte (sintetizado)",
+  "licencia": "CC0 1.0",
+  "fuente": "hecho para Recorte"
+ },
+ {
+  "id": "explosion",
+  "nombre": "Explosión",
+  "tipo": "impacto",
+  "para": "un estallido, un fracaso, algo que revienta",
+  "duracion": 2.5,
+  "autor": "rubberduck y Recorte",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/100-cc0-sfx"
+ },
+ {
+  "id": "latido",
+  "nombre": "Latido",
+  "tipo": "tension",
+  "para": "un momento de nervios, algo que está en juego",
+  "duracion": 1.42,
+  "autor": "bart",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/heartbeat-sounds"
+ },
+ {
+  "id": "alarma",
+  "nombre": "Alarma",
+  "tipo": "tension",
+  "para": "un peligro, una urgencia, algo que falla",
+  "duracion": 1.98,
+  "autor": "rubberduck",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/30-cc0-sfx-loops"
+ },
+ {
+  "id": "subida",
+  "nombre": "Subida",
+  "tipo": "tension",
+  "para": "la tensión que sube hasta un corte o una revelación (termina en seco: ponlo para que acabe justo en el corte)",
+  "duracion": 3.0,
+  "autor": "Recorte (sintetizado)",
+  "licencia": "CC0 1.0",
+  "fuente": "hecho para Recorte"
+ },
+ {
+  "id": "tension",
+  "nombre": "Zumbido de tensión",
+  "tipo": "tension",
+  "para": "de fondo bajo un momento de misterio o peligro, 8 s",
+  "duracion": 8.0,
+  "autor": "Recorte (sintetizado)",
+  "licencia": "CC0 1.0",
+  "fuente": "hecho para Recorte"
+ },
+ {
+  "id": "camara-foto",
+  "nombre": "Cámara de fotos",
+  "tipo": "objeto",
+  "para": "una foto que aparece, un recuerdo, un flash",
+  "duracion": 0.88,
+  "autor": "themightyglider",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/camera"
+ },
+ {
+  "id": "pagina",
+  "nombre": "Página",
+  "tipo": "objeto",
+  "para": "un documento, un libro, pasar a otro capítulo",
+  "duracion": 1.1,
+  "autor": "StarNinjas",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/10-book-page-flips"
+ },
+ {
+  "id": "papel",
+  "nombre": "Papel",
+  "tipo": "objeto",
+  "para": "una carta, un recorte de periódico que aparece",
+  "duracion": 0.4,
+  "autor": "rubberduck",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/100-cc0-sfx"
+ },
+ {
+  "id": "puerta",
+  "nombre": "Puerta",
+  "tipo": "objeto",
+  "para": "alguien que se va, un final, una etapa que se cierra",
+  "duracion": 0.46,
+  "autor": "rubberduck",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/100-cc0-sfx"
+ },
+ {
+  "id": "monedas",
+  "nombre": "Monedas",
+  "tipo": "objeto",
+  "para": "dinero, ganancias, un precio",
+  "duracion": 0.76,
+  "autor": "OwlishMedia",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/202-more-sound-effects"
+ },
+ {
+  "id": "telefono",
+  "nombre": "Teléfono",
+  "tipo": "objeto",
+  "para": "una llamada, una notificación, un mensaje",
+  "duracion": 1.13,
+  "autor": "OwlishMedia",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/202-more-sound-effects"
+ },
+ {
+  "id": "maquina-escribir",
+  "nombre": "Máquina de escribir",
+  "tipo": "objeto",
+  "para": "un texto que se escribe letra a letra, una fecha, un expediente (2 s)",
+  "duracion": 2.44,
+  "autor": "Cassie-OrbitGames",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/typewriter-sounds"
+ },
+ {
+  "id": "reloj",
+  "nombre": "Tic tac",
+  "tipo": "objeto",
+  "para": "el tiempo que pasa, una cuenta atrás, una espera (4 s)",
+  "duracion": 3.69,
+  "autor": "cemkalyoncu",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/tick-and-tock"
+ },
+ {
+  "id": "pasos",
+  "nombre": "Pasos",
+  "tipo": "objeto",
+  "para": "alguien que llega o camina (3 s)",
+  "duracion": 2.94,
+  "autor": "rubberduck",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/100-cc0-sfx-2"
+ },
+ {
+  "id": "trueno",
+  "nombre": "Trueno",
+  "tipo": "ambiente",
+  "para": "una tormenta, un giro oscuro de la historia",
+  "duracion": 5.26,
+  "autor": "rubberduck",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/100-cc0-sfx-2"
+ },
+ {
+  "id": "lluvia",
+  "nombre": "Lluvia",
+  "tipo": "ambiente",
+  "para": "de fondo en una escena de lluvia o tristeza",
+  "duracion": 10.0,
+  "autor": "Kresiek The Furry",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/amb-rain-loop-1"
+ },
+ {
+  "id": "trafico",
+  "nombre": "Tráfico",
+  "tipo": "ambiente",
+  "para": "de fondo en la ciudad, una calle, una autopista",
+  "duracion": 10.0,
+  "autor": "rubberduck",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/100-cc0-sfx-2"
+ },
+ {
+  "id": "obra",
+  "nombre": "Obra en construcción",
+  "tipo": "ambiente",
+  "para": "de fondo cuando se construye algo, una fábrica que nace",
+  "duracion": 10.0,
+  "autor": "rubberduck",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/100-cc0-sfx-2"
+ },
+ {
+  "id": "maquinas",
+  "nombre": "Máquinas",
+  "tipo": "ambiente",
+  "para": "de fondo en una fábrica, un taller, un laboratorio",
+  "duracion": 6.96,
+  "autor": "rubberduck",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/100-cc0-sfx-2"
+ },
+ {
+  "id": "multitud",
+  "nombre": "Multitud",
+  "tipo": "ambiente",
+  "para": "de fondo con gente: un mercado, una protesta, un estadio",
+  "duracion": 10.0,
+  "autor": "StarNinjas",
+  "licencia": "CC0 1.0",
+  "fuente": "https://opengameart.org/content/crowd-shoutingspeaking-ambience"
+ }
+]
