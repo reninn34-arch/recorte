@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Project } from '../../../shared/types'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
@@ -27,7 +27,8 @@ import {
   type FiltrosTL,
   type SonidoTL,
   type TextoTL,
-  type Timeline
+  type Timeline,
+  timelineActiva
 } from '../../../shared/timeline'
 import { useMusica, useSincronizar, useTamano, useVoces, type FuentesVista, type Historial, type Reproductor } from '../hooks/timeline'
 import type { Elegido } from './TimelineEditor'
@@ -65,12 +66,14 @@ export function Monitor({
 }) {
   const src = proyecto.demo ? undefined : mediaUrl(proyecto.id, proyecto.proxy ?? 'fuente')
   const enImagen = Boolean(reproductor.imagen)
-  const rotulos = textosEn(timeline, reproductor.tiempo)
+  // Lo que se ve y suena: sin las pistas ocultas o silenciadas (lo que se edita es `timeline`, entera).
+  const vista = useMemo(() => timelineActiva(timeline), [timeline])
+  const rotulos = textosEn(vista, reproductor.tiempo)
   const vacia = timeline.clips.length === 0
-  const musicaRef = useMusica(timeline, reproductor, proyecto.transcript)
+  const musicaRef = useMusica(vista, reproductor, proyecto.transcript)
   const urlDe = useCallback((archivo: string) => mediaUrl(proyecto.id, archivo), [proyecto.id])
-  const vocesRef = useVoces(timeline, reproductor, urlDe)
-  const ubicado = ubicar(timeline, reproductor.tiempo)
+  const vocesRef = useVoces(vista, reproductor, urlDe)
+  const ubicado = ubicar(vista, reproductor.tiempo)
   const clipActual = ubicado?.clip
   // Un clip mudo solo aporta imagen: su sonido va en las pistas de voz y música.
   useEffect(() => {
@@ -121,7 +124,7 @@ export function Monitor({
 
   const [borrador, setBorrador] = useState<Borrador>(null)
   const [guia, setGuia] = useState<{ v: boolean; h: boolean }>({ v: false, h: false })
-  const capas = capasEn(timeline, reproductor.tiempo)
+  const capas = capasEn(vista, reproductor.tiempo)
   const [soltando, setSoltando] = useState(false)
 
   /** Un medio de la biblioteca soltado sobre el monitor: queda encima, donde se soltó. */
@@ -246,12 +249,12 @@ export function Monitor({
       ) : (
         <div className="monitor-vacio"><Icon name="play" size={28} /></div>
       )}
-      {timeline.musica && !proyecto.demo && (
-        <audio ref={musicaRef} src={mediaUrl(proyecto.id, timeline.musica.archivo)} preload="auto" loop />
+      {vista.musica && !proyecto.demo && (
+        <audio ref={musicaRef} src={mediaUrl(proyecto.id, vista.musica.archivo)} preload="auto" loop />
       )}
-      {timeline.voces?.length && !proyecto.demo ? <audio ref={vocesRef} preload="auto" /> : null}
+      {vista.voces?.length && !proyecto.demo ? <audio ref={vocesRef} preload="auto" /> : null}
       {!proyecto.demo &&
-        (timeline.sonidos ?? []).map((s) => (
+        (vista.sonidos ?? []).map((s) => (
           <SonidoVista key={s.id} sonido={s} url={urlDe(s.archivo)} tiempo={reproductor.tiempo} reproduciendo={reproductor.reproduciendo} />
         ))}
       {cw > 0 && (

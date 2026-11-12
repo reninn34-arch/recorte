@@ -8,7 +8,7 @@ import { RenderQueue } from './RenderQueue'
 import { SourceCard } from './SourceCard'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
-import { capaNueva, cambiarCapa, cambiarFuente, escalaAnimada, type TipoAnimar, duracionTimeline, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, type Timeline } from '../../../shared/timeline'
+import { capaNueva, cambiarCapa, cambiarFuente, escalaAnimada, type TipoAnimar, duracionTimeline, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, timelineActiva, type Timeline } from '../../../shared/timeline'
 import { useHistorial, useReproductor, type FuentesVista } from '../hooks/timeline'
 import { Monitor } from './Monitor'
 import { MediosPanel } from './MediosPanel'
@@ -98,7 +98,9 @@ export function Editor({
     for (const m of proyecto.medios ?? []) lista[m.id] = { url: mediaUrl(proyecto.id, `medio/${m.id}`), tipo: m.tipo }
     return lista
   }, [proyecto.id, proyecto.proxy, proyecto.medios])
-  const reproductor = useReproductor(timeline, proyecto.id, fuentes)
+  // Lo que suena y se ve es la timeline sin las pistas silenciadas (los clips no cambian de sitio).
+  const activa = useMemo(() => timelineActiva(timeline), [timeline])
+  const reproductor = useReproductor(activa, proyecto.id, fuentes)
   const [agregando, setAgregando] = useState(false)
 
   // Una versión nueva del agente llega como timeline pendiente: entra como un paso más, así

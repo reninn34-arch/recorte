@@ -2,6 +2,12 @@ import React, { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState,
 import { createPortal } from 'react-dom'
 import {
   ajustarClip,
+  cambiarPista,
+  cambiarVelocidad,
+  LIMITES_VELOCIDAD,
+  PISTAS,
+  velocidadDe,
+  type PistaId,
   anadirCapa,
   cambiarTexto as cambiarTextoTL,
   ajustesDe,
@@ -182,6 +188,27 @@ export function TimelineEditor({
   /** Copia un efecto de sonido al proyecto (uno incluido o, sin id, uno del equipo). */
   ponerSonido?: (incluido?: string) => Promise<{ archivo: string; nombre: string; duracion: number } | null>
 }) {
+  // Selección múltiple: lo que se suma con Ctrl o Mayús + clic (además de lo elegido). Sirve para borrar varios de una vez.
+  const [varios, setVarios] = useState<NonNullable<Elegido>[]>([])
+  const enVarios = (id: string) => varios.some((v) => v.id === id)
+  /** Con Ctrl o Mayús, el clic suma o quita de la selección en vez de elegir. Devuelve si lo hizo. */
+  function sumar(e: React.PointerEvent, cual: NonNullable<Elegido>): boolean {
+    if (!(e.ctrlKey || e.metaKey || e.shiftKey) || e.button !== 0) return false
+    e.preventDefault()
+    e.stopPropagation()
+    setVarios((antes) => {
+      const base = antes.length || !elegido || elegido.tipo === 'musica' ? antes : [elegido]
+      return base.some((v) => v.id === cual.id) ? base.filter((v) => v.id !== cual.id) : [...base, cual]
+    })
+    return true
+  }
+  // Elegir otra cosa con un clic normal (o nada) deshace la selección múltiple.
+  useEffect(() => {
+    setVarios((antes) => (antes.length && (!elegido || !antes.some((v) => v.id === elegido.id)) ? [] : antes))
+  }, [elegido])
+  /** Si una fuente es un video (la velocidad no tiene sentido en una foto). */
+  const esVideo = (fuente: string) => fuente === 'principal' || medios?.find((m) => m.id === fuente)?.tipo === 'video'
+  const clasePista = (id: PistaId) => `${tl.pistas?.[id]?.bloqueada ? 'is-bloqueada' : ''} ${tl.pistas?.[id]?.oculta ? 'is-oculta' : ''}`
   // La pestaña abierta de la biblioteca.
   const [pestana, setPestana] = useState('medios')
   /** La pista sobre la que se está arrastrando un medio de la biblioteca. */
@@ -362,10 +389,12 @@ export function TimelineEditor({
     const puntos = puntosIman(base)
     arrastrar(e, (dx) => {
       const limite = duracionDe ? duracionDe(tramo.clip.fuente) : duracionFuente
-      if (lado === 'entrada') return recortarClip(base, id, 'entrada', tramo.clip.entrada + dx, limite)
+      // Lo arrastrado son segundos de la timeline: en la fuente, por la velocidad del clip.
+      const vel = velocidadDe(tramo.clip)
+      if (lado === 'entrada') return recortarClip(base, id, 'entrada', tramo.clip.entrada + dx * vel, limite)
       // El borde derecho se pega al cabezal y a los bordes de los rótulos.
       const finTl = iman(tramo.fin + dx, puntos.filter((p) => p > tramo.inicio))
-      return recortarClip(base, id, 'salida', tramo.clip.entrada + (finTl - tramo.inicio), limite)
+      return recortarClip(base, id, 'salida', tramo.clip.entrada + (finTl - tramo.inicio) * vel, limite)
     })
   }
 
@@ -502,6 +531,28 @@ export function TimelineEditor({
   }
 
   function accionBorrar() {
+    if (varios.length > 1) {
+      // Varios a la vez: un solo paso de deshacer.
+      let nueva = timeline
+      for (const v of varios) {
+        nueva =
+          v.tipo === 'clip'
+            ? borrarClip(nueva, v.id)
+            : v.tipo === 'voz'
+              ? borrarVoz(nueva, v.id)
+              : v.tipo === 'capa'
+                ? borrarCapa(nueva, v.id)
+                : v.tipo === 'sonido'
+                  ? borrarSonido(nueva, v.id)
+                  : v.tipo === 'texto'
+                    ? borrarTexto(nueva, v.id)
+                    : nueva
+      }
+      if (nueva !== timeline) historial.aplicar(nueva)
+      setVarios([])
+      onElegir(null)
+      return
+    }
     if (!elegido) return
     if (elegido.tipo === 'clip') historial.aplicar(borrarClip(timeline, elegido.id))
     else if (elegido.tipo === 'musica') historial.aplicar(ponerMusica(timeline, undefined))
@@ -608,6 +659,12 @@ export function TimelineEditor({
     if (ctrl && tecla === 'z' && !e.shiftKey) historial.deshacer()
     else if (ctrl && (tecla === 'y' || (tecla === 'z' && e.shiftKey))) historial.rehacer()
     else if (ctrl && tecla === 'd') accionDuplicar()
+    else if (ctrl && tecla === 'a') {
+      // Todos los clips de la pista de video.
+      if (!tl.clips.length) return
+      setVarios(tl.clips.map((c) => ({ tipo: 'clip' as const, id: c.id })))
+      if (!elegido || elegido.tipo !== 'clip') onElegir({ tipo: 'clip', id: tl.clips[0].id })
+    }
     else if (ctrl && tecla === 'c') {
       if (!accionCopiar()) return
     } else if (ctrl && tecla === 'x') {
@@ -844,12 +901,34 @@ export function TimelineEditor({
       <div className="tl-cuerpo">
         <div className="tl-nombres">
           <span className="tl-nombre regla" />
-          <span className="tl-nombre"><Icon name="layers" size={12} /> Encima</span>
-          <span className="tl-nombre"><Icon name="film" size={12} /> Video</span>
-          <span className="tl-nombre"><Icon name="type" size={12} /> Texto</span>
-          <span className="tl-nombre"><Icon name="sparkles" size={12} /> Voz</span>
-          <span className="tl-nombre"><Icon name="plus" size={12} /> Sonidos</span>
-          <span className="tl-nombre"><Icon name="music" size={12} /> Música</span>
+          {PISTAS.map((p) => {
+            const estado = tl.pistas?.[p.id]
+            const quitar = p.audio ? 'Silenciar' : 'Ocultar'
+            const poner = p.audio ? 'Volver a oír' : 'Volver a mostrar'
+            return (
+              <span key={p.id} className={`tl-nombre ${estado?.oculta ? 'is-oculta' : ''}`}>
+                <span className="tl-nombre-texto">{p.nombre}</span>
+                <button
+                  className={`tl-pista-boton ${estado?.oculta ? 'is-on' : ''}`}
+                  onClick={() => historial.aplicar(cambiarPista(timeline, p.id, { oculta: !estado?.oculta }))}
+                  title={`${estado?.oculta ? poner : quitar} la pista ${p.nombre} (en el monitor y en el MP4)`}
+                  aria-label={`${estado?.oculta ? poner : quitar} la pista ${p.nombre}`}
+                  aria-pressed={Boolean(estado?.oculta)}
+                >
+                  <Icon name={p.audio ? (estado?.oculta ? 'volumen-no' : 'volumen') : estado?.oculta ? 'ojo-no' : 'ojo'} size={12} />
+                </button>
+                <button
+                  className={`tl-pista-boton ${estado?.bloqueada ? 'is-on' : ''}`}
+                  onClick={() => historial.aplicar(cambiarPista(timeline, p.id, { bloqueada: !estado?.bloqueada }))}
+                  title={estado?.bloqueada ? `Desbloquear la pista ${p.nombre}` : `Bloquear la pista ${p.nombre}: no se puede tocar`}
+                  aria-label={estado?.bloqueada ? `Desbloquear la pista ${p.nombre}` : `Bloquear la pista ${p.nombre}`}
+                  aria-pressed={Boolean(estado?.bloqueada)}
+                >
+                  <Icon name={estado?.bloqueada ? 'candado' : 'candado-abierto'} size={12} />
+                </button>
+              </span>
+            )
+          })}
         </div>
 
         <div className="tl-scroll" ref={scrollRef} onWheel={rueda}>
@@ -863,7 +942,7 @@ export function TimelineEditor({
             </div>
 
             <div
-              className={`tl-carril encima ${destino === 'encima' ? 'is-destino' : ''}`}
+              className={`tl-carril encima ${destino === 'encima' ? 'is-destino' : ''} ${clasePista('encima')}`}
               onPointerDown={arrastrarCabezal}
               {...receptor('encima')}
             >
@@ -876,9 +955,9 @@ export function TimelineEditor({
                 return (
                   <div
                     key={c.id}
-                    className={`tl-rotulo tl-capa ${elegido?.tipo === 'capa' && elegido.id === c.id ? 'is-elegido' : ''}`}
+                    className={`tl-rotulo tl-capa ${(elegido?.tipo === 'capa' && elegido.id === c.id) || enVarios(c.id) ? 'is-elegido' : ''}`}
                     style={{ left: c.inicio * pps, width: Math.max(4, anchoCapa), ...fondoMini(c.fuente) }}
-                    onPointerDown={(e) => arrastrarCapa(e, c.id, 'mover')}
+                    onPointerDown={(e) => sumar(e, { tipo: 'capa', id: c.id }) || arrastrarCapa(e, c.id, 'mover')}
                     title={`${nombre} · ${c.duracion.toFixed(1)} s`}
                   >
                     <span className="tl-asa izquierda" onPointerDown={(e) => arrastrarCapa(e, c.id, 'inicio')} />
@@ -889,22 +968,23 @@ export function TimelineEditor({
               })}
             </div>
 
-            <div className={`tl-carril video ${destino === 'video' ? 'is-destino' : ''}`} onPointerDown={arrastrarCabezal} {...receptor('video')}>
+            <div className={`tl-carril video ${destino === 'video' ? 'is-destino' : ''} ${clasePista('video')}`} onPointerDown={arrastrarCabezal} {...receptor('video')}>
               {lista.length === 0 && <span className="tl-vacio">La timeline está vacía. Deshaz (Ctrl+Z) para recuperar el material.</span>}
               {lista.map((t) => {
                 const anchoClip = (t.fin - t.inicio) * pps
                 return (
                   <div
                     key={t.clip.id}
-                    className={`tl-clip ${t.clip.fuente !== 'principal' ? 'otra-fuente' : ''} ${elegido?.id === t.clip.id ? 'is-elegido' : ''}`}
+                    className={`tl-clip ${t.clip.fuente !== 'principal' ? 'otra-fuente' : ''} ${elegido?.id === t.clip.id || enVarios(t.clip.id) ? 'is-elegido' : ''}`}
                     style={{ left: t.inicio * pps, width: anchoClip, ...fondoMini(t.clip.fuente) }}
-                    onPointerDown={(e) => arrastrarClip(e, t.clip.id)}
+                    onPointerDown={(e) => sumar(e, { tipo: 'clip', id: t.clip.id }) || arrastrarClip(e, t.clip.id)}
                     title={`Clip ${t.indice + 1} · ${nombreDe ? nombreDe(t.clip.fuente) : 'fuente'} ${tc(t.clip.entrada)}–${tc(t.clip.salida)}`}
                   >
                     <span className="tl-asa izquierda" onPointerDown={(e) => recortar(e, t.clip.id, 'entrada')} />
                     {anchoClip > 46 && (
                       <span className="tl-clip-texto">
                         <b>{t.indice + 1}</b>
+                        {t.clip.velocidad ? <i className="tl-clip-vel">{t.clip.velocidad}×</i> : null}
                         {anchoClip > 120 &&
                           (t.clip.fuente !== 'principal' && nombreDe ? <> {nombreDe(t.clip.fuente)}</> : <> {tc(t.clip.entrada, false)}–{tc(t.clip.salida, false)}</>)}
                       </span>
@@ -929,13 +1009,13 @@ export function TimelineEditor({
               })}
             </div>
 
-            <div className="tl-carril texto" onPointerDown={arrastrarCabezal}>
+            <div className={`tl-carril texto ${clasePista('texto')}`} onPointerDown={arrastrarCabezal}>
               {tl.textos.map((x) => (
                 <div
                   key={x.id}
-                  className={`tl-rotulo ${elegido?.id === x.id ? 'is-elegido' : ''}`}
+                  className={`tl-rotulo ${elegido?.id === x.id || enVarios(x.id) ? 'is-elegido' : ''}`}
                   style={{ left: x.inicio * pps, width: Math.max(4, x.duracion * pps) }}
-                  onPointerDown={(e) => arrastrarTexto(e, x.id, 'mover')}
+                  onPointerDown={(e) => sumar(e, { tipo: 'texto', id: x.id }) || arrastrarTexto(e, x.id, 'mover')}
                   onDoubleClick={() => textoRef.current?.select()}
                   title={x.texto}
                 >
@@ -946,16 +1026,16 @@ export function TimelineEditor({
               ))}
             </div>
 
-            <div className="tl-carril voz" onPointerDown={arrastrarCabezal}>
+            <div className={`tl-carril voz ${clasePista('voz')}`} onPointerDown={arrastrarCabezal}>
               {(tl.voces ?? []).map((v) => {
                 const anchoFrase = v.duracion * pps
                 return (
                   <div
                     key={v.id}
-                    className={`tl-voz tl-frase ${elegido?.tipo === 'voz' && elegido.id === v.id ? 'is-elegido' : ''}`}
+                    className={`tl-voz tl-frase ${(elegido?.tipo === 'voz' && elegido.id === v.id) || enVarios(v.id) ? 'is-elegido' : ''}`}
                     style={{ left: v.inicio * pps, width: Math.max(4, anchoFrase - 1) }}
                     title={v.texto || 'Narración'}
-                    onPointerDown={(e) => arrastrarFrase(e, v.id)}
+                    onPointerDown={(e) => sumar(e, { tipo: 'voz', id: v.id }) || arrastrarFrase(e, v.id)}
                   >
                     {urlDe && v.archivo && <Onda url={urlDe(v.archivo)} duracion={v.duracion} />}
                     {anchoFrase > 30 && <span className="tl-clip-texto">{v.texto || 'Narración'}</span>}
@@ -980,7 +1060,7 @@ export function TimelineEditor({
               })}
             </div>
 
-            <div className="tl-carril sonidos" onPointerDown={arrastrarCabezal}>
+            <div className={`tl-carril sonidos ${clasePista('sonidos')}`} onPointerDown={arrastrarCabezal}>
               {!tl.sonidos?.length && ponerSonido && (
                 <button className="tl-vacio tl-vacio-boton" onPointerDown={(e) => e.stopPropagation()} onClick={() => setPestana('audio')}>
                   + Añadir un efecto de sonido
@@ -991,10 +1071,10 @@ export function TimelineEditor({
                 return (
                   <div
                     key={s.id}
-                    className={`tl-voz tl-frase tl-sonido ${elegido?.tipo === 'sonido' && elegido.id === s.id ? 'is-elegido' : ''}`}
+                    className={`tl-voz tl-frase tl-sonido ${(elegido?.tipo === 'sonido' && elegido.id === s.id) || enVarios(s.id) ? 'is-elegido' : ''}`}
                     style={{ left: s.inicio * pps, width: Math.max(6, anchoSonido - 1) }}
                     title={s.nombre}
-                    onPointerDown={(e) => arrastrarSonido(e, s.id)}
+                    onPointerDown={(e) => sumar(e, { tipo: 'sonido', id: s.id }) || arrastrarSonido(e, s.id)}
                   >
                     {urlDe && <Onda url={urlDe(s.archivo)} duracion={s.duracion} />}
                     {anchoSonido > 30 && <span className="tl-clip-texto">{s.nombre}</span>}
@@ -1003,7 +1083,7 @@ export function TimelineEditor({
               })}
             </div>
 
-            <div className="tl-carril musica" onPointerDown={arrastrarCabezal}>
+            <div className={`tl-carril musica ${clasePista('musica')}`} onPointerDown={arrastrarCabezal}>
               {tl.musica ? (
                 <div
                   className={`tl-musica ${elegido?.tipo === 'musica' ? 'is-elegido' : ''}`}
@@ -1042,7 +1122,9 @@ export function TimelineEditor({
           <div className="ed-insp">
             <div className="ed-insp-cabeza">
               <b>
-                {clipElegido
+                {varios.length > 1
+                  ? `${varios.length} elegidos`
+                  : clipElegido
                   ? `Clip ${clipElegido.indice + 1}`
                   : capaElegida
                     ? 'Capa encima'
@@ -1119,7 +1201,16 @@ export function TimelineEditor({
               </div>
             )}
       <div className="tl-detalle">
-        {clipElegido ? (
+        {varios.length > 1 ? (
+          <div className="ed-vacio">
+            <p>
+              Tienes {varios.length} elementos elegidos. Suma o quita con Ctrl + clic; un clic normal vuelve a elegir uno solo.
+            </p>
+            <button className="btn small" onClick={accionBorrar}>
+              <Icon name="trash" size={14} /> Borrar los {varios.length}
+            </button>
+          </div>
+        ) : clipElegido ? (
           <>
             <span>
               <b>Clip {clipElegido.indice + 1}</b> de {lista.length} · fuente {tc(clipElegido.clip.entrada)} → {tc(clipElegido.clip.salida)} ·{' '}
@@ -1146,6 +1237,37 @@ export function TimelineEditor({
               <Icon name="trash" size={14} /> Borrar
             </button>
             <div className="tl-ajustes">
+              {esVideo(clipElegido.clip.fuente) && (
+                <>
+                  <span className="ed-seccion">Velocidad</span>
+                  <label className="tl-ajuste" title="Cámara lenta o rápida. El clip dura más o menos, y lo que viene después se corre.">
+                    <span>
+                      Velocidad <b>{velocidadDe(clipElegido.clip).toFixed(2).replace(/\.?0+$/, '')}×</b>
+                    </span>
+                    <input
+                      type="range"
+                      min={LIMITES_VELOCIDAD[0]}
+                      max={LIMITES_VELOCIDAD[1]}
+                      step={0.05}
+                      value={velocidadDe(clipElegido.clip)}
+                      onPointerDown={empezarAjuste}
+                      onFocus={empezarAjuste}
+                      onChange={(e) => deslizar(cambiarVelocidad(timeline, clipElegido.clip.id, Number(e.target.value)))}
+                    />
+                  </label>
+                  <div className="ed-opciones">
+                    {[0.25, 0.5, 1, 1.5, 2, 4].map((v) => (
+                      <button
+                        key={v}
+                        className={`chip ${Math.abs(velocidadDe(clipElegido.clip) - v) < 0.005 ? 'is-active' : ''}`}
+                        onClick={() => historial.aplicar(cambiarVelocidad(timeline, clipElegido.clip.id, v))}
+                      >
+                        {v}×
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
               {(
                 [
                   [
@@ -1616,6 +1738,8 @@ export function TimelineEditor({
               <dd>Copiar, cortar y pegar en el cabezal</dd>
               <dt>Ctrl+D</dt>
               <dd>Duplicar el clip</dd>
+              <dt>Ctrl+clic</dt>
+              <dd>Elegir varios (Ctrl+A, todos los clips)</dd>
               <dt>+ · −</dt>
               <dd>Acercar o alejar la línea de tiempo</dd>
               <dt>T</dt>

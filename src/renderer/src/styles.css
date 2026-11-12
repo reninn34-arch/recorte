@@ -3005,3 +3005,19 @@ button { cursor: pointer; }
 .ed .tl-carril.video { height: 54px; }
 .ed .tl-nombre:nth-child(3) { height: 54px; }
 .ed .tl-voz:not(.tl-sonido) .tl-onda { color: #ffffff2e; }
+
+/* Cabeceras de pista: nombre y sus dos botones (ver u oír, y bloquear). */
+.ed .tl-nombres { width: 104px; }
+.ed .tl-nombre { gap: 2px; padding: 0 4px 0 8px; }
+.tl-nombre-texto { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tl-pista-boton { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: none; border-radius: 4px; background: none; color: var(--dim); flex-shrink: 0; }
+.tl-pista-boton:hover { background: var(--panel-3); color: var(--text); }
+.tl-pista-boton.is-on { color: var(--accent-2); }
+.ed .tl-nombre .tl-pista-boton svg { color: inherit; }
+.tl-nombre.is-oculta .tl-nombre-texto { opacity: 0.45; }
+.tl-carril.is-oculta > :not(.tl-vacio) { opacity: 0.3; }
+.tl-carril.is-bloqueada > * { pointer-events: none; }
+.tl-carril.is-bloqueada { background-image: repeating-linear-gradient(135deg, transparent 0 7px, #ffffff08 7px 8px); }
+.tl-clip-vel { margin-left: 4px; padding: 0 4px; border-radius: 3px; background: var(--accent); color: var(--ink); font-style: normal; font-size: 10px; font-weight: 700; }
+.ed-opciones { display: flex; flex-wrap: wrap; gap: 4px; }
+.ed-opciones .chip { padding: 2px 8px; font-size: 11px; }

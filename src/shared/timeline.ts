@@ -30,6 +30,8 @@ export interface ClipTL {
   ajustes?: AjustesClip
   /** Sin su sonido: un tramo que solo aporta imagen (la voz y la música van en sus pistas). */
   mudo?: boolean
+  /** A qué velocidad va (0.25 a 4; sin ella, normal). En la timeline dura su tramo de la fuente entre la velocidad. */
+  velocidad?: number
   /** Entra fundiéndose sobre el clip anterior, en estos segundos (0.1 a 1.5). */
   fundido?: number
   /** Cómo entra en esos segundos: barrido, zoom, desenfoque, destello, círculo (sin él, fundido). */
@@ -378,6 +380,8 @@ export interface Timeline {
   capas?: CapaTL[]
   /** Efectos de sonido sueltos. */
   sonidos?: SonidoTL[]
+  /** Las pistas ocultas, silenciadas o bloqueadas. */
+  pistas?: Partial<Record<PistaId, PistaTL>>
   /** Grano, polvo, trama, viñeta y parpadeo de todo el video. */
   filtros?: FiltrosTL
 }
@@ -402,7 +406,79 @@ function pinza(valor: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, valor))
 }
 
-const largo = (c: ClipTL): number => c.salida - c.entrada
+/** Lo que dura un clip en la timeline: su tramo de la fuente, a su velocidad. */
+const largo = (c: ClipTL): number => (c.salida - c.entrada) / velocidadDe(c)
+
+/** Los límites de la velocidad de un clip (cámara lenta a cámara rápida). */
+export const LIMITES_VELOCIDAD = [0.25, 4] as const
+export const velocidadDe = (c: Pick<ClipTL, 'velocidad'>): number => c.velocidad ?? 1
+
+/** Cambia la velocidad de un clip de video (1 = normal). Lo que viene después se corre. */
+export function cambiarVelocidad(tl: Timeline, id: string, velocidad: number): Timeline {
+  const v = Math.round(pinza(velocidad, LIMITES_VELOCIDAD[0], LIMITES_VELOCIDAD[1]) * 100) / 100
+  const clips = tl.clips.map((c) => {
+    if (c.id !== id) return c
+    // Que no quede más corto que el mínimo en la timeline.
+    const tope = Math.max(LIMITES_VELOCIDAD[0], (c.salida - c.entrada) / DURACION_MINIMA)
+    const { velocidad: _antes, ...resto } = c
+    const final = Math.min(v, tope)
+    return Math.abs(final - 1) < 0.005 ? resto : { ...resto, velocidad: final }
+  })
+  return conClips(tl, clips)
+}
+
+// ===== Pistas: ocultar o silenciar, y bloquear =====
+
+export type PistaId = 'encima' | 'video' | 'texto' | 'voz' | 'sonidos' | 'musica'
+export interface PistaTL {
+  /** No se ve (Encima, Texto) o no suena (Video, Voz, Sonidos, Música): ni en el monitor ni en el MP4. */
+  oculta?: boolean
+  /** No se puede tocar en la línea de tiempo. */
+  bloqueada?: boolean
+}
+export const PISTAS: { id: PistaId; nombre: string; audio: boolean }[] = [
+  { id: 'encima', nombre: 'Encima', audio: false },
+  { id: 'video', nombre: 'Video', audio: true },
+  { id: 'texto', nombre: 'Texto', audio: false },
+  { id: 'voz', nombre: 'Voz', audio: true },
+  { id: 'sonidos', nombre: 'Sonidos', audio: true },
+  { id: 'musica', nombre: 'Música', audio: true }
+]
+
+function normalizarPistas(entrada: unknown): Timeline['pistas'] | undefined {
+  if (!entrada || typeof entrada !== 'object') return undefined
+  const pistas: NonNullable<Timeline['pistas']> = {}
+  for (const p of PISTAS) {
+    const x = (entrada as Record<string, PistaTL | undefined>)[p.id]
+    if (x?.oculta === true || x?.bloqueada === true) pistas[p.id] = { ...(x.oculta === true ? { oculta: true } : {}), ...(x.bloqueada === true ? { bloqueada: true } : {}) }
+  }
+  return Object.keys(pistas).length ? pistas : undefined
+}
+
+export function cambiarPista(tl: Timeline, id: PistaId, cambio: PistaTL): Timeline {
+  const pistas = normalizarPistas({ ...(tl.pistas ?? {}), [id]: { ...(tl.pistas?.[id] ?? {}), ...cambio } })
+  const { pistas: _antes, ...resto } = tl
+  return pistas ? { ...resto, pistas } : resto
+}
+
+/**
+ * La timeline tal como se ve y suena: sin lo de las pistas ocultas o silenciadas. Es la que usan el monitor y el
+ * MP4; la que se edita conserva todo. Los clips no cambian de sitio (la pista de video solo pierde su sonido).
+ */
+export function timelineActiva(tl: Timeline): Timeline {
+  const p = tl.pistas
+  if (!p || !PISTAS.some((x) => p[x.id]?.oculta)) return tl
+  const { capas, voces, sonidos, musica, ...resto } = tl
+  return {
+    ...resto,
+    clips: p.video?.oculta ? tl.clips.map((c) => ({ ...c, mudo: true })) : tl.clips,
+    textos: p.texto?.oculta ? [] : tl.textos,
+    ...(capas && !p.encima?.oculta ? { capas } : {}),
+    ...(voces && !p.voz?.oculta ? { voces } : {}),
+    ...(sonidos && !p.sonidos?.oculta ? { sonidos } : {}),
+    ...(musica && !p.musica?.oculta ? { musica } : {})
+  }
+}
 
 // ===== Crear =====
 
@@ -467,6 +543,9 @@ export function normalizarTimeline(entrada: unknown, duracionFuente: number, otr
       salida: s,
       ...(ajustes ? { ajustes } : {}),
       ...(c.mudo === true ? { mudo: true } : {}),
+      ...(typeof c.velocidad === 'number' && Number.isFinite(c.velocidad) && Math.abs(c.velocidad - 1) >= 0.005
+        ? { velocidad: Math.round(pinza(c.velocidad, LIMITES_VELOCIDAD[0], LIMITES_VELOCIDAD[1]) * 100) / 100 }
+        : {}),
       ...(typeof c.fundido === 'number' && c.fundido >= 0.05 ? { fundido: Math.round(pinza(c.fundido, 0.1, Math.min(MAX_FUNDIDO, (s - e) / 2)) * 100) / 100 } : {}),
       ...(typeof c.fundido === 'number' && c.fundido >= 0.05 && c.transicion && c.transicion !== 'fundido' && TRANSICIONES.some((x) => x.id === c.transicion)
         ? { transicion: c.transicion }
@@ -502,7 +581,8 @@ export function normalizarTimeline(entrada: unknown, duracionFuente: number, otr
     ...(voces.length ? { voces } : {}),
     ...(capas.length ? { capas } : {}),
     ...(sonidos.length ? { sonidos } : {}),
-    ...(filtros ? { filtros } : {})
+    ...(filtros ? { filtros } : {}),
+    ...(normalizarPistas(crudo.pistas) ? { pistas: normalizarPistas(crudo.pistas) } : {})
   }
 }
 
@@ -666,7 +746,7 @@ export function ubicar(tl: Timeline, t: number): (Tramo & { tFuente: number }) |
   const ultimo = lista[lista.length - 1]
   const tiempo = pinza(t, 0, ultimo.fin)
   const tramo = lista.find((x) => tiempo < x.fin - EPSILON) ?? ultimo
-  return { ...tramo, tFuente: tramo.clip.entrada + (tiempo - tramo.inicio) }
+  return { ...tramo, tFuente: tramo.clip.entrada + (tiempo - tramo.inicio) * velocidadDe(tramo.clip) }
 }
 
 /** Los ajustes que se ven: los del clip con los neutros por defecto. */
@@ -925,8 +1005,8 @@ export function borrarTramo(tl: Timeline, desde: number, hasta: number): Timelin
       clips.push(tr.clip)
       continue
     }
-    const corteA = tr.clip.entrada + Math.max(0, a - tr.inicio)
-    const corteB = tr.clip.entrada + Math.min(largo(tr.clip), b - tr.inicio)
+    const corteA = tr.clip.entrada + Math.max(0, a - tr.inicio) * velocidadDe(tr.clip)
+    const corteB = tr.clip.entrada + Math.min(largo(tr.clip), b - tr.inicio) * velocidadDe(tr.clip)
     if (corteA - tr.clip.entrada >= DURACION_MINIMA) clips.push({ ...tr.clip, salida: corteA })
     if (tr.clip.salida - corteB >= DURACION_MINIMA) {
       clips.push({ ...tr.clip, id: corteA - tr.clip.entrada >= DURACION_MINIMA ? nuevoId('clip') : tr.clip.id, entrada: corteB })
@@ -1325,7 +1405,7 @@ export function borrarSonido(tl: Timeline, id: string): Timeline {
 export function cambiarFuente(tl: Timeline, id: string, fuente: FuenteId, duracionNueva: number): Timeline {
   const clips = tl.clips.map((c) => {
     if (c.id !== id) return c
-    const cuanto = Math.min(largo(c), Math.max(DURACION_MINIMA, duracionNueva))
+    const cuanto = Math.min(c.salida - c.entrada, Math.max(DURACION_MINIMA, duracionNueva))
     // Otra foto: desde 0. Otro video: desde su principio (el punto de entrada anterior no significa nada en el nuevo).
     return { ...c, fuente, entrada: 0, salida: cuanto }
   })

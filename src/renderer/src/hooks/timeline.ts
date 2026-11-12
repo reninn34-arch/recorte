@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { duracionTimeline, tramos, tramosDeVoces, ubicar, vozEnTimeline, type Timeline } from '../../../shared/timeline'
+import { duracionTimeline, tramos, tramosDeVoces, ubicar, vozEnTimeline, type Timeline , velocidadDe } from '../../../shared/timeline'
 import type { TranscriptSegment } from '../../../shared/types'
 
 const LIMITE_HISTORIAL = 200
@@ -234,8 +234,10 @@ export function useReproductor(timeline: Timeline, clave: string, fuentes: Fuent
           if (video.currentTime >= tramo.clip.salida - 0.015 || video.ended || (casiAlFinal && video.paused)) {
             if (!siguiente(lista, tramo.fin)) return
           } else if (video.currentTime >= tramo.clip.entrada - 0.05) {
-            tiempoRef.current = tramo.inicio + Math.max(0, video.currentTime - tramo.clip.entrada)
+            tiempoRef.current = tramo.inicio + Math.max(0, video.currentTime - tramo.clip.entrada) / velocidadDe(tramo.clip)
           }
+          // Cámara lenta o rápida: el video corre a la velocidad del clip.
+          if (Math.abs(video.playbackRate - velocidadDe(tramo.clip)) > 0.001) video.playbackRate = velocidadDe(tramo.clip)
         }
       }
       setTiempo(tiempoRef.current)

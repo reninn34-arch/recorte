@@ -29,7 +29,9 @@ import {
   type TextoTL,
   type FiltrosTL,
   type PosicionTexto,
-  type Timeline
+  type Timeline,
+  timelineActiva,
+  velocidadDe
 } from '../shared/timeline'
 import type { OpcionesExport } from '../shared/api'
 import type { ClipSuggestion, Project } from '../shared/types'
@@ -215,6 +217,8 @@ export async function exportarTimeline(
     const m = proyecto.medios?.find((x) => x.id === f)
     return m?.ancho && m.alto ? m.alto / m.ancho : 1
   }
+  // Lo que se exporta es lo que se ve y suena: sin las pistas ocultas o silenciadas.
+  timeline = timelineActiva(timeline)
   const lista = tramos(timeline).filter((t) => fuenteDe(t.clip.fuente))
   if (lista.length === 0) return { ok: false, error: 'La timeline está vacía: no hay nada que exportar.' }
   const duracion = duracionTimeline(timeline)
@@ -262,8 +266,19 @@ export async function exportarTimeline(
   lista.forEach((t, i) => {
     const largo = t.fin - t.inicio
     const f = fuenteDe(t.clip.fuente)!
+    // Cámara lenta o rápida (solo video): se lee su tramo entero de la fuente y se estira o se comprime.
+    const vel = f.tipo === 'video' ? velocidadDe(t.clip) : 1
+    const ritmo = Math.abs(vel - 1) > 0.005 ? `setpts=(PTS-STARTPTS)/${vel.toFixed(3)}` : 'setpts=PTS-STARTPTS'
+    // atempo solo admite de 0.5 a 2 por paso: se encadenan.
+    const tempos: string[] = []
+    for (let r = vel; Math.abs(r - 1) > 0.005; ) {
+      const paso = Math.min(2, Math.max(0.5, r))
+      tempos.push(`atempo=${paso.toFixed(4)}`)
+      r /= paso
+    }
+    const tempo = tempos.length ? `${tempos.join(',')},` : ''
     if (f.tipo === 'imagen') entradas.push('-loop', '1', '-framerate', String(fps), '-t', largo.toFixed(3), '-i', f.ruta)
-    else entradas.push('-ss', t.clip.entrada.toFixed(3), '-t', largo.toFixed(3), '-i', f.ruta)
+    else entradas.push('-ss', t.clip.entrada.toFixed(3), '-t', (largo * vel).toFixed(3), '-i', f.ruta)
     const iv = n++
     // Zoom: recorte hacia el punto (cx, cy) antes de encuadrar. Color: eq. Lo mismo que el monitor.
     const a = ajustesDe(t.clip)
@@ -296,11 +311,11 @@ export async function exportarTimeline(
     // Profundidad de campo: el fondo (profundidad 0) desenfocado si el foco está más cerca.
     const borroso = desenfoqueDeCampo(a, 0)
     const fondoBorroso = borroso > 0.005 ? `,gblur=sigma=${(borroso * DESENFOQUE_MAX * ancho).toFixed(2)}` : ''
-    partes.push(`[${iv}:v]setpts=PTS-STARTPTS,fps=${fps},${zoom}${encuadre}${lento}${fondoBorroso},setsar=1${color},format=yuv420p,settb=AVTB[v${i}]`)
+    partes.push(`[${iv}:v]${ritmo},fps=${fps},${zoom}${encuadre}${lento}${fondoBorroso},setsar=1${color},format=yuv420p,settb=AVTB[v${i}]`)
     if (conAudio) {
       if (f.conAudio && !t.clip.mudo) {
         // apad + atrim: cada tramo de audio dura exactamente lo que su video, o concat se desfasa.
-        partes.push(`[${iv}:a]asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo,apad,atrim=0:${largo.toFixed(3)}[a${i}]`)
+        partes.push(`[${iv}:a]asetpts=PTS-STARTPTS,${tempo}aresample=48000,aformat=channel_layouts=stereo,apad,atrim=0:${largo.toFixed(3)}[a${i}]`)
       } else {
         // Una imagen o un video mudo: silencio de su misma duración.
         entradas.push('-f', 'lavfi', '-t', largo.toFixed(3), '-i', 'anullsrc=r=48000:cl=stereo')

@@ -1,5 +1,12 @@
 import {
   ArrowUp,
+  Eye,
+  EyeOff,
+  Gauge,
+  Lock,
+  LockOpen,
+  Volume2,
+  VolumeX,
   Box,
   FolderOpen,
   Check,
@@ -73,6 +80,13 @@ const ICONOS = {
   alerta: TriangleAlert,
   'log-out': LogOut,
   enviar: ArrowUp,
+  ojo: Eye,
+  'ojo-no': EyeOff,
+  velocidad: Gauge,
+  candado: Lock,
+  'candado-abierto': LockOpen,
+  volumen: Volume2,
+  'volumen-no': VolumeX,
   carpeta: FolderOpen,
   cubo: Box
 } satisfies Record<string, LucideIcon>
