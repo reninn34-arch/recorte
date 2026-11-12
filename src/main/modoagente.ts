@@ -101,15 +101,13 @@ function copiarKit(trabajo: string): boolean {
     mkdirSync(join(destino, 'fuentes'), { recursive: true })
     for (const n of readdirSync(letras)) copyFileSync(join(letras, n), join(destino, 'fuentes', n))
   }
-  // La biblioteca de música libre: se deja apuntada (son decenas de MB; el kit copia solo la pista elegida).
+  // La música libre y los efectos de sonido incluidos se dejan apuntados (son MB; se copia solo lo que se usa).
   const musica = rutaScriptPython('musica')
-  if (existsSync(join(musica, 'catalogo.json'))) writeFileSync(join(destino, 'biblioteca.json'), JSON.stringify({ musica }), 'utf8')
-  // Los efectos de sonido incluidos, para `"sonidos": [{ "sonido": "pop" }]` en la receta.
   const sonidos = rutaScriptPython('sonidos')
-  if (existsSync(sonidos)) {
-    mkdirSync(join(destino, 'sonidos'), { recursive: true })
-    for (const n of readdirSync(sonidos)) if (n.endsWith('.wav')) copyFileSync(join(sonidos, n), join(destino, 'sonidos', n))
-  }
+  const biblioteca: Record<string, string> = {}
+  if (existsSync(join(musica, 'catalogo.json'))) biblioteca.musica = musica
+  if (existsSync(join(sonidos, 'catalogo.json'))) biblioteca.sonidos = sonidos
+  writeFileSync(join(destino, 'biblioteca.json'), JSON.stringify(biblioteca), 'utf8')
   // El FFmpeg de Recorte, aunque no esté en el PATH del agente.
   writeFileSync(join(destino, 'rutas.json'), JSON.stringify({ ffmpeg: resolverBinario('ffmpeg'), ffprobe: resolverBinario('ffprobe') }))
   return true
@@ -172,7 +170,7 @@ Con \`kit/\` no programas el video: escribes \`receta.json\` (qué foto o video,
 \`python kit/kit.py armar receta.json\` lo hace en UNA pasada, con la música, y deja \`revision/hoja-final.jpg\`.
 Trae fotos a pantalla completa con encuadre y acercamiento, video, antes/después (deslizar, lado, arriba), collage,
 frases con brillo, rótulos, desenfocar zonas, fundidos, la música recortada, capas encima (logos, íconos con su «pop»)
-y efectos de sonido (whoosh, pop, ding…). Para mini documentales trae además títulos de revista (serif cursiva, sans
+y efectos de sonido (34: transiciones, golpes, tensión, objetos y ambientes; \`kit.py sonidos\`). Para mini documentales trae además títulos de revista (serif cursiva, sans
 gruesa, palabra roja enorme, subrayado, grano), la etiqueta de papel con un nombre, palabras sueltas que flotan, un objeto
 de museo bajo un foco que entra girando en 3D y fotos de archivo que caen apiladas. Lee \`kit/RECETA.md\` (es corto).
 - **Si el usuario trae un video de referencia para copiar su estilo**, haz una lista de sus efectos (qué letra, qué color,

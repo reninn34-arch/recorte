@@ -121,9 +121,23 @@ NUNCA los pegues con un script aparte: así quedan en las pistas «Encima» y «
   foto que **se acerca** o algo que **gira**. Para una escena por capas: fondo como foto, y encima cada pieza recortada (PNG
   sin fondo) entrando en su momento, desde su lado, con un «pop» de sonido.
   Solo imágenes (un PNG con transparencia queda mejor). Que no tape caras ni subtítulos.
-- `sonido`: uno de los que trae Recorte: `whoosh` (un cambio rápido), `pop` (algo que aparece), `pop-alto` (el siguiente
-  de una serie), `ding` (un dato, un acierto), `caching` (una oferta). O `archivo` con uno propio. `volumen` por defecto 0.6.
-- Un «pop» cuando entra cada logo o ícono, un «whoosh» en los cortes fuertes; sin abusar (uno cada pocos segundos).
+- `sonido`: uno de los 34 que trae Recorte (`python kit/kit.py sonidos` da la lista con para qué sirve cada uno y lo que
+  dura; `--tipo` filtra). O `archivo` con uno propio. `volumen` por defecto 0.6. Los hay de seis tipos:
+  - **transiciones**: `whoosh` (un cambio rápido), `swish` (algo corto que pasa), `reversa` (el aire que se recoge antes de
+    un corte), `glitch` (tecnología, un fallo, un salto brusco).
+  - **aparece algo**: `pop`, `pop-alto` (el siguiente de una serie), `ding` (un dato), `caching` (una oferta), `campana`
+    (un logro), `interruptor`.
+  - **golpes**: `impacto` (grave y largo: el título, la gran cifra, el giro), `golpe`, `gong` (algo solemne), `explosion`,
+    `cristal` (algo que se rompe).
+  - **tensión**: `subida` (3 s que crecen hasta un corte), `tension` (zumbido de fondo, 8 s), `latido`, `alarma`.
+  - **objetos y acciones**: `maquina-escribir` (un texto que se escribe), `camara-foto` (una foto que aparece), `pagina`,
+    `papel`, `reloj` (el tiempo que pasa), `pasos`, `puerta`, `monedas`, `telefono`.
+  - **ambientes** (de fondo, 10 s): `lluvia`, `trafico`, `obra`, `maquinas`, `multitud`, `trueno`.
+- Como un editor: un «pop» cuando entra cada logo o ícono, la `maquina-escribir` bajo un texto que se escribe, la
+  `camara-foto` cuando cae una foto de archivo, un `whoosh` o un `swish` en los cortes fuertes y, en el gran momento, la
+  `subida` que acaba JUSTO en el corte (`"en"` = el corte − 3) y el `impacto` en el corte. Un ambiente bajo (0.25–0.35)
+  da lugar a una escena (la ciudad, la fábrica, la lluvia): ponlo seguido varias veces si la escena dura más de 10 s.
+  Sin abusar: uno cada pocos segundos, y nunca encima de una frase importante de la voz.
 
 ## Por piezas: así se hace un documental con personas (el método normal)
 Como un editor con sus recursos sueltos: no pidas escenas enteras con la persona dentro; pide las PIEZAS y compón.

@@ -276,9 +276,42 @@ def subtitulo(lienzo, L, t):
     return lienzo
 
 
+def carpeta_sonidos():
+    """Dónde están los efectos de sonido de Recorte: la carpeta apuntada en kit/biblioteca.json, o kit/sonidos (las
+    creaciones viejas los tenían copiados), o junto al kit (pruebas)."""
+    aqui = os.path.dirname(os.path.abspath(__file__))
+    try:
+        with open(os.path.join(aqui, 'biblioteca.json'), encoding='utf-8') as f:
+            ruta = json.load(f).get('sonidos')
+        if ruta and os.path.isdir(ruta):
+            return ruta
+    except (OSError, ValueError):
+        pass
+    for r in (os.path.join(aqui, 'sonidos'), os.path.join(os.path.dirname(aqui), 'sonidos')):
+        if os.path.isdir(r):
+            return r
+    return os.path.join(aqui, 'sonidos')
+
+
 def sonido_incluido(nombre):
-    """La ruta de un efecto de sonido que trae Recorte (`whoosh`, `pop`, `pop-alto`, `ding`, `caching`)."""
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sonidos', f'{nombre}.wav')
+    """La ruta de un efecto de sonido que trae Recorte (`kit.py sonidos` da la lista)."""
+    return os.path.join(carpeta_sonidos(), f'{nombre}.wav')
+
+
+def sonidos(tipo=None):
+    """Los efectos de sonido que trae Recorte, con para qué sirve cada uno y lo que dura."""
+    base = carpeta_sonidos()
+    ruta = os.path.join(base, 'catalogo.json')
+    if not os.path.isfile(ruta):
+        lista = [{'id': n[:-4]} for n in sorted(os.listdir(base)) if n.endswith('.wav')] if os.path.isdir(base) else []
+    else:
+        with open(ruta, encoding='utf-8') as f:
+            lista = [{k: c[k] for k in ('id', 'nombre', 'tipo', 'para', 'duracion')} for c in json.load(f)]
+    lista = [c for c in lista if not tipo or c.get('tipo') == tipo]
+    return {'sonidos': lista,
+            'uso': 'En la receta: "sonidos": [{"sonido": "<id>", "en": <segundo>, "volumen": 0.6}]. Con medida: en lo que '
+                   'aparece o cambia, no en cada corte. Los ambientes van de fondo y bajos (0.3) y se pueden repetir '
+                   'seguidos. subida y reversa terminan en seco: "en" = el corte menos su duración.'}
 
 
 def leer_capas(lista, L):
@@ -3743,6 +3776,8 @@ def main():
     dn.add_argument('consulta', help='lo que nombra el usuario: «la bandera», «el título 2002», «cuando dice órbita»')
     dn.add_argument('--receta', default='receta.json')
     sub.add_parser('medir', help='cuánto tardaría este equipo en renderizar un documental de 50 s')
+    so = sub.add_parser('sonidos', help='los efectos de sonido de Recorte (transiciones, golpes, tensión, objetos, ambientes)')
+    so.add_argument('--tipo', choices=('transicion', 'interfaz', 'impacto', 'tension', 'objeto', 'ambiente'))
     mu = sub.add_parser('musica', help='la biblioteca de música libre (CC0) de Recorte')
     mu.add_argument('--animo', choices=ANIMOS_MUSICA)
     mu.add_argument('--duracion', type=float, help='lo que dura el video (primero las pistas que alcanzan)')
@@ -3796,6 +3831,8 @@ def main():
         print(json.dumps(revisar(x.video, x.referencia, receta=x.receta), ensure_ascii=False))
     elif x.orden == 'donde':
         print(json.dumps(donde(x.receta, x.consulta), ensure_ascii=False))
+    elif x.orden == 'sonidos':
+        print(json.dumps(sonidos(x.tipo), ensure_ascii=False))
     elif x.orden == 'musica':
         print(json.dumps(musica(x.animo, x.duracion, x.usar), ensure_ascii=False))
     elif x.orden == 'medir':

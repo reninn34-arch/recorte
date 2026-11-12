@@ -24,7 +24,7 @@ import {
 import type { MedioProyecto } from '../shared/types'
 import { resolverBinario } from './binarios'
 import { ejecutar } from './crear'
-import { buscarPython } from './transcribir'
+import { buscarPython, rutaScriptPython } from './transcribir'
 import { duracionMedio, probeVideo } from './ffmpeg'
 
 /**
@@ -451,7 +451,10 @@ export async function proyectoDesdeReceta(
   // Los efectos de sonido: los incluidos (kit/sonidos) o los del agente, copiados al proyecto.
   const sonidos: SonidoTL[] = []
   for (const [i, x] of sonidosReceta.entries()) {
-    const incluido = typeof x.sonido === 'string' && /^[\w-]{1,30}$/.test(x.sonido) ? dentro(trabajo, `kit/sonidos/${x.sonido}.wav`) : null
+    // Los incluidos están en Recorte (las creaciones viejas los tenían copiados en kit/sonidos).
+    const id = typeof x.sonido === 'string' && /^[\w-]{1,30}$/.test(x.sonido) ? x.sonido : null
+    const enRecorte = id ? rutaScriptPython(join('sonidos', `${id}.wav`)) : ''
+    const incluido = id ? (existsSync(enRecorte) ? enRecorte : dentro(trabajo, `kit/sonidos/${id}.wav`)) : null
     const ruta = incluido ?? dentro(trabajo, x.archivo)
     if (!ruta) continue
     const nombre = `sonido-${String(i + 1).padStart(2, '0')}-${randomUUID().slice(0, 6)}${extname(ruta).toLowerCase() || '.wav'}`

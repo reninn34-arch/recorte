@@ -1322,12 +1322,54 @@ export const TIPO_ARRASTRE_MEDIO = 'application/x-recorte-medio'
 
 // ===== Efectos de sonido incluidos (python/sonidos/<id>.wav) =====
 
-export const SONIDOS_INCLUIDOS: { id: string; nombre: string; para: string }[] = [
-  { id: 'whoosh', nombre: 'Whoosh', para: 'un cambio rápido, algo que entra volando' },
-  { id: 'pop', nombre: 'Pop', para: 'un logo o un ícono que aparece' },
-  { id: 'pop-alto', nombre: 'Pop agudo', para: 'otro ícono, o el siguiente de una serie' },
-  { id: 'ding', nombre: 'Ding', para: 'un dato, un acierto, un precio' },
-  { id: 'caching', nombre: 'Caja registradora', para: 'una oferta, un descuento, una venta' }
+export type TipoSonido = 'transicion' | 'interfaz' | 'impacto' | 'tension' | 'objeto' | 'ambiente'
+
+/** Los grupos del menú «Sonido», en su orden. */
+export const TIPOS_SONIDO: { id: TipoSonido; nombre: string }[] = [
+  { id: 'transicion', nombre: 'Transiciones' },
+  { id: 'interfaz', nombre: 'Aparece algo' },
+  { id: 'impacto', nombre: 'Golpes' },
+  { id: 'tension', nombre: 'Tensión' },
+  { id: 'objeto', nombre: 'Objetos y acciones' },
+  { id: 'ambiente', nombre: 'Ambientes (de fondo)' }
+]
+
+/** Los efectos que trae Recorte (python/sonidos/catalogo.json, con su origen y licencia: todos CC0). */
+export const SONIDOS_INCLUIDOS: { id: string; nombre: string; tipo: TipoSonido; para: string }[] = [
+  { id: 'whoosh', nombre: 'Whoosh', tipo: 'transicion', para: 'un cambio rápido, algo que entra volando' },
+  { id: 'swish', nombre: 'Swish', tipo: 'transicion', para: 'un movimiento corto y suave: una tarjeta que pasa, un dato que entra' },
+  { id: 'reversa', nombre: 'Reversa', tipo: 'transicion', para: 'el aire que se recoge antes de un corte' },
+  { id: 'glitch', nombre: 'Glitch', tipo: 'transicion', para: 'un fallo digital: tecnología, internet, algo que se corrompe o un salto brusco' },
+  { id: 'pop', nombre: 'Pop', tipo: 'interfaz', para: 'un logo o un ícono que aparece' },
+  { id: 'pop-alto', nombre: 'Pop agudo', tipo: 'interfaz', para: 'otro ícono, o el siguiente de una serie' },
+  { id: 'ding', nombre: 'Ding', tipo: 'interfaz', para: 'un dato, un acierto, un precio' },
+  { id: 'caching', nombre: 'Caja registradora', tipo: 'interfaz', para: 'una oferta, un descuento, una venta' },
+  { id: 'campana', nombre: 'Campana', tipo: 'interfaz', para: 'un logro, el inicio de algo, una buena noticia' },
+  { id: 'interruptor', nombre: 'Interruptor', tipo: 'interfaz', para: 'encender una idea, un cambio de escena seco' },
+  { id: 'gong', nombre: 'Gong', tipo: 'impacto', para: 'una revelación solemne, un título importante' },
+  { id: 'golpe', nombre: 'Golpe', tipo: 'impacto', para: 'algo que cae, un sello, un dato que pega fuerte' },
+  { id: 'cristal', nombre: 'Cristal roto', tipo: 'impacto', para: 'algo que se rompe, un récord que cae' },
+  { id: 'impacto', nombre: 'Impacto de cine', tipo: 'impacto', para: 'un golpe grave y largo: el título, la gran cifra, el giro de la historia' },
+  { id: 'explosion', nombre: 'Explosión', tipo: 'impacto', para: 'un estallido, un fracaso, algo que revienta' },
+  { id: 'latido', nombre: 'Latido', tipo: 'tension', para: 'un momento de nervios, algo que está en juego' },
+  { id: 'alarma', nombre: 'Alarma', tipo: 'tension', para: 'un peligro, una urgencia, algo que falla' },
+  { id: 'subida', nombre: 'Subida', tipo: 'tension', para: 'la tensión que sube hasta un corte o una revelación' },
+  { id: 'tension', nombre: 'Zumbido de tensión', tipo: 'tension', para: 'de fondo bajo un momento de misterio o peligro, 8 s' },
+  { id: 'camara-foto', nombre: 'Cámara de fotos', tipo: 'objeto', para: 'una foto que aparece, un recuerdo, un flash' },
+  { id: 'pagina', nombre: 'Página', tipo: 'objeto', para: 'un documento, un libro, pasar a otro capítulo' },
+  { id: 'papel', nombre: 'Papel', tipo: 'objeto', para: 'una carta, un recorte de periódico que aparece' },
+  { id: 'puerta', nombre: 'Puerta', tipo: 'objeto', para: 'alguien que se va, un final, una etapa que se cierra' },
+  { id: 'monedas', nombre: 'Monedas', tipo: 'objeto', para: 'dinero, ganancias, un precio' },
+  { id: 'telefono', nombre: 'Teléfono', tipo: 'objeto', para: 'una llamada, una notificación, un mensaje' },
+  { id: 'maquina-escribir', nombre: 'Máquina de escribir', tipo: 'objeto', para: 'un texto que se escribe letra a letra, una fecha, un expediente' },
+  { id: 'reloj', nombre: 'Tic tac', tipo: 'objeto', para: 'el tiempo que pasa, una cuenta atrás, una espera' },
+  { id: 'pasos', nombre: 'Pasos', tipo: 'objeto', para: 'alguien que llega o camina' },
+  { id: 'trueno', nombre: 'Trueno', tipo: 'ambiente', para: 'una tormenta, un giro oscuro de la historia' },
+  { id: 'lluvia', nombre: 'Lluvia', tipo: 'ambiente', para: 'de fondo en una escena de lluvia o tristeza' },
+  { id: 'trafico', nombre: 'Tráfico', tipo: 'ambiente', para: 'de fondo en la ciudad, una calle, una autopista' },
+  { id: 'obra', nombre: 'Obra en construcción', tipo: 'ambiente', para: 'de fondo cuando se construye algo, una fábrica que nace' },
+  { id: 'maquinas', nombre: 'Máquinas', tipo: 'ambiente', para: 'de fondo en una fábrica, un taller, un laboratorio' },
+  { id: 'multitud', nombre: 'Multitud', tipo: 'ambiente', para: 'de fondo con gente: un mercado, una protesta, un estadio' }
 ]
 
 /**

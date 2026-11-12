@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   ajustarClip,
   ajustesDe,
@@ -38,6 +38,7 @@ import {
   insertarClip,
   TIPO_ARRASTRE_MEDIO,
   SONIDOS_INCLUIDOS,
+  TIPOS_SONIDO,
   VOLUMEN_SONIDO,
   cambiarFiltros,
   FILTROS,
@@ -656,10 +657,15 @@ export function TimelineEditor({
             </button>
             {menu === 'sonido' && (
               <div className="tl-menu" onPointerDown={(e) => e.stopPropagation()}>
-                {SONIDOS_INCLUIDOS.map((s) => (
-                  <button key={s.id} className="tl-menu-item" onClick={() => void accionSonido(s.id)} title={`Para ${s.para}`}>
-                    {s.nombre} <span className="tl-dim">· {s.para}</span>
-                  </button>
+                {TIPOS_SONIDO.map((g) => (
+                  <Fragment key={g.id}>
+                    <span className="tl-menu-grupo">{g.nombre}</span>
+                    {SONIDOS_INCLUIDOS.filter((s) => s.tipo === g.id).map((s) => (
+                      <button key={s.id} className="tl-menu-item" onClick={() => void accionSonido(s.id)} title={`Para ${s.para}`}>
+                        {s.nombre} <span className="tl-dim">· {s.para}</span>
+                      </button>
+                    ))}
+                  </Fragment>
                 ))}
                 <button className="tl-menu-item" onClick={() => void accionSonido()}>
                   <Icon name="folder" size={13} /> Desde tu equipo…

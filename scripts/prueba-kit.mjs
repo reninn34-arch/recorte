@@ -382,7 +382,14 @@ try {
   if (!(comp.capas.length === 2 && /sombra/.test(sombra.archivo) && Math.abs(pers.y + altoPers / 2 - 0.9) < 0.02 && pers.animar === 'peso' && existsSync(join(trabajo, pers.archivo))))
     throw new Error(`componer no puso la figura en su suelo: ${JSON.stringify(comp)}`)
   // La biblioteca de música libre: por ánimo, y la elegida se copia a medios/.
-  writeFileSync(join(trabajo, 'kit', 'biblioteca.json'), JSON.stringify({ musica: join(raiz, 'python', 'musica') }))
+  writeFileSync(join(trabajo, 'kit', 'biblioteca.json'), JSON.stringify({ musica: join(raiz, 'python', 'musica'), sonidos: join(raiz, 'python', 'sonidos') }))
+  // Los efectos de sonido: el catálogo con su tipo, y cada uno donde el kit lo busca.
+  const efectos = json(correr(python, ['kit/kit.py', 'sonidos'], trabajo)).sonidos
+  const faltan = efectos.filter((e) => !existsSync(join(raiz, 'python', 'sonidos', `${e.id}.wav`)) || !e.para || !e.tipo)
+  if (efectos.length < 30 || faltan.length) throw new Error(`sonidos: ${efectos.length} en el catálogo, sin archivo o sin uso: ${JSON.stringify(faltan)}`)
+  const golpes = json(correr(python, ['kit/kit.py', 'sonidos', '--tipo', 'impacto'], trabajo)).sonidos
+  if (!(golpes.length >= 3 && golpes.every((e) => e.tipo === 'impacto'))) throw new Error(`sonidos --tipo no filtró: ${JSON.stringify(golpes)}`)
+  console.log(`efectos de sonido: ${efectos.length} en el catálogo, ${golpes.length} golpes ✓`)
   const tensas = json(correr(python, ['kit/kit.py', 'musica', '--animo', 'tensa', '--duracion', '60'], trabajo))
   if (!(tensas.pistas.length >= 3 && tensas.pistas.every((p) => p.animo === 'tensa'))) throw new Error(`musica no filtró por ánimo: ${JSON.stringify(tensas)}`)
   const usada = json(correr(python, ['kit/kit.py', 'musica', '--usar', tensas.pistas[0].archivo], trabajo))
