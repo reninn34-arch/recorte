@@ -24,6 +24,28 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.38',
+    fecha: '2026-11-11',
+    resumen: 'El agente arma los documentales por piezas: personajes, decorados y objetos sueltos, compuestos de forma creíble.',
+    novedades: [
+      {
+        icono: 'layers',
+        titulo: 'Por piezas',
+        texto: 'En vez de pedir escenas enteras, el agente pide cada personaje sobre verde, los lugares vacíos y los objetos sueltos, y compone cada escena: el personaje animado delante de su escenario en 3D.'
+      },
+      {
+        icono: 'image',
+        titulo: 'Personajes que encajan',
+        texto: 'El personaje queda de pie en el suelo del decorado, con su luz y su color, y con una sombra: ya no parece pegado encima.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Más variedad',
+        texto: 'El mismo personaje hace cosas distintas en cada escena, con su misma cara, y cambia de plano. Si repite la misma pose demasiadas veces, el agente se entera y lo corrige.'
+      }
+    ]
+  },
+  {
     version: '0.1.37',
     fecha: '2026-11-11',
     resumen: 'Los videos del agente se renderizan varias veces más rápido, con el mismo resultado.',
