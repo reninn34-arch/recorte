@@ -24,6 +24,38 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.39',
+    fecha: '2026-11-12',
+    resumen: 'Música y efectos de sonido incluidos, videos más rápidos con tu tarjeta gráfica y una voz que ya no falla.',
+    novedades: [
+      {
+        icono: 'music',
+        titulo: 'Música libre incluida',
+        texto: '30 pistas para tus videos, de seis ánimos: tensa, épica, emotiva, alegre, calma y misterio. Clásica de orquesta y piano, y moderna. Se pueden usar en cualquier video, también para vender, sin pagar ni dar crédito. El agente elige la que va con tu historia.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: '34 efectos de sonido',
+        texto: 'Además de whoosh, pop y ding: impacto de cine, subida de tensión, glitch, máquina de escribir, cámara de fotos, reloj, pasos, monedas y ambientes de lluvia, ciudad, fábrica o multitud. En el editor, el botón «Sonido» los muestra por grupos, y el agente los pone donde los pondría un editor.'
+      },
+      {
+        icono: 'film',
+        titulo: 'Usa tu tarjeta gráfica',
+        texto: 'Si tu equipo tiene una tarjeta NVIDIA, AMD o Intel, los videos se codifican con ella y el recorte de personas y la profundidad van más rápido.'
+      },
+      {
+        icono: 'clock',
+        titulo: 'Mide tu equipo',
+        texto: 'En Ajustes, «Medir velocidad» te dice cuánto tardaría tu equipo en hacer un documental y si usa la tarjeta gráfica.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Voz sin fallos y mejor criterio',
+        texto: 'La narración ya no falla al descargarse. Con Claude Code, el video lo hace Opus, el modelo más capaz, y también lo revisa con ojos frescos antes de entregártelo.'
+      }
+    ]
+  },
+  {
     version: '0.1.38',
     fecha: '2026-11-11',
     resumen: 'El agente arma los documentales por piezas: personajes, decorados y objetos sueltos, compuestos de forma creíble.',
