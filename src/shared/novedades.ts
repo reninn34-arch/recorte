@@ -24,6 +24,28 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.37',
+    fecha: '2026-11-11',
+    resumen: 'Los videos del agente se renderizan varias veces más rápido, con el mismo resultado.',
+    novedades: [
+      {
+        icono: 'clock',
+        titulo: 'Render mucho más rápido',
+        texto: 'El agente dibuja varios cuadros a la vez con todos los núcleos de tu equipo y cada cuadro tarda la mitad. Un documental de 50 s con escenas 3D y personajes animados pasó de unos 45 minutos a unos 10.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Sabes cuánto falta',
+        texto: 'Mientras renderiza, el agente ve cuánto le falta y, al terminar, cuánto tardó.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Al pasar al editor, sin repetir',
+        texto: 'Si el mismo personaje con el mismo movimiento sale en varias escenas, se anima una sola vez.'
+      }
+    ]
+  },
+  {
     version: '0.1.36',
     fecha: '2026-11-11',
     resumen: 'Escenas vivas: el agente separa a las personas de su escenario y las anima, en vez de entregar fotos con zoom.',
