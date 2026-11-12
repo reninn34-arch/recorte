@@ -7,6 +7,7 @@ import { esAprobacion } from '../../../shared/modoagente'
 import { estiloPorId } from '../../../shared/estilos'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
+import { VersionesCreacion } from './VersionesCreacion'
 
 /**
  * Los pasos del plan dentro del chat, marcándose mientras el agente trabaja: los que ya pasó,
@@ -51,8 +52,11 @@ export function EstudioCreacion({
   onParar,
   voz,
   estilo,
-  agente
+  agente,
+  versiones
 }: {
+  /** Las versiones del agente: volver, aprobar, «Otro video así», «Mis estilos». */
+  versiones?: { cambio: (c: Creacion) => void; nueva: (c: Creacion) => void }
   voz: ControlVoz
   estilo?: ControlEstilo
   /** Modo agente: pedir (o rehacer) el plan, y hacer o cambiar el video. */
@@ -297,6 +301,9 @@ export function EstudioCreacion({
                 </button>
                 <span className="tl-dim">Versión {c.version}. En el editor lo cortas, le pones música, rótulos o zoom.</span>
               </div>
+              {c.modo === 'agente' && versiones && (
+                <VersionesCreacion creacion={c} ocupado={trabajando} onCambio={versiones.cambio} onNueva={versiones.nueva} />
+              )}
             </div>
           )}
 

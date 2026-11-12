@@ -103,6 +103,8 @@ export interface EstadoModoAgente {
   plan?: PlanAgente
   /** Lo último que hizo el agente (para ver «qué está haciendo»). */
   registro: string[]
+  /** Un aviso para el próximo turno del agente (p. ej. que el usuario volvió a una versión anterior). */
+  nota?: string
   resultado?: ResultadoAgente
   /** Cuántas veces trabajó (cada cambio es una ronda). */
   rondas: number

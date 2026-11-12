@@ -947,6 +947,15 @@ export default function App() {
             plan: (pedido) => vozCreacion((id) => window.recorte.agentePlan(id, pedido)),
             hacer: (pedido) => vozCreacion((id) => window.recorte.agenteHacer(id, pedido))
           }}
+          versiones={{
+            cambio: (nueva) => setCreacion((c) => (c && c.id === nueva.id ? nueva : c)),
+            nueva: (nueva) => {
+              // «Otro video así»: se abre la creación nueva y empieza su plan (con el estilo de la otra).
+              setCreacion(nueva)
+              setVista('estudio')
+              void pasoCreacion(nueva.id, () => window.recorte.agentePlan(nueva.id))
+            }
+          }}
           estilo={{
             geminiDisponible: Boolean(estadoVoz.tieneClave),
             analizar: (modo) => vozCreacion((id) => window.recorte.estiloAnalizar(id, modo)),

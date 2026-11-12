@@ -112,6 +112,7 @@ export function CajaCrear({
   agentes,
   creando,
   estilo,
+  base,
   onCrear,
   onConectar,
   chat
@@ -119,6 +120,8 @@ export function CajaCrear({
   agentes: Agentes
   creando: boolean
   estilo: string
+  /** Partir de uno de «Mis estilos». */
+  base?: PeticionCreacion['base']
   onCrear?: (p: PeticionCreacion) => void
   onConectar: () => void
   chat?: CajaEnChat
@@ -335,6 +338,7 @@ export function CajaCrear({
         duracion,
         adjuntos,
         modo: 'agente',
+        ...(base ? { base } : {}),
         // En el agente solo hay una tarea: quien hace el video.
         ...(tVideo ? { tareas: { video: tVideo } } : {}),
         ...(voz && vozConectada ? { vozElegida: voz } : {}),

@@ -11,7 +11,7 @@
  */
 
 import type { FichaEstilo, Viabilidad } from './estilo'
-import type { EstadoModoAgente, PlanAgente } from './modoagente'
+import type { EstadoModoAgente, PlanAgente, ResultadoAgente } from './modoagente'
 
 export type FormatoCreacion = 'vertical' | 'horizontal'
 export type FaseCreacion = 'plan' | 'estilo' | 'guion' | 'voz' | 'video' | 'listo'
@@ -284,12 +284,54 @@ export interface Creacion {
   editorSalida?: string
   /** Proyecto del editor creado a partir de esta creación. */
   proyectoEditor?: string
+  /** Cada video que entregó el agente (v1, v2…), para volver a uno o aprobarlo. */
+  versiones?: VersionCreacion[]
+  /** La versión que el usuario dio por buena («Así está bien»): de ella parten los cambios y «Otro video así». */
+  aprobada?: number
+  /** El estilo del que parte este video (otro video tuyo o uno de «Mis estilos»), en `trabajo/base-estilo/`. */
+  base?: BaseEstilo
   createdAt: number
   updatedAt: number
 }
 
+/** Un video que entregó el agente. */
+export interface VersionCreacion {
+  n: number
+  /** El video (`salidas/agente-vN.mp4`). */
+  archivo: string
+  fecha: number
+  /** Lo que el usuario pidió para llegar a esta versión (en la primera, nada). */
+  pedido?: string
+  resultado?: ResultadoAgente
+}
+
+/** De dónde copia el estilo un video: de otra creación (su versión aprobada) o de «Mis estilos». */
+export interface BaseEstilo {
+  nombre: string
+  origen: 'creacion' | 'propio'
+  id: string
+  version?: number
+}
+
+/** Un estilo propio guardado desde un video que salió bien («Mis estilos»). */
+export interface EstiloPropio {
+  id: string
+  nombre: string
+  /** De qué trataba el video del que salió (para la tarjeta). */
+  descripcion: string
+  formato: FormatoCreacion
+  /** El tipo de video de la creación de la que salió. */
+  estilo: string
+  creado: number
+  /** Una imagen del video (`muestra.jpg` en su carpeta), si la hay. */
+  muestra?: boolean
+  desde?: { creacion: string; version: number }
+}
+
 export interface PeticionCreacion {
   peticion: string
+  /** Partir del estilo de otro video tuyo o de uno de «Mis estilos». */
+  base?: { creacion?: string; version?: number; propio?: string }
   estilo: string
   formato: FormatoCreacion
   duracion: number

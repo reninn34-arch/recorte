@@ -597,7 +597,29 @@ function contexto(c: Creacion): string {
     estilo.id !== 'libre'
       ? `\n\nTIPO DE VIDEO QUE ELIGIÓ: «${estilo.nombre}» (${estilo.descripcion}). Síguelo como dirección editorial, salvo que su pedido o la charla digan otra cosa :\n${estilo.guia}`
       : ''
-  return `PEDIDO ORIGINAL DEL USUARIO:\n"""\n${c.peticion}\n"""\n\nArchivos en entrada/:\n${archivos}${tipo}\n\nFormato elegido en la app: ${c.formato === 'horizontal' ? 'horizontal 16:9' : 'vertical 9:16'}, duración: la que pida el usuario; si no la dice, la decides tú según el material y lo que se cuenta (lee «La duración la decide el material» en AGENTS.md), sin recortar a una cifra fija.${charla ? `\n\nConversación hasta ahora:\n${charla}` : ''}`
+  return `PEDIDO ORIGINAL DEL USUARIO:\n"""\n${c.peticion}\n"""\n\nArchivos en entrada/:\n${archivos}${tipo}${bloqueBase(c)}\n\nFormato elegido en la app: ${c.formato === 'horizontal' ? 'horizontal 16:9' : 'vertical 9:16'}, duración: la que pida el usuario; si no la dice, la decides tú según el material y lo que se cuenta (lee «La duración la decide el material» en AGENTS.md), sin recortar a una cifra fija.${charla ? `\n\nConversación hasta ahora:\n${charla}` : ''}`
+}
+
+/**
+ * Un video que parte del estilo de otro («Otro video así» o uno de «Mis estilos»): qué hay en base-estilo/ y
+ * cómo usarlo. Se copia el ESTILO (y los personajes o decorados, si el pedido los repite); el contenido es nuevo.
+ */
+function bloqueBase(c: Creacion): string {
+  if (!c.base) return ''
+  const de = c.base.origen === 'propio' ? `su estilo guardado «${c.base.nombre}»` : `su video «${c.base.nombre}»${c.base.version ? ` (la versión ${c.base.version}, la que aprobó)` : ''}`
+  return `
+
+ESTE VIDEO PARTE DE ${de.toUpperCase()}: el usuario quiere OTRO VIDEO ASÍ. En base-estilo/ tienes:
+- receta.json: la receta del kit de aquel video. Es tu plantilla: las mismas letras y tamaños, colores, entradas y
+  salidas, transiciones, ritmo de cortes, tomas de cámara, filtros, subtítulos, volumen de música y voz, sonidos y forma
+  de cerrar. Léela ENTERA antes de planear y parte de ella (cópiala como tu receta.json y cambia el contenido).
+- conversacion.md: lo que el usuario pidió, corrigió y aprobó en aquel video. Lo que corrigió allí, no lo repitas aquí.
+- notas.md (si está): tus notas de entonces: qué mediste y por qué decidiste cada cosa.
+- archivos/: lo que usaba aquella receta (personajes, decorados, utilería, música), con su misma ruta relativa
+  (base-estilo/archivos/medios/x.png). Reutiliza un personaje o un decorado solo si el pedido nuevo es de lo mismo
+  (la misma marca, el mismo personaje, la misma serie); si no, pide los tuyos con el MISMO estilo de imagen.
+- estilo.json (si está): la ficha de estilo de la referencia que copiaba aquel video.
+Lo que cambia es el CONTENIDO: el de este pedido. En el plan di en una línea qué conservas de aquel video y qué es nuevo.`
 }
 
 /** Lo último que dijo el usuario en la conversación (para el turno que retoma la sesión). */

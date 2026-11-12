@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import type { PeticionCreacion } from '../../../shared/creacion'
+import { useEffect, useState } from 'react'
+import type { EstiloPropio, PeticionCreacion } from '../../../shared/creacion'
 import { ESTILOS, GRUPOS } from '../../../shared/estilos'
 import type { Agentes } from '../hooks/agentes'
 import { Icon, type IconName } from '../Icons'
@@ -26,6 +26,13 @@ export function CrearIA({
 }) {
   const [estilo, setEstilo] = useState('libre')
   const elegido = ESTILOS.find((e) => e.id === estilo)
+  // «Mis estilos»: los guardados desde videos que salieron bien.
+  const [propios, setPropios] = useState<EstiloPropio[]>([])
+  const [propio, setPropio] = useState<string | null>(null)
+  const miEstilo = propios.find((p) => p.id === propio)
+  useEffect(() => {
+    window.recorte.estilosPropios().then(setPropios).catch(() => setPropios([]))
+  }, [])
 
   return (
     <div className="crear">
@@ -50,14 +57,60 @@ export function CrearIA({
       </header>
 
       <div className="crear-cuerpo">
-        <h1>{elegido && elegido.id !== 'libre' ? elegido.nombre : '¿Qué video quieres hacer?'}</h1>
+        <h1>{miEstilo ? `Con tu estilo «${miEstilo.nombre}»` : elegido && elegido.id !== 'libre' ? elegido.nombre : '¿Qué video quieres hacer?'}</h1>
         <p className="crear-sub">
-          {elegido && elegido.id !== 'libre'
-            ? elegido.descripcion
-            : 'Cuéntaselo como a un editor. Elige quién lo hace y con qué voz; lo ves avanzar paso a paso en el chat.'}
+          {miEstilo
+            ? 'Cuenta de qué trata el video nuevo: el agente usa las mismas letras, colores, ritmo, cámara y música de aquel.'
+            : elegido && elegido.id !== 'libre'
+              ? elegido.descripcion
+              : 'Cuéntaselo como a un editor. Elige quién lo hace y con qué voz; lo ves avanzar paso a paso en el chat.'}
         </p>
 
-        <CajaCrear agentes={agentes} creando={creando} estilo={estilo} onCrear={onCrear} onConectar={onConectar} />
+        <CajaCrear
+          agentes={agentes}
+          creando={creando}
+          estilo={miEstilo ? miEstilo.estilo : estilo}
+          base={miEstilo ? { propio: miEstilo.id } : undefined}
+          onCrear={onCrear}
+          onConectar={onConectar}
+        />
+
+        {propios.length > 0 && (
+          <div className="crear-estilos">
+            <div className="crear-estilos-cabeza">
+              <span>Mis estilos</span>
+            </div>
+            <div className="crear-grupo crear-propios">
+              {propios.map((p) => (
+                <span key={p.id} className="crear-propio">
+                  <button
+                    className={`crear-estilo ${propio === p.id ? 'is-active' : ''}`}
+                    onClick={() => setPropio(propio === p.id ? null : p.id)}
+                    title={`De: ${p.descripcion}`}
+                  >
+                    <Icon name="layers" size={14} />
+                    <span>
+                      <b>{p.nombre}</b>
+                      <small>{p.descripcion}</small>
+                    </span>
+                  </button>
+                  <button
+                    className="crear-propio-borrar"
+                    aria-label={`Borrar el estilo ${p.nombre}`}
+                    title="Borrar este estilo (el video del que salió no se toca)"
+                    onClick={() => {
+                      if (!window.confirm(`¿Borrar el estilo «${p.nombre}»? El video del que salió no se toca.`)) return
+                      if (propio === p.id) setPropio(null)
+                      window.recorte.borrarEstiloPropio(p.id).then(setPropios).catch(() => undefined)
+                    }}
+                  >
+                    <Icon name="x" size={11} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="crear-estilos">
           <div className="crear-estilos-cabeza">

@@ -54,6 +54,7 @@ import { viabilidadDe } from './estilo/viabilidad'
 import { guardar } from './disco'
 import { cambiaElGuion, ID_SEGURO, MAX_CLIPS_VEO, mismaNarracion, pideMontarVoz, textoMuestra, textoNarracion, VOCES_GEMINI, vozDesactualizada, vozVigente } from '../shared/creacion'
 import type { AgenteId, Creacion, EleccionTarea, MensajeCreacion, NivelModelo, PeticionCreacion, TareasCreacion } from '../shared/creacion'
+import { archivosVersion, armarBase, baseDe, EstilosPropios, versionBase } from './estilospropios'
 import { turnoAgente } from './chat'
 import { buscarActualizacion, estadoActualizacion, instalarActualizacion, prepararActualizaciones } from './actualizar'
 import { activarGustos, agregarGustos, bloqueGustos, cargarGustos, olvidarGustos, quitarGusto, senalGusto, usoCreacion } from './gustos'
@@ -610,7 +611,9 @@ app.whenReady().then(() => {
         // Lo que retocó a mano en el editor viaja con el pedido, para que la versión nueva no lo pise.
         const retoques = c.agente.resultado && !seguir ? retoquesDe(c) : []
         if (retoques.length) avisarAgente(c, `Le paso al agente ${retoques.length === 1 ? 'tu retoque' : `tus ${retoques.length} retoques`} a mano`, 0.06)
-        const cambio = pedido || retoques.length ? `${pedido ?? 'Haz una versión nueva conservando lo que retoqué.'}${bloqueRetoques(retoques)}` : undefined
+        const cambio0 = pedido || retoques.length ? `${pedido ?? 'Haz una versión nueva conservando lo que retoqué.'}${bloqueRetoques(retoques)}` : undefined
+        // Si volvió a una versión anterior, el agente lo sabe antes de tocar nada.
+        const cambio = cambio0 && c.agente.nota && !seguir ? `${c.agente.nota}\n\n${cambio0}` : cambio0
         // Al seguir tras el límite, lo que dejó desde la ronda cortada cuenta como de esta ronda.
         const desde = seguir ? (c.agente.pausa?.desde ?? Date.now()) : Date.now()
         desdeHacer = desde
@@ -658,6 +661,13 @@ app.whenReady().then(() => {
         // Entregado: todos los pasos del plan quedan hechos (aunque no los anunciara uno a uno).
         if (c.agente.plan?.pasos.length) c.agente.paso = c.agente.plan.pasos.length
         c.agente.resultado = revisado.resultado
+        // Cada entrega queda en el historial: se puede volver a ella o aprobarla.
+        c.versiones = [
+          ...(c.versiones ?? []).filter((v) => v.n !== c.version),
+          { n: c.version, archivo: revisado.resultado.archivo, fecha: Date.now(), ...(pedido ? { pedido: pedido.slice(0, 600) } : {}), resultado: revisado.resultado }
+        ]
+        // El aviso (volvió a una versión) ya lo recibió.
+        delete c.agente.nota
         if (revisado.resultado.tipo === 'video') {
           c.salida = revisado.resultado.archivo
           c.portada = revisado.resultado.revision[1] ?? revisado.resultado.revision[0]
@@ -918,7 +928,124 @@ app.whenReady().then(() => {
       // La voz elegida en la caja y «Hazlo directo» (antes se perdían aquí y el agente no los recibía).
       ...(typeof x.vozElegida === 'string' && VOCES_GEMINI.some((v) => v.id === x.vozElegida) ? { vozElegida: x.vozElegida } : {}),
       ...(x.directo === true ? { directo: true } : {})
+    }).then((c) => conBase(c, x.base))
+  })
+
+  // ===== Versiones: «Así está bien», volver a una anterior, «Otro video así» y «Mis estilos» =====
+  const propios = new EstilosPropios(join(app.getPath('userData'), 'estilos-propios'))
+  /** Un video nuevo que parte del estilo de otro: copia su paquete a trabajo/base-estilo/. */
+  const conBase = (c: Creacion, base: PeticionCreacion['base']): Creacion => {
+    if (!base) return c
+    const destino = join(creaciones.carpeta(c.id), 'trabajo', 'base-estilo')
+    try {
+      if (typeof base.propio === 'string') {
+        const meta = propios.copiarA(base.propio, destino)
+        c.base = baseDe(meta, 'propio', meta.id)
+      } else if (typeof base.creacion === 'string') {
+        const o = creaciones.get(base.creacion)
+        if (!o) return c
+        const n = typeof base.version === 'number' && base.version >= 1 && base.version <= o.version ? base.version : versionBase(o)
+        armarBase(o, creaciones.carpeta(o.id), n, destino)
+        c.base = baseDe({ nombre: o.guion?.titulo ?? o.nombre }, 'creacion', o.id, n)
+      }
+    } catch (e) {
+      c.mensajes.push(mensaje('agente', `No pude copiar el estilo de partida: ${textoError(e)}. Lo hago desde cero.`, true))
+    }
+    return creaciones.guardar(c)
+  }
+  const sinTrabajar = (id: unknown): Creacion => {
+    const c = typeof id === 'string' ? creaciones.get(id) : null
+    if (!c) throw new Error('Esa creación ya no existe.')
+    if (creandoAhora.has(c.id)) throw new Error('El agente está trabajando en este video: espera a que acabe.')
+    return c
+  }
+  const numVersion = (c: Creacion, n: unknown): number => {
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > c.version) throw new Error('Esa versión no existe.')
+    return n
+  }
+  /** Deja la versión n como la vigente: su video y su receta (la de ahora queda guardada aparte). */
+  const volverA = (c: Creacion, n: number): void => {
+    const carpeta = creaciones.carpeta(c.id)
+    const { video, receta } = archivosVersion(carpeta, n)
+    if (!video) throw new Error(`No encuentro el video de la versión ${n}.`)
+    const trabajo = join(carpeta, 'trabajo')
+    const actual = join(trabajo, 'receta.json')
+    if (receta) {
+      if (existsSync(actual)) copyFileSync(actual, join(trabajo, `receta-antes-de-volver-a-v${n}.json`))
+      copyFileSync(join(carpeta, receta), actual)
+    }
+    const guardada = c.versiones?.find((v) => v.n === n)?.resultado
+    const fotos = [0, 1, 2, 3, 4, 5].map((i) => `salidas/agente-v${n}-r${i}.jpg`).filter((r) => existsSync(join(carpeta, r)))
+    const resultado = guardada ?? {
+      archivo: video,
+      tipo: /\.(png|jpg)$/i.test(video) ? ('imagen' as const) : ('video' as const),
+      resumen: `Versión ${n}.`,
+      comprobaciones: [],
+      revision: fotos.filter((r) => !/-r0\.jpg$/.test(r)),
+      ...(receta ? { receta } : {})
+    }
+    if (!c.agente) c.agente = { registro: [], rondas: 0 }
+    c.agente.resultado = resultado
+    c.agente.nota = `OJO: el usuario VOLVIÓ a la versión ${n} (${video.replace('salidas/', '')}): lo que hiciste después no le sirvió.${receta ? ` receta.json ya es la de esa versión (la que tenías quedó en receta-antes-de-volver-a-v${n}.json).` : ''} Parte de la versión ${n} y conserva todo lo que no se pide cambiar.`
+    if (resultado.tipo === 'video') {
+      c.salida = video
+      c.portada = resultado.revision[1] ?? resultado.revision[0] ?? c.portada
+    }
+  }
+  ipcMain.handle('creacion:aprobar', (_evento, id: unknown, n: unknown) => {
+    const c = sinTrabajar(id)
+    const v = numVersion(c, n)
+    const vigente = c.agente?.resultado?.archivo === archivosVersion(creaciones.carpeta(c.id), v).video
+    if (!vigente) volverA(c, v)
+    c.aprobada = v
+    c.mensajes.push(mensaje('usuario', `Así está bien (versión ${v}).`))
+    c.mensajes.push({
+      ...mensaje('agente', `Anotado: la versión ${v} es la buena. Si me pides algo, parto de ella y conservo lo demás. Con «Otro video así» hago uno nuevo con este mismo estilo, o guárdalo en «Mis estilos» para usarlo cuando quieras.`),
+      propuestas: []
     })
+    return creaciones.guardar(c)
+  })
+  ipcMain.handle('creacion:volver', (_evento, id: unknown, n: unknown) => {
+    const c = sinTrabajar(id)
+    const v = numVersion(c, n)
+    volverA(c, v)
+    c.mensajes.push(mensaje('usuario', `Vuelve a la versión ${v}.`))
+    c.mensajes.push({ ...mensaje('agente', `Volví a la versión ${v}. Lo que me pidas ahora parte de ella.`), propuestas: [] })
+    return creaciones.guardar(c)
+  })
+  /** «Otro video así»: una creación nueva con lo mismo de esta (agente, formato, voz, Flow) y su estilo de base. */
+  ipcMain.handle('creacion:otro-asi', async (_evento, id: unknown, peticion: unknown, n: unknown) => {
+    const o = typeof id === 'string' ? creaciones.get(id) : null
+    if (!o) throw new Error('Esa creación ya no existe.')
+    if (typeof peticion !== 'string' || !peticion.trim()) throw new Error('Cuéntale de qué trata el video nuevo.')
+    const v = typeof n === 'number' ? numVersion(o, n) : versionBase(o)
+    const nueva = await creaciones.nueva({
+      peticion: peticion.trim().slice(0, 4000),
+      estilo: o.estilo,
+      formato: o.formato,
+      duracion: o.duracion,
+      adjuntos: [],
+      ...(o.modo === 'agente' ? { modo: 'agente' as const } : {}),
+      ...(o.tareas ? { tareas: o.tareas } : {}),
+      ...(o.flow ? { flow: o.flow } : {}),
+      ...(o.vozElegida ? { vozElegida: o.vozElegida } : {}),
+      ...(o.directo ? { directo: true } : {})
+    })
+    return conBase(nueva, { creacion: o.id, version: v })
+  })
+  ipcMain.handle('estilos-propios:listar', () => propios.listar())
+  ipcMain.handle('estilos-propios:guardar', (_evento, id: unknown, nombre: unknown, n: unknown) => {
+    const c = typeof id === 'string' ? creaciones.get(id) : null
+    if (!c) throw new Error('Esa creación ya no existe.')
+    const v = typeof n === 'number' ? numVersion(c, n) : versionBase(c)
+    const e = propios.guardar(c, creaciones.carpeta(c.id), v, typeof nombre === 'string' ? nombre : '')
+    c.mensajes.push({ ...mensaje('agente', `Guardé el estilo de la versión ${v} como «${e.nombre}» en «Mis estilos». Lo eliges al crear un video nuevo.`), propuestas: [] })
+    creaciones.guardar(c)
+    return e
+  })
+  ipcMain.handle('estilos-propios:borrar', (_evento, id: unknown) => {
+    if (typeof id === 'string') propios.borrar(id)
+    return propios.listar()
   })
   ipcMain.handle('creacion:guion', (_evento, id: unknown, pedido: unknown) =>
     conCreacion(id, async (c, senal) => {

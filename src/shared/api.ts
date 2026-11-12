@@ -1,7 +1,7 @@
 import type { MensajeChat, OperacionTL } from './chat'
 import type { Gustos, SenalGusto } from './gustos'
 import type { MusicaTL, Timeline } from './timeline'
-import type { AjustesCreacion, Creacion, MensajeCreacion, ModeloAgente, PeticionCreacion } from './creacion'
+import type { AjustesCreacion, Creacion, EstiloPropio, MensajeCreacion, ModeloAgente, PeticionCreacion } from './creacion'
 import type { EstadoFlow, PedidoFlow, ResultadoFlow } from './flow'
 import type { AjustesIA, Project, TranscriptSegment } from './types'
 
@@ -345,6 +345,16 @@ export interface RecorteApi {
   creacionAdjuntar: (id: string, rutas: string[]) => Promise<Creacion>
   /** Deja en la conversación los mensajes de un cambio rápido sobre la timeline. */
   creacionAnotar: (id: string, mensajes: Partial<MensajeCreacion>[]) => Promise<Creacion>
+  /** «Así está bien»: la versión n es la buena (si no es la vigente, vuelve a ella). */
+  creacionAprobar: (id: string, n: number) => Promise<Creacion>
+  /** Vuelve a la versión n: su video y su receta pasan a ser los vigentes. */
+  creacionVolver: (id: string, n: number) => Promise<Creacion>
+  /** Un video nuevo con el estilo de esta creación (su versión aprobada, o la n). */
+  creacionOtroAsi: (id: string, peticion: string, n?: number) => Promise<Creacion>
+  /** «Mis estilos»: los estilos guardados desde videos que salieron bien. */
+  estilosPropios: () => Promise<EstiloPropio[]>
+  guardarEstiloPropio: (id: string, nombre: string, n?: number) => Promise<EstiloPropio>
+  borrarEstiloPropio: (id: string) => Promise<EstiloPropio[]>
   estiloAnalizar: (id: string, modo?: 'gemini') => Promise<Creacion>
   /** Deja la fase Estilo y pasa al guion. */
   estiloContinuar: (id: string) => Promise<Creacion>

@@ -18,6 +18,7 @@
     "package": "electron-vite build && node scripts/licencia-instalador.mjs && electron-builder",
     "prueba:modo-agente": "node scripts/prueba-modo-agente.mjs",
     "prueba:kit": "node scripts/prueba-kit.mjs",
+    "prueba:versiones": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs scripts/prueba-versiones.mjs",
     "prueba:adaptadores": "node --experimental-strip-types --no-warnings scripts/prueba-adaptadores.mjs",
     "prueba:exportar": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-exportar.mjs",
     "prueba:mcp": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-mcp.mjs",
