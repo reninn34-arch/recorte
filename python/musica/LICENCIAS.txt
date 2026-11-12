@@ -1,0 +1,34 @@
+Música incluida en Recorte. Todas las pistas tienen licencia CC0 1.0 (dominio público): se pueden usar,
+modificar y distribuir, también con fines comerciales, sin pedir permiso ni dar crédito.
+https://creativecommons.org/publicdomain/zero/1.0/
+
+alegre-campo-suenos.mp3: «The Field of Dreams» — pauliuw — CC0 1.0 — https://opengameart.org/content/the-field-of-dreams
+alegre-grieg-manana.mp3: «Peer Gynt Suite No. 1, Op. 46 - I. Morning» — Musopen (grabación); obra de dominio público — CC0 1.0 — https://archive.org/details/MusopenKickstarterRecordings
+alegre-haydn-alondra.mp3: «String Quartet In D, Op. 645, H 363, Lark - I. Allegro Moderato» — Musopen (grabación); obra de dominio público — CC0 1.0 — https://archive.org/details/MusopenKickstarterRecordings
+alegre-mendelssohn-italiana.mp3: «Symphon No. 4 in A Major, Op. 90 'Italian' - I. Allegro vivace» — Musopen (grabación); obra de dominio público — CC0 1.0 — https://archive.org/details/MusopenKickstarterRecordings
+alegre-mozart-figaro.mp3: «Marriage of Figaro» — Musopen (grabación); obra de dominio público — CC0 1.0 — https://archive.org/details/MusopenKickstarterRecordings
+calma-bach-goldberg-aria.mp3: «Goldberg Variations, BWV 988 - Aria» — Musopen (grabación); obra de dominio público — CC0 1.0 — https://archive.org/details/MusopenKickstarterRecordings
+calma-lofi-relajado.mp3: «Chill Lofi Inspired» — omfgdude — CC0 1.0 — https://opengameart.org/content/chill-lofi-inspired
+calma-nevada.mp3: «Snowfall» — kistol — CC0 1.0 — https://opengameart.org/content/snowfall
+calma-schubert-andantino.mp3: «Sonata in A Minor, D. 959 - II. Andantino» — Musopen (grabación); obra de dominio público — CC0 1.0 — https://archive.org/details/MusopenKickstarterRecordings
+emotiva-ambiente-tragico.mp3: «Tragic ambient main menu» — haeldb — CC0 1.0 — https://opengameart.org/content/tragic-ambient-main-menu
+emotiva-dvorak-lento.mp3: «String Quartet No. 12 in F Major, Op. 96, American - II. Lento» — Musopen (grabación); obra de dominio público — CC0 1.0 — https://archive.org/details/MusopenKickstarterRecordings
+emotiva-grieg-muerte-aase.mp3: «Peer Gynt Suite No. 1, Op. 46 - II. Aase's Death» — Musopen (grabación); obra de dominio público — CC0 1.0 — https://archive.org/details/MusopenKickstarterRecordings
+emotiva-junto-a-ti.mp3: «Next to You» — joth — CC0 1.0 — https://opengameart.org/content/next-to-you
+emotiva-suk-meditacion.mp3: «Meditation» — Musopen (grabación); obra de dominio público — CC0 1.0 — https://archive.org/details/MusopenKickstarterRecordings
+emotiva-tchaikovsky-lamento.mp3: «Symphony No. 6 in B minor, Op. 74, 'Pathetique' - IV. Finale Adagio lamentoso» — Musopen (grabación); obra de dominio público — CC0 1.0 — https://archive.org/details/MusopenKickstarterRecordings
+epica-batalla.mp3: «Battle Theme A» — cynicmusic — CC0 1.0 — https://opengameart.org/content/battle-theme-a
+epica-beethoven-egmont.mp3: «Egmont Overture Op. 84» — Musopen (grabación); obra de dominio público — CC0 1.0 — https://archive.org/details/MusopenKickstarterRecordings
+epica-rimsky-pascua-rusa.mp3: «Russian Easter Festival Overture, Op. 36» — Musopen (grabación); obra de dominio público — CC0 1.0 — https://archive.org/details/MusopenKickstarterRecordings
+epica-smetana-moldava.mp3: «Ma Vlast (My Fatherland) - Vltava» — Musopen (grabación); obra de dominio público — CC0 1.0 — https://archive.org/details/MusopenKickstarterRecordings
+epica-tchaikovsky-marcha.mp3: «Symphony No. 6 in B minor, Op. 74, 'Pathetique' - III. Allegro molto vivace» — Musopen (grabación); obra de dominio público — CC0 1.0 — https://archive.org/details/MusopenKickstarterRecordings
+misterio-borodin-estepas.mp3: «In The Steppes of Central Asia» — Musopen (grabación); obra de dominio público — CC0 1.0 — https://archive.org/details/MusopenKickstarterRecordings
+misterio-grieg-anitra.mp3: «Peer Gynt Suite No. 1, Op. 46 - III. Anitra's Dream» — Musopen (grabación); obra de dominio público — CC0 1.0 — https://archive.org/details/MusopenKickstarterRecordings
+misterio-lo-vi.mp3: «I swear I saw it (background track)» — yd — CC0 1.0 — https://opengameart.org/content/i-swear-i-saw-it-background-track
+misterio-mendelssohn-hebridas.mp3: «Hebrides Overture Fingal's Cave» — Musopen (grabación); obra de dominio público — CC0 1.0 — https://archive.org/details/MusopenKickstarterRecordings
+tensa-beethoven-coriolano.mp3: «Coriolan Overture» — Musopen (grabación); obra de dominio público — CC0 1.0 — https://archive.org/details/MusopenKickstarterRecordings
+tensa-brahms-tragica.mp3: «Tragic Overture» — Musopen (grabación); obra de dominio público — CC0 1.0 — https://archive.org/details/MusopenKickstarterRecordings
+tensa-grieg-montana.mp3: «Peer Gynt Suite No. 1, Op. 46 - IV. In the Hall Of The Mountain King» — Musopen (grabación); obra de dominio público — CC0 1.0 — https://archive.org/details/MusopenKickstarterRecordings
+tensa-insistente.mp3: «Insistent (background loop)» — yd — CC0 1.0 — https://opengameart.org/content/insistent-background-loop
+tensa-mozart-sinfonia-40.mp3: «1st Mov Molto allegro» — Musopen (grabación); obra de dominio público — CC0 1.0 — https://archive.org/details/MusopenKickstarterRecordings
+tensa-ojo-tormenta.mp3: «Eye of the Storm» — joth — CC0 1.0 — https://opengameart.org/content/eye-of-the-storm
