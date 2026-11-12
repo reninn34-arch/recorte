@@ -24,6 +24,43 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.42',
+    fecha: '2026-11-12',
+    resumen: 'Un editor nuevo, ordenado como los editores profesionales, con velocidad, ondas de audio y más atajos.',
+    novedades: [
+      {
+        icono: 'layers',
+        titulo: 'Editor reorganizado',
+        texto: 'La biblioteca a la izquierda (Medios, Texto, Audio, Efectos, IA), el monitor al centro, los ajustes de lo que elijas a la derecha y la línea de tiempo abajo. El chat del agente se pliega para dejar más sitio.'
+      },
+      {
+        icono: 'film',
+        titulo: 'Miniaturas y ondas',
+        texto: 'Cada clip muestra su imagen en la línea de tiempo, y la voz, los sonidos y la música dibujan su onda.'
+      },
+      {
+        icono: 'velocidad',
+        titulo: 'Cámara lenta y rápida',
+        texto: 'Cambia la velocidad de un clip de video, de 0,25× a 4×. Se ve en el monitor y sale igual en el MP4.'
+      },
+      {
+        icono: 'ojo',
+        titulo: 'Pistas con control',
+        texto: 'Oculta o silencia una pista entera, o bloquéala para no moverla sin querer.'
+      },
+      {
+        icono: 'copy',
+        titulo: 'Copiar, pegar y elegir varios',
+        texto: 'Ctrl+C, Ctrl+X y Ctrl+V sobre clips, textos, capas y sonidos. Con Ctrl + clic eliges varios y los borras de una vez. Ctrl+B divide.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Arreglos',
+        texto: 'El agente ya puede usar caminar, correr y los demás movimientos al componer una escena, y avisa si un texto queda donde el personaje salta o patea.'
+      }
+    ]
+  },
+  {
     version: '0.1.41',
     fecha: '2026-11-12',
     resumen: 'Sigue trabajando tus videos como en una charla: aprueba una versión, vuelve a otra y haz más videos con el mismo estilo.',
