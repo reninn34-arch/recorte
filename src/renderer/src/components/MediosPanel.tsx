@@ -50,7 +50,7 @@ export function MediosPanel({
           </span>
         </div>
         <button className="btn primary small" onClick={onAgregar} disabled={agregando || proyecto.demo}>
-          <Icon name="plus" size={14} /> {agregando ? 'Agregando…' : 'Agregar videos o imágenes'}
+          <Icon name="plus" size={14} /> {agregando ? 'Importando…' : 'Importar medios'}
         </button>
       </div>
 

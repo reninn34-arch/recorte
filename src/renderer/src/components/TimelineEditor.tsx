@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import {
   ajustarClip,
   ajustesDe,
@@ -56,7 +57,7 @@ import {
 import type { OpcionesExport } from '../../../shared/api'
 import type { TranscriptSegment } from '../../../shared/types'
 import type { Historial } from '../hooks/timeline'
-import { Icon } from '../Icons'
+import { Icon, type IconName } from '../Icons'
 import { InspectorVoz, type GenerarVoz, type GrabarVoz } from './InspectorVoz'
 
 /**
@@ -124,8 +125,17 @@ export function TimelineEditor({
   quitandoFondo,
   medios,
   duraciones,
-  ponerSonido
+  ponerSonido,
+  paneles,
+  panelMedios,
+  pestanasExtra
 }: {
+  /** Dónde se dibuja cada parte del editor: la biblioteca (izquierda), el inspector (derecha) y el transporte (bajo el monitor). */
+  paneles: { biblioteca: HTMLElement | null; inspector: HTMLElement | null; transporte: HTMLElement | null }
+  /** La pestaña «Medios» de la biblioteca (los archivos del proyecto). */
+  panelMedios?: ReactNode
+  /** Más pestañas de la biblioteca (los clips que propone la IA, la cola de renders…). */
+  pestanasExtra?: { id: string; nombre: string; icono: IconName; contenido: ReactNode }[]
   timeline: Timeline
   duracionFuente: number
   /** Lo que puede durar cada fuente (el video principal, otro video, una imagen). */
@@ -163,7 +173,8 @@ export function TimelineEditor({
   /** Copia un efecto de sonido al proyecto (uno incluido o, sin id, uno del equipo). */
   ponerSonido?: (incluido?: string) => Promise<{ archivo: string; nombre: string; duracion: number } | null>
 }) {
-  const [menu, setMenu] = useState<'encima' | 'sonido' | 'filtros' | null>(null)
+  // La pestaña abierta de la biblioteca.
+  const [pestana, setPestana] = useState('medios')
   /** La pista sobre la que se está arrastrando un medio de la biblioteca. */
   const [destino, setDestino] = useState<'video' | 'encima' | null>(null)
   const [nuevaVoz, setNuevaVoz] = useState(false)
@@ -206,13 +217,6 @@ export function TimelineEditor({
   const capaElegida = elegido?.tipo === 'capa' ? tl.capas?.find((c) => c.id === elegido.id) : undefined
   const sonidoElegido = elegido?.tipo === 'sonido' ? tl.sonidos?.find((s) => s.id === elegido.id) : undefined
   const medidas = duraciones ?? {}
-  // Un clic fuera cierra el menú de «Encima» o «Sonido».
-  useEffect(() => {
-    if (!menu) return
-    const cerrar = () => setMenu(null)
-    window.addEventListener('pointerdown', cerrar)
-    return () => window.removeEventListener('pointerdown', cerrar)
-  }, [menu])
   // Elegir cualquier otra cosa cierra el «añadir voz».
   useEffect(() => {
     if (elegido) setNuevaVoz(false)
@@ -434,7 +438,6 @@ export function TimelineEditor({
 
   /** Pone un medio de la biblioteca encima, en el cabezal (un logo, un ícono, una toma de apoyo). */
   function accionEncima(fuente: string, inicio = tiempo, x = 0.5, y = 0.5) {
-    setMenu(null)
     const m = medios?.find((x) => x.id === fuente)
     if (!m) return
     const r = capaNueva(timeline, fuente, m.tipo, inicio, medidas, x, y)
@@ -474,7 +477,6 @@ export function TimelineEditor({
   })
 
   async function accionSonido(incluido?: string, inicio = tiempo) {
-    setMenu(null)
     if (!ponerSonido) return
     const s = await ponerSonido(incluido)
     if (!s) return
@@ -501,9 +503,11 @@ export function TimelineEditor({
     onElegir(null)
   }
 
-  function accionTexto() {
-    const { timeline: nueva, id } = anadirTexto(timeline, tiempo)
-    if (nueva === timeline) return
+  function accionTexto(fuente?: string) {
+    const { timeline: base, id } = anadirTexto(timeline, tiempo)
+    if (base === timeline) return
+    // Desde la biblioteca se elige ya con su letra.
+    const nueva = fuente && fuente !== 'normal' ? cambiarTexto(base, id, { fuente }) : base
     historial.aplicar(nueva)
     onElegir({ tipo: 'texto', id })
     requestAnimationFrame(() => textoRef.current?.select())
@@ -591,127 +595,144 @@ export function TimelineEditor({
 
   return (
     <div className="tl">
+      {paneles.transporte &&
+        createPortal(
+          <>
+            <button className="ed-play" onClick={onAlternar} title={reproduciendo ? 'Pausa (Espacio)' : 'Reproducir (Espacio)'} aria-label={reproduciendo ? 'Pausa' : 'Reproducir'}>
+              <Icon name={reproduciendo ? 'pause' : 'play'} size={18} />
+            </button>
+            <span className="tl-tc">
+              {tc(tiempo)} <span>/ {tc(total)}</span>
+            </span>
+          </>,
+          paneles.transporte
+        )}
+
+      {paneles.biblioteca &&
+        createPortal(
+          <div className="ed-bib">
+            <div className="ed-bib-tabs" role="tablist" aria-label="Biblioteca">
+              {(
+                [
+                  { id: 'medios', nombre: 'Medios', icono: 'film' },
+                  { id: 'texto', nombre: 'Texto', icono: 'type' },
+                  { id: 'audio', nombre: 'Audio', icono: 'music' },
+                  { id: 'efectos', nombre: 'Efectos', icono: 'sliders' },
+                  ...(pestanasExtra ?? [])
+                ] as { id: string; nombre: string; icono: IconName }[]
+              ).map((p) => (
+                <button
+                  key={p.id}
+                  role="tab"
+                  aria-selected={pestana === p.id}
+                  className={`ed-bib-tab ${pestana === p.id ? 'is-on' : ''} ${p.id === 'efectos' && tl.filtros ? 'tiene' : ''}`}
+                  onClick={() => setPestana(p.id)}
+                >
+                  <Icon name={p.icono} size={17} />
+                  <span>{p.nombre}</span>
+                </button>
+              ))}
+            </div>
+            <div className="ed-bib-cuerpo">
+              {pestana === 'medios' && (panelMedios ?? <span className="tl-dim">Este proyecto no tiene más medios.</span>)}
+
+              {pestana === 'texto' && (
+                <>
+                  <span className="ed-seccion">Añadir un texto</span>
+                  <p className="tl-dim">Entra en el cabezal. Después lo mueves en el monitor y lo ajustas a la derecha.</p>
+                  <div className="ed-rejilla">
+                    {Object.entries(FUENTES_TEXTO).map(([clave, f]) => (
+                      <button key={clave} className="ed-tarjeta" disabled={total <= 0} onClick={() => accionTexto(clave)} title={`Añadir un texto con la letra ${f.nombre} (T)`}>
+                        <b style={{ fontFamily: f.familia }}>Aa</b>
+                        <span>{f.nombre}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {pestana === 'audio' && (
+                <>
+                  <span className="ed-seccion">Música</span>
+                  <button className="ed-fila" onClick={() => void accionMusica()}>
+                    <Icon name="music" size={14} />
+                    <span>{tl.musica ? `Cambiar «${tl.musica.nombre}»` : 'Elegir música de tu equipo…'}</span>
+                  </button>
+                  {generarVoz && (
+                    <>
+                      <span className="ed-seccion">Narración</span>
+                      <button className="ed-fila" disabled={total <= 0} onClick={() => (onElegir(null), setNuevaVoz(true))}>
+                        <Icon name="sparkles" size={14} />
+                        <span>Añadir una frase de voz en el cabezal</span>
+                      </button>
+                    </>
+                  )}
+                  {ponerSonido && (
+                    <>
+                      {TIPOS_SONIDO.map((g) => (
+                        <Fragment key={g.id}>
+                          <span className="ed-seccion">Sonidos · {g.nombre}</span>
+                          {SONIDOS_INCLUIDOS.filter((x) => x.tipo === g.id).map((x) => (
+                            <button key={x.id} className="ed-fila" disabled={total <= 0} onClick={() => void accionSonido(x.id)} title={`Lo pone en el cabezal. Para ${x.para}`}>
+                              <Icon name="plus" size={13} />
+                              <span>
+                                {x.nombre} <small>{x.para}</small>
+                              </span>
+                            </button>
+                          ))}
+                        </Fragment>
+                      ))}
+                      <button className="ed-fila" disabled={total <= 0} onClick={() => void accionSonido()}>
+                        <Icon name="folder" size={14} />
+                        <span>Un sonido de tu equipo…</span>
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
+
+              {pestana === 'efectos' && (
+                <>
+                  <span className="ed-seccion">Filtros de todo el video</span>
+                  {FILTROS.map((f) => (
+                    <label key={f.id} className="tl-ajuste" title={`Para ${f.para}`}>
+                      <span>
+                        {f.nombre} <b>{Math.round((tl.filtros?.[f.id] ?? 0) * 100)} %</b>
+                      </span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={tl.filtros?.[f.id] ?? 0}
+                        onPointerDown={empezarAjuste}
+                        onFocus={empezarAjuste}
+                        onChange={(e) => deslizar(cambiarFiltros(timeline, { [f.id]: Number(e.target.value) }))}
+                      />
+                    </label>
+                  ))}
+                  {tl.filtros && (
+                    <button className="btn small ghost" onClick={() => historial.aplicar(cambiarFiltros(timeline, { grano: 0, polvo: 0, trama: 0, vineta: 0, parpadeo: 0 }))}>
+                      Quitar todos
+                    </button>
+                  )}
+                  <span className="ed-seccion">Transiciones y cámara</span>
+                  <p className="tl-dim">Van en cada clip: elige un clip en la línea de tiempo y ajústalo en el panel de la derecha.</p>
+                </>
+              )}
+
+              {pestanasExtra?.map((p) => pestana === p.id && <Fragment key={p.id}>{p.contenido}</Fragment>)}
+            </div>
+          </div>,
+          paneles.biblioteca
+        )}
+
       <div className="tl-barra">
-        <button className="tl-boton" onClick={onAlternar} title={reproduciendo ? 'Pausa (Espacio)' : 'Reproducir (Espacio)'}>
-          <Icon name={reproduciendo ? 'pause' : 'play'} size={16} />
-        </button>
-        <span className="tl-tc">
-          {tc(tiempo)} <span>/ {tc(total)}</span>
-        </span>
-        <span className="tl-separador" />
         <button className="tl-boton" onClick={accionDividir} title="Dividir en el cabezal (S)" disabled={total <= 0}>
           <Icon name="scissors" size={16} /> Dividir
         </button>
-        <button className="tl-boton" onClick={accionTexto} title="Añadir texto en el cabezal (T)" disabled={total <= 0}>
-          <Icon name="type" size={16} /> Texto
-        </button>
-        {onAgregarClips && (
-          <button className="tl-boton" onClick={onAgregarClips} disabled={agregandoClips} title="Agrega varios videos o imágenes al final de la timeline">
-            <Icon name="plus" size={16} /> {agregandoClips ? 'Agregando…' : 'Clips'}
-          </button>
-        )}
-        {generarVoz && (
-          <button
-            className="tl-boton"
-            onClick={() => (onElegir(null), setNuevaVoz(true))}
-            title="Añadir una frase de narración en el cabezal, con la voz que elijas"
-            disabled={total <= 0}
-          >
-            <Icon name="sparkles" size={16} /> Voz
-          </button>
-        )}
-        {medios && (
-          <span className="tl-menu-ancla" onPointerDown={(e) => e.stopPropagation()}>
-            <button
-              className={`tl-boton ${menu === 'encima' ? 'is-activo' : ''}`}
-              onClick={() => setMenu((m) => (m === 'encima' ? null : 'encima'))}
-              title="Pone una imagen o un video de la biblioteca encima del video, en el cabezal"
-              disabled={total <= 0}
-            >
-              <Icon name="layers" size={16} /> Encima
-            </button>
-            {menu === 'encima' && (
-              <div className="tl-menu" onPointerDown={(e) => e.stopPropagation()}>
-                {medios.length === 0 ? (
-                  <span className="tl-dim">Agrega imágenes o videos con «Clips» o en Medios; también puedes arrastrarlos desde la biblioteca.</span>
-                ) : (
-                  medios.map((m) => (
-                    <button key={m.id} className="tl-menu-item" onClick={() => accionEncima(m.id)}>
-                      <Icon name={m.tipo === 'imagen' ? 'image' : 'film'} size={13} /> {m.nombre}
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
-          </span>
-        )}
-        {ponerSonido && (
-          <span className="tl-menu-ancla" onPointerDown={(e) => e.stopPropagation()}>
-            <button
-              className={`tl-boton ${menu === 'sonido' ? 'is-activo' : ''}`}
-              onClick={() => setMenu((m) => (m === 'sonido' ? null : 'sonido'))}
-              title="Pone un efecto de sonido en el cabezal"
-              disabled={total <= 0}
-            >
-              <Icon name="sparkles" size={16} /> Sonido
-            </button>
-            {menu === 'sonido' && (
-              <div className="tl-menu" onPointerDown={(e) => e.stopPropagation()}>
-                {TIPOS_SONIDO.map((g) => (
-                  <Fragment key={g.id}>
-                    <span className="tl-menu-grupo">{g.nombre}</span>
-                    {SONIDOS_INCLUIDOS.filter((s) => s.tipo === g.id).map((s) => (
-                      <button key={s.id} className="tl-menu-item" onClick={() => void accionSonido(s.id)} title={`Para ${s.para}`}>
-                        {s.nombre} <span className="tl-dim">· {s.para}</span>
-                      </button>
-                    ))}
-                  </Fragment>
-                ))}
-                <button className="tl-menu-item" onClick={() => void accionSonido()}>
-                  <Icon name="folder" size={13} /> Desde tu equipo…
-                </button>
-              </div>
-            )}
-          </span>
-        )}
-        <span className="tl-menu-ancla" onPointerDown={(e) => e.stopPropagation()}>
-          <button
-            className={`tl-boton ${menu === 'filtros' ? 'is-activo' : ''} ${tl.filtros ? 'tiene' : ''}`}
-            onClick={() => setMenu((m) => (m === 'filtros' ? null : 'filtros'))}
-            title="Grano, polvo, trama de imprenta, viñeta y parpadeo para todo el video"
-            disabled={total <= 0}
-          >
-            <Icon name="sliders" size={16} /> Filtros
-          </button>
-          {menu === 'filtros' && (
-            <div className="tl-menu tl-menu-filtros" onPointerDown={(e) => e.stopPropagation()}>
-              {FILTROS.map((f) => (
-                <label key={f.id} className="tl-ajuste" title={`Para ${f.para}`}>
-                  <span>
-                    {f.nombre} <b>{Math.round((tl.filtros?.[f.id] ?? 0) * 100)} %</b>
-                  </span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={tl.filtros?.[f.id] ?? 0}
-                    onPointerDown={empezarAjuste}
-                    onFocus={empezarAjuste}
-                    onChange={(e) => deslizar(cambiarFiltros(timeline, { [f.id]: Number(e.target.value) }))}
-                  />
-                </label>
-              ))}
-              {tl.filtros && (
-                <button className="tl-menu-item" onClick={() => historial.aplicar(cambiarFiltros(timeline, { grano: 0, polvo: 0, trama: 0, vineta: 0, parpadeo: 0 }))}>
-                  Quitar todos
-                </button>
-              )}
-            </div>
-          )}
-        </span>
-        <button className="tl-boton" onClick={() => void accionMusica()} title="Poner música bajo la edición">
-          <Icon name="music" size={16} /> Música
+        <button className="tl-boton" onClick={accionDuplicar} title="Duplicar el clip elegido" disabled={!clipElegido}>
+          <Icon name="copy" size={16} />
         </button>
         <button className="tl-boton" onClick={accionBorrar} title="Borrar lo elegido (Supr)" disabled={!elegido}>
           <Icon name="trash" size={16} />
@@ -735,84 +756,20 @@ export function TimelineEditor({
             onChange={(e) => setZoom(Math.pow(zoomMax, Number(e.target.value) / 100))}
           />
         </label>
-        <button className="tl-boton" onClick={ajustar} title="Ver toda la timeline">
+        <button className="tl-boton" onClick={ajustar} title="Ver toda la línea de tiempo">
           Ajustar
         </button>
-        <span className="tl-separador" />
-        <button
-          className={`btn small ${panelExportar ? '' : 'primary'}`}
-          onClick={() => setPanelExportar((v) => !v)}
-          disabled={total <= 0 && !exportar.activo}
-        >
-          <Icon name="download" size={14} />
-          {exportar.activo ? `Exportando ${Math.round(exportar.pct * 100)} %` : 'Exportar'}
-        </button>
       </div>
-
-      {panelExportar && (
-        <div className="tl-exportar">
-          <div className="chips">
-            <button className={`chip ${formato === 'original' || exportar.vertical ? 'is-active' : ''}`} onClick={() => setFormato('original')}>
-              {exportar.vertical ? 'Original (vertical)' : 'Original (horizontal)'}
-            </button>
-            {!exportar.vertical && (
-              <button className={`chip ${formato === 'vertical' ? 'is-active' : ''}`} onClick={() => setFormato('vertical')}>
-                Vertical 9:16, recortado al centro
-              </button>
-            )}
-          </div>
-          <label
-            className={`tl-check ${exportar.hayTranscripcion ? '' : 'is-off'}`}
-            title={exportar.hayTranscripcion ? undefined : 'Transcribe el video para poder quemar los subtítulos'}
-          >
-            <input
-              type="checkbox"
-              checked={subtitulos && exportar.hayTranscripcion}
-              disabled={!exportar.hayTranscripcion}
-              onChange={(e) => setSubtitulos(e.target.checked)}
-            />
-            Subtítulos de la voz
-          </label>
-          {exportar.destino && (
-            <span className="tl-dim tl-destino" title={exportar.destino}>
-              Se guarda en {exportar.destino}
-            </span>
-          )}
-          <span className="tl-flex" />
-          {exportar.activo && (
-            <span className="tl-progreso">
-              <span style={{ width: `${Math.round(exportar.pct * 100)}%` }} />
-            </span>
-          )}
-          {exportar.hayArchivo && !exportar.activo && (
-            <button className="btn small ghost" onClick={exportar.onAbrir}>
-              <Icon name="folder" size={14} /> Ver el último
-            </button>
-          )}
-          <button
-            className="btn small primary"
-            disabled={exportar.activo || total <= 0}
-            onClick={() =>
-              exportar.onExportar({
-                formato: exportar.vertical ? 'original' : formato,
-                subtitulos: subtitulos && exportar.hayTranscripcion
-              })
-            }
-          >
-            <Icon name="download" size={14} /> {exportar.activo ? 'Exportando…' : `Exportar MP4 · ${tc(total, false)}`}
-          </button>
-        </div>
-      )}
 
       <div className="tl-cuerpo">
         <div className="tl-nombres">
           <span className="tl-nombre regla" />
-          <span className="tl-nombre">Encima</span>
-          <span className="tl-nombre">Video</span>
-          <span className="tl-nombre">Texto</span>
-          <span className="tl-nombre">Voz</span>
-          <span className="tl-nombre">Sonidos</span>
-          <span className="tl-nombre">Música</span>
+          <span className="tl-nombre"><Icon name="layers" size={12} /> Encima</span>
+          <span className="tl-nombre"><Icon name="film" size={12} /> Video</span>
+          <span className="tl-nombre"><Icon name="type" size={12} /> Texto</span>
+          <span className="tl-nombre"><Icon name="sparkles" size={12} /> Voz</span>
+          <span className="tl-nombre"><Icon name="plus" size={12} /> Sonidos</span>
+          <span className="tl-nombre"><Icon name="music" size={12} /> Música</span>
         </div>
 
         <div className="tl-scroll" ref={scrollRef} onWheel={rueda}>
@@ -831,7 +788,7 @@ export function TimelineEditor({
               {...receptor('encima')}
             >
               {!tl.capas?.length && (
-                <span className="tl-vacio">Logos, íconos o tomas encima del video: «Encima» o arrastra desde la biblioteca.</span>
+                <span className="tl-vacio">Logos, íconos o tomas encima del video: arrástralos desde Medios.</span>
               )}
               {(tl.capas ?? []).map((c) => {
                 const anchoCapa = c.duracion * pps
@@ -944,7 +901,7 @@ export function TimelineEditor({
 
             <div className="tl-carril sonidos" onPointerDown={arrastrarCabezal}>
               {!tl.sonidos?.length && ponerSonido && (
-                <button className="tl-vacio tl-vacio-boton" onPointerDown={(e) => e.stopPropagation()} onClick={() => setMenu('sonido')}>
+                <button className="tl-vacio tl-vacio-boton" onPointerDown={(e) => e.stopPropagation()} onClick={() => setPestana('audio')}>
                   + Añadir un efecto de sonido
                 </button>
               )}
@@ -997,6 +954,87 @@ export function TimelineEditor({
         </div>
       </div>
 
+      {paneles.inspector &&
+        createPortal(
+          <div className="ed-insp">
+            <div className="ed-insp-cabeza">
+              <b>
+                {clipElegido
+                  ? `Clip ${clipElegido.indice + 1}`
+                  : capaElegida
+                    ? 'Capa encima'
+                    : sonidoElegido
+                      ? 'Sonido'
+                      : musicaElegida
+                        ? 'Música'
+                        : textoElegido
+                          ? 'Texto'
+                          : (fraseElegida || nuevaVoz) && generarVoz
+                            ? 'Voz'
+                            : 'Proyecto'}
+              </b>
+              <button
+                className={`btn small ${panelExportar ? '' : 'primary'}`}
+                onClick={() => setPanelExportar((v) => !v)}
+                disabled={total <= 0 && !exportar.activo}
+              >
+                <Icon name="download" size={14} />
+                {exportar.activo ? `Exportando ${Math.round(exportar.pct * 100)} %` : 'Exportar'}
+              </button>
+            </div>
+            {panelExportar && (
+              <div className="tl-exportar">
+                <div className="chips">
+                  <button className={`chip ${formato === 'original' || exportar.vertical ? 'is-active' : ''}`} onClick={() => setFormato('original')}>
+                    {exportar.vertical ? 'Original (vertical)' : 'Original (horizontal)'}
+                  </button>
+                  {!exportar.vertical && (
+                    <button className={`chip ${formato === 'vertical' ? 'is-active' : ''}`} onClick={() => setFormato('vertical')}>
+                      Vertical 9:16, recortado al centro
+                    </button>
+                  )}
+                </div>
+                <label
+                  className={`tl-check ${exportar.hayTranscripcion ? '' : 'is-off'}`}
+                  title={exportar.hayTranscripcion ? undefined : 'Transcribe el video para poder quemar los subtítulos'}
+                >
+                  <input
+                    type="checkbox"
+                    checked={subtitulos && exportar.hayTranscripcion}
+                    disabled={!exportar.hayTranscripcion}
+                    onChange={(e) => setSubtitulos(e.target.checked)}
+                  />
+                  Subtítulos de la voz
+                </label>
+                {exportar.destino && (
+                  <span className="tl-dim tl-destino" title={exportar.destino}>
+                    Se guarda en {exportar.destino}
+                  </span>
+                )}
+                {exportar.activo && (
+                  <span className="tl-progreso">
+                    <span style={{ width: `${Math.round(exportar.pct * 100)}%` }} />
+                  </span>
+                )}
+                {exportar.hayArchivo && !exportar.activo && (
+                  <button className="btn small ghost" onClick={exportar.onAbrir}>
+                    <Icon name="folder" size={14} /> Ver el último
+                  </button>
+                )}
+                <button
+                  className="btn small primary"
+                  disabled={exportar.activo || total <= 0}
+                  onClick={() =>
+                    exportar.onExportar({
+                      formato: exportar.vertical ? 'original' : formato,
+                      subtitulos: subtitulos && exportar.hayTranscripcion
+                    })
+                  }
+                >
+                  <Icon name="download" size={14} /> {exportar.activo ? 'Exportando…' : `Exportar MP4 · ${tc(total, false)}`}
+                </button>
+              </div>
+            )}
       <div className="tl-detalle">
         {clipElegido ? (
           <>
@@ -1027,20 +1065,38 @@ export function TimelineEditor({
             <div className="tl-ajustes">
               {(
                 [
-                  ['zoom', 'Zoom', 1, 2, 0.01, (v: number) => `${Math.round(v * 100)} %`],
-                  ['brillo', 'Brillo', -0.3, 0.3, 0.01, (v: number) => `${v > 0 ? '+' : ''}${Math.round(v * 100)}`],
-                  ['contraste', 'Contraste', 0.5, 1.8, 0.01, (v: number) => `${Math.round(v * 100)} %`],
-                  ['saturacion', 'Saturación', 0, 2, 0.01, (v: number) => `${Math.round(v * 100)} %`],
-                  ['cx', 'Centro ↔', 0, 1, 0.01, (v: number) => `${Math.round(v * 100)} %`],
-                  ['cy', 'Centro ↕', 0, 1, 0.01, (v: number) => `${Math.round(v * 100)} %`],
-                  ['acercar', 'Acercar / alejar', -0.3, 0.3, 0.01, (v: number) => (v ? `${v > 0 ? '+' : '−'}${Math.round(Math.abs(v) * 100)} %` : 'no')],
-                  ['panx', 'Paneo ↔', -0.5, 0.5, 0.01, (v: number) => (v ? `${v > 0 ? '→' : '←'} ${Math.round(Math.abs(v) * 100)} %` : 'no')],
-                  ['pany', 'Paneo ↕', -0.5, 0.5, 0.01, (v: number) => (v ? `${v > 0 ? '↓' : '↑'} ${Math.round(Math.abs(v) * 100)} %` : 'no')],
-                  ['temblor', 'Cámara en mano', 0, 1, 0.05, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no')],
-                  ['campo', 'Profundidad de campo', 0, 1, 0.05, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no')],
-                  ['foco', 'Foco', 0, 1, 0.05, (v: number) => (v < 0.15 ? 'fondo' : v > 0.85 ? 'muy cerca' : `${Math.round(v * 100)} %`)]
+                  [
+                    'Encuadre',
+                    [
+                      ['zoom', 'Zoom', 1, 2, 0.01, (v: number) => `${Math.round(v * 100)} %`],
+                      ['cx', 'Centro ↔', 0, 1, 0.01, (v: number) => `${Math.round(v * 100)} %`],
+                      ['cy', 'Centro ↕', 0, 1, 0.01, (v: number) => `${Math.round(v * 100)} %`]
+                    ]
+                  ],
+                  [
+                    'Color',
+                    [
+                      ['brillo', 'Brillo', -0.3, 0.3, 0.01, (v: number) => `${v > 0 ? '+' : ''}${Math.round(v * 100)}`],
+                      ['contraste', 'Contraste', 0.5, 1.8, 0.01, (v: number) => `${Math.round(v * 100)} %`],
+                      ['saturacion', 'Saturación', 0, 2, 0.01, (v: number) => `${Math.round(v * 100)} %`]
+                    ]
+                  ],
+                  [
+                    'Cámara',
+                    [
+                      ['acercar', 'Acercar / alejar', -0.3, 0.3, 0.01, (v: number) => (v ? `${v > 0 ? '+' : '−'}${Math.round(Math.abs(v) * 100)} %` : 'no')],
+                      ['panx', 'Paneo ↔', -0.5, 0.5, 0.01, (v: number) => (v ? `${v > 0 ? '→' : '←'} ${Math.round(Math.abs(v) * 100)} %` : 'no')],
+                      ['pany', 'Paneo ↕', -0.5, 0.5, 0.01, (v: number) => (v ? `${v > 0 ? '↓' : '↑'} ${Math.round(Math.abs(v) * 100)} %` : 'no')],
+                      ['temblor', 'Cámara en mano', 0, 1, 0.05, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no')],
+                      ['campo', 'Profundidad de campo', 0, 1, 0.05, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no')],
+                      ['foco', 'Foco', 0, 1, 0.05, (v: number) => (v < 0.15 ? 'fondo' : v > 0.85 ? 'muy cerca' : `${Math.round(v * 100)} %`)]
+                    ]
+                  ]
                 ] as const
-              ).map(([clave, nombre, min, max, paso, formato]) => {
+              ).map(([grupo, filas]) => (
+                <Fragment key={grupo}>
+                  <span className="ed-seccion">{grupo}</span>
+                  {filas.map(([clave, nombre, min, max, paso, formato]) => {
                 const valor = ajustesDe(clipElegido.clip)[clave]
                 return (
                   <label key={clave} className="tl-ajuste">
@@ -1060,6 +1116,8 @@ export function TimelineEditor({
                   </label>
                 )
               })}
+                </Fragment>
+              ))}
               <select
                 value=""
                 title="Un movimiento de cámara para el clip; con capas con profundidad encima se ve en 3D"
@@ -1464,12 +1522,30 @@ export function TimelineEditor({
             </button>
           </>
         ) : (
-          <span className="tl-dim">
-            Espacio reproduce · S divide · T añade texto · Supr borra · arrastra un clip para reordenarlo o sus bordes para
-            recortarlo · arrastra rótulos y capas en el monitor · Ctrl+Z deshace · Ctrl+rueda acerca
-          </span>
+          <div className="ed-vacio">
+            <p>Elige un clip, un texto, una capa o un sonido en la línea de tiempo para ajustarlo aquí.</p>
+            <dl className="ed-atajos">
+              <dt>Espacio</dt>
+              <dd>Reproducir o pausar</dd>
+              <dt>S</dt>
+              <dd>Dividir en el cabezal</dd>
+              <dt>T</dt>
+              <dd>Añadir un texto</dd>
+              <dt>Supr</dt>
+              <dd>Borrar lo elegido</dd>
+              <dt>← →</dt>
+              <dd>Un cuadro (con Mayús, un segundo)</dd>
+              <dt>Ctrl+Z</dt>
+              <dd>Deshacer</dd>
+              <dt>Ctrl+rueda</dt>
+              <dd>Acercar la línea de tiempo</dd>
+            </dl>
+          </div>
         )}
       </div>
+          </div>,
+          paneles.inspector
+        )}
     </div>
   )
 }

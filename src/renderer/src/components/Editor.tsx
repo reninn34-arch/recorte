@@ -21,7 +21,6 @@ import type { PuenteEditor } from './ChatAgente'
  * herramientas bajo la línea de tiempo; el video manda.
  */
 
-type Herramienta = 'edicion' | 'clips' | 'medios' | 'cola'
 
 export function Editor({
   proyecto,
@@ -86,7 +85,10 @@ export function Editor({
   onAbrirSalida: (job: RenderJob) => void
   textoVacio: string
 }) {
-  const [herramienta, setHerramienta] = useState<Herramienta>('clips')
+  // Los paneles del editor: la línea de tiempo dibuja en ellos su biblioteca, su inspector y el transporte.
+  const [panelBiblioteca, setPanelBiblioteca] = useState<HTMLElement | null>(null)
+  const [panelInspector, setPanelInspector] = useState<HTMLElement | null>(null)
+  const [panelTransporte, setPanelTransporte] = useState<HTMLElement | null>(null)
   const [elegido, setElegido] = useState<Elegido>(null)
   const elegir = useCallback((e: Elegido) => setElegido(e), [])
   const timeline = proyecto.timeline ?? timelineVacia()
@@ -259,27 +261,81 @@ export function Editor({
     reproductor.buscar(0)
   }
 
-  const pestañas: { id: Herramienta; nombre: string }[] = [
-    { id: 'edicion', nombre: 'Edición del agente' },
-    { id: 'clips', nombre: `Clips (${proyecto.clips.length})` },
-    { id: 'medios', nombre: `Medios (${(proyecto.medios?.length ?? 0) + 1})` },
-    { id: 'cola', nombre: `Cola (${cola.length})` }
-  ]
-
   return (
-    <div className="editor">
-      <Monitor
-        proyecto={proyecto}
-        timeline={timeline}
-        reproductor={reproductor}
-        fuentes={fuentes}
-        medios={duraciones}
-        historial={historial}
-        elegido={elegido}
-        onElegir={elegir}
-      />
+    <div className="editor ed">
+      <div className="ed-arriba">
+        <aside className="ed-panel ed-biblioteca" ref={setPanelBiblioteca} aria-label="Biblioteca" />
+        <section className="ed-centro">
+          <div className="ed-visor">
+            <Monitor
+              proyecto={proyecto}
+              timeline={timeline}
+              reproductor={reproductor}
+              fuentes={fuentes}
+              medios={duraciones}
+              historial={historial}
+              elegido={elegido}
+              onElegir={elegir}
+            />
+          </div>
+          <div className="ed-transporte" ref={setPanelTransporte} />
+        </section>
+        <aside className="ed-panel ed-inspector" ref={setPanelInspector} aria-label="Ajustes de lo elegido" />
+      </div>
       <TimelineEditor
         key={proyecto.id}
+        paneles={{ biblioteca: panelBiblioteca, inspector: panelInspector, transporte: panelTransporte }}
+        panelMedios={
+          <>
+            <MediosPanel
+              proyecto={proyecto}
+              agregando={agregando}
+              onAgregar={() => void agregarMedios()}
+              onPoner={(fuente, donde) => {
+                const tl = poner(fuente, donde)
+                if (tl !== timeline) historial.aplicar(tl)
+              }}
+              onQuitar={(m) => void quitarMedio(m)}
+            />
+            {!proyecto.demo && (
+              <button className="ed-fila" onClick={() => llevarATimeline(timelineInicial(proyecto.source.duration))} title="La línea de tiempo vuelve a ser el video completo">
+                <Icon name="film" size={14} />
+                <span>Todo el material a la línea de tiempo</span>
+              </button>
+            )}
+            <SourceCard proyecto={proyecto} progreso={progreso} onTranscribir={onTranscribir} onPlay={() => reproductor.buscar(0)} />
+          </>
+        }
+        pestanasExtra={[
+          {
+            id: 'ia',
+            nombre: 'IA',
+            icono: 'sparkles',
+            contenido: (
+              <>
+                <span className="ed-seccion">Edición del agente</span>
+                {proyecto.receta && (
+                  <button className="ed-fila" onClick={() => proyecto.receta && llevarATimeline(timelineDesdeReceta(proyecto.receta))}>
+                    <Icon name="layers" size={14} />
+                    <span>Llevar la edición del agente a la línea de tiempo</span>
+                  </button>
+                )}
+                <EdicionCard proyecto={proyecto} editando={editando} renderizando={renderizando} onEditar={onEditar} onRenderizar={onRenderizarEdicion} onAbrir={onAbrirEdicion} />
+                <span className="ed-seccion">Clips que propone la IA ({proyecto.clips.length})</span>
+                {clip && (
+                  <button className="ed-fila" onClick={() => llevarATimeline(timelineDesdeCortes([{ start: clip.start, end: clip.end }], clip.title))}>
+                    <Icon name="layers" size={14} />
+                    <span>Abrir «{clip.title}» en la línea de tiempo</span>
+                  </button>
+                )}
+                <ClipList clips={proyecto.clips} proyectoId={proyecto.demo ? undefined : proyecto.id} selected={seleccion} onSelect={onSelect} vacio={textoVacio} />
+                {clip && <Inspector clip={clip} project={proyecto} onChange={onCambiarClip} onRender={onRenderClip} rendering={renderizando || lote !== null} />}
+                <span className="ed-seccion">Cola de renders ({cola.length})</span>
+                <RenderQueue jobs={cola} pendientes={pendientesLote} lote={lote} onRenderLote={onRenderLote} onOpen={onAbrirSalida} />
+              </>
+            )
+          }
+        ]}
         timeline={timeline}
         duracionFuente={proyecto.source.duration}
         duracionDe={duracionDe}
@@ -353,106 +409,6 @@ export function Editor({
         }}
       />
 
-      <div className="herramientas">
-        <div className="herramientas-tabs">
-          {pestañas.map((p) => (
-            <button
-              key={p.id}
-              className={`chip ${herramienta === p.id ? 'is-active' : ''}`}
-              onClick={() => setHerramienta(p.id)}
-            >
-              {p.nombre}
-            </button>
-          ))}
-        </div>
-
-        {herramienta === 'edicion' && proyecto.receta && (
-          <div className="herramienta-accion">
-            <span>La edición del agente se puede seguir editando a mano.</span>
-            <button className="btn small" onClick={() => proyecto.receta && llevarATimeline(timelineDesdeReceta(proyecto.receta))}>
-              <Icon name="layers" size={14} /> Llevar a la timeline
-            </button>
-          </div>
-        )}
-        {herramienta === 'edicion' && (
-          <EdicionCard
-            proyecto={proyecto}
-            editando={editando}
-            renderizando={renderizando}
-            onEditar={onEditar}
-            onRenderizar={onRenderizarEdicion}
-            onAbrir={onAbrirEdicion}
-          />
-        )}
-        {herramienta === 'clips' && clip && (
-          <div className="herramienta-accion">
-            <span>«{clip.title}» · {Math.round(clip.end - clip.start)} s</span>
-            <button
-              className="btn small"
-              onClick={() => llevarATimeline(timelineDesdeCortes([{ start: clip.start, end: clip.end }], clip.title))}
-            >
-              <Icon name="layers" size={14} /> Abrir en la timeline
-            </button>
-          </div>
-        )}
-        {herramienta === 'clips' && (
-          <div className="herramienta-clips">
-            <ClipList
-              clips={proyecto.clips}
-              proyectoId={proyecto.demo ? undefined : proyecto.id}
-              selected={seleccion}
-              onSelect={onSelect}
-              vacio={textoVacio}
-            />
-            {clip && (
-              <Inspector
-                clip={clip}
-                project={proyecto}
-                onChange={onCambiarClip}
-                onRender={onRenderClip}
-                rendering={renderizando || lote !== null}
-              />
-            )}
-          </div>
-        )}
-        {herramienta === 'medios' && !proyecto.demo && (
-          <div className="herramienta-accion">
-            <span>La timeline parte del video completo; vuelve a él cuando quieras.</span>
-            <button className="btn small" onClick={() => llevarATimeline(timelineInicial(proyecto.source.duration))}>
-              <Icon name="film" size={14} /> Todo el material a la timeline
-            </button>
-          </div>
-        )}
-        {herramienta === 'medios' && (
-          <MediosPanel
-            proyecto={proyecto}
-            agregando={agregando}
-            onAgregar={() => void agregarMedios()}
-            onPoner={(fuente, donde) => {
-              const tl = poner(fuente, donde)
-              if (tl !== timeline) historial.aplicar(tl)
-            }}
-            onQuitar={(m) => void quitarMedio(m)}
-          />
-        )}
-        {herramienta === 'medios' && (
-          <SourceCard
-            proyecto={proyecto}
-            progreso={progreso}
-            onTranscribir={onTranscribir}
-            onPlay={() => reproductor.buscar(0)}
-          />
-        )}
-        {herramienta === 'cola' && (
-          <RenderQueue
-            jobs={cola}
-            pendientes={pendientesLote}
-            lote={lote}
-            onRenderLote={onRenderLote}
-            onOpen={onAbrirSalida}
-          />
-        )}
-      </div>
     </div>
   )
 }
