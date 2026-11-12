@@ -247,5 +247,45 @@ for (const t of [0.7, 1.7, 2.6]) {
 }
 assert.ok(Math.abs(centro6(1.7) - centro6(1.4)) > 40, 'en el corte la capa salta con el fondo (sigue a la segunda toma)')
 
+// Velocidad y pistas: un clip al doble dura la mitad (en la timeline y en el MP4), dividirlo conserva su velocidad,
+// y una pista silenciada u oculta no llega al MP4.
+{
+  const { cambiarVelocidad, cambiarPista, dividir, duracionTimeline, timelineActiva, ubicar } = await import('../src/shared/timeline.ts')
+  const tonos = join(dir, 'tonos.mp4')
+  ff(['-f', 'lavfi', '-i', 'testsrc2=s=640x360:d=4:r=30', '-f', 'lavfi', '-i', 'sine=f=440:d=4', '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', tonos])
+  const p7 = { ...proyecto, source: { ...proyecto.source, path: tonos, duration: 4 }, medios: [] }
+  const base = normalizarTimeline({ clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 4 }], textos: [{ id: 't1', texto: 'Hola', inicio: 0, duracion: 1, posicion: 'abajo' }] }, 4, {})
+  const rapida = cambiarVelocidad(base, 'c1', 2)
+  assert.ok(Math.abs(duracionTimeline(rapida) - 2) < 0.001, 'al doble de velocidad, el clip dura la mitad')
+  assert.ok(Math.abs(ubicar(rapida, 1).tFuente - 2) < 0.001, 'el segundo 1 de la timeline es el 2 de la fuente')
+  const partida = dividir(rapida, 0.5)
+  assert.equal(partida.clips.length, 2)
+  assert.ok(partida.clips.every((c) => c.velocidad === 2) && Math.abs(partida.clips[0].salida - 1) < 0.001, 'dividir conserva la velocidad y corta en la fuente')
+  assert.ok(Math.abs(duracionTimeline(partida) - 2) < 0.001)
+  assert.equal(normalizarTimeline(rapida, 4, {}).clips[0].velocidad, 2, 'la velocidad sobrevive a guardar y abrir')
+  const mp4 = (r, carpeta) => r.archivo ?? r.ruta ?? join(dir, carpeta, 'timeline-prueba-original.mp4')
+  const dur = (ruta) => Number(spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', ruta], { encoding: 'utf8' }).stdout)
+  const pistas = (ruta) => spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', ruta], { encoding: 'utf8' }).stdout
+  const r7 = await exportarTimeline(p7, rapida, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas7'))
+  assert.ok(r7.ok, r7.error)
+  assert.ok(Math.abs(dur(mp4(r7, 'salidas7')) - 2) < 0.15, `al doble, el MP4 dura 2 s (dura ${dur(mp4(r7, 'salidas7'))})`)
+  assert.ok(/audio/.test(pistas(mp4(r7, 'salidas7'))), 'el clip acelerado conserva su sonido')
+  const lenta = cambiarVelocidad(normalizarTimeline({ clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 1 }], textos: [] }, 4, {}), 'c1', 0.25)
+  const r8 = await exportarTimeline(p7, lenta, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas8'))
+  assert.ok(r8.ok, r8.error)
+  assert.ok(Math.abs(dur(mp4(r8, 'salidas8')) - 4) < 0.2, `a un cuarto, 1 s de fuente dura 4 s (dura ${dur(mp4(r8, 'salidas8'))})`)
+  // Pistas: el texto oculto y el video silenciado.
+  const callada = cambiarPista(cambiarPista(base, 'video', { oculta: true }), 'texto', { oculta: true })
+  assert.equal(timelineActiva(callada).textos.length, 0)
+  assert.equal(callada.textos.length, 1, 'ocultar una pista no borra lo que tiene')
+  assert.equal(normalizarTimeline(callada, 4, {}).pistas?.video?.oculta, true, 'las pistas sobreviven a guardar y abrir')
+  const r9 = await exportarTimeline(p7, callada, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas9'))
+  assert.ok(r9.ok, r9.error)
+  const vol = spawnSync('ffmpeg', ['-v', 'info', '-i', mp4(r9, 'salidas9'), '-af', 'volumedetect', '-f', 'null', '-'], { encoding: 'utf8' }).stderr
+  const max = Number(/max_volume: (-?[\d.]+|-inf)/.exec(vol)?.[1] ?? '-inf')
+  assert.ok(!/audio/.test(pistas(mp4(r9, 'salidas9'))) || !(max > -60), `con la pista de video silenciada, el MP4 no suena (máx ${max} dB)`)
+  console.log('velocidad (2× y 0,25×) y pistas ocultas en el MP4 ✓')
+}
+
 rmSync(dir, { recursive: true, force: true })
 console.log('exportar: ok')
