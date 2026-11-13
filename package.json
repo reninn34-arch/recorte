@@ -24,6 +24,8 @@
     "prueba:mcp": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-mcp.mjs",
     "prueba:retoques": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-retoques.mjs",
     "prueba:edicion": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs scripts/prueba-edicion.mjs",
+    "prueba:estabilizar": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-estabilizar.mjs",
+    "prueba:multicam": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-multicam.mjs",
     "prueba:modelos": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-modelos.mjs",
     "prueba:medios": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs scripts/prueba-medios.mjs"
   },

@@ -54,6 +54,7 @@ import {
   ponerClave,
   quitarClave,
   velocidadDe,
+  fuenteEnClip,
   type ParametroClave,
   PARAMETROS_CLAVE_CAPA,
   ponerClaveCapa,
@@ -710,7 +711,7 @@ export function aplicarOperaciones(
           break
         }
         // `en` son segundos desde que empieza el clip en la timeline; la clave se guarda en el segundo de su fuente.
-        const f = destino.entrada + o.en * velocidadDe(destino)
+        const f = fuenteEnClip(destino, o.en)
         const nueva = o.quitar || o.valor === undefined ? quitarClave(tl, destino.id, o.parametro, f) : ponerClave(tl, destino.id, o.parametro, f, o.valor)
         if (nueva === tl) fallos.push(`No pude ${o.quitar ? 'quitar' : 'poner'} esa clave en el clip ${o.clip}.`)
         else {
@@ -1014,7 +1015,7 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
 - {"op":"color","clip":N,"brillo":B,"contraste":C,"saturacion":S}  brillo -0.3 a 0.3 (0 neutro), contraste 0.5 a 1.8 (1 neutro), saturación 0 (blanco y negro) a 2 (1 neutro). Sin "clip", a todos. Pon solo lo que cambies. También corrige el color como en Lumetri: "exposicion" (-2 a 2 pasos), "altas", "sombras", "blancos", "negros" (-1 a 1; sombras +0.3 abre una cara oscura), "temperatura" (-1 frío a 1 cálido) y "tinte" (-1 verde a 1 magenta).
   La misma op pone EFECTOS al clip: "desenfoque" 0 a 1 (0.35 para un fondo bajo un texto), "sepia" 0 a 1 (foto antigua), "tono" -180 a 180 (gira los colores), "invertir" 1 (negativo; 0 lo quita).
   Y un LOOK de color completo con "look" (sustituye al color y los efectos que tuviera): ${LOOKS.map((l) => `${l.id} (${l.para})`).join(', ')}. Para un flash en negativo: divide medio segundo y ponle "invertir":1.
-- {"op":"clave","clip":N,"parametro":"zoom|cx|cy|brillo|contraste|saturacion","en":S,"valor":V}  FOTOGRAMA CLAVE: ese ajuste del clip N vale V en el segundo S (contado desde que empieza el clip) y cambia suave hasta la siguiente clave. Con dos o más claves animas a mano: un zoom que entra y vuelve a salir (zoom 1 en 0, 1.4 en 1.5, 1 en 3), el encuadre que va de una cara a otra (cx, cy), un fundido a oscuro (brillo 0 → -0.3), el color que se apaga (saturacion 1 → 0). Hasta 12 claves por ajuste. "quitar":true en vez de "valor" borra la de ese segundo.
+- {"op":"clave","clip":N,"parametro":"zoom|cx|cy|brillo|contraste|saturacion|escala|posx|posy|giro|exposicion|altas|sombras|blancos|negros|temperatura|tinte","en":S,"valor":V}  FOTOGRAMA CLAVE: ese ajuste del clip N vale V en el segundo S (contado desde que empieza el clip) y cambia suave hasta la siguiente clave. Con dos o más claves animas a mano: un zoom que entra y vuelve a salir (zoom 1 en 0, 1.4 en 1.5, 1 en 3), el encuadre que va de una cara a otra (cx, cy), un fundido a oscuro (brillo 0 → -0.3), el color que se apaga (saturacion 1 → 0), la imagen que se achica a una esquina (escala 1 → 0.4 con posx/posy) o que gira (giro). Hasta 12 claves por ajuste. "quitar":true en vez de "valor" borra la de ese segundo.
 - {"op":"clave_capa","capa_n":N,"parametro":"x|y|ancho|giro|opacidad","en":S,"valor":V}  FOTOGRAMA CLAVE de una capa encima: en el segundo S (desde que aparece la capa) vale V, y cambia suave hasta la siguiente. x, y de -0.5 a 1.5 (fuera del cuadro para entrar o salir volando), ancho 0.05 a 2, giro en grados, opacidad 0 a 1. Así se hace un recorrido con curvas (varias claves de x e y), algo que crece y se encoge, un logo que aparece y se desvanece (opacidad 0 → 1 → 0). Mandan sobre "fin_x"… de anadir_capa. "quitar":true borra la de ese segundo.
 - {"op":"audio_clip","clip":N,"volumen":V,"entra":S,"sale":S,"limpio":L}  el sonido de un clip de VIDEO: «volumen» 0 a 1.5 (1 como viene), «entra» y «sale» segundos de fundido de entrada y de salida (0 a 5), «limpio» 0 a 1 para quitar el ruido de fondo (zumbido, aire, siseo; 0.5 suele bastar). Solo los campos que cambian.
 - {"op":"velocidad","clip":N,"velocidad":V}  cámara lenta o rápida de un clip de VIDEO: 0.25 a 4 (1 normal; 0.5 la mitad de rápido, 2 el doble). El clip dura más o menos y lo que sigue se corre. En una foto no hace nada.

@@ -24,6 +24,53 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.48',
+    fecha: '2026-11-13',
+    resumen: 'El editor completa sus herramientas: multicámara, rampas de velocidad, seguimiento, capas de ajuste, subtítulos editables, limpieza automática y mucho más.',
+    novedades: [
+      {
+        icono: 'scissors',
+        titulo: 'Limpieza automática',
+        texto: 'En la pestaña IA: quita los silencios, las muletillas («eh», «mmm») y las palabras repetidas de una toma hablada con un clic. Te dice cuánto va a quitar antes, y se deshace todo junto.'
+      },
+      {
+        icono: 'type',
+        titulo: 'Subtítulos editables y plantillas',
+        texto: 'En la pestaña Texto: los subtítulos de la voz como textos que corriges uno por uno, con estilos (Redes, Clásico, Limpio, Titular), y plantillas listas: rótulo inferior, título, cita, llamado a la acción y dato.'
+      },
+      {
+        icono: 'film',
+        titulo: 'Multicámara',
+        texto: 'Varias tomas de la misma escena se sincronizan por el sonido; las ves a la vez y cortas entre ellas con un clic o con 1, 2, 3… También puedes dejar el sonido de una sola toma.'
+      },
+      {
+        icono: 'velocidad',
+        titulo: 'Velocidad, estabilizar y congelar',
+        texto: 'Rampas de velocidad con ◆, Estabilizar un clip tembloroso, Congelar el cuadro del cabezal y Anidar varios clips en uno.'
+      },
+      {
+        icono: 'ojo',
+        titulo: 'Tapar zonas que siguen a alguien',
+        texto: 'Difumina o tapa en negro una cara o una placa; la mueves en el monitor y con «Seguir lo que tapa» acompaña a lo que se mueve.'
+      },
+      {
+        icono: 'palette',
+        titulo: 'Capas de ajuste y más claves',
+        texto: 'Una pista «Ajuste» que cambia el color o desenfoca todo lo de abajo en un tramo. Y fotogramas clave para Transformar, el color nuevo y el volumen.'
+      },
+      {
+        icono: 'volumen',
+        titulo: 'Sonido',
+        texto: 'Separar el audio de un clip (cortes en J y L), recortar sonidos sueltos, hasta 3 pistas de sonidos, onda en los clips, Mejorar voz y Volumen para redes al exportar.'
+      },
+      {
+        icono: 'layers',
+        titulo: 'Monitor de origen, historial y más',
+        texto: 'Abre un video con «Ver», marca su tramo e Insertar (,) o Sobrescribir (.). Historial para volver a cualquier paso, exportar entre entrada y salida, un cuadro como imagen o solo el sonido.'
+      }
+    ]
+  },
+  {
     version: '0.1.47',
     fecha: '2026-11-13',
     resumen: 'El editor da un salto hacia Premiere: transporte con código de tiempo, herramientas de edición, color tipo Lumetri, transformar y un mezclador de audio.',

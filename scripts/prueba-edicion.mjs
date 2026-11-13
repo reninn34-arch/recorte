@@ -11,9 +11,27 @@ import {
   cambiarPista,
   timelineActiva,
   tramos,
-  VOLUMEN_SONIDO
+  VOLUMEN_SONIDO,
+  soloTramo,
+  subtitulosDesdeVoz,
+  quitarSubtitulos,
+  ESTILOS_SUBTITULO,
+  sobrescribirClip,
+  separarAudio,
+  sonidoUnicoMulticam,
+  anidarClips,
+  desanidarClip,
+  clipsSeguidos,
+  largoClip,
+  fuenteEnClip,
+  clipEnFuente,
+  ponerClaveRampa,
+  quitarClaveRampa,
+  dividir,
+  cambiarSonido
 } from '../src/shared/timeline.ts'
 import { aplicarOperaciones, validarOperaciones } from '../src/shared/chat.ts'
+import { aplicarLimpieza, buscarLimpieza, MULETILLAS } from '../src/shared/limpieza.ts'
 
 /**
  * Las herramientas de edición del editor (sin la app): marcas en la regla y «Extraer» entre la entrada y la salida.
@@ -116,6 +134,80 @@ try {
   ok(!cambiarPista(mez, 'voz', { volumen: 1 }).pistas.voz, 'Un fader en 0 dB no se guarda.')
   ok(!normalizarTimeline({ ...mez, pistas: { texto: { volumen: 0.3 } } }, 20).pistas, 'Una pista sin audio no tiene fader.')
   console.log('mezclador: el fader de cada pista llega a voz, video y sonidos, hasta +6 dB ✓')
+  // Solo un tramo (exportar entre la entrada y la salida).
+  const tramo = soloTramo(tl, 2, 6)
+  cerca(duracionTimeline(tramo), 4, 'El tramo debía durar 4 s')
+  ok(!tramo.textos.some((t) => t.id === 't-antes') && tramo.textos.some((t) => t.id === 't-cruza'), `El tramo debía quitar el texto de antes y dejar el que cruza: ${JSON.stringify(tramo.textos.map((t) => t.id))}`)
+  cerca(tramo.clips[0].entrada, 2, 'El tramo debía empezar en el segundo 2 del material')
+  // Pistas de sonidos: hasta 3, la 1 no se guarda.
+  let son = cambiarSonido(base, 's-cruza', { pista: 2 })
+  ok(son.sonidos.find((x) => x.id === 's-cruza').pista === 2, 'El sonido no cambió de pista.')
+  ok(cambiarSonido(son, 's-cruza', { pista: 7 }).sonidos.find((x) => x.id === 's-cruza').pista === 3, 'No hay más de 3 pistas de sonidos.')
+  ok(cambiarSonido(son, 's-cruza', { pista: 1 }).sonidos.find((x) => x.id === 's-cruza').pista === undefined, 'La pista 1 no se guarda.')
+  console.log('solo un tramo para exportar, y los sonidos en hasta 3 pistas ✓')
+  // Rampa de velocidad: la duración, el cuadro de cada momento (y al revés) y dividir sin cambiar nada.
+  let ra = normalizarTimeline({ version: 1, clips: [{ id: 'r', fuente: 'principal', entrada: 2, salida: 8 }], textos: [] }, 20)
+  ra = ponerClaveRampa(ponerClaveRampa(ra, 'r', 2, 1), 'r', 8, 0.5)
+  const cr = ra.clips[0]
+  ok(cr.rampa.length === 2 && largoClip(cr) > 6 && largoClip(cr) < 12, `La rampa debía alargar el clip: ${largoClip(cr)}`)
+  cerca(duracionTimeline(ra), largoClip(cr), 'La timeline debía durar lo del clip con rampa')
+  for (const dt of [0, 1.3, 4.2, largoClip(cr)]) cerca(clipEnFuente(cr, fuenteEnClip(cr, dt)), dt, `Ida y vuelta en ${dt}`)
+  const partida = dividir(ra, 3)
+  cerca(duracionTimeline(partida), duracionTimeline(ra), 'Dividir un clip con rampa no debía cambiar la duración')
+  ok(!quitarClaveRampa(ra, 'r').clips[0].rampa && duracionTimeline(quitarClaveRampa(ra, 'r')) === 6, 'Quitar la rampa debía devolver la velocidad fija')
+  console.log(`rampa de velocidad: 6 s de fuente duran ${largoClip(cr).toFixed(2)} s, ida y vuelta exacta y se divide sin cambiar ✓`)
+  // Anidar: dos clips seguidos pasan a ser uno (con los de dentro guardados) y se desanidan igual que estaban.
+  ok(clipsSeguidos(tres, ['a', 'c']) === null && clipsSeguidos(tres, ['b', 'a']).join() === '0,1', 'Solo se anidan clips seguidos.')
+  const an = anidarClips(tres, ['a', 'b'], 'm-anidado', 8)
+  ok(an.timeline.clips.length === 2 && an.timeline.clips[0].anidado.length === 2 && an.timeline.clips[0].fuente === 'm-anidado', `El anidado no quedó bien: ${JSON.stringify(an.timeline.clips)}`)
+  cerca(duracionTimeline(an.timeline), duracionTimeline(tres), 'Anidar no debía cambiar la duración')
+  const sinAnidar = desanidarClip(an.timeline, an.id)
+  ok(sinAnidar.clips.map((c) => `${c.entrada}-${c.salida}`).join() === tres.clips.map((c) => `${c.entrada}-${c.salida}`).join(), 'Desanidar debía devolver los clips de dentro')
+  ok(normalizarTimeline(an.timeline, 20, { 'm-anidado': 8 }).clips[0].anidado.length === 2, 'Los clips de dentro sobreviven a guardar y abrir.')
+  console.log('anidar: dos clips seguidos en uno, misma duración, y se desanidan como estaban ✓')
+  // Sobrescribir: un tramo de 3 s entra en el segundo 2 tapando lo que hay, sin cambiar la duración.
+  const so = sobrescribirClip(tres, { fuente: 'mx', entrada: 0, salida: 3 }, 2)
+  cerca(duracionTimeline(so.timeline), duracionTimeline(tres), 'Sobrescribir no debía cambiar la duración')
+  const ts = tramos(so.timeline)
+  ok(ts.some((x) => x.clip.id === so.id && Math.abs(x.inicio - 2) < 1e-6 && Math.abs(x.fin - 5) < 1e-6), `El clip nuevo debía ir de 2 a 5: ${JSON.stringify(ts.map((x) => [x.clip.fuente, x.inicio, x.fin]))}`)
+  ok(ts[0].clip.salida === 2 && ts[2].clip.entrada === 11, `Lo de antes y después debía quedar recortado: ${JSON.stringify(so.timeline.clips)}`)
+  const alFinal = sobrescribirClip(tres, { fuente: 'mx', entrada: 0, salida: 4 }, 8)
+  cerca(duracionTimeline(alFinal.timeline), 12, 'Sobrescribir pasado el final debía alargar la timeline')
+  // Separar el audio: el clip queda mudo y su sonido queda suelto en el mismo sitio.
+  const sep = separarAudio(tres, 'b', 'media/audio-b.wav', 'Sonido', 4)
+  const sb = sep.sonidos.find((x) => x.archivo === 'media/audio-b.wav')
+  ok(sep.clips[1].mudo === true && sb && sb.inicio === 4 && sb.duracion === 4 && sb.largo === 4, `Separar el audio no quedó bien: ${JSON.stringify(sb)} ${sep.clips[1].mudo}`)
+  // Multicámara con un solo sonido: las tomas mudas y un sonido de principio a fin.
+  const mc = { ...tres, multicam: { angulos: [{ fuente: 'principal', desfase: 0 }, { fuente: 'mb', desfase: 1 }] } }
+  const uno = sonidoUnicoMulticam(mc, 'media/toma1.wav', 'Toma 1', 10)
+  ok(uno.clips.every((c) => c.mudo) && uno.sonidos.some((x) => x.archivo === 'media/toma1.wav' && x.inicio === 0 && x.duracion === 10), 'La multicámara no quedó con un solo sonido.')
+  console.log('sobrescribir, separar el audio y la multicámara con un solo sonido ✓')
+  // Subtítulos editables desde la voz: frases cortas, en su segundo, sin pisarse, con el estilo elegido.
+  const palabrasDe = (frase, desde, paso) => frase.split(' ').map((text, k) => ({ text, start: desde + k * paso, end: desde + k * paso + paso * 0.9 }))
+  const transcript = [
+    { id: 's1', start: 0.5, end: 4, text: '', words: palabrasDe('Hola a todos hoy les cuento algo muy importante.', 0.5, 0.4) },
+    { id: 's2', start: 5, end: 7, text: '', words: palabrasDe('Empecemos ya', 5, 0.5) }
+  ]
+  const conSubs = subtitulosDesdeVoz(normalizarTimeline({ version: 1, clips: [{ id: 'c', fuente: 'principal', entrada: 0, salida: 10 }], textos: [{ id: 'mio', inicio: 8, duracion: 1, texto: 'mío', posicion: 'arriba' }] }, 20), transcript, ESTILOS_SUBTITULO.find((x) => x.id === 'redes').estilo)
+  const subs = conSubs.textos.filter((x) => x.subtitulo)
+  ok(subs.length === 3 && subs[0].texto === 'Hola a todos hoy les cuento' && subs[1].texto === 'algo muy importante.' && subs[2].texto === 'Empecemos ya', `Los subtítulos no se partieron bien: ${JSON.stringify(subs.map((x) => x.texto))}`)
+  cerca(subs[0].inicio, 0.5, 'El primer subtítulo debía empezar con la primera palabra')
+  ok(subs.every((x, k) => k === 0 || x.inicio >= subs[k - 1].inicio + subs[k - 1].duracion - 1e-6), 'Los subtítulos no debían pisarse.')
+  ok(subs.every((x) => x.fuente === 'gruesa' && x.animacion === 'palabras'), 'Los subtítulos debían tener el estilo elegido.')
+  ok(conSubs.textos.some((x) => x.id === 'mio') && normalizarTimeline(conSubs, 20).textos.filter((x) => x.subtitulo).length === 3, 'Los otros textos se quedan y los subtítulos sobreviven a guardar.')
+  ok(quitarSubtitulos(conSubs).textos.length === 1, 'Quitar los subtítulos debía dejar solo el texto propio.')
+  console.log('subtítulos editables desde la voz: frases cortas, en su segundo, sin pisarse y con su estilo ✓')
+  // Limpieza automática: un silencio largo, un «eh» y un «que que».
+  const w = (text, start, end) => ({ text, start, end })
+  const tr2 = [{ id: 's', start: 0, end: 10, text: '', words: [w('Hola', 0, 0.4), w('eh,', 0.5, 0.8), w('les', 0.9, 1.1), w('cuento', 1.2, 1.6), w('que', 1.7, 1.9), w('que', 2.0, 2.2), w('hoy', 2.3, 2.5), w('vamos', 4.5, 4.9), w('bien.', 5.0, 5.4)] }]
+  const limpio0 = normalizarTimeline({ version: 1, clips: [{ id: 'c', fuente: 'principal', entrada: 0, salida: 6 }], textos: [{ id: 'tx', inicio: 4.6, duracion: 0.8, texto: 'vamos', posicion: 'abajo' }] }, 20)
+  const halla = buscarLimpieza(limpio0, tr2, { silencios: true, minimo: 0.7, muletillas: true, lista: MULETILLAS, repeticiones: true })
+  ok(halla.silencios >= 1 && halla.muletillas === 1 && halla.repeticiones === 1, `La limpieza no encontró lo esperado: ${JSON.stringify(halla)}`)
+  const limpio = aplicarLimpieza(limpio0, halla.tramos)
+  cerca(duracionTimeline(limpio), 6 - halla.segundos, 'La limpieza debía acortar justo lo encontrado')
+  ok(limpio.textos[0] && limpio.textos[0].inicio < 4.6 - 1.5, `El texto de «vamos» debía correrse con el video: ${JSON.stringify(limpio.textos)}`)
+  ok(buscarLimpieza(limpio0, tr2, { silencios: false, minimo: 0.7, muletillas: false, lista: [], repeticiones: false }).tramos.length === 0, 'Sin nada marcado no se quita nada.')
+  console.log(`limpieza automática: ${halla.silencios} silencio, 1 muletilla y 1 repetición; ${halla.segundos.toFixed(2)} s menos y el texto se corre con el video ✓`)
   console.log('prueba edición: ok')
 } catch (e) {
   console.error(`prueba edición: error · ${e instanceof Error ? e.message : String(e)}`)

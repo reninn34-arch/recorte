@@ -33,6 +33,11 @@ import {
   filtroColorCss,
   curvasColor,
   hayMovimiento,
+  ajustesDeCapa,
+  zonaEnPixeles,
+  zonaEn,
+  cambiarZonas,
+  type ZonaTL,
   DESENFOQUE_CLIP,
   ajustesEn,
   ponerClaveCapa,
@@ -84,10 +89,10 @@ export function Monitor({
   const clipActual = ubicado?.clip
   // Un clip mudo solo aporta imagen: su sonido va en las pistas de voz y música.
   useEffect(() => {
-    if (reproductor.videoRef.current) reproductor.videoRef.current.muted = Boolean(clipActual?.mudo)
-  }, [clipActual?.id, clipActual?.mudo, reproductor.videoRef])
+    if (reproductor.videoRef.current) reproductor.videoRef.current.muted = Boolean(clipActual?.mudo || clipActual?.rampa?.length)
+  }, [clipActual?.id, clipActual?.mudo, clipActual?.rampa, reproductor.videoRef])
   // El volumen del clip con sus fundidos (el monitor llega hasta 1; por encima solo se oye en el MP4).
-  const volumenClip = ubicado && clipActual ? Math.min(1, volumenClipEn(clipActual, reproductor.tiempo - ubicado.inicio, ubicado.fin - ubicado.inicio)) : 1
+  const volumenClip = ubicado && clipActual ? Math.min(1, volumenClipEn(clipActual, reproductor.tiempo - ubicado.inicio, ubicado.fin - ubicado.inicio, ubicado.tFuente)) : 1
   useEffect(() => {
     if (reproductor.videoRef.current) reproductor.videoRef.current.volume = volumenClip
   }, [volumenClip, reproductor.videoRef])
@@ -135,6 +140,17 @@ export function Monitor({
   const proporcion = (proyecto.source.width || 16) / (proyecto.source.height || 9)
   const cw = tam ? Math.min(tam.w, tam.h * proporcion) : 0
   const ch = cw / proporcion
+  // Las capas de ajuste que tocan ahora: el mismo filtro para el video y para las capas (los textos quedan limpios).
+  const ajustesAhora = (vista.ajustesCapa ?? []).filter((x) => reproductor.tiempo >= x.inicio && reproductor.tiempo < x.inicio + x.duracion)
+  const curvasAjuste = ajustesAhora.map((x) => curvasColor(ajustesDeCapa(x)))
+  const filtroAjuste =
+    ajustesAhora
+      .map((x, k) => {
+        const aj = ajustesDeCapa(x)
+        return `${curvasAjuste[k] ? `url(#${idCurvas}-aj${k}) ` : ''}${filtroColorCss(aj)}${aj.desenfoque > 0.005 ? ` blur(${(aj.desenfoque * DESENFOQUE_CLIP * cw).toFixed(2)}px)` : ''}`.trim()
+      })
+      .filter(Boolean)
+      .join(' ') || undefined
   // Profundidad de campo: el fondo (a profundidad 0) se desenfoca si el foco está más cerca.
   const fondoBorroso = desenfoqueDeCampo(a, 0)
   if (a.desenfoque > 0.005) estiloImagen.filter = `${estiloImagen.filter ?? ''} blur(${(a.desenfoque * DESENFOQUE_CLIP * cw).toFixed(2)}px)`.trim()
@@ -143,6 +159,51 @@ export function Monitor({
   const letra = Math.min(cw, ch) * (ch > cw ? 0.06 : 0.065) * 0.93
 
   const [borrador, setBorrador] = useState<Borrador>(null)
+  // Una zona tapada que se está moviendo o agrandando con el ratón (se aplica al soltar).
+  const [zonaMovida, setZonaMovida] = useState<{ k: number; z: ZonaTL } | null>(null)
+  /** Mueve (o, desde su esquina, agranda) una zona tapada del clip elegido. */
+  function arrastrarZona(e: React.PointerEvent, k: number, z: ZonaTL, modo: 'mover' | 'tamano') {
+    if (e.button !== 0 || !cw || !clipActual) return
+    e.preventDefault()
+    e.stopPropagation()
+    const x0 = e.clientX
+    const y0 = e.clientY
+    const clipId = clipActual.id
+    let ultima: ZonaTL = z
+    const calcular = (ev: PointerEvent): ZonaTL => {
+      const dx = (ev.clientX - x0) / cw
+      const dy = (ev.clientY - y0) / ch
+      if (modo === 'tamano') {
+        // Desde la esquina: crece hacia ese lado y el centro acompaña.
+        const ancho = Math.max(0.02, Math.min(1, z.ancho + dx))
+        const alto = Math.max(0.02, Math.min(1, z.alto + dy))
+        return { ...z, ancho, alto, x: z.x + (ancho - z.ancho) / 2, y: z.y + (alto - z.alto) / 2 }
+      }
+      return { ...z, x: Math.max(0, Math.min(1, z.x + dx)), y: Math.max(0, Math.min(1, z.y + dy)) }
+    }
+    const mover = (ev: PointerEvent) => {
+      ultima = calcular(ev)
+      setZonaMovida({ k, z: ultima })
+    }
+    const soltar = (ev: PointerEvent) => {
+      window.removeEventListener('pointermove', mover)
+      window.removeEventListener('pointerup', soltar)
+      ultima = calcular(ev)
+      setZonaMovida(null)
+      const clip = timeline.clips.find((c) => c.id === clipId)
+      if (!clip?.zonas) return
+      // Una zona que sigue algo: se corre todo su recorrido lo que se movió (y toma el tamaño nuevo).
+      const dx = ultima.x - z.x
+      const dy = ultima.y - z.y
+      const nueva = (x: ZonaTL): ZonaTL =>
+        x.recorrido
+          ? { ...x, ancho: ultima.ancho, alto: ultima.alto, recorrido: x.recorrido.map((p) => ({ ...p, x: Math.max(0, Math.min(1, p.x + dx)), y: Math.max(0, Math.min(1, p.y + dy)) })) }
+          : ultima
+      historial.aplicar(cambiarZonas(timeline, clipId, clip.zonas.map((x, j) => (j === k ? nueva(x) : x))))
+    }
+    window.addEventListener('pointermove', mover)
+    window.addEventListener('pointerup', soltar)
+  }
   const [guia, setGuia] = useState<{ v: boolean; h: boolean }>({ v: false, h: false })
   const capas = capasEn(vista, reproductor.tiempo)
   const [soltando, setSoltando] = useState(false)
@@ -257,7 +318,7 @@ export function Monitor({
         <>
           {/* El video va en un lienzo del tamaño exacto del cuadro y que recorta lo que sobra: así el zoom y las
               transiciones (un barrido, el círculo) se mueven dentro del cuadro y no por el negro de los lados. */}
-          <div className="monitor-lienzo" style={cw > 0 ? { width: cw, height: ch } : undefined}>
+          <div className="monitor-lienzo" style={cw > 0 ? { width: cw, height: ch, filter: filtroAjuste } : undefined}>
             {/* Durante una transición, la foto del clip anterior queda debajo (sale empujada, se acerca o se
                 funde), como en el MP4: sin ella, cada corte con transición parpadeaba a negro. */}
             {previoUrl && tr && (
@@ -281,7 +342,53 @@ export function Monitor({
                 {...reproductor.eventos}
               />
               {enImagen && <img className="monitor-imagen" src={reproductor.imagen!} alt="" style={estiloImagen} />}
+              {/* Las zonas tapadas del clip: lo mismo que el MP4 (un recuadro difuminado o en negro). */}
+              {!vacia &&
+                clipActual?.zonas?.map((z0, k) => {
+                  // Si sigue algo, su sitio es el de este momento de su recorrido.
+                  const z = zonaMovida?.k === k ? zonaMovida.z : ubicado ? zonaEn(z0, ubicado.tFuente) : z0
+                  // Con el clip elegido, la zona se mueve arrastrándola y se agranda desde su esquina.
+                  const editable = elegido?.tipo === 'clip' && elegido.id === clipActual.id
+                  const r = zonaEnPixeles(z, proyecto.source.width || 1920, proyecto.source.height || 1080)
+                  const anchoFuente = proyecto.source.width || 1920
+                  const alto = proyecto.source.height || 1080
+                  const radio = Math.max(1, Math.floor((z.fuerza * Math.min(r.w, r.h)) / 5))
+                  return (
+                    <span
+                      key={k}
+                      className={`monitor-zona ${z.modo === 'negro' ? 'is-negro' : ''} ${editable ? 'is-editable' : ''}`}
+                      title={editable ? `Zona ${k + 1}: arrástrala para moverla; desde la esquina, cambia su tamaño` : undefined}
+                      onPointerDown={editable ? (e) => arrastrarZona(e, k, z, 'mover') : undefined}
+                      onClick={editable ? (e) => e.stopPropagation() : undefined}
+                      style={{
+                        left: `${(r.x / anchoFuente) * 100}%`,
+                        top: `${(r.y / alto) * 100}%`,
+                        width: `${(r.w / anchoFuente) * 100}%`,
+                        height: `${(r.h / alto) * 100}%`,
+                        ...(z.modo === 'desenfoque' ? { backdropFilter: `blur(${((radio * 0.9 * cw) / anchoFuente).toFixed(1)}px)` } : {})
+                      }}
+                    >
+                      {editable && <span className="monitor-zona-esquina" onPointerDown={(e) => arrastrarZona(e, k, z, 'tamano')} onClick={(e) => e.stopPropagation()} />}
+                    </span>
+                  )
+                })}
             </div>
+            {curvasAjuste.some(Boolean) && (
+              <svg className="monitor-curvas" width="0" height="0" aria-hidden="true" focusable="false">
+                {curvasAjuste.map(
+                  (c, k) =>
+                    c && (
+                      <filter key={k} id={`${idCurvas}-aj${k}`} colorInterpolationFilters="sRGB">
+                        <feComponentTransfer>
+                          <feFuncR type="table" tableValues={c.r.join(' ')} />
+                          <feFuncG type="table" tableValues={c.g.join(' ')} />
+                          <feFuncB type="table" tableValues={c.b.join(' ')} />
+                        </feComponentTransfer>
+                      </filter>
+                    )
+                )}
+              </svg>
+            )}
             {curvas && (
               <svg className="monitor-curvas" width="0" height="0" aria-hidden="true" focusable="false">
                 <filter id={idCurvas} colorInterpolationFilters="sRGB">
@@ -325,7 +432,7 @@ export function Monitor({
             const ancho = b && !b.fin ? (b.ancho ?? e.ancho) : e.ancho
             const fin = editando && c.fin && !c.claves ? { ...c.fin, ...(b?.fin ? { x: b.x, y: b.y, ancho: b.ancho ?? c.fin.ancho } : {}) } : null
             return (
-              <div key={c.id} className="monitor-capa-grupo">
+              <div key={c.id} className="monitor-capa-grupo" style={filtroAjuste ? { filter: filtroAjuste } : undefined}>
                 {fin && (
                   <>
                     <svg className="monitor-recorrido" viewBox="0 0 100 100" preserveAspectRatio="none">
@@ -439,7 +546,7 @@ function CapaVideo({ capa, url, tiempo, reproduciendo, largo }: { capa: CapaTL; 
 function SonidoVista({ sonido, url, tiempo, reproduciendo }: { sonido: SonidoTL; url: string; tiempo: number; reproduciendo: boolean }) {
   const ref = useRef<HTMLAudioElement>(null)
   const dentro = tiempo >= sonido.inicio && tiempo < sonido.inicio + sonido.duracion
-  useSincronizar(ref, dentro ? tiempo - sonido.inicio : null, reproduciendo, sonido.volumen ?? VOLUMEN_SONIDO)
+  useSincronizar(ref, dentro ? tiempo - sonido.inicio + (sonido.desde ?? 0) : null, reproduciendo, sonido.volumen ?? VOLUMEN_SONIDO)
   return <audio ref={ref} data-pista-audio="sonidos" crossOrigin="anonymous" src={url} preload="auto" />
 }
 

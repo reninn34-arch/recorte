@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from 'electron'
-import { ANIMAR_CAPA, duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, SONIDOS_INCLUIDOS, timelineInicial, timelineVacia, type Timeline } from '../shared/timeline'
+import { ANIMAR_CAPA, duracionTimeline, duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, SONIDOS_INCLUIDOS, timelineInicial, timelineVacia, type Timeline } from '../shared/timeline'
 import { randomUUID } from 'node:crypto'
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, join, resolve, sep } from 'node:path'
@@ -17,7 +17,7 @@ import { Ajustes } from './ajustes'
 import { conectarAgente, desconectarAgente, estadoAgentes, prepararAgentes, versionesAgentes, agenteDeOrden, marcarSesionCaida, VARIABLE_LLAVE } from './agentes'
 import { estadoSistema, instalarHerramienta } from './sistema'
 import { activarHerramientas } from './herramientas'
-import { carpetaPorDefecto, copiarAVideos, carpetaDelProyecto } from './carpetas'
+import { carpetaPorDefecto, copiarAVideos, carpetaDelProyecto, nombreArchivo, rutaLibre } from './carpetas'
 import { abrirFlow, agregarCuentaFlow, ajustesFlow, estadoFlow, leerSaldosFlow, pedirFlow, quitarCuentaFlow } from './flow'
 import { MODELO_CHATGPT, MODELOS_IMAGEN, modelosVideoVigentes, type PedidoFlow } from '../shared/flow'
 import { estadoChatGPT, generarImagenChatGPT } from './imagenchatgpt'
@@ -47,6 +47,9 @@ import { prepararArchivos } from './archivos'
 import { clipsDelPlan, esAprobacion, MAX_CLIPS_GUION, pasoAnunciado } from '../shared/modoagente'
 import { estiloPorId } from '../shared/estilos'
 import { guardarModelos } from './modelos3d'
+import { picosDeArchivo } from './onda'
+import { estabilizarTramo } from './estabilizar'
+import { desfasePorSonido } from './multicam'
 import { atenderVoz } from './vozagente'
 import { proyectoDesdeReceta } from './recetaeditor'
 import { medirReferencia } from './estilo/referencia'
@@ -1544,16 +1547,22 @@ app.whenReady().then(() => {
     const p = proyectos.abrir(id)
     if (!p) throw new Error('El proyecto ya no existe.')
     const m = p.medios?.find((x) => x.id === medio)
-    if (!m || m.tipo !== 'imagen') throw new Error('Solo se le puede quitar el fondo a una imagen de la biblioteca.')
+    if (!m) throw new Error('Ese medio ya no está en la biblioteca.')
     const py = await buscarPython()
     const kit = rutaScriptPython(join('kit', 'kit.py'))
     if (!py || !existsSync(kit)) throw new Error('Hace falta Python para quitar fondos (Ajustes › Sistema).')
     const carpeta = join(proyectos.carpeta(id), 'recortes')
     mkdirSync(carpeta, { recursive: true })
-    const salida = join(carpeta, `${basename(m.nombre, extname(m.nombre)).slice(0, 40)}-sin-fondo-${randomUUID().slice(0, 6)}.png`)
+    const esVideo = m.tipo === 'video'
+    // Un video sobre verde (llave de color): sale un WebM con transparencia; una imagen, un PNG.
+    const salida = join(carpeta, `${basename(m.nombre, extname(m.nombre)).slice(0, 40)}-sin-fondo-${randomUUID().slice(0, 6)}.${esVideo ? 'webm' : 'png'}`)
     const cita = (x: string) => (/[\s"]/.test(x) ? `"${x}"` : x)
     // La primera vez con una foto de fondo variado se baja el modelo (178 MB): hasta 15 minutos.
-    const r = await ejecutar([[py.cmd, ...py.args].map(cita).join(' '), cita(kit), 'recortar', cita(m.ruta), '--salida', cita(salida)], carpeta, 900_000)
+    const r = await ejecutar(
+      [[py.cmd, ...py.args].map(cita).join(' '), cita(kit), esVideo ? 'recortar-video' : 'recortar', cita(m.ruta), '--salida', cita(salida)],
+      carpeta,
+      900_000
+    )
     if (r.codigo !== 0 || !existsSync(salida)) {
       const motivo = r.salida.trim().split('\n').filter(Boolean).pop() ?? ''
       throw new Error(motivo.length < 300 && motivo ? motivo : 'No pude quitarle el fondo.')
@@ -1563,6 +1572,149 @@ app.whenReady().then(() => {
     if (!nuevo) throw new Error(`No pude agregar el recorte: ${agregado.fallos.join(', ')}`)
     return { project: agregado.project, medio: nuevo }
   }
+  /**
+   * Congelar cuadro (como «Insertar segmento congelado» de Premiere): el cuadro de un video en el segundo `segundo` de
+   * su fuente sale como imagen a la biblioteca, para ponerlo como un clip quieto.
+   */
+  async function congelarCuadro(id: string, fuente: string, segundo: number): Promise<{ project: Project; medio: string }> {
+    const p = proyectos.abrir(id)
+    if (!p) throw new Error('El proyecto ya no existe.')
+    const ruta = fuente === 'principal' ? p.source.path : p.medios?.find((m) => m.id === fuente && m.tipo === 'video')?.ruta
+    if (!ruta) throw new Error('Solo se congela un cuadro de un video.')
+    const carpeta = join(proyectos.carpeta(id), 'congelados')
+    mkdirSync(carpeta, { recursive: true })
+    const salida = join(carpeta, `cuadro-${Math.round(Math.max(0, segundo) * 1000)}-${randomUUID().slice(0, 6)}.png`)
+    const r = await ejecutar(
+      [`"${resolverBinario('ffmpeg') ?? 'ffmpeg'}"`, '-y', '-v', 'error', '-ss', Math.max(0, segundo).toFixed(3), '-i', `"${ruta}"`, '-frames:v', '1', `"${salida}"`],
+      carpeta,
+      60_000
+    )
+    if (r.codigo !== 0 || !existsSync(salida)) throw new Error('No pude sacar ese cuadro del video.')
+    const agregado = await agregarRutas(id, [salida])
+    const nuevo = agregado.agregados[0]
+    if (!nuevo) throw new Error(`No pude agregar el cuadro: ${agregado.fallos.join(', ')}`)
+    return { project: agregado.project, medio: nuevo }
+  }
+  // Estabilizar: el tramo que usa el clip sale estabilizado a la biblioteca (el original no se toca).
+  ipcMain.handle('proyecto:estabilizar', async (_evento, id: unknown, fuente: unknown, desde: unknown, hasta: unknown) => {
+    if (typeof id !== 'string' || typeof fuente !== 'string' || typeof desde !== 'number' || typeof hasta !== 'number' || !(hasta > desde)) throw new Error('Datos inválidos.')
+    const p = proyectos.abrir(id)
+    if (!p) throw new Error('El proyecto ya no existe.')
+    const ruta = fuente === 'principal' ? p.source.path : p.medios?.find((m) => m.id === fuente && m.tipo === 'video')?.ruta
+    if (!ruta) throw new Error('Solo se estabiliza un video.')
+    // Un poco de margen a cada lado: así el clip se puede alargar un poco después sin volver a estabilizar.
+    const a = Math.max(0, desde - 1)
+    const b = hasta + 1
+    const salida = await estabilizarTramo(ruta, a, b, join(proyectos.carpeta(id), 'estabilizados'), (f) =>
+      enviarProgreso({ id, fase: 'render', pct: f, texto: `Estabilizando ${Math.round(f * 100)} %` })
+    )
+    const agregado = await agregarRutas(id, [salida])
+    const nuevo = agregado.agregados[0]
+    if (!nuevo) throw new Error(`No pude agregar la toma estabilizada: ${agregado.fallos.join(', ')}`)
+    return { project: agregado.project, medio: nuevo, desde: a }
+  })
+  // Seguir una zona tapada (una cara que se mueve): su centro en cada momento del tramo, con OpenCV.
+  ipcMain.handle('proyecto:seguir-zona', async (_evento, id: unknown, fuente: unknown, pedido: unknown) => {
+    const q = (pedido ?? {}) as { desde?: unknown; hasta?: unknown; en?: unknown; x?: unknown; y?: unknown; ancho?: unknown; alto?: unknown }
+    const nums = [q.desde, q.hasta, q.en, q.x, q.y, q.ancho, q.alto]
+    if (typeof id !== 'string' || typeof fuente !== 'string' || !nums.every((v) => typeof v === 'number' && Number.isFinite(v))) throw new Error('Datos inválidos.')
+    const p = proyectos.abrir(id)
+    if (!p) throw new Error('El proyecto ya no existe.')
+    const ruta = fuente === 'principal' ? p.source.path : p.medios?.find((m) => m.id === fuente && m.tipo === 'video')?.ruta
+    if (!ruta) throw new Error('Solo se sigue algo dentro de un video.')
+    const py = await buscarPython()
+    const script = rutaScriptPython('seguir.py')
+    if (!py || !existsSync(script)) throw new Error('Hace falta Python para seguir una zona (Ajustes › Sistema).')
+    const carpeta = join(proyectos.carpeta(id), 'seguimiento')
+    mkdirSync(carpeta, { recursive: true })
+    const salida = join(carpeta, `zona-${randomUUID().slice(0, 8)}.json`)
+    const cita = (x: string) => (/[\s"]/.test(x) ? `"${x}"` : x)
+    const arg = (n: string, v: unknown) => [`--${n}`, String(v)]
+    const r = await ejecutar(
+      [
+        [py.cmd, ...py.args].map(cita).join(' '),
+        cita(script),
+        cita(ruta),
+        cita(salida),
+        ...arg('desde', q.desde),
+        ...arg('hasta', q.hasta),
+        ...arg('en', q.en),
+        ...arg('x', q.x),
+        ...arg('y', q.y),
+        ...arg('ancho', q.ancho),
+        ...arg('alto', q.alto)
+      ],
+      carpeta,
+      600_000
+    )
+    if (r.codigo !== 0 || !existsSync(salida)) {
+      const motivo = r.salida.trim().split('\n').filter(Boolean).pop() ?? ''
+      throw new Error(motivo && motivo.length < 300 ? motivo : 'No pude seguir esa zona.')
+    }
+    const datos = JSON.parse(readFileSync(salida, 'utf8')) as { recorrido: { f: number; x: number; y: number }[]; perdido: number }
+    rmSync(salida, { force: true })
+    return datos
+  })
+  // Anidar: los clips elegidos se renderizan en un solo video (con su color, sus efectos y su sonido) que entra a la
+  // biblioteca; el editor pone ese clip en su lugar y guarda los de dentro para desanidar.
+  ipcMain.handle('proyecto:anidar', async (_evento, id: unknown, clips: unknown) => {
+    if (typeof id !== 'string' || !Array.isArray(clips) || clips.length < 2) throw new Error('Elige al menos dos clips seguidos.')
+    const p = proyectos.abrir(id)
+    if (!p) throw new Error('El proyecto ya no existe.')
+    const dentro = normalizarTimeline({ version: 1, clips, textos: [] }, p.source.duration, duracionesDeMedios(p.medios))
+    if (dentro.clips.length < 2) throw new Error('Esos clips ya no están en el proyecto.')
+    const carpeta = join(proyectos.carpeta(id), 'anidados', randomUUID().slice(0, 8))
+    const r = await exportarTimeline(p, dentro, proyectos.carpeta(id), { formato: 'original', subtitulos: false, calidad: 'alta' }, (pct) =>
+      enviarProgreso({ id, fase: 'render', pct, texto: `Anidando ${Math.round(pct * 100)} %` })
+    , carpeta)
+    if (!r.ok || !r.output) throw new Error(r.error ?? 'No pude anidar esos clips.')
+    const final = join(carpeta, `anidado-${dentro.clips.length}-clips.mp4`)
+    renameSync(r.output, final)
+    const agregado = await agregarRutas(id, [final])
+    const nuevo = agregado.agregados[0]
+    if (!nuevo) throw new Error(`No pude agregar el anidado: ${agregado.fallos.join(', ')}`)
+    const m = agregado.project.medios?.find((x) => x.id === nuevo)
+    return { project: agregado.project, medio: nuevo, duracion: m?.duracion ?? duracionTimeline(dentro) }
+  })
+  // Multicámara: el desfase de cada toma respecto de la primera, comparando la forma de su sonido.
+  ipcMain.handle('proyecto:sincronizar', async (_evento, id: unknown, fuentes: unknown) => {
+    if (typeof id !== 'string' || !Array.isArray(fuentes) || fuentes.length < 2) throw new Error('Elige al menos dos tomas.')
+    const p = proyectos.abrir(id)
+    if (!p) throw new Error('El proyecto ya no existe.')
+    const rutas = fuentes.map((f) => (f === 'principal' ? p.source.path : p.medios?.find((m) => m.id === f && m.tipo === 'video')?.ruta))
+    if (rutas.some((r) => !r)) throw new Error('Una de las tomas ya no está en la biblioteca.')
+    const picos = await Promise.all(rutas.map((r) => picosDeArchivo(r!, proyectos.carpeta(id))))
+    if (!picos[0]?.length) throw new Error('La primera toma no tiene sonido: no hay con qué sincronizar.')
+    return fuentes.map((f, i) => {
+      if (i === 0) return { fuente: String(f), desfase: 0, confianza: 1 }
+      if (!picos[i]?.length) return { fuente: String(f), desfase: 0, confianza: 0 }
+      return { fuente: String(f), ...desfasePorSonido(picos[0]!, picos[i]!) }
+    })
+  })
+  // Separar el audio: el sonido de un tramo de un video sale a `media/` como WAV, para ponerlo en una pista de sonidos.
+  ipcMain.handle('proyecto:extraer-audio', async (_evento, id: unknown, fuente: unknown, desde: unknown, hasta: unknown) => {
+    if (typeof id !== 'string' || typeof fuente !== 'string' || typeof desde !== 'number' || typeof hasta !== 'number' || !(hasta > desde)) throw new Error('Datos inválidos.')
+    const p = proyectos.abrir(id)
+    if (!p) throw new Error('El proyecto ya no existe.')
+    const m = fuente === 'principal' ? null : p.medios?.find((x) => x.id === fuente && x.tipo === 'video')
+    const ruta = fuente === 'principal' ? p.source.path : m?.ruta
+    if (!ruta) throw new Error('Solo se separa el sonido de un video.')
+    const media = join(proyectos.carpeta(id), 'media')
+    mkdirSync(media, { recursive: true })
+    const nombre = `audio-${randomUUID().slice(0, 8)}.wav`
+    const r = await ejecutar(
+      [`"${resolverBinario('ffmpeg') ?? 'ffmpeg'}"`, '-y', '-v', 'error', '-ss', Math.max(0, desde).toFixed(3), '-t', (hasta - desde).toFixed(3), '-i', `"${ruta}"`, '-vn', '-ac', '2', '-ar', '48000', `"${join(media, nombre)}"`],
+      media,
+      300_000
+    )
+    if (r.codigo !== 0 || !existsSync(join(media, nombre))) throw new Error('Ese video no tiene sonido que separar.')
+    const duracion = Math.round((await duracionMedio(join(media, nombre))) * 1000) / 1000
+    return { archivo: `media/${nombre}`, duracion: duracion || hasta - desde, nombre: `Sonido de ${fuente === 'principal' ? p.name : m!.nombre}`.slice(0, 60) }
+  })
+  ipcMain.handle('proyecto:congelar', (_evento, id: unknown, fuente: unknown, segundo: unknown) => {
+    if (typeof id !== 'string' || typeof fuente !== 'string' || typeof segundo !== 'number' || !Number.isFinite(segundo)) throw new Error('Datos inválidos.')
+    return congelarCuadro(id, fuente, segundo)
+  })
   /**
    * Anima una imagen recortada de la biblioteca (respira, se balancea, ondea, flota, humo) con el kit: un
    * WebM con transparencia en bucle que entra a la biblioteca. Como el «Puppet» de After Effects: sin créditos.
@@ -1605,6 +1757,14 @@ app.whenReady().then(() => {
   ipcMain.handle('proyecto:animar-imagen', (_evento, id: unknown, medio: unknown, tipo: unknown) => {
     if (typeof id !== 'string' || typeof medio !== 'string' || typeof tipo !== 'string') throw new Error('Datos inválidos.')
     return animarImagen(id, medio, tipo)
+  })
+  // La onda de un video o audio del proyecto (para la línea de tiempo): sus picos, calculados una vez y guardados.
+  ipcMain.handle('proyecto:onda', (_evento, id: unknown, fuente: unknown) => {
+    if (typeof id !== 'string' || typeof fuente !== 'string') return null
+    const proyecto = proyectos.get(id)
+    if (!proyecto) return null
+    const ruta = fuente === 'principal' ? proyecto.source.path : proyecto.medios?.find((m) => m.id === fuente && m.tipo === 'video')?.ruta
+    return ruta ? picosDeArchivo(ruta, proyectos.carpeta(id)) : null
   })
   ipcMain.handle('proyecto:quitar-fondo', (_evento, id: unknown, medio: unknown) => {
     if (typeof id !== 'string' || typeof medio !== 'string') throw new Error('Datos inválidos.')
@@ -2338,6 +2498,30 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('proyecto:exportar-timeline', (_evento, id: unknown, timeline: unknown, opciones: unknown) => exportarProyecto(id, timeline, opciones))
+  // Exportar el cuadro del cabezal como imagen (la cámara de Premiere): con todo lo de encima, a la medida del video.
+  ipcMain.handle('proyecto:exportar-cuadro', async (_evento, id: unknown, timeline: unknown, segundo: unknown) => {
+    if (typeof id !== 'string' || typeof segundo !== 'number' || !Number.isFinite(segundo)) return { ok: false, error: 'Datos inválidos.' }
+    const proyecto = proyectos.abrir(id)
+    if (!proyecto) return { ok: false, error: 'El proyecto ya no existe.' }
+    const valida = normalizarTimeline(timeline, proyecto.source.duration, duracionesDeMedios(proyecto.medios))
+    const tmp = join(proyectos.carpeta(id), 'cuadro-tmp')
+    rmSync(tmp, { recursive: true, force: true })
+    try {
+      const fps = proyecto.source.fps > 0 ? proyecto.source.fps : 30
+      const r = await exportarTimeline(proyecto, valida, proyectos.carpeta(id), { formato: 'original', subtitulos: false, desde: Math.max(0, segundo), hasta: segundo + 3 / fps, calidad: 'alta' }, () => {}, tmp)
+      if (!r.ok || !r.output) return { ok: false, error: r.error ?? 'No pude sacar el cuadro.' }
+      const destino = carpetaDelProyecto(await carpetaVideos(), proyecto.name)
+      mkdirSync(destino, { recursive: true })
+      const t = Math.max(0, segundo)
+      const nombre = `cuadro-${String(Math.floor(t / 60)).padStart(2, '0')}m${(t % 60).toFixed(2).padStart(5, '0').replace('.', 's')}.png`
+      const salida = rutaLibre(destino, nombreArchivo(nombre))
+      const e = await ejecutar([`"${resolverBinario('ffmpeg') ?? 'ffmpeg'}"`, '-y', '-v', 'error', '-i', `"${r.output}"`, '-frames:v', '1', `"${salida}"`], destino, 60_000)
+      if (e.codigo !== 0 || !existsSync(salida)) return { ok: false, error: 'No pude guardar la imagen.' }
+      return { ok: true, archivo: salida }
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
   async function exportarProyecto(id: unknown, timeline: unknown, opciones: unknown): Promise<RenderResultado> {
       if (typeof id !== 'string') return { ok: false, error: 'Proyecto inválido.' }
       if (enRender.has(id) || enLote.has(id)) {
@@ -2350,7 +2534,14 @@ app.whenReady().then(() => {
       const crudas = (opciones ?? {}) as Partial<OpcionesExport>
       const elegidas: OpcionesExport = {
         formato: crudas.formato === 'vertical' ? 'vertical' : 'original',
-        subtitulos: crudas.subtitulos === true
+        subtitulos: crudas.subtitulos === true,
+        ...(typeof crudas.desde === 'number' && typeof crudas.hasta === 'number' && Number.isFinite(crudas.desde) && Number.isFinite(crudas.hasta) && crudas.hasta > crudas.desde
+          ? { desde: Math.max(0, crudas.desde), hasta: crudas.hasta }
+          : {}),
+        ...(crudas.resolucion === '1080' || crudas.resolucion === '720' ? { resolucion: crudas.resolucion } : {}),
+        ...(crudas.calidad === 'alta' || crudas.calidad === 'ligera' ? { calidad: crudas.calidad } : {}),
+        ...(crudas.normalizar === true ? { normalizar: true } : {}),
+        ...(crudas.soloAudio === 'wav' || crudas.soloAudio === 'mp3' ? { soloAudio: crudas.soloAudio } : {})
       }
       // Se exporta la timeline que ve el usuario, validada contra el material.
       const valida = normalizarTimeline(timeline, proyecto.source.duration, duracionesDeMedios(proyecto.medios))
@@ -2372,7 +2563,8 @@ app.whenReady().then(() => {
         }
         const actual = proyectos.abrir(id)
         if (!actual) return { ...resultado, ok: false, error: 'El proyecto ya no existe.' }
-        if (resultado.ok && resultado.output) {
+        // Solo el sonido no es «el último video» (ese sigue siendo el MP4 anterior).
+        if (resultado.ok && resultado.output && !elegidas.soloAudio) {
           actual.timelineSalida = resultado.output
           proyectos.save(actual)
         }

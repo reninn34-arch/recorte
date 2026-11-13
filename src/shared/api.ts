@@ -8,6 +8,17 @@ import type { AjustesIA, Project, TranscriptSegment } from './types'
 export interface OpcionesExport {
   formato: 'original' | 'vertical'
   subtitulos: boolean
+  /** Solo un tramo de la timeline (la entrada y la salida del editor), en segundos. */
+  desde?: number
+  hasta?: number
+  /** El lado corto del video: el del material, 1080 o 720 (solo achica). */
+  resolucion?: 'original' | '1080' | '720'
+  /** Alta (archivo grande), normal o ligera (para mandar rápido). */
+  calidad?: 'alta' | 'normal' | 'ligera'
+  /** Deja el volumen a la medida de las redes (−14 LUFS). */
+  normalizar?: boolean
+  /** Solo el sonido de la mezcla final, en WAV (sin pérdida) o MP3 (liviano): sin video. */
+  soloAudio?: 'wav' | 'mp3'
 }
 
 export interface EstadoAgente {
@@ -246,6 +257,26 @@ export interface RecorteApi {
   quitarFondo: (id: string, medio: string) => Promise<{ project: Project; medio: string }>
   /** Anima una imagen recortada (respirar, balanceo, ondear, flotar, humo): devuelve la animación (un medio nuevo). */
   animarImagen: (id: string, medio: string, tipo: string) => Promise<{ project: Project; medio: string; escala: number; avisos?: string[] }>
+  /** Estabiliza el tramo de un video que usa un clip: la toma estable entra a la biblioteca (empieza en `desde` de la original). */
+  estabilizar: (id: string, fuente: string, desde: number, hasta: number) => Promise<{ project: Project; medio: string; desde: number }>
+  /** Guarda el cuadro del cabezal (con todo lo de encima) como PNG en la carpeta de videos del proyecto. */
+  exportarCuadro: (id: string, timeline: unknown, segundo: number) => Promise<{ ok: boolean; archivo?: string; error?: string }>
+  /** Sigue una zona de un video desde el segundo `en` (su centro en cada momento, en fracciones del cuadro). */
+  seguirZona: (
+    id: string,
+    fuente: string,
+    pedido: { desde: number; hasta: number; en: number; x: number; y: number; ancho: number; alto: number }
+  ) => Promise<{ recorrido: { f: number; x: number; y: number }[]; perdido: number }>
+  /** Anida varios clips seguidos: los renderiza en un video de la biblioteca (para ponerlo como un solo clip). */
+  anidar: (id: string, clips: unknown[]) => Promise<{ project: Project; medio: string; duracion: number }>
+  /** Multicámara: cuánto está corrida cada toma respecto de la primera, por su sonido (y cuánto se parecen, 0 a 1). */
+  sincronizar: (id: string, fuentes: string[]) => Promise<{ fuente: string; desfase: number; confianza: number }[]>
+  /** Saca el sonido de un tramo de un video a la carpeta del proyecto (para separarlo del clip). */
+  extraerAudio: (id: string, fuente: string, desde: number, hasta: number) => Promise<{ archivo: string; duracion: number; nombre: string }>
+  /** Saca el cuadro de un video (en ese segundo de su fuente) a la biblioteca como imagen, para congelarlo. */
+  congelarCuadro: (id: string, fuente: string, segundo: number) => Promise<{ project: Project; medio: string }>
+  /** Los picos del audio de una fuente (50 por segundo, 0 a 1) para dibujar su onda; null si no tiene sonido. */
+  ondaDe: (id: string, fuente: string) => Promise<number[] | null>
   /** Quita un medio del proyecto y sus clips de la timeline (el archivo no se toca). */
   quitarMedio: (id: string, medio: string) => Promise<Project>
   transcribir: (id: string) => Promise<TranscripcionResultado>

@@ -298,7 +298,7 @@ assert.ok(Math.abs(centro6(1.7) - centro6(1.4)) > 40, 'en el corte la capa salta
   assert.ok(r10.ok, r10.error)
   const tal = mp4(r10, 'salidas-son0')
   const baja = ajustarSonidoClip(base, 'c1', { volumen: 0.5, entra: 1, sale: 1 })
-  assert.deepEqual(sonidoDe(baja.clips[0]), { volumen: 0.5, entra: 1, sale: 1, limpio: 0 })
+  assert.deepEqual(sonidoDe(baja.clips[0]), { volumen: 0.5, entra: 1, sale: 1, limpio: 0, realce: 0 })
   assert.ok(Math.abs(volumenClipEn(baja.clips[0], 0.5, 4) - 0.25) < 0.001 && Math.abs(volumenClipEn(baja.clips[0], 2, 4) - 0.5) < 0.001, 'el monitor sube y baja el volumen con los fundidos')
   assert.deepEqual(normalizarTimeline(baja, 4, {}).clips[0].sonido, { volumen: 0.5, entra: 1, sale: 1 }, 'el sonido del clip sobrevive a guardar y abrir')
   const dos = dividir(baja, 2)
@@ -567,6 +567,22 @@ assert.ok(Math.abs(centro6(1.7) - centro6(1.4)) > 40, 'en el corte la capa salta
   assert.ok(sombras[0] > base[0] + 10, `abrir sombras y negros no aclaró el gris medio: ${base} → ${sombras}`)
   console.log(`color tipo Lumetri en el MP4: exposición ${base[0]} → ${exp[0]} (curva del monitor: ${esperado}), cálido R${calido[0]}/B${calido[2]}, sombras ${sombras[0]} ✓`)
 
+  // El color con fotogramas clave: la exposición sube de 0 a +1.5 a lo largo del clip.
+  {
+    const tlc = normalizarTimeline({ clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 2, claves: { exposicion: [{ f: 0, v: 0 }, { f: 2, v: 1.5 }], temperatura: [{ f: 0, v: 0 }, { f: 2, v: 0.8 }] } }], textos: [] }, 2)
+    const r = await exportarTimeline(pg, tlc, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-color-claves'))
+    assert.ok(r.ok, r.error)
+    const px = (t) => [...spawnSync('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', join(dir, 'salidas-color-claves', 'timeline-prueba-original.mp4'), '-frames:v', '1', '-vf', 'crop=8:8:316:176,scale=1:1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']).stdout]
+    const ini = px(0.05)
+    const fin = px(1.9)
+    const { valorClave } = await import('../src/shared/timeline.ts')
+    const curvaFin = curvasColor({ ...ajustesDe(undefined), exposicion: valorClave([{ f: 0, v: 0 }, { f: 2, v: 1.5 }], 1.9), temperatura: valorClave([{ f: 0, v: 0 }, { f: 2, v: 0.8 }], 1.9) })
+    const esperadoFin = Math.round(curvaFin.g[Math.round((base[1] / 255) * (curvaFin.g.length - 1))] * 255)
+    assert.ok(Math.abs(ini[1] - base[1]) < 8, `al principio, el color como viene: ${ini} vs ${base}`)
+    assert.ok(fin[1] > ini[1] + 30 && fin[0] > fin[2] + 15, `al final, más claro y cálido: ${ini} → ${fin}`)
+    assert.ok(Math.abs(fin[1] - esperadoFin) <= 10, `al final, la curva del monitor: ${fin[1]} en vez de ~${esperadoFin}`)
+    console.log(`color con fotogramas clave en el MP4: ${ini[1]} → ${fin[1]} (curva del monitor ${esperadoFin}), cálido al final ✓`)
+  }
   const negro = (c) => c[0] < 30 && c[1] < 30 && c[2] < 30
   const grisV = (c) => c[0] > 90 && c[0] < 170
   const chica = await exportarCon({ escala: 0.5 }, 'salidas-mov1')
@@ -578,6 +594,164 @@ assert.ok(Math.abs(centro6(1.7) - centro6(1.4)) > 40, 'en el corte la capa salta
   const recortada = await exportarCon({ recorteIzq: 0.25, recorteAba: 0.2 }, 'salidas-mov4')
   assert.ok(negro(recortada(60, 100)) && negro(recortada(400, 340)) && grisV(recortada(400, 100)), `recortar: el borde izquierdo y el de abajo debían quedar negros (${recortada(60, 100)}, ${recortada(400, 340)}, ${recortada(400, 100)})`)
   console.log('recortar y transformar en el MP4: escala, posición, rotación y recorte de bordes ✓')
+  // Con fotogramas clave: se achica y se corre a una esquina mientras gira.
+  {
+    const tlk = normalizarTimeline({ clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 2, claves: { escala: [{ f: 0, v: 1 }, { f: 2, v: 0.4 }], posx: [{ f: 0, v: 0 }, { f: 2, v: 0.25 }], giro: [{ f: 0, v: 0 }, { f: 2, v: 30 }] } }], textos: [] }, 2)
+    const r = await exportarTimeline(pg, tlk, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-mov5'))
+    assert.ok(r.ok, r.error)
+    const px = (t, x, y) => [...spawnSync('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', join(dir, 'salidas-mov5', 'timeline-prueba-original.mp4'), '-frames:v', '1', '-vf', `crop=8:8:${x}:${y},scale=1:1`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']).stdout]
+    assert.ok(grisV(px(0.05, 20, 20)), `al empezar, la imagen llena el cuadro: ${px(0.05, 20, 20)}`)
+    assert.ok(negro(px(1.9, 20, 20)) && negro(px(1.9, 100, 176)), `al final, chica y corrida a la derecha: ${px(1.9, 20, 20)} ${px(1.9, 100, 176)}`)
+    assert.ok(grisV(px(1.9, 476, 176)), `al final, la imagen está a la derecha: ${px(1.9, 476, 176)}`)
+    console.log('transformar con fotogramas clave en el MP4: se achica, se corre y gira cuadro a cuadro ✓')
+  }
+}
+
+// Exportar solo entre la entrada y la salida, a 720p y en calidad ligera.
+{
+  const tlr = normalizarTimeline({ clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 4 }], textos: [{ id: 't', inicio: 3, duracion: 1, texto: 'fin', posicion: 'abajo' }] }, 4)
+  const r = await exportarTimeline(proyecto, tlr, dir, { formato: 'vertical', subtitulos: false, desde: 1, hasta: 3, resolucion: '720', calidad: 'ligera' }, () => {}, join(dir, 'salidas-tramo'))
+  assert.ok(r.ok, r.error)
+  const info = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=width,height:format=duration', '-of', 'json', join(dir, 'salidas-tramo', 'timeline-prueba-vertical-tramo.mp4')], { encoding: 'utf8' })
+  const d = JSON.parse(info.stdout)
+  const v = d.streams.find((x) => x.width)
+  assert.ok(Math.abs(Number(d.format.duration) - 2) < 0.15, `el tramo debía durar 2 s: ${d.format.duration}`)
+  assert.equal(`${v.width}x${v.height}`, '720x1280', 'a 720p, el vertical sale 720×1280')
+  console.log(`exportar entre la entrada y la salida: ${Number(d.format.duration).toFixed(2)} s, ${v.width}×${v.height} en calidad ligera ✓`)
+}
+
+// El volumen con fotogramas clave: el tono suena entero al principio y baja a casi nada al final.
+{
+  const tono = join(dir, 'tono.mp4')
+  ff(['-f', 'lavfi', '-i', 'color=c=gray:s=320x180:d=3:r=30', '-f', 'lavfi', '-i', 'sine=f=440:d=3', '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', tono])
+  const pt = { ...proyecto, source: { path: tono, width: 320, height: 180, fps: 30, duration: 3 }, medios: [] }
+  const tlv = normalizarTimeline({ clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 3, clavesVolumen: [{ f: 0.5, v: 1 }, { f: 2.5, v: 0.1 }] }], textos: [] }, 3)
+  assert.equal(tlv.clips[0].clavesVolumen.length, 2, 'las claves de volumen sobreviven a normalizar')
+  const r = await exportarTimeline(pt, tlv, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-volclaves'))
+  assert.ok(r.ok, r.error)
+  const nivel = (desde) => Number(/mean_volume: (-?[\d.]+) dB/.exec(spawnSync('ffmpeg', ['-v', 'info', '-ss', String(desde), '-t', '0.3', '-i', join(dir, 'salidas-volclaves', 'timeline-prueba-original.mp4'), '-af', 'volumedetect', '-f', 'null', '-'], { encoding: 'utf8' }).stderr)?.[1])
+  const antes = nivel(0.1)
+  const despues = nivel(2.6)
+  assert.ok(antes - despues > 15, `el volumen debía bajar ~20 dB con sus claves: ${antes} → ${despues}`)
+  console.log(`volumen con fotogramas clave en el MP4: ${antes} dB → ${despues} dB ✓`)
+}
+
+// Zonas tapadas: una difuminada (el detalle desaparece) y una en negro.
+{
+  const rejilla = join(dir, 'rejilla.mp4')
+  ff(['-f', 'lavfi', '-i', 'testsrc2=s=640x360:d=2:r=30', '-vf', 'noise=alls=40:allf=u', '-c:v', 'libx264', '-crf', '12', '-pix_fmt', 'yuv420p', rejilla])
+  const pz = { ...proyecto, source: { path: rejilla, width: 640, height: 360, fps: 30, duration: 2 }, medios: [] }
+  const exportarZ = async (zonas, carpeta) => {
+    const tlz = normalizarTimeline({ clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 2, zonas }], textos: [] }, 2)
+    const r = await exportarTimeline(pz, tlz, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, carpeta))
+    assert.ok(r.ok, r.error)
+    return (x, y, w, h) => [...spawnSync('ffmpeg', ['-v', 'error', '-ss', '1', '-i', join(dir, carpeta, 'timeline-prueba-original.mp4'), '-frames:v', '1', '-vf', `crop=${w}:${h}:${x}:${y},format=gray`, '-f', 'rawvideo', '-']).stdout]
+  }
+  // El detalle fino: cuánto cambia cada píxel respecto del de al lado (un difuminado lo borra).
+  const variacion = (px) => {
+    let suma = 0
+    for (let i = 1; i < px.length; i++) suma += Math.abs(px[i] - px[i - 1])
+    return suma / (px.length - 1)
+  }
+  const sin = await exportarZ(undefined, 'salidas-zona0')
+  const con = await exportarZ([{ x: 0.5, y: 0.5, ancho: 0.4, alto: 0.4, modo: 'desenfoque', fuerza: 1 }, { x: 0.12, y: 0.15, ancho: 0.15, alto: 0.2, modo: 'negro' }], 'salidas-zona1')
+  const antes = variacion(sin(280, 150, 80, 60))
+  const despues = variacion(con(280, 150, 80, 60))
+  const negra = con(50, 40, 20, 20)
+  assert.ok(despues < antes * 0.5, `la zona difuminada debía perder el detalle: ${antes.toFixed(1)} → ${despues.toFixed(1)}`)
+  assert.ok(Math.max(...negra) < 30, `la zona en negro debía quedar negra: ${Math.max(...negra)}`)
+  assert.ok(variacion(con(500, 280, 60, 40)) > antes * 0.5, 'fuera de las zonas, la imagen sigue igual')
+  // Una zona negra que sigue algo: en 0.2 s está a la izquierda y en 1.8 s a la derecha.
+  const sigue = await exportarZ([{ x: 0.2, y: 0.5, ancho: 0.1, alto: 0.15, modo: 'negro', recorrido: [{ f: 0, x: 0.2, y: 0.5 }, { f: 2, x: 0.8, y: 0.5 }] }], 'salidas-zona2')
+  const negroEn = async (t, x) => {
+    const px = [...spawnSync('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', join(dir, 'salidas-zona2', 'timeline-prueba-original.mp4'), '-frames:v', '1', '-vf', `crop=10:10:${x}:175,format=gray`, '-f', 'rawvideo', '-']).stdout]
+    return Math.max(...px) < 35
+  }
+  assert.ok((await negroEn(0.2, 160)) && !(await negroEn(0.2, 470)), 'al principio, la zona que sigue está a la izquierda')
+  assert.ok((await negroEn(1.8, 470)) && !(await negroEn(1.8, 160)), 'al final, la zona que sigue está a la derecha')
+  console.log(`zonas tapadas en el MP4: el detalle baja de ${antes.toFixed(1)} a ${despues.toFixed(1)} y la zona negra queda negra; una zona sigue su recorrido ✓`)
+}
+
+// Mejorar la voz y el volumen para redes: un tono bajito sale a ~−14 LUFS; la voz realzada suena distinto.
+{
+  const bajo = join(dir, 'bajo.mp4')
+  ff(['-f', 'lavfi', '-i', 'color=c=gray:s=320x180:d=4:r=30', '-f', 'lavfi', '-i', 'sine=f=300:d=4,volume=0.05', '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', bajo])
+  const pb = { ...proyecto, source: { path: bajo, width: 320, height: 180, fps: 30, duration: 4 }, medios: [] }
+  const lufs = (ruta) => Number(/I:\s+(-?[\d.]+) LUFS/.exec(spawnSync('ffmpeg', ['-v', 'info', '-i', ruta, '-af', 'ebur128', '-f', 'null', '-'], { encoding: 'utf8' }).stderr.split('Summary:').pop())?.[1])
+  const tlb = normalizarTimeline({ clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 4 }], textos: [] }, 4)
+  const r1 = await exportarTimeline(pb, tlb, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-lufs0'))
+  const r2 = await exportarTimeline(pb, tlb, dir, { formato: 'original', subtitulos: false, normalizar: true }, () => {}, join(dir, 'salidas-lufs1'))
+  assert.ok(r1.ok && r2.ok, r1.error ?? r2.error)
+  const sinN = lufs(join(dir, 'salidas-lufs0', 'timeline-prueba-original.mp4'))
+  const conN = lufs(join(dir, 'salidas-lufs1', 'timeline-prueba-original.mp4'))
+  assert.ok(Math.abs(conN + 14) < 2, `normalizado debía quedar cerca de −14 LUFS: ${sinN} → ${conN}`)
+  const tlr = normalizarTimeline({ clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 4, sonido: { realce: 1 } }], textos: [] }, 4)
+  assert.equal(tlr.clips[0].sonido.realce, 1, 'el realce de voz sobrevive a normalizar')
+  const r3 = await exportarTimeline(pb, tlr, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-realce'))
+  assert.ok(r3.ok, r3.error)
+  const realzado = lufs(join(dir, 'salidas-realce', 'timeline-prueba-original.mp4'))
+  assert.ok(realzado > sinN + 1, `la voz realzada debía sonar más presente: ${sinN} → ${realzado}`)
+  console.log(`volumen para redes: ${sinN} → ${conN} LUFS; mejorar voz: ${sinN} → ${realzado} LUFS ✓`)
+}
+
+// Rampa de velocidad: el brillo del cuadro dice de qué segundo de la fuente sale (sube 50 por segundo).
+{
+  const { largoClip, fuenteEnClip } = await import('../src/shared/timeline.ts')
+  const reloj = join(dir, 'reloj.mp4')
+  ff(['-f', 'lavfi', '-i', 'nullsrc=s=320x180:d=4:r=30,format=gray,geq=lum=20+50*T', '-c:v', 'libx264', '-crf', '8', '-pix_fmt', 'yuv420p', reloj])
+  const pr = { ...proyecto, source: { path: reloj, width: 320, height: 180, fps: 30, duration: 4 }, medios: [] }
+  const tlr = normalizarTimeline({ clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 3, rampa: [{ f: 0, v: 2 }, { f: 1.5, v: 0.4 }, { f: 3, v: 0.4 }] }], textos: [] }, 4)
+  const dura = largoClip(tlr.clips[0])
+  const r = await exportarTimeline(pr, tlr, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-rampa'))
+  assert.ok(r.ok, r.error)
+  const mp4r = join(dir, 'salidas-rampa', 'timeline-prueba-original.mp4')
+  const info = JSON.parse(spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'json', mp4r], { encoding: 'utf8' }).stdout)
+  assert.ok(Math.abs(Number(info.format.duration) - dura) < 0.15, `la rampa debía durar ${dura.toFixed(2)} s: ${info.format.duration}`)
+  const fuenteVista = (t) => {
+    const px = [...spawnSync('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', mp4r, '-frames:v', '1', '-vf', 'crop=20:20:150:80,format=gray,scale=1:1', '-f', 'rawvideo', '-']).stdout][0]
+    return (px - 20) / 50
+  }
+  for (const t of [0.3, dura * 0.5, dura - 0.4]) {
+    const esperado = fuenteEnClip(tlr.clips[0], t)
+    const visto = fuenteVista(t)
+    assert.ok(Math.abs(visto - esperado) < 0.15, `en ${t.toFixed(2)} s debía verse el segundo ${esperado.toFixed(2)} de la fuente: ${visto.toFixed(2)}`)
+  }
+  console.log(`rampa de velocidad en el MP4: 3 s de fuente en ${dura.toFixed(2)} s, cada cuadro del segundo que dice la curva ✓`)
+}
+
+// Un sonido recortado por su principio suena desde ese punto de su archivo (un tono que cambia de nota a los 1 s).
+{
+  const dos = join(dir, 'media', 'dos-notas.wav')
+  ff(['-f', 'lavfi', '-i', 'sine=f=300:d=1', '-f', 'lavfi', '-i', 'sine=f=1200:d=1', '-filter_complex', '[0][1]concat=n=2:v=0:a=1', dos])
+  const tls = normalizarTimeline({ clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 2, mudo: true }], textos: [], sonidos: [{ id: 's', inicio: 0, duracion: 0.8, desde: 1.1, largo: 2, archivo: 'media/dos-notas.wav', nombre: 'dos', volumen: 1 }] }, 4)
+  assert.equal(tls.sonidos[0].desde, 1.1, 'el recorte del sonido sobrevive a normalizar')
+  const r = await exportarTimeline(proyecto, tls, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-sonrec'))
+  assert.ok(r.ok, r.error)
+  // La nota que suena al principio: si es la segunda (1200 Hz), el recorte funcionó.
+  const agudo = Number(/mean_volume: (-?[\d.]+) dB/.exec(spawnSync('ffmpeg', ['-v', 'info', '-t', '0.6', '-i', join(dir, 'salidas-sonrec', 'timeline-prueba-original.mp4'), '-af', 'highpass=f=900,highpass=f=900,volumedetect', '-f', 'null', '-'], { encoding: 'utf8' }).stderr)?.[1])
+  const grave = Number(/mean_volume: (-?[\d.]+) dB/.exec(spawnSync('ffmpeg', ['-v', 'info', '-t', '0.6', '-i', join(dir, 'salidas-sonrec', 'timeline-prueba-original.mp4'), '-af', 'lowpass=f=500,lowpass=f=500,volumedetect', '-f', 'null', '-'], { encoding: 'utf8' }).stderr)?.[1])
+  assert.ok(agudo > grave + 15, `debía sonar la segunda nota (aguda): agudo ${agudo} dB, grave ${grave} dB`)
+  console.log(`sonido recortado por su principio en el MP4: suena desde su segundo 1.1 (agudo ${agudo} dB frente a grave ${grave} dB) ✓`)
+}
+
+// Capas de ajuste: en su tramo, todo pasa a blanco y negro (y fuera de él, el color sigue).
+{
+  const tla = normalizarTimeline({ clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 4 }], textos: [], capas: [{ id: 'k1', fuente: 'm1', inicio: 0, duracion: 4, x: 0.25, y: 0.5, ancho: 0.2 }], ajustesCapa: [{ id: 'a', inicio: 1, duracion: 2, ajustes: { saturacion: 0 } }] }, 4, { m1: 5, m2: 3 })
+  assert.equal(tla.ajustesCapa.length, 1, 'la capa de ajuste sobrevive a normalizar')
+  const r = await exportarTimeline(proyecto, tla, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-ajuste'))
+  assert.ok(r.ok, r.error)
+  const px = (t) => [...spawnSync('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', join(dir, 'salidas-ajuste', 'timeline-prueba-original.mp4'), '-frames:v', '1', '-vf', 'crop=10:10:155:175,scale=1:1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']).stdout]
+  const fuera = px(0.5)
+  const dentro = px(2)
+  assert.ok(fuera[0] > 150 && fuera[1] < 80, `fuera del tramo, el logo sigue rojo: ${fuera}`)
+  assert.ok(Math.max(...dentro) - Math.min(...dentro) < 12, `dentro del tramo, el logo queda gris (sin color): ${dentro}`)
+  console.log(`capa de ajuste en el MP4: el logo rojo ${fuera} queda gris ${dentro} solo en su tramo ✓`)
+  // Solo el sonido: un WAV con la mezcla (el «ding» de la primera prueba en su segundo).
+  const rs = await exportarTimeline(proyecto, tl, dir, { formato: 'original', subtitulos: false, soloAudio: 'wav' }, () => {}, join(dir, 'salidas-wav'))
+  assert.ok(rs.ok && rs.output.endsWith('.wav'), rs.error ?? rs.output)
+  const info = JSON.parse(spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,codec_name:format=duration', '-of', 'json', rs.output], { encoding: 'utf8' }).stdout)
+  assert.ok(info.streams.length === 1 && info.streams[0].codec_type === 'audio' && Math.abs(Number(info.format.duration) - 4) < 0.15, `el WAV debía ser solo audio de 4 s: ${JSON.stringify(info)}`)
+  console.log(`exportar solo el sonido: WAV de ${Number(info.format.duration).toFixed(2)} s, sin video ✓`)
 }
 
 rmSync(dir, { recursive: true, force: true })

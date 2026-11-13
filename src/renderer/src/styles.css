@@ -1546,7 +1546,7 @@ button { cursor: pointer; }
 }
 .tl-nombre.regla { height: 22px; }
 .tl-nombre:nth-child(n+2) { height: 30px; }
-.tl-nombre:nth-child(3) { height: 40px; } /* Video */
+.tl-nombre.p-video { height: 40px; } /* Video */
 
 .tl-scroll { flex: 1; overflow-x: auto; overflow-y: hidden; min-width: 0; }
 .tl-lienzo { position: relative; padding-right: 24px; }
@@ -3003,7 +3003,7 @@ button { cursor: pointer; }
 .chat-plegar:hover { color: var(--text); background: var(--panel-3); }
 .is-chat-plegado > .chat-plegar { right: 0; transform: translate(-4px, -50%); color: var(--accent); }
 .ed .tl-carril.video { height: 54px; }
-.ed .tl-nombre:nth-child(3) { height: 54px; }
+.ed .tl-nombre.p-video { height: 54px; }
 .ed .tl-voz:not(.tl-sonido) .tl-onda { color: #ffffff2e; }
 
 /* Cabeceras de pista: nombre y sus dos botones (ver u oír, y bloquear). */
@@ -3184,3 +3184,62 @@ button { cursor: pointer; }
 .mezclador-tira .medidor { height: 140px; }
 .mezclador-fader { writing-mode: vertical-lr; direction: rtl; width: 20px; height: 140px; margin: 0; accent-color: #5aa9ff; }
 .mezclador-nombre { font-size: 10.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+/* La onda del sonido de un clip de video, en la mitad de abajo del bloque (sobre las miniaturas). */
+.tl-clip > .tl-onda { top: 45%; height: 55%; inset: auto 0 0 0; color: #b9c6ffcc; mix-blend-mode: screen; }
+.tl-carril.sonidos.con-filas { background-image: repeating-linear-gradient(to bottom, transparent 0 29px, var(--line) 29px 30px); }
+/* Zonas tapadas del clip (difuminar o negro), en el monitor y en el inspector. */
+.monitor-zona { position: absolute; pointer-events: none; overflow: hidden; }
+.monitor-zona.is-negro { background: #000; }
+.ed-zona { display: flex; flex-direction: column; gap: 4px; padding: 8px; margin: 4px 0 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.ed-zona-cabeza { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.ed-zona-cabeza select { margin-left: auto; height: 24px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line-2); border-radius: 6px; font-size: 12px; }
+.ed-zona-cabeza b { white-space: nowrap; }
+.monitor-zona.is-editable { pointer-events: auto; cursor: move; outline: 1px dashed #ffffffb0; outline-offset: -1px; }
+.monitor-zona-esquina { position: absolute; right: -5px; bottom: -5px; width: 11px; height: 11px; border-radius: 2px; background: #fff; border: 1px solid #0008; cursor: nwse-resize; }
+.monitor-zona.is-editable { overflow: visible; }
+.ed-zona-seguir { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 2px; }
+/* Multicámara: las tomas a la vez; la que se ve, con borde azul. */
+.mc-rejilla { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 4px; }
+.mc-toma { position: relative; padding: 0; border: 2px solid var(--line-2); border-radius: 8px; overflow: hidden; background: #000; aspect-ratio: 16 / 9; cursor: pointer; }
+.mc-toma:hover { border-color: var(--muted); }
+.mc-toma.is-actual { border-color: #5aa9ff; box-shadow: 0 0 0 1px #5aa9ff; }
+.mc-toma video, .mc-vacia { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.mc-etiqueta { position: absolute; left: 4px; bottom: 4px; max-width: calc(100% - 8px); padding: 1px 6px; border-radius: 4px; background: #000a; color: #fff; font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-etiqueta b { color: #9ccbff; margin-right: 3px; }
+.mc-sonido { margin-top: 8px; gap: 6px; } .mc-sonido select { flex: 1; min-width: 0; height: 26px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line-2); border-radius: 6px; font-size: 12px; }
+.tl-sonido:hover .tl-asa { background: #ffffff30; }
+/* Monitor de origen (en la biblioteca): un video con su entrada y salida, para insertar o sobrescribir. */
+.origen { display: flex; flex-direction: column; gap: 6px; padding: 8px; margin-bottom: 10px; border: 1px solid color-mix(in srgb, #5aa9ff 45%, var(--line)); border-radius: 10px; background: var(--bg); }
+.origen-cabeza { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.origen-cabeza b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.origen video { width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 6px; cursor: pointer; }
+.origen-barra { position: relative; height: 14px; border-radius: 3px; background: var(--panel-3); cursor: pointer; }
+.origen-rango { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, #5aa9ff 40%, transparent); border-left: 2px solid #5aa9ff; border-right: 2px solid #5aa9ff; }
+.origen-cabezal { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: #fff; }
+.origen-controles { display: flex; align-items: center; justify-content: space-between; gap: 2px; }
+.origen-controles .tr-tc { min-width: 0; font-size: 11px; }
+.origen-controles .tr-tc.is-actual { font-size: 12px; }
+.origen-acciones { display: flex; gap: 6px; }
+.origen-acciones .btn { flex: 1; justify-content: center; }
+.origen-acciones kbd { font-family: var(--mono); font-size: 10px; padding: 0 4px; border-radius: 3px; background: var(--panel-3); }
+.origen-tiempos { display: flex; justify-content: space-between; gap: 6px; }
+.origen-controles { justify-content: center; }
+.origen-tiempos .tr-tc { min-width: 0; font-size: 11px; } .origen-tiempos .tr-tc.is-actual { font-size: 12.5px; }
+/* La pista de capas de ajuste (arriba de todo). */
+.tl-carril.ajuste { height: 26px; }
+.tl-nombre.p-ajuste { height: 26px; }
+
+.ed .tl-nombre.p-encima:not([style]) { height: 30px; }
+.tl-rotulo.tl-ajuste-capa { top: 3px; bottom: 3px; background: repeating-linear-gradient(135deg, #2a3340 0 6px, #25303b 6px 12px); border-color: #7f93ad; }
+/* Historial: cada paso de la edición; el actual resaltado, lo deshecho más tenue. */
+.historial { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.historial-paso { display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 6px 8px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--text); font-size: 12px; text-align: left; cursor: pointer; }
+.historial-paso span { flex: 1; min-width: 0; }
+.historial-paso small { color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.historial-paso:hover { background: var(--panel-3); }
+.historial-paso.is-actual { border-color: #5aa9ff; background: color-mix(in srgb, #5aa9ff 14%, transparent); }
+.historial-paso.is-futuro { color: var(--dim); text-decoration: line-through; text-decoration-color: #ffffff30; }
+.limpieza-num { width: 52px; height: 22px; padding: 0 4px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line-2); border-radius: 5px; }
+/* Con muchas pestañas en la biblioteca: más angostas, y si no caben, pasan a otra fila. */
+.ed-bib-tab { flex: 1 0 42px; min-width: 0; padding-left: 1px; padding-right: 1px; }
+.ed-bib-tab span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-size: 10px; }

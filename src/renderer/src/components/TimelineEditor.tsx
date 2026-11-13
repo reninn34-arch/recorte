@@ -89,6 +89,31 @@ import {
   borrarMarcador,
   extraerRango,
   rodarCorte,
+  ESTILOS_SUBTITULO,
+  PLANTILLAS_TEXTO,
+  subtitulosDesdeVoz,
+  quitarSubtitulos,
+  anadirAjusteCapa,
+  cambiarAjusteCapa,
+  borrarAjusteCapa,
+  AJUSTES_DE_CAPA,
+  type AjusteDeCapa,
+  cambiarAngulo,
+  clipsSeguidos,
+  desanidarClip,
+  ponerClaveRampa,
+  quitarClaveRampa,
+  velocidadEnFuente,
+  fuenteEnClip,
+  clipEnFuente,
+  cambiarZonas,
+  zonaEn,
+  MAX_ZONAS,
+  type ZonaTL,
+  ponerClaveVolumen,
+  quitarClaveVolumen,
+  valorClave,
+  PISTAS_SONIDOS,
   deslizarContenido,
   desplazarClip,
   type ColorMarcador
@@ -120,7 +145,7 @@ export interface ControlExportar {
   destino?: string
 }
 
-export type Elegido = { tipo: 'clip' | 'texto' | 'musica' | 'voz' | 'capa' | 'sonido'; id: string } | null
+export type Elegido = { tipo: 'clip' | 'texto' | 'musica' | 'voz' | 'capa' | 'sonido' | 'ajuste'; id: string } | null
 
 const IMAN_PX = 8
 const PASOS_REGLA = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1200]
@@ -199,8 +224,43 @@ export function TimelineEditor({
   pestanasExtra,
   miniaturaDe,
   urlDe,
+  ondaDe,
+  onCongelar,
+  congelando,
+  onEstabilizar,
+  estabilizando,
+  onExportarCuadro,
+  sacandoCuadro,
+  onAnidar,
+  anidando,
+  onSepararAudio,
+  separando,
+  seguirZona,
   fps = 30
 }: {
+  /** Sigue una zona tapada por el video (una cara que se mueve). */
+  seguirZona?: (
+    fuente: string,
+    pedido: { desde: number; hasta: number; en: number; x: number; y: number; ancho: number; alto: number }
+  ) => Promise<{ recorrido: { f: number; x: number; y: number }[]; perdido: number }>
+  /** Separa el sonido del clip (lo pasa a la pista de sonidos). */
+  onSepararAudio?: (clipId: string) => void
+  separando?: boolean
+  /** Anida varios clips seguidos en uno. */
+  onAnidar?: (ids: string[]) => void
+  anidando?: boolean
+  /** Guarda el cuadro del cabezal como imagen. */
+  onExportarCuadro?: () => void
+  sacandoCuadro?: boolean
+  /** Estabiliza un clip de video (su tramo sale estable a la biblioteca). */
+  onEstabilizar?: (clipId: string) => void
+  /** El clip que se está estabilizando. */
+  estabilizando?: string | null
+  /** Congela el cuadro del cabezal: lo pone como un clip quieto ahí mismo. */
+  onCongelar?: () => void
+  congelando?: boolean
+  /** La clave de la onda de una fuente de video (su sonido, dibujado en sus clips). */
+  ondaDe?: (fuente: string) => string | undefined
   /** Los cuadros por segundo del proyecto (para el código de tiempo y el avance cuadro a cuadro). */
   fps?: number
   /** La miniatura de una fuente (el video principal o un medio), para verla dentro de sus clips. */
@@ -324,6 +384,10 @@ export function TimelineEditor({
   const [panelExportar, setPanelExportar] = useState(false)
   const [formato, setFormato] = useState<OpcionesExport['formato']>('original')
   const [subtitulos, setSubtitulos] = useState(false)
+  const [resolucion, setResolucion] = useState<NonNullable<OpcionesExport['resolucion']>>('original')
+  const [calidad, setCalidad] = useState<NonNullable<OpcionesExport['calidad']>>('normal')
+  const [soloEntradaSalida, setSoloEntradaSalida] = useState(true)
+  const [normalizar, setNormalizar] = useState(true)
   const [borrador, setBorrador] = useState<Timeline | null>(null)
   const [insercion, setInsercion] = useState<number | null>(null)
   const [zoom, setZoom] = useState(1)
@@ -335,6 +399,10 @@ export function TimelineEditor({
   const [marcaElegida, setMarcaElegida] = useState<string | null>(null)
   const [cortePrevio, setCortePrevio] = useState<number | null>(null)
   const [mezclador, setMezclador] = useState(false)
+  const [estiloSubs, setEstiloSubs] = useState('redes')
+  /** La zona que se está siguiendo (clip y número) y el aviso del seguimiento. */
+  const [siguiendo, setSiguiendo] = useState<{ clip: string; k: number } | null>(null)
+  const [avisoSeguir, setAvisoSeguir] = useState('')
   const niveles = useNiveles(reproduciendo || mezclador)
   const cuadro = 1 / Math.max(1, Math.round(fps))
   const [, forzar] = useState(0)
@@ -350,6 +418,14 @@ export function TimelineEditor({
   const ALTO_FILA = 30
   const filasEncima = Math.min(PISTAS_ENCIMA, Math.max(1, ...(tl.capas ?? []).map(pistaDeCapa)) + (tl.capas?.length ? 1 : 0))
   const encimaRef = useRef<HTMLDivElement | null>(null)
+  // Los sonidos también van en varias pistas (las usadas y una libre arriba), para encimar efectos.
+  const filasSonidos = Math.min(PISTAS_SONIDOS, Math.max(1, ...(tl.sonidos ?? []).map((s) => s.pista ?? 1)) + (tl.sonidos?.length ? 1 : 0))
+  const sonidosRef = useRef<HTMLDivElement | null>(null)
+  const pistaSonidoEn = (clientY: number): number => {
+    const caja = sonidosRef.current?.getBoundingClientRect()
+    if (!caja) return 1
+    return Math.min(filasSonidos, Math.max(1, filasSonidos - Math.floor((clientY - caja.top) / ALTO_FILA)))
+  }
   /** La pista de «Encima» que hay bajo el puntero (la de arriba es la más alta). */
   const pistaEn = (clientY: number): number => {
     const caja = encimaRef.current?.getBoundingClientRect()
@@ -379,6 +455,7 @@ export function TimelineEditor({
   const fraseElegida = elegido?.tipo === 'voz' ? tl.voces?.find((v) => v.id === elegido.id) : undefined
   const capaElegida = elegido?.tipo === 'capa' ? tl.capas?.find((c) => c.id === elegido.id) : undefined
   const sonidoElegido = elegido?.tipo === 'sonido' ? tl.sonidos?.find((s) => s.id === elegido.id) : undefined
+  const ajusteElegido = elegido?.tipo === 'ajuste' ? tl.ajustesCapa?.find((x) => x.id === elegido.id) : undefined
   const medidas = duraciones ?? {}
   // Elegir cualquier otra cosa cierra el «añadir voz».
   useEffect(() => {
@@ -387,8 +464,8 @@ export function TimelineEditor({
 
   // Si lo elegido desaparece (deshacer, borrar), se suelta.
   useEffect(() => {
-    if (elegido && !clipElegido && !textoElegido && !musicaElegida && !fraseElegida && !capaElegida && !sonidoElegido && !borrador) onElegir(null)
-  }, [elegido, clipElegido, textoElegido, musicaElegida, fraseElegida, capaElegida, sonidoElegido, borrador, onElegir])
+    if (elegido && !clipElegido && !textoElegido && !musicaElegida && !fraseElegida && !capaElegida && !sonidoElegido && !ajusteElegido && !borrador) onElegir(null)
+  }, [elegido, clipElegido, textoElegido, musicaElegida, fraseElegida, capaElegida, sonidoElegido, ajusteElegido, borrador, onElegir])
 
   useLayoutEffect(() => {
     const el = scrollRef.current
@@ -656,13 +733,47 @@ export function TimelineEditor({
     })
   }
 
-  function arrastrarSonido(e: React.PointerEvent, id: string) {
+  /** Mueve una capa de ajuste o le cambia el principio o el final. */
+  function arrastrarAjuste(e: React.PointerEvent, id: string, modo: 'mover' | 'inicio' | 'fin') {
+    onElegir({ tipo: 'ajuste', id })
+    const base = timeline
+    const x = base.ajustesCapa?.find((a) => a.id === id)
+    if (!x) return
+    const puntos = puntosIman(base)
+    const fin = x.inicio + x.duracion
+    arrastrar(e, (dx) => {
+      if (modo === 'mover') return cambiarAjusteCapa(base, id, { inicio: Math.max(0, iman(x.inicio + dx, puntos)) })
+      if (modo === 'inicio') {
+        const inicio = Math.max(0, Math.min(iman(x.inicio + dx, puntos), fin - DURACION_MINIMA))
+        return cambiarAjusteCapa(base, id, { inicio, duracion: fin - inicio })
+      }
+      return cambiarAjusteCapa(base, id, { duracion: iman(fin + dx, puntos) - x.inicio })
+    })
+  }
+
+  function arrastrarSonido(e: React.PointerEvent, id: string, modo: 'mover' | 'inicio' | 'fin' = 'mover') {
     onElegir({ tipo: 'sonido', id })
     const base = timeline
     const s = base.sonidos?.find((x) => x.id === id)
     if (!s) return
     const puntos = puntosIman(base)
-    arrastrar(e, (dx) => cambiarSonido(base, id, { inicio: Math.max(0, iman(s.inicio + dx, puntos)) }))
+    // Recortar por los bordes (para un corte en J o en L): el principio corre `desde` dentro del archivo.
+    if (modo !== 'mover') {
+      const desde0 = s.desde ?? 0
+      const largoArchivo = s.largo ?? desde0 + s.duracion
+      arrastrar(e, (dx) => {
+        if (modo === 'inicio') {
+          // No antes del principio del archivo ni del de la línea de tiempo, y que quede algo.
+          const d = Math.max(-desde0, -s.inicio, Math.min(s.duracion - DURACION_MINIMA, iman(s.inicio + dx, puntos) - s.inicio))
+          return cambiarSonido(base, id, { inicio: s.inicio + d, duracion: s.duracion - d, desde: desde0 + d })
+        }
+        const fin = Math.min(s.inicio + largoArchivo - desde0, Math.max(s.inicio + DURACION_MINIMA, iman(s.inicio + s.duracion + dx, puntos)))
+        return cambiarSonido(base, id, { duracion: fin - s.inicio })
+      })
+      return
+    }
+    // Arriba o abajo, cambia de pista de sonidos.
+    arrastrar(e, (dx, ev) => cambiarSonido(base, id, { inicio: Math.max(0, iman(s.inicio + dx, puntos)), pista: pistaSonidoEn(ev.clientY) }))
   }
 
   /** Pone un medio de la biblioteca encima, en el cabezal (un logo, un ícono, una toma de apoyo). */
@@ -737,7 +848,9 @@ export function TimelineEditor({
                   ? borrarSonido(nueva, v.id)
                   : v.tipo === 'texto'
                     ? borrarTexto(nueva, v.id)
-                    : nueva
+                    : v.tipo === 'ajuste'
+                      ? borrarAjusteCapa(nueva, v.id)
+                      : nueva
       }
       if (nueva !== timeline) historial.aplicar(nueva)
       setVarios([])
@@ -750,6 +863,7 @@ export function TimelineEditor({
     else if (elegido.tipo === 'voz') historial.aplicar(borrarVoz(timeline, elegido.id))
     else if (elegido.tipo === 'capa') historial.aplicar(borrarCapa(timeline, elegido.id))
     else if (elegido.tipo === 'sonido') historial.aplicar(borrarSonido(timeline, elegido.id))
+    else if (elegido.tipo === 'ajuste') historial.aplicar(borrarAjusteCapa(timeline, elegido.id))
     else historial.aplicar(borrarTexto(timeline, elegido.id))
     onElegir(null)
   }
@@ -817,7 +931,7 @@ export function TimelineEditor({
 
   /** El segundo de la fuente del clip elegido que está bajo el cabezal (dentro del clip). */
   const fuenteEnCabezal = clipElegido
-    ? Math.min(clipElegido.clip.salida, Math.max(clipElegido.clip.entrada, clipElegido.clip.entrada + (tiempo - clipElegido.inicio) * velocidadDe(clipElegido.clip)))
+    ? Math.min(clipElegido.clip.salida, Math.max(clipElegido.clip.entrada, fuenteEnClip(clipElegido.clip, tiempo - clipElegido.inicio)))
     : 0
   const esClave = (clave: string): clave is ParametroClave => (PARAMETROS_CLAVE as readonly string[]).includes(clave)
 
@@ -962,6 +1076,13 @@ export function TimelineEditor({
     else if (ctrl) return
     else if (tecla === 'v') setHerramienta('seleccion')
     else if (tecla === 'c') setHerramienta('cuchilla')
+    else if (tecla === 'f' && e.shiftKey) onCongelar?.()
+    else if (tecla === 'e' && e.shiftKey) onExportarCuadro?.()
+    else if (/^[1-9]$/.test(e.key) && tl.multicam) {
+      // Multicámara: 1, 2, 3… cortan a esa toma en el cabezal (también reproduciendo, como en Premiere).
+      const r = cambiarAngulo(timeline, tiempo, Number(e.key) - 1, limiteFuente)
+      if (r !== timeline) historial.aplicar(r)
+    }
     else if (tecla === 'n') setHerramienta('rodar')
     else if (tecla === 'y') setHerramienta('deslizar')
     else if (tecla === 'u') setHerramienta('desplazar')
@@ -1072,6 +1193,17 @@ export function TimelineEditor({
               <button className="tr-boton" onClick={accionExtraer} disabled={!hayRango} title="Extraer: quita lo que hay entre la entrada y la salida y cierra el hueco (tecla ')" aria-label="Extraer entre entrada y salida">
                 <Icon name="extraer" size={15} />
               </button>
+              {onExportarCuadro && (
+                <button
+                  className={`tr-boton ${sacandoCuadro ? 'is-on' : ''}`}
+                  onClick={onExportarCuadro}
+                  disabled={total <= 0 || sacandoCuadro}
+                  title="Exportar cuadro: guarda lo que se ve en el cabezal como imagen PNG (Mayús+E)"
+                  aria-label="Exportar cuadro"
+                >
+                  <Icon name="camara" size={15} />
+                </button>
+              )}
             </div>
             <span className="tr-tc" title={hayRango ? 'Lo que dura el tramo entre la entrada y la salida' : 'Lo que dura todo el video'}>
               {hayRango ? (
@@ -1116,6 +1248,57 @@ export function TimelineEditor({
 
               {pestana === 'texto' && (
                 <>
+                  <span className="ed-seccion">Subtítulos</span>
+                  <p className="tl-dim">
+                    Un texto por frase corta, en su segundo, desde lo que se dice (la transcripción y la narración). Luego corriges o mueves cada uno como un
+                    rótulo.
+                  </p>
+                  <div className="ed-opciones">
+                    {ESTILOS_SUBTITULO.map((x) => (
+                      <button key={x.id} className={`chip ${estiloSubs === x.id ? 'is-active' : ''}`} title={x.para} onClick={() => setEstiloSubs(x.id)}>
+                        {x.nombre}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    className="ed-fila"
+                    disabled={total <= 0 || (!transcript?.length && !tl.voces?.length)}
+                    title={!transcript?.length && !tl.voces?.length ? 'Transcribe el video (o pon narración) para hacer subtítulos' : undefined}
+                    onClick={() => {
+                      const estilo = ESTILOS_SUBTITULO.find((x) => x.id === estiloSubs)?.estilo ?? {}
+                      const r = subtitulosDesdeVoz(timeline, transcript, estilo)
+                      if (r.textos.filter((x) => x.subtitulo).length) historial.aplicar(r)
+                    }}
+                  >
+                    <Icon name="type" size={14} />
+                    <span>{tl.textos.some((x) => x.subtitulo) ? 'Rehacer los subtítulos con este estilo' : 'Crear los subtítulos de la voz'}</span>
+                  </button>
+                  {tl.textos.some((x) => x.subtitulo) && (
+                    <button className="ed-fila" onClick={() => historial.aplicar(quitarSubtitulos(timeline))}>
+                      <Icon name="trash" size={14} />
+                      <span>Quitar los {tl.textos.filter((x) => x.subtitulo).length} subtítulos</span>
+                    </button>
+                  )}
+                  <span className="ed-seccion">Plantillas</span>
+                  {PLANTILLAS_TEXTO.map((x) => (
+                    <button
+                      key={x.id}
+                      className="ed-fila"
+                      disabled={total <= 0}
+                      title={`Para ${x.para}. Entra en el cabezal; luego cambias las palabras.`}
+                      onClick={() => {
+                        const r = anadirTexto(timeline, tiempo, x.texto)
+                        if (r.timeline === timeline) return
+                        historial.aplicar(cambiarTextoTL(r.timeline, r.id, x.estilo))
+                        onElegir({ tipo: 'texto', id: r.id })
+                      }}
+                    >
+                      <Icon name="plus" size={13} />
+                      <span>
+                        {x.nombre} <small>{x.para}</small>
+                      </span>
+                    </button>
+                  ))}
                   <span className="ed-seccion">Añadir un texto</span>
                   <p className="tl-dim">Entra en el cabezal. Después lo mueves en el monitor y lo ajustas a la derecha.</p>
                   <div className="ed-rejilla">
@@ -1388,6 +1571,11 @@ export function TimelineEditor({
         <button className="tl-boton" onClick={accionDividir} title="Dividir en el cabezal (S)" disabled={total <= 0}>
           <Icon name="scissors" size={16} /> Dividir
         </button>
+        {onCongelar && (
+          <button className="tl-boton" onClick={onCongelar} disabled={total <= 0 || congelando} title="Congelar el cuadro del cabezal: entra ahí como un clip quieto de 2 s (Mayús+F)">
+            <Icon name="pause" size={15} /> {congelando ? 'Congelando…' : 'Congelar'}
+          </button>
+        )}
         <button className="tl-boton" onClick={accionDuplicar} title="Duplicar el clip elegido" disabled={!clipElegido}>
           <Icon name="copy" size={16} />
         </button>
@@ -1435,11 +1623,21 @@ export function TimelineEditor({
             const quitar = p.audio ? 'Silenciar' : 'Ocultar'
             const poner = p.audio ? 'Volver a oír' : 'Volver a mostrar'
             return (
-              <span key={p.id} className={`tl-nombre ${estado?.oculta ? 'is-oculta' : ''}`} style={p.id === 'encima' && filasEncima > 1 ? { height: filasEncima * ALTO_FILA } : undefined}>
+              <span
+                key={p.id}
+                className={`tl-nombre p-${p.id} ${estado?.oculta ? 'is-oculta' : ''}`}
+                style={p.id === 'encima' && filasEncima > 1 ? { height: filasEncima * ALTO_FILA } : p.id === 'sonidos' && filasSonidos > 1 ? { height: filasSonidos * ALTO_FILA } : undefined}
+              >
                 {p.id === 'encima' && filasEncima > 1 ? (
                   <span className="tl-nombre-texto tl-nombre-filas" title="Varias pistas de video encima: arrastra una capa arriba o abajo para cambiarla de pista. La de arriba tapa a las demás.">
                     {Array.from({ length: filasEncima }, (_, i) => (
                       <i key={i}>Encima {filasEncima - i}</i>
+                    ))}
+                  </span>
+                ) : p.id === 'sonidos' && filasSonidos > 1 ? (
+                  <span className="tl-nombre-texto tl-nombre-filas" title="Varias pistas de sonidos: arrastra un efecto arriba o abajo para encimarlo con otro.">
+                    {Array.from({ length: filasSonidos }, (_, i) => (
+                      <i key={i}>Son. {filasSonidos - i}</i>
                     ))}
                   </span>
                 ) : (
@@ -1525,6 +1723,36 @@ export function TimelineEditor({
               ))}
             </div>
 
+            <div className={`tl-carril ajuste ${clasePista('ajuste')}`} onPointerDown={arrastrarCabezal}>
+              {!tl.ajustesCapa?.length && (
+                <button
+                  className="tl-vacio tl-vacio-boton"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => {
+                    const r = anadirAjusteCapa(timeline, Math.min(tiempo, Math.max(0, total - DURACION_MINIMA)))
+                    historial.aplicar(r.timeline)
+                    onElegir({ tipo: 'ajuste', id: r.id })
+                  }}
+                  disabled={total <= 0}
+                >
+                  + Capa de ajuste (color o desenfoque para todo lo de abajo)
+                </button>
+              )}
+              {(tl.ajustesCapa ?? []).map((x) => (
+                <div
+                  key={x.id}
+                  className={`tl-rotulo tl-ajuste-capa ${(elegido?.tipo === 'ajuste' && elegido.id === x.id) || enVarios(x.id) ? 'is-elegido' : ''}`}
+                  style={{ left: x.inicio * pps, width: Math.max(6, x.duracion * pps - 1) }}
+                  title="Capa de ajuste: cambia el color o desenfoca todo lo de abajo en este tramo"
+                  onPointerDown={(e) => sumar(e, { tipo: 'ajuste', id: x.id }) || arrastrarAjuste(e, x.id, 'mover')}
+                >
+                  <span className="tl-asa izquierda" onPointerDown={(e) => arrastrarAjuste(e, x.id, 'inicio')} />
+                  {x.duracion * pps > 50 && <span className="tl-clip-texto">Ajuste</span>}
+                  <span className="tl-asa derecha" onPointerDown={(e) => arrastrarAjuste(e, x.id, 'fin')} />
+                </div>
+              ))}
+            </div>
+
             <div
               ref={encimaRef}
               className={`tl-carril encima ${filasEncima > 1 ? 'con-filas' : ''} ${destino === 'encima' ? 'is-destino' : ''} ${clasePista('encima')}`}
@@ -1577,11 +1805,14 @@ export function TimelineEditor({
                     onPointerDown={(e) => sumar(e, { tipo: 'clip', id: t.clip.id }) || arrastrarClip(e, t.clip.id)}
                     title={`Clip ${t.indice + 1} · ${nombreDe ? nombreDe(t.clip.fuente) : 'fuente'} ${tc(t.clip.entrada)}–${tc(t.clip.salida)}`}
                   >
+                    {ondaDe && esVideo(t.clip.fuente) && !t.clip.mudo && ondaDe(t.clip.fuente) && (
+                      <Onda url={ondaDe(t.clip.fuente)!} duracion={t.clip.salida - t.clip.entrada} desde={t.clip.entrada} />
+                    )}
                     <span className="tl-asa izquierda" onPointerDown={(e) => recortar(e, t.clip.id, 'entrada')} />
                     {anchoClip > 46 && (
                       <span className="tl-clip-texto">
                         <b>{t.indice + 1}</b>
-                        {t.clip.velocidad ? <i className="tl-clip-vel">{t.clip.velocidad}×</i> : null}
+                        {t.clip.rampa ? <i className="tl-clip-vel" title="Tiene una rampa de velocidad">rampa</i> : t.clip.velocidad ? <i className="tl-clip-vel">{t.clip.velocidad}×</i> : null}
                         {t.clip.claves ? <i className="tl-clip-vel tl-clip-anim" title="Tiene fotogramas clave">◆</i> : null}
                         {anchoClip > 120 &&
                           (t.clip.fuente !== 'principal' && nombreDe ? <> {nombreDe(t.clip.fuente)}</> : <> {tc(t.clip.entrada, false)}–{tc(t.clip.salida, false)}</>)}
@@ -1662,7 +1893,12 @@ export function TimelineEditor({
               })}
             </div>
 
-            <div className={`tl-carril sonidos ${clasePista('sonidos')}`} onPointerDown={arrastrarCabezal}>
+            <div
+              ref={sonidosRef}
+              className={`tl-carril sonidos ${filasSonidos > 1 ? 'con-filas' : ''} ${clasePista('sonidos')}`}
+              style={filasSonidos > 1 ? { height: filasSonidos * ALTO_FILA } : undefined}
+              onPointerDown={arrastrarCabezal}
+            >
               {!tl.sonidos?.length && ponerSonido && (
                 <button className="tl-vacio tl-vacio-boton" onPointerDown={(e) => e.stopPropagation()} onClick={() => setPestana('audio')}>
                   + Añadir un efecto de sonido
@@ -1674,12 +1910,18 @@ export function TimelineEditor({
                   <div
                     key={s.id}
                     className={`tl-voz tl-frase tl-sonido ${(elegido?.tipo === 'sonido' && elegido.id === s.id) || enVarios(s.id) ? 'is-elegido' : ''}`}
-                    style={{ left: s.inicio * pps, width: Math.max(6, anchoSonido - 1) }}
-                    title={s.nombre}
+                    style={{
+                      left: s.inicio * pps,
+                      width: Math.max(6, anchoSonido - 1),
+                      ...(filasSonidos > 1 ? { top: (filasSonidos - Math.min(filasSonidos, s.pista ?? 1)) * ALTO_FILA + 4, bottom: 'auto', height: ALTO_FILA - 8 } : {})
+                    }}
+                    title={`${s.nombre}${filasSonidos > 1 ? ` · pista ${s.pista ?? 1}` : ''}`}
                     onPointerDown={(e) => sumar(e, { tipo: 'sonido', id: s.id }) || arrastrarSonido(e, s.id)}
                   >
-                    {urlDe && <Onda url={urlDe(s.archivo)} duracion={s.duracion} />}
+                    {urlDe && <Onda url={urlDe(s.archivo)} duracion={s.duracion} desde={s.desde ?? 0} />}
                     {anchoSonido > 30 && <span className="tl-clip-texto">{s.nombre}</span>}
+                    <span className="tl-asa izquierda" onPointerDown={(e) => arrastrarSonido(e, s.id, 'inicio')} />
+                    <span className="tl-asa derecha" onPointerDown={(e) => arrastrarSonido(e, s.id, 'fin')} />
                   </div>
                 )
               })}
@@ -1778,6 +2020,32 @@ export function TimelineEditor({
                   />
                   Subtítulos de la voz
                 </label>
+                <label className="tl-check" title="El lado corto del video (nunca se agranda)">
+                  Resolución
+                  <select value={resolucion} onChange={(e) => setResolucion(e.target.value as typeof resolucion)}>
+                    <option value="original">La del material</option>
+                    <option value="1080">1080p</option>
+                    <option value="720">720p (más liviano)</option>
+                  </select>
+                </label>
+                <label className="tl-check" title="Alta: más nítido y más pesado. Ligera: para mandar rápido por chat.">
+                  Calidad
+                  <select value={calidad} onChange={(e) => setCalidad(e.target.value as typeof calidad)}>
+                    <option value="alta">Alta</option>
+                    <option value="normal">Normal</option>
+                    <option value="ligera">Ligera</option>
+                  </select>
+                </label>
+                <label className="tl-check" title="Deja el volumen a la medida que piden YouTube, Instagram y TikTok (−14 LUFS): ni muy bajo ni saturado">
+                  <input type="checkbox" checked={normalizar} onChange={(e) => setNormalizar(e.target.checked)} />
+                  Volumen para redes
+                </label>
+                {hayRango && (
+                  <label className="tl-check" title="Exporta solo el tramo marcado con { y } en el monitor">
+                    <input type="checkbox" checked={soloEntradaSalida} onChange={(e) => setSoloEntradaSalida(e.target.checked)} />
+                    Solo entre la entrada y la salida ({tcCuadros(rango.salida! - rango.entrada!, fps)})
+                  </label>
+                )}
                 {exportar.destino && (
                   <span className="tl-dim tl-destino" title={exportar.destino}>
                     Se guarda en {exportar.destino}
@@ -1799,12 +2067,39 @@ export function TimelineEditor({
                   onClick={() =>
                     exportar.onExportar({
                       formato: exportar.vertical ? 'original' : formato,
-                      subtitulos: subtitulos && exportar.hayTranscripcion
+                      subtitulos: subtitulos && exportar.hayTranscripcion,
+                      resolucion,
+                      calidad,
+                      normalizar,
+                      ...(hayRango && soloEntradaSalida ? { desde: rango.entrada, hasta: rango.salida } : {})
                     })
                   }
                 >
-                  <Icon name="download" size={14} /> {exportar.activo ? 'Exportando…' : `Exportar MP4 · ${tc(total, false)}`}
+                  <Icon name="download" size={14} />{' '}
+                  {exportar.activo ? 'Exportando…' : `Exportar MP4 · ${tc(hayRango && soloEntradaSalida ? rango.salida! - rango.entrada! : total, false)}`}
                 </button>
+                <label className="tl-check" title="Solo el sonido de la mezcla final (para un podcast o para mandar a mezclar)">
+                  <select
+                    value=""
+                    disabled={exportar.activo || total <= 0}
+                    onChange={(e) => {
+                      const formatoAudio = e.target.value as 'wav' | 'mp3'
+                      if (!formatoAudio) return
+                      exportar.onExportar({
+                        formato: 'original',
+                        subtitulos: false,
+                        normalizar,
+                        soloAudio: formatoAudio,
+                        ...(hayRango && soloEntradaSalida ? { desde: rango.entrada, hasta: rango.salida } : {})
+                      })
+                    }}
+                    aria-label="Exportar solo el sonido"
+                  >
+                    <option value="">Solo el sonido…</option>
+                    <option value="wav">WAV (sin pérdida)</option>
+                    <option value="mp3">MP3 (liviano)</option>
+                  </select>
+                </label>
               </div>
             )}
       <div className="tl-detalle">
@@ -1816,6 +2111,16 @@ export function TimelineEditor({
             <button className="btn small" onClick={accionBorrar}>
               <Icon name="trash" size={14} /> Borrar los {varios.length}
             </button>
+            {onAnidar && varios.every((v) => v.tipo === 'clip') && clipsSeguidos(timeline, varios.map((v) => v.id)) && (
+              <button
+                className="btn small"
+                disabled={anidando}
+                onClick={() => onAnidar(varios.map((v) => v.id))}
+                title="Junta estos clips en uno solo (como una secuencia anidada): le pones un color, una zona o una rampa a todos juntos. Se puede desanidar."
+              >
+                <Icon name="layers" size={14} /> {anidando ? 'Anidando…' : `Anidar los ${varios.length} en un clip`}
+              </button>
+            )}
           </div>
         ) : clipElegido ? (
           <>
@@ -1843,26 +2148,219 @@ export function TimelineEditor({
             <button className="btn small ghost" onClick={accionBorrar}>
               <Icon name="trash" size={14} /> Borrar
             </button>
+            {onSepararAudio && esVideo(clipElegido.clip.fuente) && !clipElegido.clip.mudo && (
+              <button
+                className="btn small ghost"
+                disabled={separando}
+                onClick={() => onSepararAudio(clipElegido.clip.id)}
+                title="Desvincula el sonido: pasa a la pista de sonidos y lo mueves o recortas aparte de la imagen (para que la voz entre antes o se quede después del corte)."
+              >
+                <Icon name="music" size={14} /> {separando ? 'Separando…' : 'Separar audio'}
+              </button>
+            )}
+            {clipElegido.clip.anidado && (
+              <button
+                className="btn small ghost"
+                onClick={() => historial.aplicar(desanidarClip(timeline, clipElegido.clip.id))}
+                title={`Vuelve a poner los ${clipElegido.clip.anidado.length} clips de dentro (lo que le hiciste al anidado se pierde)`}
+              >
+                <Icon name="layers" size={14} /> Desanidar ({clipElegido.clip.anidado.length})
+              </button>
+            )}
+            {onEstabilizar && esVideo(clipElegido.clip.fuente) && (
+              <button
+                className="btn small ghost"
+                disabled={Boolean(estabilizando)}
+                onClick={() => onEstabilizar(clipElegido.clip.id)}
+                title="Quita el temblor de la cámara (recorta un poco los bordes). Tarda más o menos lo que dura el clip; el original queda en la biblioteca."
+              >
+                <Icon name="velocidad" size={14} /> {estabilizando === clipElegido.clip.id ? 'Estabilizando…' : 'Estabilizar'}
+              </button>
+            )}
             <div className="tl-ajustes">
+              <details className="ed-grupo" open={Boolean(clipElegido.clip.zonas?.length)}>
+                <summary className="ed-seccion">
+                  Tapar una zona
+                  {(clipElegido.clip.zonas?.length ?? 0) < MAX_ZONAS && (
+                    <button
+                      className="ed-seccion-quitar"
+                      title="Difumina o tapa en negro una parte del cuadro (una cara, una placa, un dato). Muévela con los controles."
+                      onClick={(e) => {
+                        e.preventDefault()
+                        const nueva: ZonaTL = { x: 0.5, y: 0.5, ancho: 0.3, alto: 0.3, modo: 'desenfoque', fuerza: 0.6 }
+                        historial.aplicar(cambiarZonas(timeline, clipElegido.clip.id, [...(clipElegido.clip.zonas ?? []), nueva]))
+                        ;(e.currentTarget.closest('details') as HTMLDetailsElement | null)?.setAttribute('open', '')
+                      }}
+                    >
+                      + Añadir
+                    </button>
+                  )}
+                </summary>
+                {!clipElegido.clip.zonas?.length && <p className="tl-dim">Para difuminar una cara, una placa o un dato, o taparlo en negro.</p>}
+                {(clipElegido.clip.zonas ?? []).map((z, k) => {
+                  /** Dónde está la zona en el cabezal (si sigue algo, el punto de su recorrido). */
+                  const zonaEnCabezal = (x: ZonaTL) => {
+                    const en = zonaEn(x, fuenteEnCabezal)
+                    return { x: en.x, y: en.y }
+                  }
+                  const cambiar = (cambio: Partial<ZonaTL>, suave = false) => {
+                    const zonas = (clipElegido.clip.zonas ?? []).map((x, j) => (j === k ? { ...x, ...cambio } : x))
+                    const r = cambiarZonas(timeline, clipElegido.clip.id, zonas)
+                    if (suave) deslizar(r)
+                    else historial.aplicar(r)
+                  }
+                  return (
+                    <div key={k} className="ed-zona">
+                      <div className="ed-zona-cabeza">
+                        <b>Zona {k + 1}</b>
+                        <select value={z.modo} onChange={(e) => cambiar({ modo: e.target.value as ZonaTL['modo'] })} aria-label={`Cómo se tapa la zona ${k + 1}`}>
+                          <option value="desenfoque">Difuminar</option>
+                          <option value="negro">Negro</option>
+                        </select>
+                        <button
+                          className="ed-seccion-quitar"
+                          onClick={() => historial.aplicar(cambiarZonas(timeline, clipElegido.clip.id, (clipElegido.clip.zonas ?? []).filter((_, j) => j !== k)))}
+                        >
+                          Quitar
+                        </button>
+                      </div>
+                      {seguirZona && esVideo(clipElegido.clip.fuente) && (
+                        <div className="ed-zona-seguir">
+                          {z.recorrido ? (
+                            <>
+                              <span className="tl-dim">Sigue lo que tapa ({z.recorrido.length} puntos).</span>
+                              <button className="ed-seccion-quitar" onClick={() => cambiar({ recorrido: undefined, ...zonaEnCabezal(z) })}>
+                                Dejarla quieta
+                              </button>
+                            </>
+                          ) : null}
+                          <button
+                            className="btn small ghost"
+                            disabled={siguiendo !== null}
+                            title="Pon el cabezal donde la zona tapa bien lo que quieres (una cara) y Recorte la hace seguirlo por todo el clip."
+                            onClick={async () => {
+                              const c = clipElegido.clip
+                              const base = zonaEnCabezal(z)
+                              setSiguiendo({ clip: c.id, k })
+                              setAvisoSeguir('')
+                              try {
+                                const r = await seguirZona(c.fuente, { desde: c.entrada, hasta: c.salida, en: fuenteEnCabezal, x: base.x, y: base.y, ancho: z.ancho, alto: z.alto })
+                                const actual = timeline.clips.find((x) => x.id === c.id)
+                                if (!actual?.zonas?.[k]) return
+                                historial.aplicar(cambiarZonas(timeline, c.id, actual.zonas.map((x, j) => (j === k ? { ...x, recorrido: r.recorrido } : x))))
+                                setAvisoSeguir(r.perdido > 0.2 ? `La perdí en el ${Math.round(r.perdido * 100)} % del clip: ahí se queda quieta. Revísala.` : 'Listo: la zona sigue lo que tapa.')
+                              } catch (error) {
+                                setAvisoSeguir(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error))
+                              } finally {
+                                setSiguiendo(null)
+                              }
+                            }}
+                          >
+                            {siguiendo?.clip === clipElegido.clip.id && siguiendo.k === k ? 'Siguiendo…' : z.recorrido ? 'Seguir de nuevo' : 'Seguir lo que tapa'}
+                          </button>
+                          {avisoSeguir && siguiendo === null && <span className="tl-dim">{avisoSeguir}</span>}
+                        </div>
+                      )}
+                      {(
+                        [
+                          // Si sigue algo, su centro lo pone el recorrido: se mueve arrastrándola en el monitor.
+                          ...(z.recorrido ? [] : ([['x', 'Centro ↔', 0, 1], ['y', 'Centro ↕', 0, 1]] as const)),
+                          ['ancho', 'Ancho', 0.02, 1],
+                          ['alto', 'Alto', 0.02, 1],
+                          ...(z.modo === 'desenfoque' ? ([['fuerza', 'Fuerza', 0.1, 1]] as const) : [])
+                        ] as const
+                      ).map(([clave, nombre, min, max]) => (
+                        <label key={clave} className="tl-ajuste">
+                          <span>
+                            {nombre} <b>{Math.round(z[clave] * 100)} %</b>
+                          </span>
+                          <input
+                            type="range"
+                            min={min}
+                            max={max}
+                            step={0.005}
+                            value={z[clave]}
+                            onPointerDown={empezarAjuste}
+                            onFocus={empezarAjuste}
+                            onChange={(e) => cambiar({ [clave]: Number(e.target.value) }, true)}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  )
+                })}
+              </details>
               {esVideo(clipElegido.clip.fuente) && (
                 <>
-                  <span className="ed-seccion">Velocidad</span>
-                  <label className="tl-ajuste" title="Cámara lenta o rápida. El clip dura más o menos, y lo que viene después se corre.">
-                    <span>
-                      Velocidad <b>{velocidadDe(clipElegido.clip).toFixed(2).replace(/\.?0+$/, '')}×</b>
-                    </span>
-                    <input
-                      type="range"
-                      min={LIMITES_VELOCIDAD[0]}
-                      max={LIMITES_VELOCIDAD[1]}
-                      step={0.05}
-                      value={velocidadDe(clipElegido.clip)}
-                      onPointerDown={empezarAjuste}
-                      onFocus={empezarAjuste}
-                      onChange={(e) => deslizar(cambiarVelocidad(timeline, clipElegido.clip.id, Number(e.target.value)))}
-                    />
-                  </label>
-                  <div className="ed-opciones">
+                  <span className="ed-seccion">
+                    Velocidad
+                    {clipElegido.clip.rampa && (
+                      <button className="ed-seccion-quitar" title="Quita la rampa: el clip vuelve a su velocidad fija" onClick={() => historial.aplicar(quitarClaveRampa(timeline, clipElegido.clip.id))}>
+                        Quitar rampa
+                      </button>
+                    )}
+                  </span>
+                  {(() => {
+                    // Rampa de velocidad: con ◆ la velocidad cambia a lo largo del clip (cámara lenta que entra y sale).
+                    const rampa = clipElegido.clip.rampa ?? []
+                    const aqui = rampa.find((x) => Math.abs(x.f - fuenteEnCabezal) < 0.034)
+                    const v = rampa.length ? velocidadEnFuente(clipElegido.clip, fuenteEnCabezal) : velocidadDe(clipElegido.clip)
+                    return (
+                      <label
+                        className={`tl-ajuste ${rampa.length ? 'con-claves' : ''}`}
+                        title={
+                          rampa.length
+                            ? 'Rampa de velocidad: el valor es el del cabezal. Mueve el cabezal y cambia la velocidad para poner otra clave. El sonido del clip se calla.'
+                            : 'Cámara lenta o rápida. El clip dura más o menos, y lo que viene después se corre.'
+                        }
+                      >
+                        <span>
+                          <span className="tl-ajuste-nombre">
+                            Velocidad
+                            <span className="ed-claves" onClick={(e) => e.preventDefault()}>
+                              <button
+                                className={`ed-clave ${aqui ? 'is-on' : rampa.length ? 'is-animado' : ''}`}
+                                aria-pressed={Boolean(aqui)}
+                                aria-label={aqui ? 'Quitar la clave de velocidad' : 'Poner una clave de velocidad'}
+                                title={
+                                  aqui
+                                    ? 'Quitar esta clave de la rampa'
+                                    : 'Rampa de velocidad: pone una clave en el cabezal. Mueve el cabezal, cambia la velocidad y el clip acelera o frena suave entre las claves.'
+                                }
+                                onClick={() =>
+                                  historial.aplicar(
+                                    aqui
+                                      ? quitarClaveRampa(timeline, clipElegido.clip.id, aqui.f)
+                                      : ponerClaveRampa(timeline, clipElegido.clip.id, fuenteEnCabezal, v)
+                                  )
+                                }
+                              >
+                                ◆
+                              </button>
+                            </span>
+                          </span>
+                          <b>{v.toFixed(2).replace(/\.?0+$/, '')}×</b>
+                        </span>
+                        <input
+                          type="range"
+                          min={LIMITES_VELOCIDAD[0]}
+                          max={LIMITES_VELOCIDAD[1]}
+                          step={0.05}
+                          value={v}
+                          onPointerDown={empezarAjuste}
+                          onFocus={empezarAjuste}
+                          onChange={(e) =>
+                            deslizar(
+                              rampa.length
+                                ? ponerClaveRampa(timeline, clipElegido.clip.id, fuenteEnCabezal, Number(e.target.value))
+                                : cambiarVelocidad(timeline, clipElegido.clip.id, Number(e.target.value))
+                            )
+                          }
+                        />
+                      </label>
+                    )
+                  })()}
+                  {!clipElegido.clip.rampa && <div className="ed-opciones">
                     {[0.25, 0.5, 1, 1.5, 2, 4].map((v) => (
                       <button
                         key={v}
@@ -1872,7 +2370,7 @@ export function TimelineEditor({
                         {v}×
                       </button>
                     ))}
-                  </div>
+                  </div>}
                 </>
               )}
               {esVideo(clipElegido.clip.fuente) && !clipElegido.clip.mudo && (
@@ -1880,7 +2378,7 @@ export function TimelineEditor({
                   <span className="ed-seccion">
                     Sonido
                     {clipElegido.clip.sonido && (
-                      <button className="btn small ghost" title="Deja el sonido como viene" onClick={() => historial.aplicar(ajustarSonidoClip(timeline, clipElegido.clip.id, { volumen: 1, entra: 0, sale: 0, limpio: 0 }))}>
+                      <button className="btn small ghost" title="Deja el sonido como viene" onClick={() => historial.aplicar(ajustarSonidoClip(timeline, clipElegido.clip.id, { volumen: 1, entra: 0, sale: 0, limpio: 0, realce: 0 }))}>
                         Restablecer
                       </button>
                     )}
@@ -1890,25 +2388,64 @@ export function TimelineEditor({
                       ['volumen', 'Volumen', 0, 1.5, 0.01, (v: number) => `${Math.round(v * 100)} %`, 'Más de 100 % solo se oye en el video exportado'],
                       ['entra', 'Entra fundiéndose', 0, Math.min(5, clipElegido.fin - clipElegido.inicio), 0.05, (v: number) => (v ? `${v.toFixed(1)} s` : 'no'), 'El sonido sube desde el silencio al empezar el clip'],
                       ['sale', 'Sale fundiéndose', 0, Math.min(5, clipElegido.fin - clipElegido.inicio), 0.05, (v: number) => (v ? `${v.toFixed(1)} s` : 'no'), 'El sonido baja al silencio al acabar el clip'],
-                      ['limpio', 'Quitar ruido de fondo', 0, 1, 0.05, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no'), 'Quita el zumbido, el aire o el siseo. Se oye en el video exportado, no en el monitor']
+                      ['limpio', 'Quitar ruido de fondo', 0, 1, 0.05, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no'), 'Quita el zumbido, el aire o el siseo. Se oye en el video exportado, no en el monitor'],
+                      ['realce', 'Mejorar voz', 0, 1, 0.05, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no'), 'Más clara y pareja: quita los graves que retumban, empareja lo fuerte y lo suave y le da presencia. Se oye en el video exportado, no en el monitor']
                     ] as const
-                  ).map(([clave, nombre, min, max, paso, formato, ayuda]) => (
-                    <label key={clave} className="tl-ajuste en-linea" title={ayuda}>
-                      <span>
-                        {nombre} <b>{formato(sonidoDe(clipElegido.clip)[clave])}</b>
-                      </span>
-                      <input
-                        type="range"
-                        min={min}
-                        max={max}
-                        step={paso}
-                        value={sonidoDe(clipElegido.clip)[clave]}
-                        onPointerDown={empezarAjuste}
-                        onFocus={empezarAjuste}
-                        onChange={(e) => deslizar(ajustarSonidoClip(timeline, clipElegido.clip.id, { [clave]: Number(e.target.value) }))}
-                      />
-                    </label>
-                  ))}
+                  ).map(([clave, nombre, min, max, paso, formato, ayuda]) => {
+                    // El volumen se anima con fotogramas clave (◆), como el de Premiere.
+                    const claves = clave === 'volumen' ? (clipElegido.clip.clavesVolumen ?? []) : []
+                    const aqui = claves.find((x) => Math.abs(x.f - fuenteEnCabezal) < 0.034)
+                    const valor = claves.length ? valorClave(claves, fuenteEnCabezal) : sonidoDe(clipElegido.clip)[clave]
+                    return (
+                      <label key={clave} className={`tl-ajuste en-linea ${claves.length ? 'con-claves' : ''}`} title={ayuda}>
+                        <span>
+                          <span className="tl-ajuste-nombre">
+                            {nombre}
+                            {clave === 'volumen' && (
+                              <span className="ed-claves" onClick={(e) => e.preventDefault()}>
+                                <button
+                                  className={`ed-clave ${aqui ? 'is-on' : claves.length ? 'is-animado' : ''}`}
+                                  aria-pressed={Boolean(aqui)}
+                                  aria-label={aqui ? 'Quitar la clave de volumen' : 'Poner una clave de volumen'}
+                                  title={
+                                    aqui
+                                      ? 'Quitar este fotograma clave del volumen'
+                                      : 'Animar el volumen: pone una clave en el cabezal. Mueve el cabezal, cambia el volumen y sube o baja solo (para bajar la música de un clip bajo una frase, por ejemplo).'
+                                  }
+                                  onClick={() =>
+                                    historial.aplicar(
+                                      aqui
+                                        ? quitarClaveVolumen(timeline, clipElegido.clip.id, aqui.f)
+                                        : ponerClaveVolumen(timeline, clipElegido.clip.id, fuenteEnCabezal, valor)
+                                    )
+                                  }
+                                >
+                                  ◆
+                                </button>
+                              </span>
+                            )}
+                          </span>
+                          <b>{formato(valor)}</b>
+                        </span>
+                        <input
+                          type="range"
+                          min={min}
+                          max={max}
+                          step={paso}
+                          value={valor}
+                          onPointerDown={empezarAjuste}
+                          onFocus={empezarAjuste}
+                          onChange={(e) =>
+                            deslizar(
+                              claves.length
+                                ? ponerClaveVolumen(timeline, clipElegido.clip.id, fuenteEnCabezal, Number(e.target.value))
+                                : ajustarSonidoClip(timeline, clipElegido.clip.id, { [clave]: Number(e.target.value) })
+                            )
+                          }
+                        />
+                      </label>
+                    )
+                  })}
                 </>
               )}
               {(
@@ -1981,7 +2518,7 @@ export function TimelineEditor({
                   ]
                 ] as const
               ).map(([grupo, filas]) => (
-                <details key={grupo} className="ed-grupo" open={grupo === 'Encuadre' || grupo === 'Color' || filas.some(([clave]) => clipElegido.clip.ajustes?.[clave] !== undefined)}>
+                <details key={grupo} className="ed-grupo" open={grupo === 'Encuadre' || grupo === 'Color' || filas.some(([clave]) => clipElegido.clip.ajustes?.[clave] !== undefined || Boolean((clipElegido.clip.claves as Record<string, unknown> | undefined)?.[clave]))}>
                   <summary className="ed-seccion">
                     {grupo}
                     {grupo !== 'Encuadre' && grupo !== 'Cámara' && filas.some(([clave]) => clipElegido.clip.ajustes?.[clave] !== undefined) && (
@@ -2002,7 +2539,7 @@ export function TimelineEditor({
                 const lista = esClave(clave) ? (clipElegido.clip.claves?.[clave] ?? []) : []
                 const aqui = esClave(clave) ? claveEn(clipElegido.clip, clave, fuenteEnCabezal) : undefined
                 // A qué segundo de la timeline cae una clave (para saltar a ella).
-                const aTimeline = (f: number) => clipElegido.inicio + (f - clipElegido.clip.entrada) / velocidadDe(clipElegido.clip)
+                const aTimeline = (f: number) => clipElegido.inicio + clipEnFuente(clipElegido.clip, f)
                 const anterior = [...lista].reverse().find((x) => x.f < fuenteEnCabezal - 0.02)
                 const siguiente = lista.find((x) => x.f > fuenteEnCabezal + 0.02)
                 return (
@@ -2305,20 +2842,87 @@ export function TimelineEditor({
                 ))}
               </select></label>
             )}
-            {onQuitarFondo && medios?.find((m) => m.id === capaElegida.fuente)?.tipo === 'imagen' && (
+            {onQuitarFondo && medios?.find((m) => m.id === capaElegida.fuente) && (
               <button
                 className="btn small ghost"
                 disabled={quitandoFondo}
                 onClick={() => onQuitarFondo(capaElegida.id)}
-                title="Deja solo a la persona o al objeto. Un fondo liso sale al momento; con cualquier otra foto usa un modelo (la primera vez se baja: 178 MB)."
+                title={
+                  medios?.find((m) => m.id === capaElegida.fuente)?.tipo === 'video'
+                    ? 'Llave de color: quita el fondo verde de este video (croma) y lo deja transparente sobre lo de abajo. Tarda lo que dura el video.'
+                    : 'Deja solo a la persona o al objeto. Un fondo liso sale al momento; con cualquier otra foto usa un modelo (la primera vez se baja: 178 MB).'
+                }
               >
-                {quitandoFondo ? 'Quitando el fondo…' : 'Quitar fondo'}
+                {quitandoFondo ? 'Quitando el fondo…' : medios?.find((m) => m.id === capaElegida.fuente)?.tipo === 'video' ? 'Quitar fondo verde' : 'Quitar fondo'}
               </button>
             )}
             <span className="tl-dim">
               {tc(capaElegida.inicio)} · {capaElegida.duracion.toFixed(1)} s ·{' '}
               {capaElegida.fin ? 'en pausa, la silueta punteada es dónde termina: arrástrala' : 'arrástrala en el monitor'}
             </span>
+            <span className="tl-flex" />
+            <button className="btn small ghost" onClick={accionBorrar}>
+              <Icon name="trash" size={14} /> Quitar
+            </button>
+          </>
+        ) : ajusteElegido ? (
+          <>
+            <b>Capa de ajuste</b>
+            <span className="tl-dim">
+              {tc(ajusteElegido.inicio)} · {ajusteElegido.duracion.toFixed(1)} s · vale para el video y las capas de abajo, no para los textos
+            </span>
+            <div className="ed-opciones">
+              {(
+                [
+                  ['Blanco y negro', { saturacion: 0, contraste: 1.1 }],
+                  ['Cálido', { temperatura: 0.5, saturacion: 1.1 }],
+                  ['Frío', { temperatura: -0.5 }],
+                  ['Oscurecer', { exposicion: -1 }],
+                  ['Desenfocar', { desenfoque: 0.5 }],
+                  ['Nada', {}]
+                ] as const
+              ).map(([nombre, aj]) => (
+                <button key={nombre} className="chip" onClick={() => historial.aplicar(cambiarAjusteCapa(timeline, ajusteElegido.id, { ajustes: { ...aj } }))}>
+                  {nombre}
+                </button>
+              ))}
+            </div>
+            <div className="tl-ajustes">
+              {AJUSTES_DE_CAPA.map((k: AjusteDeCapa) => {
+                const [min, max, neutro] = LIMITES_AJUSTES[k]
+                const v = ajusteElegido.ajustes[k] ?? neutro
+                const nombres: Record<AjusteDeCapa, string> = {
+                  exposicion: 'Exposición',
+                  contraste: 'Contraste',
+                  altas: 'Altas luces',
+                  sombras: 'Sombras',
+                  blancos: 'Blancos',
+                  negros: 'Negros',
+                  saturacion: 'Saturación',
+                  temperatura: 'Temperatura',
+                  tinte: 'Tinte',
+                  brillo: 'Brillo',
+                  desenfoque: 'Desenfoque'
+                }
+                return (
+                  <label key={k} className="tl-ajuste">
+                    <span>
+                      {nombres[k]} <b>{Math.round(v * 100) / 100}</b>
+                    </span>
+                    <input
+                      type="range"
+                      min={min}
+                      max={max}
+                      step={0.01}
+                      value={v}
+                      onPointerDown={empezarAjuste}
+                      onFocus={empezarAjuste}
+                      onChange={(e) => deslizar(cambiarAjusteCapa(timeline, ajusteElegido.id, { ajustes: { ...ajusteElegido.ajustes, [k]: Number(e.target.value) } }))}
+                    />
+                  </label>
+                )
+              })}
+            </div>
             <span className="tl-flex" />
             <button className="btn small ghost" onClick={accionBorrar}>
               <Icon name="trash" size={14} /> Quitar

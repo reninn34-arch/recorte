@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { duracionTimeline, tramos, tramosDeVoces, ubicar, vozEnTimeline, type Timeline , velocidadDe } from '../../../shared/timeline'
+import { duracionTimeline, tramos, tramosDeVoces, ubicar, vozEnTimeline, type Timeline , velocidadDe, clipEnFuente, velocidadEnFuente } from '../../../shared/timeline'
 import type { TranscriptSegment } from '../../../shared/types'
 
 const LIMITE_HISTORIAL = 200
@@ -12,6 +12,10 @@ export interface Historial {
   rehacer: () => void
   puedeDeshacer: boolean
   puedeRehacer: boolean
+  /** Todos los pasos, del más viejo al más nuevo (para el panel de historial), y cuál es el actual. */
+  pasos: () => { timelines: Timeline[]; cuando: number[]; actual: number }
+  /** Va a cualquier paso de la lista (deshaciendo o rehaciendo los que haga falta). */
+  irA: (indice: number) => void
 }
 
 /**
@@ -22,6 +26,10 @@ export interface Historial {
 export function useHistorial(actual: Timeline, onCambiar: (t: Timeline) => void, clave: string): Historial {
   const pasado = useRef<Timeline[]>([])
   const futuro = useRef<Timeline[]>([])
+  // Cuándo se hizo cada paso (el de `actual` en `ahora`), para el panel de historial.
+  const horasPasado = useRef<number[]>([])
+  const horasFuturo = useRef<number[]>([])
+  const ahora = useRef(Date.now())
   const actualRef = useRef(actual)
   actualRef.current = actual
   const cambiarRef = useRef(onCambiar)
@@ -31,14 +39,23 @@ export function useHistorial(actual: Timeline, onCambiar: (t: Timeline) => void,
   useEffect(() => {
     pasado.current = []
     futuro.current = []
+    horasPasado.current = []
+    horasFuturo.current = []
+    ahora.current = Date.now()
     refrescar()
   }, [clave])
 
   const aplicar = useCallback((nueva: Timeline) => {
     if (nueva === actualRef.current) return
     pasado.current.push(actualRef.current)
-    if (pasado.current.length > LIMITE_HISTORIAL) pasado.current.shift()
+    horasPasado.current.push(ahora.current)
+    ahora.current = Date.now()
+    if (pasado.current.length > LIMITE_HISTORIAL) {
+      pasado.current.shift()
+      horasPasado.current.shift()
+    }
     futuro.current = []
+    horasFuturo.current = []
     actualRef.current = nueva
     cambiarRef.current(nueva)
     refrescar()
@@ -55,6 +72,8 @@ export function useHistorial(actual: Timeline, onCambiar: (t: Timeline) => void,
     const previa = pasado.current.pop()
     if (!previa) return
     futuro.current.push(actualRef.current)
+    horasFuturo.current.push(ahora.current)
+    ahora.current = horasPasado.current.pop() ?? Date.now()
     actualRef.current = previa
     cambiarRef.current(previa)
     refrescar()
@@ -64,8 +83,42 @@ export function useHistorial(actual: Timeline, onCambiar: (t: Timeline) => void,
     const siguiente = futuro.current.pop()
     if (!siguiente) return
     pasado.current.push(actualRef.current)
+    horasPasado.current.push(ahora.current)
+    ahora.current = horasFuturo.current.pop() ?? Date.now()
     actualRef.current = siguiente
     cambiarRef.current(siguiente)
+    refrescar()
+  }, [])
+
+  const pasos = useCallback(
+    () => ({
+      timelines: [...pasado.current, actualRef.current, ...[...futuro.current].reverse()],
+      cuando: [...horasPasado.current, ahora.current, ...[...horasFuturo.current].reverse()],
+      actual: pasado.current.length
+    }),
+    []
+  )
+
+  const irA = useCallback((indice: number) => {
+    // Un paso a la vez: así el futuro y el pasado quedan bien ordenados para seguir deshaciendo o rehaciendo.
+    let actual = pasado.current.length
+    while (actual > indice && pasado.current.length) {
+      const previa = pasado.current.pop()!
+      futuro.current.push(actualRef.current)
+      horasFuturo.current.push(ahora.current)
+      ahora.current = horasPasado.current.pop() ?? Date.now()
+      actualRef.current = previa
+      actual--
+    }
+    while (actual < indice && futuro.current.length) {
+      const siguiente = futuro.current.pop()!
+      pasado.current.push(actualRef.current)
+      horasPasado.current.push(ahora.current)
+      ahora.current = horasFuturo.current.pop() ?? Date.now()
+      actualRef.current = siguiente
+      actual++
+    }
+    cambiarRef.current(actualRef.current)
     refrescar()
   }, [])
 
@@ -75,7 +128,9 @@ export function useHistorial(actual: Timeline, onCambiar: (t: Timeline) => void,
     deshacer,
     rehacer,
     puedeDeshacer: pasado.current.length > 0,
-    puedeRehacer: futuro.current.length > 0
+    puedeRehacer: futuro.current.length > 0,
+    pasos,
+    irA
   }
 }
 
@@ -234,10 +289,11 @@ export function useReproductor(timeline: Timeline, clave: string, fuentes: Fuent
           if (video.currentTime >= tramo.clip.salida - 0.015 || video.ended || (casiAlFinal && video.paused)) {
             if (!siguiente(lista, tramo.fin)) return
           } else if (video.currentTime >= tramo.clip.entrada - 0.05) {
-            tiempoRef.current = tramo.inicio + Math.max(0, video.currentTime - tramo.clip.entrada) / velocidadDe(tramo.clip)
+            tiempoRef.current = tramo.inicio + clipEnFuente(tramo.clip, Math.max(tramo.clip.entrada, video.currentTime))
           }
-          // Cámara lenta o rápida: el video corre a la velocidad del clip.
-          if (Math.abs(video.playbackRate - velocidadDe(tramo.clip)) > 0.001) video.playbackRate = velocidadDe(tramo.clip)
+          // Cámara lenta o rápida: el video corre a la velocidad del clip (con rampa, la de este momento).
+          const vel = velocidadEnFuente(tramo.clip, video.currentTime)
+          if (Math.abs(video.playbackRate - vel) > 0.005) video.playbackRate = vel
         }
       }
       setTiempo(tiempoRef.current)

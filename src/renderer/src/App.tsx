@@ -686,9 +686,10 @@ export default function App() {
       const resultado = await window.recorte.exportarTimeline(id, proyecto.timeline, opciones)
       if (resultado.ok && resultado.output) {
         // Solo se toma la salida: la timeline pudo cambiar mientras se exportaba.
-        setProyecto((p) => (p && p.id === id ? { ...p, timelineSalida: resultado.output } : p))
+        // El sonido solo no reemplaza al último video exportado.
+        if (!opciones.soloAudio) setProyecto((p) => (p && p.id === id ? { ...p, timelineSalida: resultado.output } : p))
         setAviso(`Guardado en ${resultado.output}`)
-        avisarFin('Tu video exportado está listo.')
+        avisarFin(opciones.soloAudio ? 'Tu sonido exportado está listo.' : 'Tu video exportado está listo.')
       } else {
         setAviso(resultado.error ?? 'No pude exportar la timeline.')
       }

@@ -40,6 +40,17 @@ export interface ClipTL {
   fundido?: number
   /** Cómo entra en esos segundos: barrido, zoom, desenfoque, destello, círculo (sin él, fundido). */
   transicion?: TransicionClip
+  /** Fotogramas clave del volumen de su sonido (f: segundo de la fuente; v: 0 a 1.5), como en Premiere. */
+  clavesVolumen?: ClaveTL[]
+  /** Zonas tapadas del clip (una cara, una placa, un dato): difuminadas o en negro, en el monitor y en el MP4. */
+  zonas?: ZonaTL[]
+  /**
+   * Rampa de velocidad (el «Reasignación de tiempo» de Premiere): la velocidad en cada segundo de la fuente
+   * (f), de 0.1 a 4, suave entre claves. Manda sobre `velocidad`; el sonido del clip se calla.
+   */
+  rampa?: ClaveTL[]
+  /** Si es un anidado (varios clips hechos uno, como una secuencia anidada de Premiere): los clips de dentro. */
+  anidado?: ClipTL[]
 }
 
 export const MAX_FUNDIDO = 1.5
@@ -54,8 +65,10 @@ export interface SonidoClip {
   sale?: number
   /** Quitar el ruido de fondo (el zumbido, el aire, el siseo): 0 (nada) a 1 (fuerte). Se oye en el MP4. */
   limpio?: number
+  /** Mejorar la voz (como «Diálogo» de Premiere): quita graves que retumban, la empareja y la aclara. 0 a 1. */
+  realce?: number
 }
-export const LIMITES_SONIDO_CLIP = { volumen: [0, 1.5, 1], entra: [0, 5, 0], sale: [0, 5, 0], limpio: [0, 1, 0] } as const satisfies Record<keyof SonidoClip, readonly [number, number, number]>
+export const LIMITES_SONIDO_CLIP = { volumen: [0, 1.5, 1], entra: [0, 5, 0], sale: [0, 5, 0], limpio: [0, 1, 0], realce: [0, 1, 0] } as const satisfies Record<keyof SonidoClip, readonly [number, number, number]>
 
 /** Cómo entra un clip sobre el anterior (con `fundido` = lo que dura). Sin tipo, un fundido cruzado. */
 export type TransicionClip =
@@ -189,6 +202,122 @@ export const LIMITES_AJUSTES = {
   recorteAba: [0, 0.45, 0]
 } as const satisfies Record<keyof AjustesClip, readonly [number, number, number]>
 
+/** Una zona tapada de un clip: un rectángulo del cuadro (en fracciones, con su centro en x, y). */
+export interface ZonaTL {
+  x: number
+  y: number
+  ancho: number
+  alto: number
+  /** desenfoque (difumina) o negro (tapa del todo). */
+  modo: 'desenfoque' | 'negro'
+  /** Cuánto se difumina, 0.1 a 1. */
+  fuerza: number
+  /** Si sigue algo que se mueve: su centro en cada segundo de la fuente (lo calcula el seguidor). */
+  recorrido?: PuntoRecorrido[]
+}
+export interface PuntoRecorrido {
+  f: number
+  x: number
+  y: number
+}
+export const MAX_ZONAS = 3
+
+/** El centro de una zona en el segundo `f` de la fuente: el de su recorrido (interpolado) o el fijo. */
+export function zonaEn(z: ZonaTL, f: number): ZonaTL {
+  const r = z.recorrido
+  if (!r?.length) return z
+  if (f <= r[0].f) return { ...z, x: r[0].x, y: r[0].y }
+  const ultimo = r[r.length - 1]
+  if (f >= ultimo.f) return { ...z, x: ultimo.x, y: ultimo.y }
+  let lo = 0
+  let hi = r.length - 1
+  while (hi - lo > 1) {
+    const m = (lo + hi) >> 1
+    if (r[m].f <= f) lo = m
+    else hi = m
+  }
+  const k = (f - r[lo].f) / Math.max(1e-6, r[hi].f - r[lo].f)
+  return { ...z, x: r[lo].x + (r[hi].x - r[lo].x) * k, y: r[lo].y + (r[hi].y - r[lo].y) * k }
+}
+
+export function normalizarZonas(entrada: unknown): ZonaTL[] | undefined {
+  if (!Array.isArray(entrada)) return undefined
+  const zonas: ZonaTL[] = []
+  for (const z of entrada) {
+    if (!z || typeof z !== 'object') continue
+    const n = (v: unknown, min: number, max: number, def: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(pinza(v, min, max) * 1000) / 1000 : def)
+    const zona = z as Partial<ZonaTL>
+    zonas.push({
+      x: n(zona.x, 0, 1, 0.5),
+      y: n(zona.y, 0, 1, 0.5),
+      ancho: n(zona.ancho, 0.02, 1, 0.3),
+      alto: n(zona.alto, 0.02, 1, 0.3),
+      modo: zona.modo === 'negro' ? 'negro' : 'desenfoque',
+      fuerza: n(zona.fuerza, 0.1, 1, 0.6),
+      ...(Array.isArray(zona.recorrido) && zona.recorrido.length
+        ? {
+            recorrido: zona.recorrido
+              .filter((p) => p && [p.f, p.x, p.y].every((v) => typeof v === 'number' && Number.isFinite(v)))
+              .map((p) => ({ f: Math.round(Math.max(0, p.f) * 1000) / 1000, x: Math.round(pinza(p.x, 0, 1) * 10000) / 10000, y: Math.round(pinza(p.y, 0, 1) * 10000) / 10000 }))
+              .sort((a, b) => a.f - b.f)
+              .slice(0, 6000)
+          }
+        : {})
+    })
+  }
+  return zonas.length ? zonas.slice(0, MAX_ZONAS) : undefined
+}
+
+/** Cambia las zonas tapadas de un clip (sin ninguna, se quitan). */
+export function cambiarZonas(tl: Timeline, id: string, zonas: ZonaTL[]): Timeline {
+  return {
+    ...tl,
+    clips: tl.clips.map((c) => {
+      if (c.id !== id) return c
+      const { zonas: _z, ...resto } = c
+      const z = normalizarZonas(zonas)
+      return z ? { ...resto, zonas: z } : resto
+    })
+  }
+}
+
+/** El rectángulo de una zona en píxeles de un cuadro de `ancho`×`alto` (pares y dentro del cuadro). */
+export function zonaEnPixeles(z: ZonaTL, ancho: number, alto: number): { x: number; y: number; w: number; h: number } {
+  const w = Math.max(2, Math.min(ancho, Math.round((z.ancho * ancho) / 2) * 2))
+  const h = Math.max(2, Math.min(alto, Math.round((z.alto * alto) / 2) * 2))
+  const x = Math.max(0, Math.min(ancho - w, Math.round(z.x * ancho - w / 2)))
+  const y = Math.max(0, Math.min(alto - h, Math.round(z.y * alto - h / 2)))
+  return { x, y, w, h }
+}
+
+/**
+ * El clip pasa a usar otra fuente que es un trozo de la suya (la toma estabilizada empieza en `desde` de la original):
+ * se conservan su duración, sus ajustes y sus fotogramas clave, corridos a la fuente nueva.
+ */
+export function cambiarATramo(tl: Timeline, id: string, fuente: FuenteId, desde: number): Timeline {
+  const corre = (lista: ClaveTL[] | undefined) => lista?.map((x) => ({ ...x, f: Math.max(0, x.f - desde) }))
+  const correZonas = (zonas: ZonaTL[] | undefined) =>
+    zonas?.map((z) => (z.recorrido ? { ...z, recorrido: z.recorrido.map((p) => ({ ...p, f: Math.max(0, p.f - desde) })) } : z))
+  return {
+    ...tl,
+    clips: tl.clips.map((c) => {
+      if (c.id !== id) return c
+      const claves = c.claves
+        ? (Object.fromEntries(Object.entries(c.claves).map(([k, v]) => [k, corre(v as ClaveTL[])])) as ClavesClip)
+        : undefined
+      return {
+        ...c,
+        fuente,
+        entrada: Math.max(0, c.entrada - desde),
+        salida: Math.max(DURACION_MINIMA, c.salida - desde),
+        ...(claves ? { claves } : {}),
+        ...(c.clavesVolumen ? { clavesVolumen: corre(c.clavesVolumen) } : {}),
+        ...(c.zonas ? { zonas: correZonas(c.zonas) } : {})
+      }
+    })
+  }
+}
+
 /** Una pista de música bajo toda la edición (se repite si es corta y se funde al final). */
 export interface MusicaTL {
   /** Ruta relativa dentro de la carpeta del proyecto (p. ej. `media/musica.mp3`). */
@@ -227,6 +356,8 @@ export interface TextoTL {
   fuente?: string
   /** Cómo aparece: palabra a palabra, letra a letra (máquina), con rebote (pop) o subiendo. Sin ella, de golpe. */
   animacion?: AnimacionTexto
+  /** Un subtítulo hecho desde la voz (se rehacen todos juntos con otro estilo). */
+  subtitulo?: boolean
 }
 
 export type AnimacionTexto = 'palabras' | 'maquina' | 'pop' | 'subir'
@@ -449,9 +580,17 @@ export interface SonidoTL {
   nombre: string
   /** 0 a 1.5; sin él, 0.6 (por debajo de la voz). */
   volumen?: number
+  /** En qué pista de sonidos va (1 a PISTAS_SONIDOS, para encimar efectos); sin ella, la 1. */
+  pista?: number
+  /** Desde qué segundo del archivo suena (al recortarle el principio); sin él, desde 0. */
+  desde?: number
+  /** Lo que dura el archivo entero (hasta dónde se puede alargar al recortar). */
+  largo?: number
 }
 
 export const VOLUMEN_SONIDO = 0.6
+/** Cuántas pistas de efectos de sonido puede haber (como las de audio de Premiere). */
+export const PISTAS_SONIDOS = 3
 
 export interface Timeline {
   version: 1
@@ -470,6 +609,115 @@ export interface Timeline {
   filtros?: FiltrosTL
   /** Marcas en la regla para ubicarse (no salen en el video). */
   marcadores?: MarcadorTL[]
+  /** Multicámara: las tomas de la misma escena, sincronizadas, para cortar entre ellas. */
+  multicam?: MulticamTL
+  /** Capas de ajuste: tramos que cambian el color o desenfocan todo lo de abajo (el video y las capas, no los textos). */
+  ajustesCapa?: CapaAjusteTL[]
+}
+
+/** Lo que puede hacer una capa de ajuste (los ajustes de color del clip, y desenfocar). */
+export const AJUSTES_DE_CAPA = ['exposicion', 'contraste', 'altas', 'sombras', 'blancos', 'negros', 'saturacion', 'temperatura', 'tinte', 'brillo', 'desenfoque'] as const
+export type AjusteDeCapa = (typeof AJUSTES_DE_CAPA)[number]
+
+/** Una capa de ajuste (como la de Premiere): de `inicio` a `inicio + duracion`, sus ajustes valen para todo lo de abajo. */
+export interface CapaAjusteTL {
+  id: string
+  inicio: number
+  duracion: number
+  ajustes: Partial<Record<AjusteDeCapa, number>>
+}
+
+export function normalizarAjustesCapa(entrada: unknown, total: number): CapaAjusteTL[] {
+  const salida: CapaAjusteTL[] = []
+  for (const x of Array.isArray(entrada) ? (entrada as Partial<CapaAjusteTL>[]) : []) {
+    if (!x || typeof x.inicio !== 'number' || typeof x.duracion !== 'number') continue
+    const inicio = pinza(x.inicio, 0, Math.max(0, total - DURACION_MINIMA))
+    const duracion = pinza(x.duracion, DURACION_MINIMA, Math.max(DURACION_MINIMA, total - inicio))
+    const todos = normalizarAjustes(x.ajustes) ?? {}
+    const ajustes = Object.fromEntries(AJUSTES_DE_CAPA.filter((k) => todos[k] !== undefined).map((k) => [k, todos[k]!])) as CapaAjusteTL['ajustes']
+    salida.push({ id: typeof x.id === 'string' && x.id ? x.id : nuevoId('ajuste'), inicio, duracion, ajustes })
+  }
+  return salida.sort((a, b) => a.inicio - b.inicio).slice(0, 50)
+}
+
+/** Añade una capa de ajuste en `inicio` (5 s, o lo que quede). */
+export function anadirAjusteCapa(tl: Timeline, inicio: number, ajustes: CapaAjusteTL['ajustes'] = { saturacion: 0.6 }): { timeline: Timeline; id: string } {
+  const total = duracionTimeline(tl)
+  const id = nuevoId('ajuste')
+  const lista = normalizarAjustesCapa([...(tl.ajustesCapa ?? []), { id, inicio, duracion: Math.min(5, Math.max(DURACION_MINIMA, total - inicio)), ajustes }], total)
+  return { timeline: { ...tl, ajustesCapa: lista }, id }
+}
+
+export function cambiarAjusteCapa(tl: Timeline, id: string, cambio: Partial<Omit<CapaAjusteTL, 'id'>>): Timeline {
+  if (!tl.ajustesCapa?.some((x) => x.id === id)) return tl
+  return { ...tl, ajustesCapa: normalizarAjustesCapa(tl.ajustesCapa.map((x) => (x.id === id ? { ...x, ...cambio } : x)), duracionTimeline(tl)) }
+}
+
+export function borrarAjusteCapa(tl: Timeline, id: string): Timeline {
+  const quedan = (tl.ajustesCapa ?? []).filter((x) => x.id !== id)
+  const { ajustesCapa: _a, ...resto } = tl
+  return quedan.length ? { ...resto, ajustesCapa: quedan } : resto
+}
+
+/** Los ajustes de una capa de ajuste como ajustes completos de clip (lo que no tiene, neutro). */
+export function ajustesDeCapa(x: CapaAjusteTL): Required<AjustesClip> {
+  return { ...ajustesDe(undefined), ...x.ajustes }
+}
+
+/**
+ * Las tomas de una multicámara (hasta 9). `desfase`: dónde está en esa toma lo que en la primera pasa en el segundo 0
+ * (el sonido que en la primera está en t, en esta está en t + desfase).
+ */
+export interface MulticamTL {
+  angulos: { fuente: FuenteId; desfase: number; nombre?: string }[]
+}
+export const MAX_ANGULOS = 9
+
+export function normalizarMulticam(entrada: unknown, existen: (fuente: string) => boolean): MulticamTL | undefined {
+  const x = entrada as Partial<MulticamTL> | undefined
+  if (!x || !Array.isArray(x.angulos)) return undefined
+  const angulos = x.angulos
+    .filter((a) => a && typeof a.fuente === 'string' && existen(a.fuente) && typeof a.desfase === 'number' && Number.isFinite(a.desfase))
+    .map((a) => ({ fuente: a.fuente, desfase: Math.round(a.desfase * 1000) / 1000, ...(typeof a.nombre === 'string' && a.nombre ? { nombre: a.nombre.slice(0, 40) } : {}) }))
+    .filter((a, i, todos) => todos.findIndex((b) => b.fuente === a.fuente) === i)
+    .slice(0, MAX_ANGULOS)
+  return angulos.length >= 2 ? { angulos } : undefined
+}
+
+/**
+ * Cortar a otra toma en el segundo `t` (como apretar 1, 2, 3… en el monitor multicámara de Premiere): desde ahí, el
+ * clip muestra la toma `n` en el mismo momento de la escena, hasta su final. Si `t` está en el principio del clip,
+ * cambia el clip entero.
+ */
+export function cambiarAngulo(tl: Timeline, t: number, n: number, duracionDe: (fuente: FuenteId) => number): Timeline {
+  const mc = tl.multicam
+  const destino = mc?.angulos[n]
+  const u = ubicar(tl, t)
+  if (!mc || !destino || !u || u.clip.rampa) return tl
+  const origen = mc.angulos.find((a) => a.fuente === u.clip.fuente)
+  if (!origen || origen.fuente === destino.fuente) return tl
+  const enEscena = u.tFuente - origen.desfase
+  const alInicio = t - u.inicio < 1 / 30
+  const base = alInicio ? tl : dividir(tl, t)
+  const indice = alInicio ? u.indice : u.indice + 1
+  const pieza = base.clips[indice]
+  if (!pieza || (!alInicio && base === tl)) return tl
+  const largoFuente = pieza.salida - pieza.entrada
+  // El mismo momento de la escena en la otra toma: desde el principio del clip, o desde el cabezal.
+  const desde = (alInicio ? u.clip.entrada : enEscena + origen.desfase) - origen.desfase + destino.desfase
+  const tope = duracionDe(destino.fuente)
+  const e = pinza(desde, 0, Math.max(0, tope - DURACION_MINIMA))
+  const s = Math.min(tope, e + largoFuente)
+  if (s - e < DURACION_MINIMA) return tl
+  const clips = [...base.clips]
+  clips[indice] = { ...pieza, fuente: destino.fuente, entrada: e, salida: s }
+  return conClips(base, clips)
+}
+
+/** El número de toma (0, 1, 2…) que se ve en el segundo `t`, o -1. */
+export function anguloEn(tl: Timeline, t: number): number {
+  const u = ubicar(tl, t)
+  return u && tl.multicam ? tl.multicam.angulos.findIndex((a) => a.fuente === u.clip.fuente) : -1
 }
 
 export const COLORES_MARCADOR = {
@@ -527,6 +775,15 @@ export function borrarMarcador(tl: Timeline, id: string): Timeline {
   const { marcadores: _m, ...resto } = tl
   const quedan = tl.marcadores.filter((m) => m.id !== id)
   return quedan.length ? { ...resto, marcadores: quedan } : resto
+}
+
+/** Solo el tramo de `a` a `b` (para exportar entre la entrada y la salida): lo de antes y lo de después se quita. */
+export function soloTramo(tl: Timeline, a: number, b: number): Timeline {
+  const total = duracionTimeline(tl)
+  let r = tl
+  if (b < total - DURACION_MINIMA) r = extraerRango(r, b, total)
+  if (a > DURACION_MINIMA) r = extraerRango(r, 0, a)
+  return r
 }
 
 /**
@@ -604,11 +861,126 @@ function pinza(valor: number, min: number, max: number): number {
 }
 
 /** Lo que dura un clip en la timeline: su tramo de la fuente, a su velocidad. */
-const largo = (c: ClipTL): number => (c.salida - c.entrada) / velocidadDe(c)
+const largo = (c: ClipTL): number => largoClip(c)
 
 /** Los límites de la velocidad de un clip (cámara lenta a cámara rápida). */
 export const LIMITES_VELOCIDAD = [0.25, 4] as const
 export const velocidadDe = (c: Pick<ClipTL, 'velocidad'>): number => c.velocidad ?? 1
+
+// ===== Rampas de velocidad =====
+
+export const LIMITES_RAMPA = [0.1, 4] as const
+/** Un tramo de la rampa: de f0 a f1 (segundos de la fuente) a velocidad v; empieza en t0 del clip. */
+export interface TramoVelocidad {
+  f0: number
+  f1: number
+  v: number
+  t0: number
+}
+const cacheRampa = new WeakMap<object, TramoVelocidad[]>()
+
+/**
+ * La rampa en tramos cortos de velocidad constante (hasta 80): con ellos salen la duración, el cuadro de la fuente de
+ * cada momento y las expresiones de FFmpeg, siempre iguales. null si el clip no tiene rampa.
+ */
+export function tramosVelocidad(c: Pick<ClipTL, 'entrada' | 'salida' | 'rampa'>): TramoVelocidad[] | null {
+  if (!c.rampa?.length) return null
+  const hecho = cacheRampa.get(c)
+  if (hecho) return hecho
+  const span = Math.max(DURACION_MINIMA, c.salida - c.entrada)
+  const paso = Math.max(0.04, span / 80)
+  const tramos: TramoVelocidad[] = []
+  let t = 0
+  for (let f = c.entrada; f < c.salida - 1e-6; f += paso) {
+    const f1 = Math.min(c.salida, f + paso)
+    const v = pinza(valorClave(c.rampa, (f + f1) / 2), LIMITES_RAMPA[0], LIMITES_RAMPA[1])
+    tramos.push({ f0: f, f1, v, t0: t })
+    t += (f1 - f) / v
+  }
+  cacheRampa.set(c, tramos)
+  return tramos
+}
+
+/** Lo que dura un clip en la timeline (con su velocidad o su rampa). */
+export function largoClip(c: Pick<ClipTL, 'entrada' | 'salida' | 'rampa' | 'velocidad'>): number {
+  const r = tramosVelocidad(c)
+  if (!r) return (c.salida - c.entrada) / velocidadDe(c)
+  const u = r[r.length - 1]
+  return u.t0 + (u.f1 - u.f0) / u.v
+}
+
+/** El segundo de la fuente que se ve `dt` segundos después de que empieza el clip. */
+export function fuenteEnClip(c: Pick<ClipTL, 'entrada' | 'salida' | 'rampa' | 'velocidad'>, dt: number): number {
+  const r = tramosVelocidad(c)
+  if (!r) return c.entrada + dt * velocidadDe(c)
+  let k = r.length - 1
+  while (k > 0 && r[k].t0 > dt) k--
+  return Math.min(c.salida, r[k].f0 + Math.max(0, dt - r[k].t0) * r[k].v)
+}
+
+/** Cuántos segundos después de empezar el clip se ve el segundo `f` de su fuente. */
+export function clipEnFuente(c: Pick<ClipTL, 'entrada' | 'salida' | 'rampa' | 'velocidad'>, f: number): number {
+  const r = tramosVelocidad(c)
+  if (!r) return (f - c.entrada) / velocidadDe(c)
+  let k = r.length - 1
+  while (k > 0 && r[k].f0 > f) k--
+  return r[k].t0 + Math.max(0, f - r[k].f0) / r[k].v
+}
+
+/** La velocidad del clip en el segundo `f` de su fuente. */
+export function velocidadEnFuente(c: Pick<ClipTL, 'entrada' | 'salida' | 'rampa' | 'velocidad'>, f: number): number {
+  return c.rampa?.length ? pinza(valorClave(c.rampa, f), LIMITES_RAMPA[0], LIMITES_RAMPA[1]) : velocidadDe(c)
+}
+
+/**
+ * Para FFmpeg: el segundo de la fuente según el segundo del clip (`T`, una expresión), o al revés con `inversa`
+ * (el segundo del clip según el segundo de la fuente contado desde la entrada, para setpts).
+ */
+export function exprRampa(c: Pick<ClipTL, 'entrada' | 'salida' | 'rampa'>, T: string, inversa = false): string {
+  const r = tramosVelocidad(c)!
+  const n = (x: number) => (Math.round(x * 100000) / 100000).toString()
+  let e = ''
+  for (let k = r.length - 1; k >= 0; k--) {
+    const x = r[k]
+    const valor = inversa ? `(${n(x.t0)}+(${T}-${n(x.f0 - c.entrada)})/${n(x.v)})` : `(${n(x.f0)}+(${T}-${n(x.t0)})*${n(x.v)})`
+    e = k === r.length - 1 ? valor : `if(lt(${T},${n(inversa ? r[k + 1].f0 - c.entrada : r[k + 1].t0)}),${valor},${e})`
+  }
+  return e
+}
+
+/** Las claves de una rampa válidas (velocidad de 0.1 a 4, una por cuadro). */
+export function normalizarRampa(entrada: unknown): ClaveTL[] | undefined {
+  if (!Array.isArray(entrada)) return undefined
+  const puntos: ClaveTL[] = []
+  for (const x of [...entrada].sort((a, b) => (a?.f ?? 0) - (b?.f ?? 0))) {
+    if (!x || typeof x.f !== 'number' || typeof x.v !== 'number' || !Number.isFinite(x.f) || !Number.isFinite(x.v)) continue
+    const p = { f: Math.round(Math.max(0, x.f) * 1000) / 1000, v: Math.round(pinza(x.v, LIMITES_RAMPA[0], LIMITES_RAMPA[1]) * 100) / 100 }
+    if (puntos.length && p.f - puntos[puntos.length - 1].f < 0.034) puntos[puntos.length - 1] = p
+    else puntos.push(p)
+  }
+  return puntos.length ? puntos.slice(0, 12) : undefined
+}
+
+/** Pone (o cambia) una clave de la rampa en el segundo `f` de la fuente. */
+export function ponerClaveRampa(tl: Timeline, id: string, f: number, v: number): Timeline {
+  const clips = tl.clips.map((c) => {
+    if (c.id !== id) return c
+    const lista = normalizarRampa([...(c.rampa ?? []).filter((x) => Math.abs(x.f - f) >= 0.034), { f, v }])
+    return lista ? { ...c, rampa: lista } : c
+  })
+  return conClips(tl, clips)
+}
+
+/** Quita una clave de la rampa (o toda la rampa, sin `f`): el clip vuelve a su velocidad fija. */
+export function quitarClaveRampa(tl: Timeline, id: string, f?: number): Timeline {
+  const clips = tl.clips.map((c) => {
+    if (c.id !== id || !c.rampa) return c
+    const quedan = f === undefined ? [] : c.rampa.filter((x) => Math.abs(x.f - f) >= 0.034)
+    const { rampa: _r, ...resto } = c
+    return quedan.length ? { ...resto, rampa: quedan } : resto
+  })
+  return conClips(tl, clips)
+}
 
 /** Cambia la velocidad de un clip de video (1 = normal). Lo que viene después se corre. */
 export function cambiarVelocidad(tl: Timeline, id: string, velocidad: number): Timeline {
@@ -626,7 +998,7 @@ export function cambiarVelocidad(tl: Timeline, id: string, velocidad: number): T
 
 // ===== Pistas: ocultar o silenciar, y bloquear =====
 
-export type PistaId = 'encima' | 'video' | 'texto' | 'voz' | 'sonidos' | 'musica'
+export type PistaId = 'ajuste' | 'encima' | 'video' | 'texto' | 'voz' | 'sonidos' | 'musica'
 export interface PistaTL {
   /** No se ve (Encima, Texto) o no suena (Video, Voz, Sonidos, Música): ni en el monitor ni en el MP4. */
   oculta?: boolean
@@ -639,6 +1011,7 @@ export interface PistaTL {
 /** Hasta dónde sube el fader de una pista (200 %, +6 dB). */
 export const MAX_VOLUMEN_PISTA = 2
 export const PISTAS: { id: PistaId; nombre: string; audio: boolean }[] = [
+  { id: 'ajuste', nombre: 'Ajuste', audio: false },
   { id: 'encima', nombre: 'Encima', audio: false },
   { id: 'video', nombre: 'Video', audio: true },
   { id: 'texto', nombre: 'Texto', audio: false },
@@ -677,7 +1050,7 @@ export function cambiarPista(tl: Timeline, id: PistaId, cambio: PistaTL): Timeli
 export function timelineActiva(tl: Timeline): Timeline {
   const p = tl.pistas
   if (!p || !PISTAS.some((x) => p[x.id]?.oculta || (p[x.id]?.volumen ?? 1) !== 1)) return tl
-  const { capas, voces, sonidos, musica, ...resto } = tl
+  const { capas, voces, sonidos, musica, ajustesCapa, ...resto } = tl
   // El fader de cada pista multiplica el volumen de todo lo suyo (así el monitor y el MP4 lo oyen igual).
   const fader = (id: PistaId) => p[id]?.volumen ?? 1
   const vVideo = fader('video')
@@ -687,13 +1060,18 @@ export function timelineActiva(tl: Timeline): Timeline {
   const clips = p.video?.oculta
     ? tl.clips.map((c) => ({ ...c, mudo: true }))
     : vVideo !== 1
-      ? tl.clips.map((c) => ({ ...c, sonido: { ...(c.sonido ?? {}), volumen: (c.sonido?.volumen ?? 1) * vVideo } }))
+      ? tl.clips.map((c) => ({
+          ...c,
+          sonido: { ...(c.sonido ?? {}), volumen: (c.sonido?.volumen ?? 1) * vVideo },
+          ...(c.clavesVolumen ? { clavesVolumen: c.clavesVolumen.map((x) => ({ ...x, v: x.v * vVideo })) } : {})
+        }))
       : tl.clips
   return {
     ...resto,
     clips,
     textos: p.texto?.oculta ? [] : tl.textos,
     ...(capas && !p.encima?.oculta ? { capas } : {}),
+    ...(ajustesCapa && !p.ajuste?.oculta ? { ajustesCapa } : {}),
     ...(voces && !p.voz?.oculta ? { voces: vVoz !== 1 ? voces.map((v) => ({ ...v, volumen: (v.volumen ?? 1) * vVoz })) : voces } : {}),
     ...(sonidos && !p.sonidos?.oculta
       ? { sonidos: vSonidos !== 1 ? sonidos.map((x) => ({ ...x, volumen: (x.volumen ?? VOLUMEN_SONIDO) * vSonidos })) : sonidos }
@@ -767,6 +1145,11 @@ export function normalizarTimeline(entrada: unknown, duracionFuente: number, otr
       ...(c.mudo === true ? { mudo: true } : {}),
       ...(normalizarSonidoClip(c.sonido, (s - e) / (typeof c.velocidad === 'number' && c.velocidad > 0 ? c.velocidad : 1)) ? { sonido: normalizarSonidoClip(c.sonido, (s - e) / (typeof c.velocidad === 'number' && c.velocidad > 0 ? c.velocidad : 1)) } : {}),
       ...(normalizarClaves(c.claves) ? { claves: normalizarClaves(c.claves) } : {}),
+      ...(normalizarClavesVolumen(c.clavesVolumen) ? { clavesVolumen: normalizarClavesVolumen(c.clavesVolumen) } : {}),
+      ...(normalizarRampa(c.rampa) ? { rampa: normalizarRampa(c.rampa) } : {}),
+      // Los clips de dentro de un anidado se guardan tal cual (se validan al desanidar).
+      ...(Array.isArray(c.anidado) && c.anidado.length ? { anidado: c.anidado.filter((x) => x && typeof x.entrada === 'number' && typeof x.salida === 'number').slice(0, 200) } : {}),
+      ...(normalizarZonas(c.zonas) ? { zonas: normalizarZonas(c.zonas) } : {}),
       ...(typeof c.velocidad === 'number' && Number.isFinite(c.velocidad) && Math.abs(c.velocidad - 1) >= 0.005
         ? { velocidad: Math.round(pinza(c.velocidad, LIMITES_VELOCIDAD[0], LIMITES_VELOCIDAD[1]) * 100) / 100 }
         : {}),
@@ -788,6 +1171,7 @@ export function normalizarTimeline(entrada: unknown, duracionFuente: number, otr
       duracion,
       texto: typeof t.texto === 'string' ? t.texto : '',
       posicion: t.posicion === 'arriba' || t.posicion === 'centro' ? t.posicion : 'abajo',
+      ...(t.subtitulo === true ? { subtitulo: true } : {}),
       ...estiloTexto(t),
       ...posicionLibre(t)
     })
@@ -807,7 +1191,11 @@ export function normalizarTimeline(entrada: unknown, duracionFuente: number, otr
     ...(sonidos.length ? { sonidos } : {}),
     ...(filtros ? { filtros } : {}),
     ...(normalizarPistas(crudo.pistas) ? { pistas: normalizarPistas(crudo.pistas) } : {}),
-    ...(normalizarMarcadores(crudo.marcadores, total).length ? { marcadores: normalizarMarcadores(crudo.marcadores, total) } : {})
+    ...(normalizarMarcadores(crudo.marcadores, total).length ? { marcadores: normalizarMarcadores(crudo.marcadores, total) } : {}),
+    ...(normalizarAjustesCapa(crudo.ajustesCapa, total).length ? { ajustesCapa: normalizarAjustesCapa(crudo.ajustesCapa, total) } : {}),
+    ...(normalizarMulticam(crudo.multicam, (f) => f === FUENTE_PRINCIPAL || otras[f] !== undefined)
+      ? { multicam: normalizarMulticam(crudo.multicam, (f) => f === FUENTE_PRINCIPAL || otras[f] !== undefined) }
+      : {})
   }
 }
 
@@ -899,6 +1287,9 @@ export function normalizarSonidos(entrada: unknown, total: number): SonidoTL[] {
       duracion: s.duracion,
       archivo: s.archivo,
       nombre: typeof s.nombre === 'string' && s.nombre ? s.nombre.slice(0, 60) : 'Sonido',
+      ...(typeof s.pista === 'number' && Math.round(s.pista) >= 2 ? { pista: Math.min(PISTAS_SONIDOS, Math.round(s.pista)) } : {}),
+      ...(typeof s.desde === 'number' && s.desde > 0.001 ? { desde: Math.round(s.desde * 1000) / 1000 } : {}),
+      ...(typeof s.largo === 'number' && s.largo > 0 ? { largo: Math.round(s.largo * 1000) / 1000 } : {}),
       ...(typeof s.volumen === 'number' && Number.isFinite(s.volumen) && Math.abs(s.volumen - VOLUMEN_SONIDO) > 1e-3 ? { volumen: pinza(s.volumen, 0, 1.5) } : {})
     })
   }
@@ -975,7 +1366,7 @@ export function ubicar(tl: Timeline, t: number): (Tramo & { tFuente: number }) |
   const ultimo = lista[lista.length - 1]
   const tiempo = pinza(t, 0, ultimo.fin)
   const tramo = lista.find((x) => tiempo < x.fin - EPSILON) ?? ultimo
-  return { ...tramo, tFuente: tramo.clip.entrada + (tiempo - tramo.inicio) * velocidadDe(tramo.clip) }
+  return { ...tramo, tFuente: fuenteEnClip(tramo.clip, tiempo - tramo.inicio) }
 }
 
 /** Los ajustes que se ven: los del clip con los neutros por defecto. */
@@ -1060,7 +1451,27 @@ export function hayRecorte(a: Required<AjustesClip>): boolean {
 // ===== Fotogramas clave: un ajuste del clip que cambia a lo largo del tiempo =====
 
 /** Los ajustes que se pueden animar con fotogramas clave (los que el MP4 puede cambiar cuadro a cuadro). */
-export const PARAMETROS_CLAVE = ['zoom', 'cx', 'cy', 'brillo', 'contraste', 'saturacion'] as const
+export const PARAMETROS_CLAVE = [
+  'zoom',
+  'cx',
+  'cy',
+  'brillo',
+  'contraste',
+  'saturacion',
+  'escala',
+  'posx',
+  'posy',
+  'giro',
+  'exposicion',
+  'altas',
+  'sombras',
+  'blancos',
+  'negros',
+  'temperatura',
+  'tinte'
+] as const
+/** Los ajustes de color que van en la curva (lut1d): con claves, el MP4 cambia de curva por tramos. */
+export const CLAVES_CURVA_COLOR = ['exposicion', 'altas', 'sombras', 'blancos', 'negros', 'temperatura', 'tinte'] as const
 export type ParametroClave = (typeof PARAMETROS_CLAVE)[number]
 /** Un fotograma clave: en el segundo `f` de la fuente, el ajuste vale `v`. Van pegados al material: al recortar o dividir no se mueven. */
 export interface ClaveTL {
@@ -1483,6 +1894,79 @@ export function vozEnTimeline(
   return salida
 }
 
+// ===== Subtítulos editables (como «Texto › Subtítulos» de Premiere) =====
+
+/** Los estilos de los subtítulos: cómo se ven todos de una vez. */
+export const ESTILOS_SUBTITULO: { id: string; nombre: string; para: string; estilo: Partial<TextoTL> }[] = [
+  { id: 'clasico', nombre: 'Clásico', para: 'letra blanca sobre caja negra, abajo', estilo: { posicion: 'abajo', caja: '#000000' } },
+  { id: 'redes', nombre: 'Redes', para: 'grandes, amarillos y palabra a palabra, como en TikTok', estilo: { posicion: 'abajo', x: 0.5, y: 0.72, fuente: 'gruesa', tamano: 1.5, color: '#ffe14d', sinCaja: true, animacion: 'palabras' } },
+  { id: 'limpio', nombre: 'Limpio', para: 'solo la letra con su borde, sin caja', estilo: { posicion: 'abajo', sinCaja: true, tamano: 1.1 } },
+  { id: 'titular', nombre: 'Titular', para: 'condensados y grandes, al centro', estilo: { posicion: 'centro', fuente: 'titular', tamano: 2, sinCaja: true, animacion: 'pop' } }
+]
+
+/**
+ * Hace subtítulos editables desde lo que se dice (la transcripción de los clips y las frases de narración): un texto
+ * por frase corta (hasta `maxPalabras`), en su segundo, con el estilo elegido. Los subtítulos de antes se reemplazan.
+ */
+export function subtitulosDesdeVoz(tl: Timeline, transcript: TranscriptSegment[] | undefined, estilo: Partial<TextoTL>, maxPalabras = 6): Timeline {
+  type Palabra = { texto: string; inicio: number; fin: number }
+  const palabras: Palabra[] = []
+  for (const tr of tramos(tl)) {
+    if (tr.clip.fuente !== FUENTE_PRINCIPAL || tr.clip.mudo || !transcript?.length) continue
+    for (const seg of transcript) {
+      for (const w of seg.words) {
+        if (w.end <= tr.clip.entrada || w.start >= tr.clip.salida || !w.text.trim()) continue
+        palabras.push({
+          texto: w.text.trim(),
+          inicio: tr.inicio + clipEnFuente(tr.clip, Math.max(w.start, tr.clip.entrada)),
+          fin: tr.inicio + clipEnFuente(tr.clip, Math.min(w.end, tr.clip.salida))
+        })
+      }
+    }
+  }
+  // La narración puesta frase a frase: sus palabras repartidas en lo que dura su audio.
+  for (const v of tl.voces ?? []) {
+    const lista = v.texto.split(/\s+/).filter(Boolean)
+    lista.forEach((texto, k) => palabras.push({ texto, inicio: v.inicio + (v.duracion * k) / lista.length, fin: v.inicio + (v.duracion * (k + 1)) / lista.length }))
+  }
+  palabras.sort((a, b) => a.inicio - b.inicio)
+  const bloques: Palabra[] = []
+  let actual: Palabra[] = []
+  const cerrar = () => {
+    if (!actual.length) return
+    bloques.push({ texto: actual.map((p) => p.texto).join(' '), inicio: actual[0].inicio, fin: actual[actual.length - 1].fin })
+    actual = []
+  }
+  for (const p of palabras) {
+    const previa = actual[actual.length - 1]
+    if (previa && (p.inicio - previa.fin > 0.6 || actual.length >= maxPalabras)) cerrar()
+    actual.push(p)
+    if (/[.?!…]$/.test(p.texto)) cerrar()
+  }
+  cerrar()
+  const total = duracionTimeline(tl)
+  const subs: TextoTL[] = bloques.map((b, k) => {
+    const siguiente = bloques[k + 1]?.inicio ?? total
+    const fin = Math.min(siguiente, Math.max(b.fin, b.inicio + 0.6), total)
+    return { ...estilo, id: nuevoId('texto'), inicio: b.inicio, duracion: Math.max(DURACION_MINIMA, fin - b.inicio), texto: b.texto, posicion: estilo.posicion ?? 'abajo', subtitulo: true }
+  })
+  return { ...tl, textos: ajustarTextos([...tl.textos.filter((x) => !x.subtitulo), ...subs], total) }
+}
+
+/** Quita los subtítulos hechos desde la voz (los demás textos se quedan). */
+export function quitarSubtitulos(tl: Timeline): Timeline {
+  return { ...tl, textos: tl.textos.filter((x) => !x.subtitulo) }
+}
+
+/** Plantillas de rótulos (como los gráficos esenciales de Premiere): un texto ya armado para cambiarle las palabras. */
+export const PLANTILLAS_TEXTO: { id: string; nombre: string; para: string; texto: string; estilo: Partial<TextoTL> }[] = [
+  { id: 'inferior', nombre: 'Rótulo inferior', para: 'el nombre y el cargo de quien habla', texto: 'Nombre Apellido\nCargo o dato', estilo: { posicion: 'abajo', x: 0.27, y: 0.83, tamano: 0.9, caja: '#111827', animacion: 'subir' } },
+  { id: 'titulo', nombre: 'Título grande', para: 'abrir el video o una sección', texto: 'TÍTULO', estilo: { posicion: 'centro', fuente: 'titular', tamano: 3, sinCaja: true, animacion: 'pop' } },
+  { id: 'cita', nombre: 'Cita', para: 'una frase que importa', texto: '«Una frase que importa»', estilo: { posicion: 'centro', fuente: 'cursiva', tamano: 1.6, sinCaja: true, animacion: 'palabras' } },
+  { id: 'llamado', nombre: 'Llamado a la acción', para: 'que te sigan, escriban o compren', texto: 'Síguenos para más', estilo: { posicion: 'abajo', x: 0.5, y: 0.8, fuente: 'gruesa', tamano: 1.3, caja: '#ff3b30', animacion: 'pop' } },
+  { id: 'dato', nombre: 'Dato', para: 'un número grande con su explicación', texto: '87 %\nde la gente no lo sabe', estilo: { posicion: 'centro', fuente: 'gruesa', tamano: 2, sinCaja: true, color: '#ffe14d', animacion: 'subir' } }
+]
+
 // ===== Editar =====
 
 /** Mantiene los rótulos dentro de la duración cuando la timeline se acorta. */
@@ -1568,8 +2052,8 @@ export function rodarCorte(tl: Timeline, indice: number, dt: number, duracionDe:
   const a = tl.clips[indice]
   const b = tl.clips[indice + 1]
   if (!a || !b || !Number.isFinite(dt)) return tl
-  const va = velocidadDe(a)
-  const vb = velocidadDe(b)
+  const va = velocidadEnFuente(a, a.salida)
+  const vb = velocidadEnFuente(b, b.entrada)
   // Lo más que se puede correr: a no pasa del final de su fuente ni b de su principio, y ninguno baja del mínimo.
   const max = Math.min((duracionDe(a.fuente) - a.salida) / va, (b.salida - b.entrada) / vb - DURACION_MINIMA)
   const min = Math.max(-((a.salida - a.entrada) / va - DURACION_MINIMA), -b.entrada / vb)
@@ -1603,8 +2087,8 @@ export function desplazarClip(tl: Timeline, id: string, dt: number, duracionDe: 
   if (i <= 0 || i >= tl.clips.length - 1 || !Number.isFinite(dt)) return tl
   const p = tl.clips[i - 1]
   const n = tl.clips[i + 1]
-  const vp = velocidadDe(p)
-  const vn = velocidadDe(n)
+  const vp = velocidadEnFuente(p, p.salida)
+  const vn = velocidadEnFuente(n, n.entrada)
   const max = Math.min((duracionDe(p.fuente) - p.salida) / vp, (n.salida - n.entrada) / vn - DURACION_MINIMA)
   const min = Math.max(-((p.salida - p.entrada) / vp - DURACION_MINIMA), -n.entrada / vn)
   const d = pinza(dt, Math.min(0, min), Math.max(0, max))
@@ -1613,6 +2097,109 @@ export function desplazarClip(tl: Timeline, id: string, dt: number, duracionDe: 
   clips[i - 1] = { ...p, salida: p.salida + d * vp }
   clips[i + 1] = { ...n, entrada: n.entrada + d * vn }
   return { ...tl, clips }
+}
+
+/** La pista de sonidos (1 a PISTAS_SONIDOS) que está libre entre `a` y `b`, o la 1 si ninguna lo está. */
+export function pistaSonidoLibre(tl: Timeline, a: number, b: number): number {
+  for (let p = 1; p <= PISTAS_SONIDOS; p++) {
+    const ocupada = (tl.sonidos ?? []).some((s) => (s.pista ?? 1) === p && s.inicio < b - 1e-3 && s.inicio + s.duracion > a + 1e-3)
+    if (!ocupada) return p
+  }
+  return 1
+}
+
+/**
+ * Separar el audio (desvincular, en Premiere): el clip queda mudo y su sonido pasa a ser un sonido suelto en el mismo
+ * sitio (y a su volumen), que se mueve y se recorta aparte. `archivo` es el sonido ya sacado de su tramo.
+ */
+export function separarAudio(tl: Timeline, id: string, archivo: string, nombre: string, duracion: number): Timeline {
+  const t = tramos(tl).find((x) => x.clip.id === id)
+  if (!t) return tl
+  const pista = pistaSonidoLibre(tl, t.inicio, t.inicio + duracion)
+  const sonido: SonidoTL = {
+    id: nuevoId('sonido'),
+    inicio: t.inicio,
+    duracion,
+    largo: duracion,
+    archivo,
+    nombre,
+    volumen: Math.min(1.5, t.clip.sonido?.volumen ?? 1),
+    ...(pista > 1 ? { pista } : {})
+  }
+  const sonidos = normalizarSonidos([...(tl.sonidos ?? []), sonido], duracionTimeline(tl))
+  return { ...silenciarClip(tl, id, true), sonidos }
+}
+
+/**
+ * Multicámara con un solo sonido: todos los clips de las tomas quedan mudos y suena `archivo` (el sonido de una toma,
+ * desde el principio de la escena) de principio a fin, como cuando en Premiere se usa el audio de una sola cámara.
+ */
+export function sonidoUnicoMulticam(tl: Timeline, archivo: string, nombre: string, duracion: number): Timeline {
+  if (!tl.multicam) return tl
+  const fuentes = new Set(tl.multicam.angulos.map((a) => a.fuente))
+  const clips = tl.clips.map((c) => (fuentes.has(c.fuente) ? { ...c, mudo: true } : c))
+  const pista = pistaSonidoLibre(tl, 0, duracion)
+  const sonido: SonidoTL = { id: nuevoId('sonido'), inicio: 0, duracion, largo: duracion, archivo, nombre, volumen: 1, ...(pista > 1 ? { pista } : {}) }
+  return { ...tl, clips, sonidos: normalizarSonidos([...(tl.sonidos ?? []), sonido], duracionTimeline(tl)) }
+}
+
+/** Dónde empieza la escena de la multicámara (en la primera toma) según el primer clip de la línea de tiempo. */
+export function inicioEscenaMulticam(tl: Timeline): number | null {
+  const c = tl.clips[0]
+  const a = c && tl.multicam?.angulos.find((x) => x.fuente === c.fuente)
+  return a ? c.entrada - a.desfase : null
+}
+
+/**
+ * Sobrescribir (la tecla . de Premiere): el clip nuevo entra en el segundo `t` tapando lo que hay ahí, sin correr nada;
+ * si se pasa del final, la timeline se alarga.
+ */
+export function sobrescribirClip(tl: Timeline, nuevo: { fuente: FuenteId; entrada: number; salida: number }, t: number): { timeline: Timeline; id: string } {
+  const total = duracionTimeline(tl)
+  const d = Math.max(DURACION_MINIMA, nuevo.salida - nuevo.entrada)
+  if (t >= total - EPSILON || !tl.clips.length) return insertarClip(tl, nuevo)
+  let base = t <= EPSILON ? tl : dividir(tl, t)
+  if (t + d < total - DURACION_MINIMA) base = dividir(base, t + d)
+  const lista = tramos(base)
+  const quedan = lista.filter((x) => x.fin <= t + EPSILON || x.inicio >= t + d - EPSILON)
+  const indice = quedan.findIndex((x) => x.inicio >= t + d - EPSILON)
+  const id = nuevoId('clip')
+  const clip: ClipTL = { id, fuente: nuevo.fuente, entrada: nuevo.entrada, salida: nuevo.entrada + d }
+  const clips = quedan.map((x) => x.clip)
+  clips.splice(indice < 0 ? clips.length : indice, 0, clip)
+  return { timeline: { ...base, clips }, id }
+}
+
+/** Si esos clips de la pista de video van seguidos (para anidarlos). Devuelve sus índices en orden, o null. */
+export function clipsSeguidos(tl: Timeline, ids: string[]): number[] | null {
+  const indices = ids.map((id) => tl.clips.findIndex((c) => c.id === id)).filter((i) => i >= 0).sort((a, b) => a - b)
+  if (indices.length < 2 || indices.length !== new Set(ids).size) return null
+  return indices.every((v, k) => k === 0 || v === indices[k - 1] + 1) ? indices : null
+}
+
+/**
+ * Anidar: los clips seguidos `ids` pasan a ser un solo clip de `fuente` (su render), que guarda los de dentro para
+ * poder desanidarlos. Lo de las otras pistas no se mueve: dura lo mismo.
+ */
+export function anidarClips(tl: Timeline, ids: string[], fuente: FuenteId, duracion: number): { timeline: Timeline; id: string } {
+  const indices = clipsSeguidos(tl, ids)
+  if (!indices) return { timeline: tl, id: '' }
+  const dentro = indices.map((i) => tl.clips[i])
+  const id = nuevoId('clip')
+  const nuevo: ClipTL = { id, fuente, entrada: 0, salida: Math.max(DURACION_MINIMA, duracion), anidado: dentro }
+  const clips = [...tl.clips]
+  clips.splice(indices[0], indices.length, nuevo)
+  return { timeline: conClips(tl, clips), id }
+}
+
+/** Desanidar: el clip vuelve a ser los clips que tenía dentro (lo que se le hizo al anidado se pierde). */
+export function desanidarClip(tl: Timeline, id: string): Timeline {
+  const i = tl.clips.findIndex((c) => c.id === id)
+  const c = tl.clips[i]
+  if (!c?.anidado?.length) return tl
+  const clips = [...tl.clips]
+  clips.splice(i, 1, ...c.anidado.map((x) => ({ ...x, id: x.id || nuevoId('clip') })))
+  return conClips(tl, clips)
 }
 
 /** Lleva un clip a otra posición de la pista principal. */
@@ -1644,8 +2231,8 @@ export function borrarTramo(tl: Timeline, desde: number, hasta: number): Timelin
       clips.push(tr.clip)
       continue
     }
-    const corteA = tr.clip.entrada + Math.max(0, a - tr.inicio) * velocidadDe(tr.clip)
-    const corteB = tr.clip.entrada + Math.min(largo(tr.clip), b - tr.inicio) * velocidadDe(tr.clip)
+    const corteA = fuenteEnClip(tr.clip, Math.max(0, a - tr.inicio))
+    const corteB = fuenteEnClip(tr.clip, Math.min(largo(tr.clip), b - tr.inicio))
     if (corteA - tr.clip.entrada >= DURACION_MINIMA) clips.push({ ...tr.clip, salida: corteA })
     if (tr.clip.salida - corteB >= DURACION_MINIMA) {
       clips.push({ ...tr.clip, id: corteA - tr.clip.entrada >= DURACION_MINIMA ? nuevoId('clip') : tr.clip.id, entrada: corteB })
@@ -1796,7 +2383,13 @@ export function silenciarClip(tl: Timeline, id: string, mudo: boolean): Timeline
 
 /** El sonido de un clip, con lo neutro puesto (volumen 1, sin fundidos, sin limpiar). */
 export function sonidoDe(c: Pick<ClipTL, 'sonido'> | undefined): Required<SonidoClip> {
-  return { volumen: c?.sonido?.volumen ?? 1, entra: c?.sonido?.entra ?? 0, sale: c?.sonido?.sale ?? 0, limpio: c?.sonido?.limpio ?? 0 }
+  return {
+    volumen: c?.sonido?.volumen ?? 1,
+    entra: c?.sonido?.entra ?? 0,
+    sale: c?.sonido?.sale ?? 0,
+    limpio: c?.sonido?.limpio ?? 0,
+    realce: c?.sonido?.realce ?? 0
+  }
 }
 
 /** Deja el sonido de un clip dentro de sus límites; los fundidos caben en lo que dura (`largo`, en la timeline). */
@@ -1804,7 +2397,7 @@ export function normalizarSonidoClip(entrada: unknown, largo: number): SonidoCli
   if (!entrada || typeof entrada !== 'object') return undefined
   const x = entrada as Record<string, unknown>
   const salida: SonidoClip = {}
-  for (const clave of ['volumen', 'entra', 'sale', 'limpio'] as const) {
+  for (const clave of ['volumen', 'entra', 'sale', 'limpio', 'realce'] as const) {
     const v = x[clave]
     if (typeof v !== 'number' || !Number.isFinite(v)) continue
     const [min, max, neutro] = LIMITES_SONIDO_CLIP[clave]
@@ -1849,11 +2442,51 @@ export function ajustarSonidoClip(tl: Timeline, id: string, cambio: SonidoClip):
 }
 
 /** A qué volumen suena un clip `dt` segundos después de empezar (con sus fundidos), de 0 a 1.5. */
-export function volumenClipEn(c: Pick<ClipTL, 'sonido'>, dt: number, largoClip: number): number {
+export function volumenClipEn(c: Pick<ClipTL, 'sonido' | 'clavesVolumen'>, dt: number, largoClip: number, fFuente?: number): number {
   const s = sonidoDe(c)
   const sube = s.entra > 0 ? pinza(dt / s.entra, 0, 1) : 1
   const baja = s.sale > 0 ? pinza((largoClip - dt) / s.sale, 0, 1) : 1
-  return s.volumen * sube * baja
+  // Con fotogramas clave, el volumen es el de este segundo de la fuente.
+  const base = c.clavesVolumen?.length && fFuente !== undefined ? valorClave(c.clavesVolumen, fFuente) : s.volumen
+  return base * sube * baja
+}
+
+/** Las claves de volumen válidas (0 a 1.5, una por cuadro, ordenadas). */
+export function normalizarClavesVolumen(entrada: unknown): ClaveTL[] | undefined {
+  if (!Array.isArray(entrada)) return undefined
+  const puntos: ClaveTL[] = []
+  for (const x of [...entrada].sort((a, b) => (a?.f ?? 0) - (b?.f ?? 0))) {
+    if (!x || typeof x.f !== 'number' || typeof x.v !== 'number' || !Number.isFinite(x.f) || !Number.isFinite(x.v)) continue
+    const punto = { f: Math.round(Math.max(0, x.f) * 1000) / 1000, v: Math.round(pinza(x.v, 0, LIMITES_SONIDO_CLIP.volumen[1]) * 1000) / 1000 }
+    if (puntos.length && punto.f - puntos[puntos.length - 1].f < MISMA_CLAVE) puntos[puntos.length - 1] = punto
+    else puntos.push(punto)
+  }
+  return puntos.length ? puntos.slice(0, MAX_CLAVES) : undefined
+}
+
+/** Pone (o cambia) una clave de volumen del clip en el segundo `f` de su fuente. */
+export function ponerClaveVolumen(tl: Timeline, id: string, f: number, v: number): Timeline {
+  return {
+    ...tl,
+    clips: tl.clips.map((c) => {
+      if (c.id !== id) return c
+      const lista = normalizarClavesVolumen([...(c.clavesVolumen ?? []).filter((x) => Math.abs(x.f - f) >= MISMA_CLAVE), { f, v }])
+      return lista ? { ...c, clavesVolumen: lista } : c
+    })
+  }
+}
+
+/** Quita la clave de volumen del segundo `f` (y las claves, si no queda ninguna). */
+export function quitarClaveVolumen(tl: Timeline, id: string, f: number): Timeline {
+  return {
+    ...tl,
+    clips: tl.clips.map((c) => {
+      if (c.id !== id || !c.clavesVolumen) return c
+      const quedan = c.clavesVolumen.filter((x) => Math.abs(x.f - f) >= MISMA_CLAVE)
+      const { clavesVolumen: _c, ...resto } = c
+      return quedan.length ? { ...resto, clavesVolumen: quedan } : resto
+    })
+  }
 }
 
 /** Añade una frase de narración (su audio ya está en `media/`). Devuelve la timeline y su id. */

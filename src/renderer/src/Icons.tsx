@@ -54,6 +54,7 @@ import {
   MoveHorizontal,
   ChevronsLeftRight,
   SlidersVertical,
+  Camera,
   type LucideIcon
 } from 'lucide-react'
 
@@ -118,7 +119,8 @@ const ICONOS = {
   rodar: ArrowLeftRight,
   deslizar: MoveHorizontal,
   desplazar: ChevronsLeftRight,
-  mezclador: SlidersVertical
+  mezclador: SlidersVertical,
+  camara: Camera
 } satisfies Record<string, LucideIcon>
 
 export type IconName = keyof typeof ICONOS

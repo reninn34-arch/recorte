@@ -36,10 +36,19 @@ import {
   type Timeline,
   timelineActiva,
   velocidadDe,
+  tramosVelocidad,
+  exprRampa,
+  fuenteEnClip,
   matrizColor,
+  soloTramo,
   curvasColor,
+  ajustesDeCapa,
+  CLAVES_CURVA_COLOR,
+  ajustesEn,
   cuboDeCurvas,
   hayMovimiento,
+  zonaEnPixeles,
+  zonaEn,
   DESENFOQUE_CLIP,
   exprClave
 } from '../shared/timeline'
@@ -80,12 +89,16 @@ function par(n: number): number {
 }
 
 /** Tamaño de salida: el del material (par, como pide H.264) o 1080×1920. */
-function dimensiones(proyecto: Project, formato: FormatoExport): { ancho: number; alto: number } {
-  if (formato === 'vertical') return { ancho: 1080, alto: 1920 }
-  const ancho = proyecto.source.width || 1920
-  const alto = proyecto.source.height || 1080
-  return { ancho: par(ancho), alto: par(alto) }
+function dimensiones(proyecto: Project, formato: FormatoExport, resolucion: OpcionesExport['resolucion'] = 'original'): { ancho: number; alto: number } {
+  const ancho = formato === 'vertical' ? 1080 : proyecto.source.width || 1920
+  const alto = formato === 'vertical' ? 1920 : proyecto.source.height || 1080
+  // 1080 o 720: el lado corto a esa medida (nunca se agranda).
+  const k = resolucion === 'original' ? 1 : Math.min(1, Number(resolucion) / Math.min(ancho, alto))
+  return { ancho: par(Math.round(ancho * k)), alto: par(Math.round(alto * k)) }
 }
+
+/** La calidad del H.264 (CRF): alta pesa más; ligera, para mandar rápido. */
+const CRF_CALIDAD = { alta: 17, normal: 20, ligera: 26 } as const
 
 /** Subtítulos de la voz en tiempo de timeline: los bloques de cada clip, uno tras otro. */
 function bloquesDeVoz(proyecto: Project, timeline: Timeline): Bloque[] {
@@ -229,6 +242,9 @@ export async function exportarTimeline(
   }
   // Lo que se exporta es lo que se ve y suena: sin las pistas ocultas o silenciadas.
   timeline = timelineActiva(timeline)
+  // Solo entre la entrada y la salida, si se pidió.
+  const conTramo = opciones.desde !== undefined && opciones.hasta !== undefined && opciones.hasta - opciones.desde >= 0.1
+  if (conTramo) timeline = soloTramo(timeline, opciones.desde!, opciones.hasta!)
   const lista = tramos(timeline).filter((t) => fuenteDe(t.clip.fuente))
   if (lista.length === 0) return { ok: false, error: 'La timeline está vacía: no hay nada que exportar.' }
   const duracion = duracionTimeline(timeline)
@@ -249,12 +265,12 @@ export async function exportarTimeline(
     musica = { ruta, volumen: timeline.musica.volumen, ducking: timeline.musica.ducking }
   }
 
-  const { ancho, alto } = dimensiones(proyecto, opciones.formato)
+  const { ancho, alto } = dimensiones(proyecto, opciones.formato, opciones.resolucion)
   const fps = proyecto.source.fps > 0 && proyecto.source.fps <= 60 ? Math.round(proyecto.source.fps) : 30
   const salidas = destino ?? join(carpeta, 'salidas')
   mkdirSync(salidas, { recursive: true })
-  const base = `timeline-${nombreSeguro(proyecto.name)}-${opciones.formato}`
-  const salida = join(salidas, `${base}.mp4`)
+  const base = `timeline-${nombreSeguro(proyecto.name)}-${opciones.formato}${conTramo ? '-tramo' : ''}`
+  const salida = join(salidas, `${base}.${opciones.soloAudio ?? 'mp4'}`)
 
   const voz = opciones.subtitulos ? bloquesDeVoz(proyecto, timeline) : []
   let ass: string | null
@@ -278,7 +294,13 @@ export async function exportarTimeline(
     const f = fuenteDe(t.clip.fuente)!
     // Cámara lenta o rápida (solo video): se lee su tramo entero de la fuente y se estira o se comprime.
     const vel = f.tipo === 'video' ? velocidadDe(t.clip) : 1
-    const ritmo = Math.abs(vel - 1) > 0.005 ? `setpts=(PTS-STARTPTS)/${vel.toFixed(3)}` : 'setpts=PTS-STARTPTS'
+    // Rampa de velocidad: cada cuadro de la fuente va al segundo que le toca según la curva (luego fps reparte los cuadros).
+    const rampa = f.tipo === 'video' && tramosVelocidad(t.clip) ? t.clip : null
+    const ritmo = rampa
+      ? `setpts=PTS-STARTPTS,setpts='(${exprRampa(rampa, 'T', true)})/TB'`
+      : Math.abs(vel - 1) > 0.005
+        ? `setpts=(PTS-STARTPTS)/${vel.toFixed(3)}`
+        : 'setpts=PTS-STARTPTS'
     // atempo solo admite de 0.5 a 2 por paso: se encadenan.
     const tempos: string[] = []
     for (let r = vel; Math.abs(r - 1) > 0.005; ) {
@@ -288,7 +310,7 @@ export async function exportarTimeline(
     }
     const tempo = tempos.length ? `${tempos.join(',')},` : ''
     if (f.tipo === 'imagen') entradas.push('-loop', '1', '-framerate', String(fps), '-t', largo.toFixed(3), '-i', f.ruta)
-    else entradas.push('-ss', t.clip.entrada.toFixed(3), '-t', (largo * vel).toFixed(3), '-i', f.ruta)
+    else entradas.push('-ss', t.clip.entrada.toFixed(3), '-t', (rampa ? t.clip.salida - t.clip.entrada : largo * vel).toFixed(3), '-i', f.ruta)
     const iv = n++
     // Zoom: recorte hacia el punto (cx, cy) antes de encuadrar. Color: eq. Lo mismo que el monitor.
     const a = ajustesDe(t.clip)
@@ -296,8 +318,8 @@ export async function exportarTimeline(
     // También al alejarse y con la cámara en mano (el encuadre se mueve en cada cuadro).
     // Fotogramas clave: el zoom, el centro y el color salen como expresiones del segundo de la fuente en cada cuadro.
     const cl = t.clip.claves
-    const Fz = `(${t.clip.entrada.toFixed(3)}+on/${fps}*${vel})`
-    const Ft = `(${t.clip.entrada.toFixed(3)}+t*${vel})`
+    const Fz = rampa ? `(${exprRampa(rampa, `(on/${fps})`)})` : `(${t.clip.entrada.toFixed(3)}+on/${fps}*${vel})`
+    const Ft = rampa ? `(${exprRampa(rampa, 't')})` : `(${t.clip.entrada.toFixed(3)}+t*${vel})`
     const Z = cl?.zoom ? exprClave(cl.zoom, Fz) : a.zoom.toFixed(4)
     const CX = cl?.cx ? exprClave(cl.cx, Fz) : a.cx.toFixed(4)
     const CY = cl?.cy ? exprClave(cl.cy, Fz) : a.cy.toFixed(4)
@@ -340,13 +362,69 @@ export async function exportarTimeline(
     // monitor, en un archivo .cube que aplica lut1d antes del resto del color.
     const curvas = curvasColor(a)
     let lut = ''
-    if (curvas) {
+    if (CLAVES_CURVA_COLOR.some((k) => cl?.[k]?.length)) {
+      // Con fotogramas clave en el color: la curva de cada tramo corto (hasta 120 por clip), cada una activa solo en su
+      // tramo. Los tramos seguidos con la misma curva se juntan.
+      const n = Math.min(120, Math.max(1, Math.ceil(largo * fps)))
+      const tramosColor: { a: number; b: number; cubo: string | null }[] = []
+      for (let k = 0; k < n; k++) {
+        const t0 = (largo * k) / n
+        const t1 = (largo * (k + 1)) / n
+        const c = curvasColor(ajustesEn(t.clip, fuenteEnClip(t.clip, (t0 + t1) / 2)))
+        const cubo = c ? cuboDeCurvas(c) : null
+        const previo = tramosColor[tramosColor.length - 1]
+        if (previo && previo.cubo === cubo) previo.b = t1
+        else tramosColor.push({ a: t0, b: t1, cubo })
+      }
+      const filtros = tramosColor
+        .map((x, k) => {
+          if (!x.cubo) return ''
+          const archivo = `color-clip-${i}-${k}.cube`
+          writeFileSync(join(carpeta, archivo), x.cubo, 'utf8')
+          const fin = k === tramosColor.length - 1 ? '1' : `lt(t,${x.b.toFixed(4)})`
+          return `,lut1d=file=${archivo}:interp=linear:enable='gte(t,${x.a.toFixed(4)})*${fin}'`
+        })
+        .join('')
+      lut = filtros ? `,format=gbrp${filtros}` : ''
+    } else if (curvas) {
       const archivo = `color-clip-${i}.cube`
       writeFileSync(join(carpeta, archivo), cuboDeCurvas(curvas), 'utf8')
       lut = `,format=gbrp,lut1d=file=${archivo}:interp=linear`
     }
-    const base = `[${iv}:v]${ritmo},fps=${fps},${zoom}${encuadre}${lento}${fondoBorroso},setsar=1${lut}${color}${efectos}`
-    if (!hayMovimiento(a)) partes.push(`${base},format=yuv420p,settb=AVTB[v${i}]`)
+    const crudo = `[${iv}:v]${ritmo},fps=${fps},${zoom}${encuadre}${lento}${fondoBorroso},setsar=1${lut}${color}${efectos}`
+    // Las zonas tapadas (una cara, una placa): cada una se recorta, se difumina o se pinta de negro y se pega en su sitio.
+    let base = crudo
+    if (t.clip.zonas?.length) {
+      partes.push(`${crudo}[zi${i}_0]`)
+      t.clip.zonas.forEach((z, k) => {
+        const r = zonaEnPixeles(zonaEn(z, t.clip.entrada), ancho, alto)
+        const radio = Math.max(1, Math.floor((z.fuerza * Math.min(r.w, r.h)) / 5))
+        const tapa = z.modo === 'negro' ? 'drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill' : `boxblur=lr=${radio}:lp=2:cr=${Math.max(1, Math.floor(radio / 2))}:cp=2`
+        // Una zona que sigue algo: su recorte y su sitio cambian en cada cuadro (sendcmd, como las capas animadas).
+        let ordenes = ''
+        if (z.recorrido?.length) {
+          const lineas: string[] = []
+          let antes = ''
+          for (let j = 0; j <= Math.ceil(largo * fps); j++) {
+            const q = zonaEnPixeles(zonaEn(z, fuenteEnClip(t.clip, j / fps)), ancho, alto)
+            const orden = `crop@zr${i}_${k} x ${q.x}, crop@zr${i}_${k} y ${q.y}, overlay@zo${i}_${k} x ${q.x}, overlay@zo${i}_${k} y ${q.y}`
+            if (orden !== antes) lineas.push(`${(j / fps).toFixed(4)} ${orden};`)
+            antes = orden
+          }
+          const archivo = `zona-${i}-${k}.txt`
+          writeFileSync(join(carpeta, archivo), lineas.join(String.fromCharCode(10)), 'utf8')
+          ordenes = `sendcmd=f=${archivo},`
+        }
+        partes.push(
+          `[zi${i}_${k}]${ordenes}split[za${i}_${k}][zb${i}_${k}];[zb${i}_${k}]crop@zr${i}_${k}=${r.w}:${r.h}:${r.x}:${r.y},${tapa}[zc${i}_${k}];` +
+            `[za${i}_${k}][zc${i}_${k}]overlay@zo${i}_${k}=${r.x}:${r.y}[zi${i}_${k + 1}]`
+        )
+      })
+      base = `[zi${i}_${t.clip.zonas.length}]null`
+    }
+    // Con fotogramas clave en Transformar, la escala, la rotación y la posición cambian en cada cuadro.
+    const movAnimado = Boolean(cl?.escala || cl?.posx || cl?.posy || cl?.giro)
+    if (!hayMovimiento(a) && !movAnimado) partes.push(`${base},format=yuv420p,settb=AVTB[v${i}]`)
     else {
       // Recortar y transformar (como en Premiere): los bordes recortados quedan negros y la imagen, escalada, girada y
       // corrida, se pone sobre negro; lo que se sale del cuadro se pierde. El monitor hace lo mismo con CSS.
@@ -357,17 +435,31 @@ export async function exportarTimeline(
         caja(String(ancho - px(a.recorteDer, ancho)), '0', px(a.recorteDer, ancho), alto) +
         caja('0', '0', ancho, px(a.recorteArr, alto)) +
         caja('0', String(alto - px(a.recorteAba, alto)), ancho, px(a.recorteAba, alto))
-      const escala = a.escala < 0.999 ? `,scale=w=trunc(iw*${a.escala.toFixed(4)}/2)*2:h=trunc(ih*${a.escala.toFixed(4)}/2)*2` : ''
+      const E = cl?.escala ? exprClave(cl.escala, Ft) : a.escala.toFixed(4)
+      const PX = cl?.posx ? exprClave(cl.posx, Ft) : a.posx.toFixed(4)
+      const PY = cl?.posy ? exprClave(cl.posy, Ft) : a.posy.toFixed(4)
+      const G = cl?.giro ? exprClave(cl.giro, Ft) : a.giro.toFixed(3)
+      const escala =
+        cl?.escala || a.escala < 0.999
+          ? `,scale=w='max(2,trunc(iw*(${E})/2)*2)':h='max(2,trunc(ih*(${E})/2)*2)'${cl?.escala ? ':eval=frame' : ''}`
+          : ''
       const rad = (a.giro * Math.PI) / 180
-      const giro = Math.abs(a.giro) > 0.05 ? `,rotate=${rad.toFixed(5)}:ow='rotw(${rad.toFixed(5)})':oh='roth(${rad.toFixed(5)})':c=none` : ''
+      // Girando con claves: un lienzo fijo (la diagonal del cuadro) donde cabe a cualquier ángulo.
+      const diagonal = Math.ceil(Math.hypot(ancho, alto) / 2) * 2
+      const giro = cl?.giro
+        ? `,pad=w=${diagonal}:h=${diagonal}:x='(ow-iw)/2':y='(oh-ih)/2':color=black@0:eval=frame,rotate=a='(${G})*PI/180':c=none:ow=${diagonal}:oh=${diagonal}`
+        : Math.abs(a.giro) > 0.05
+          ? `,rotate=${rad.toFixed(5)}:ow='rotw(${rad.toFixed(5)})':oh='roth(${rad.toFixed(5)})':c=none`
+          : ''
       partes.push(`${base}${recorte},format=rgba${escala}${giro}[mv${i}]`)
       partes.push(`color=c=black:s=${ancho}x${alto}:r=${fps}:d=${largo.toFixed(3)},format=rgba[mf${i}]`)
       partes.push(
-        `[mf${i}][mv${i}]overlay=x='(W-w)/2+${a.posx.toFixed(4)}*W':y='(H-h)/2+${a.posy.toFixed(4)}*H':shortest=1,format=yuv420p,settb=AVTB[v${i}]`
+        `[mf${i}][mv${i}]overlay=x='(W-w)/2+(${PX})*W':y='(H-h)/2+(${PY})*H':eval=frame:shortest=1,format=yuv420p,settb=AVTB[v${i}]`
       )
     }
     if (conAudio) {
-      if (f.conAudio && !t.clip.mudo) {
+      // Con rampa, el sonido del clip se calla (como al reasignar el tiempo en Premiere).
+      if (f.conAudio && !t.clip.mudo && !rampa) {
         // apad + atrim: cada tramo de audio dura exactamente lo que su video, o concat se desfasa.
         // El sonido del clip: sin ruido de fondo (afftdn), a su volumen y con sus fundidos de entrada y salida.
         // afftdn quita lo que queda por debajo de `nf` (dB): con más limpieza sube el umbral (−50 a −25) y la reducción (10 a 30 dB).
@@ -375,7 +467,16 @@ export async function exportarTimeline(
         const so = sonidoDe(t.clip)
         const sonido =
           (so.limpio > 0.005 ? `,afftdn=nr=${(10 + 20 * so.limpio).toFixed(1)}:nf=${(-50 + 25 * so.limpio).toFixed(1)}` : '') +
-          (Math.abs(so.volumen - 1) > 0.005 ? `,volume=${so.volumen.toFixed(3)}` : '') +
+          // Mejorar la voz: fuera los graves que retumban, una compresión suave que la empareja y presencia en 3 kHz.
+          (so.realce > 0.005
+            ? `,highpass=f=${Math.round(60 + 40 * so.realce)},acompressor=threshold=${(-14 - 10 * so.realce).toFixed(1)}dB:ratio=${(2 + 2 * so.realce).toFixed(2)}:attack=8:release=120:makeup=${(1 + 1.5 * so.realce).toFixed(2)},equalizer=f=3000:t=q:w=1.2:g=${(4 * so.realce).toFixed(2)}`
+            : '') +
+          // Con fotogramas clave, el volumen sigue su curva (en el segundo de la fuente de cada muestra).
+          (t.clip.clavesVolumen?.length
+            ? `,volume=volume='${exprClave(t.clip.clavesVolumen, `(${t.clip.entrada.toFixed(3)}+t*${vel})`)}':eval=frame`
+            : Math.abs(so.volumen - 1) > 0.005
+              ? `,volume=${so.volumen.toFixed(3)}`
+              : '') +
           (so.entra > 0.005 ? `,afade=t=in:st=0:d=${so.entra.toFixed(3)}` : '') +
           (so.sale > 0.005 ? `,afade=t=out:st=${Math.max(0, largo - so.sale).toFixed(3)}:d=${so.sale.toFixed(3)}` : '')
         partes.push(`[${iv}:a]asetpts=PTS-STARTPTS,${tempo}aresample=48000,aformat=channel_layouts=stereo,apad,atrim=0:${largo.toFixed(3)}${sonido}[a${i}]`)
@@ -425,7 +526,8 @@ export async function exportarTimeline(
     efectos.forEach((s, i) => {
       entradas.push('-i', join(carpeta, s.archivo))
       partes.push(
-        `[${n++}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=${(s.volumen ?? VOLUMEN_SONIDO).toFixed(3)},adelay=${Math.round(s.inicio * 1000)}:all=1[ef${i}]`
+        // Su tramo del archivo (recortado por los bordes), a su volumen y en su segundo.
+        `[${n++}:a]atrim=start=${(s.desde ?? 0).toFixed(3)}:duration=${s.duracion.toFixed(3)},asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=${(s.volumen ?? VOLUMEN_SONIDO).toFixed(3)},adelay=${Math.round(s.inicio * 1000)}:all=1[ef${i}]`
       )
       etiquetas.push(`[ef${i}]`)
     })
@@ -479,6 +581,24 @@ export async function exportarTimeline(
     partes.push(`${capaBase}scale=${ancho}:${alto}:flags=area[capasJuntas]`)
     capaBase = '[capasJuntas]'
   }
+  // Las capas de ajuste: en su tramo, el color y el desenfoque valen para el video y las capas (no para los textos).
+  for (const [k, x] of (timeline.ajustesCapa ?? []).entries()) {
+    const aj = ajustesDeCapa(x)
+    const en = `enable='between(t,${x.inicio.toFixed(3)},${(x.inicio + x.duracion).toFixed(3)})'`
+    let cadena = ''
+    const curvasAj = curvasColor(aj)
+    if (curvasAj) {
+      const archivo = `ajuste-${k}.cube`
+      writeFileSync(join(carpeta, archivo), cuboDeCurvas(curvasAj), 'utf8')
+      cadena += `format=gbrp,lut1d=file=${archivo}:interp=linear:${en},`
+    }
+    if (aj.brillo !== 0 || aj.contraste !== 1 || aj.saturacion !== 1)
+      cadena += `eq=brightness=${aj.brillo.toFixed(3)}:contrast=${aj.contraste.toFixed(3)}:saturation=${aj.saturacion.toFixed(3)}:${en},`
+    if (aj.desenfoque > 0.005) cadena += `gblur=sigma=${(aj.desenfoque * DESENFOQUE_CLIP * ancho).toFixed(2)}:${en},`
+    if (!cadena) continue
+    partes.push(`${capaBase}${cadena}format=yuv420p[ajuste${k}]`)
+    capaBase = `[ajuste${k}]`
+  }
   // Los filtros de todo el video (grano, polvo, trama, viñeta, parpadeo): por debajo de los rótulos,
   // para que el texto se siga leyendo nítido.
   if (timeline.filtros) {
@@ -514,10 +634,33 @@ export async function exportarTimeline(
     }
   }
   const salidaAudio = hayBus || conMusica
+  // Volumen normalizado para redes (−14 LUFS, picos por debajo de −1.5 dB), como piden YouTube, Instagram y TikTok.
+  const audioFinal = salidaAudio && opciones.normalizar ? '[afin]' : '[aout]'
+  if (salidaAudio && opciones.normalizar) partes.push('[aout]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[afin]')
   const archivoFiltro = 'filtro-timeline.txt'
   writeFileSync(join(carpeta, archivoFiltro), partes.join(';' + String.fromCharCode(10)), 'utf8')
 
-  const argumentos = [
+  if (opciones.soloAudio && !salidaAudio) return { ok: false, error: 'Esta edición no tiene sonido que exportar.' }
+  // Solo el sonido: la imagen se calcula igual (el grafo es uno) pero se descarta sin codificarla.
+  const soloAudio = opciones.soloAudio
+    ? [
+        '-map',
+        '[vout]',
+        '-f',
+        'null',
+        process.platform === 'win32' ? 'NUL' : '/dev/null',
+        '-map',
+        audioFinal,
+        ...(opciones.soloAudio === 'wav' ? ['-c:a', 'pcm_s16le', '-ar', '48000'] : ['-c:a', 'libmp3lame', '-b:a', '192k']),
+        '-progress',
+        'pipe:1',
+        '-nostats',
+        salida
+      ]
+    : null
+  const argumentos = soloAudio
+    ? ['-y', '-hide_banner', '-loglevel', 'error', ...entradas, '-/filter_complex', archivoFiltro, ...soloAudio]
+    : [
     '-y',
     '-hide_banner',
     '-loglevel',
@@ -528,9 +671,9 @@ export async function exportarTimeline(
     archivoFiltro,
     '-map',
     '[vout]',
-    ...(salidaAudio ? ['-map', '[aout]', '-c:a', 'aac', '-b:a', '160k'] : ['-an']),
+    ...(salidaAudio ? ['-map', audioFinal, '-c:a', 'aac', '-b:a', '160k'] : ['-an']),
     // Con la tarjeta gráfica si la hay (más rápido y deja el procesador para los filtros).
-    ...argsH264(await codificadorH264(), 20),
+    ...argsH264(await codificadorH264(), CRF_CALIDAD[opciones.calidad ?? 'normal']),
     ...ETIQUETAS_BT709,
     '-pix_fmt',
     'yuv420p',
@@ -571,6 +714,11 @@ export async function exportarTimeline(
     hijo.on('close', (codigo) => {
       if (codigo !== 0) {
         terminar({ ok: false, error: error.trim() || `FFmpeg terminó con código ${codigo}.` })
+        return
+      }
+      if (opciones.soloAudio) {
+        onProgreso(1, 'Sonido listo')
+        terminar({ ok: true, output: salida })
         return
       }
       void crearPortada(salida, duracion).then((portada) => {

@@ -18,8 +18,11 @@ export function MediosPanel({
   agregando,
   onAgregar,
   onPoner,
-  onQuitar
+  onQuitar,
+  onVer
 }: {
+  /** Abre un video en el monitor de origen (para marcar un tramo e insertarlo o sobrescribir). */
+  onVer?: (fuente: string) => void
   proyecto: Project
   agregando: boolean
   onAgregar: () => void
@@ -71,6 +74,11 @@ export function MediosPanel({
             <button className="btn small ghost" onClick={() => onPoner('principal', 'cabezal')}>
               En el cabezal
             </button>
+            {onVer && (
+              <button className="btn small ghost" onClick={() => onVer('principal')} title="Abrir en el monitor de origen: marca un tramo y lo insertas o sobrescribes">
+                Ver
+              </button>
+            )}
           </div>
         </div>
 
@@ -103,6 +111,11 @@ export function MediosPanel({
               <button className="btn small ghost" onClick={() => onPoner(m.id, 'encima')} title="Encima del video, en el cabezal (un logo, un ícono, una toma de apoyo)">
                 Encima
               </button>
+              {onVer && m.tipo === 'video' && (
+                <button className="btn small ghost" onClick={() => onVer(m.id)} title="Abrir en el monitor de origen: marca un tramo y lo insertas o sobrescribes">
+                  Ver
+                </button>
+              )}
               <button className="btn small ghost medio-quitar" onClick={() => onQuitar(m)} title="Quitar del proyecto (el archivo no se borra)">
                 <Icon name="trash" size={13} />
               </button>

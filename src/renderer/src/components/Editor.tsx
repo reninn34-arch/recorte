@@ -7,10 +7,14 @@ import { Inspector } from './Inspector'
 import { RenderQueue } from './RenderQueue'
 import { SourceCard } from './SourceCard'
 import { Icon } from '../Icons'
+import { PanelMulticam } from './Multicam'
+import { MonitorOrigen } from './MonitorOrigen'
+import { PanelHistorial } from './PanelHistorial'
+import { PanelLimpieza } from './PanelLimpieza'
 
 const CLAVE_ALTO_TL = 'recorte.altoLineaDeTiempo'
 import { mediaUrl } from '../media'
-import { capaNueva, cambiarCapa, cambiarFuente, escalaAnimada, type TipoAnimar, duracionTimeline, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, timelineActiva, type Timeline } from '../../../shared/timeline'
+import { ajustarClip, sobrescribirClip, separarAudio, sonidoUnicoMulticam, inicioEscenaMulticam, anidarClips, clipsSeguidos, cambiarATramo, ubicar, capaNueva, cambiarCapa, cambiarFuente, escalaAnimada, type TipoAnimar, duracionTimeline, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, timelineActiva, type Timeline } from '../../../shared/timeline'
 import { useHistorial, useReproductor, type FuentesVista } from '../hooks/timeline'
 import { Monitor } from './Monitor'
 import { MediosPanel } from './MediosPanel'
@@ -175,12 +179,117 @@ export function Editor({
     try {
       const r = await window.recorte.quitarFondo(proyecto.id, capa.fuente)
       onMedios(r.project.medios ?? [])
-      historial.aplicar(cambiarCapa(timeline, capaId, { fuente: r.medio }, { ...duraciones, [r.medio]: MAX_IMAGEN }))
-      onAviso('Listo: la capa ya no tiene fondo. El original sigue en la biblioteca.')
+      // Un video sin fondo (WebM con transparencia) dura lo que el original; una imagen, lo que haga falta.
+      const nuevo = r.project.medios?.find((m) => m.id === r.medio)
+      const dura = nuevo?.tipo === 'video' && nuevo.duracion > 0 ? nuevo.duracion : MAX_IMAGEN
+      historial.aplicar(cambiarCapa(timeline, capaId, { fuente: r.medio }, { ...duraciones, [r.medio]: dura }))
+      onAviso(`Listo: ${nuevo?.tipo === 'video' ? 'el video ya no tiene el fondo verde' : 'la capa ya no tiene fondo'}. El original sigue en la biblioteca.`)
     } catch (error) {
       onAviso(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error))
     } finally {
       setQuitandoFondo(false)
+    }
+  }
+
+  /**
+   * Congelar cuadro: el cuadro del cabezal sale como imagen y entra ahí mismo como un clip quieto de 2 s, con el color
+   * y el encuadre del clip de donde sale.
+   */
+  const [congelando, setCongelando] = useState(false)
+  /** El video abierto en el monitor de origen (o ninguno). */
+  const [origen, setOrigen] = useState<string | null>(null)
+  /** Separar el audio de un clip: su sonido pasa a la pista de sonidos y el clip queda mudo. */
+  const [separando, setSeparando] = useState(false)
+  async function separarAudioDe(clipId: string) {
+    const c = timeline.clips.find((x) => x.id === clipId)
+    if (!c || separando) return
+    if (c.rampa || Math.abs((c.velocidad ?? 1) - 1) > 0.005) {
+      onAviso('Para separar el sonido, el clip tiene que ir a velocidad normal.')
+      return
+    }
+    setSeparando(true)
+    try {
+      const r = await window.recorte.extraerAudio(proyecto.id, c.fuente, c.entrada, c.salida)
+      historial.aplicar(separarAudio(timeline, clipId, r.archivo, r.nombre, r.duracion))
+      onAviso('Listo: el sonido quedó aparte en la pista de sonidos. Muévelo o recórtalo sin tocar la imagen.')
+    } catch (error) {
+      onAviso(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error))
+    } finally {
+      setSeparando(false)
+    }
+  }
+  /** Anidar: los clips seguidos elegidos pasan a ser uno (renderizado), con los de dentro guardados para desanidar. */
+  const [anidando, setAnidando] = useState(false)
+  async function anidar(ids: string[]) {
+    const indices = clipsSeguidos(timeline, ids)
+    if (!indices || anidando) {
+      if (!indices) onAviso('Para anidar, elige dos o más clips seguidos de la pista de video (Ctrl + clic).')
+      return
+    }
+    setAnidando(true)
+    try {
+      const r = await window.recorte.anidar(proyecto.id, indices.map((i) => timeline.clips[i]))
+      onMedios(r.project.medios ?? [])
+      const hecho = anidarClips(timeline, ids, r.medio, r.duracion)
+      historial.aplicar(hecho.timeline)
+      onAviso(`Listo: ${indices.length} clips quedaron en uno. Puedes desanidarlo cuando quieras.`)
+    } catch (error) {
+      onAviso(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error))
+    } finally {
+      setAnidando(false)
+    }
+  }
+  /** Exportar cuadro: el cuadro del cabezal, con todo lo de encima, como PNG en la carpeta de videos. */
+  const [sacandoCuadro, setSacandoCuadro] = useState(false)
+  async function exportarCuadro() {
+    if (sacandoCuadro) return
+    setSacandoCuadro(true)
+    try {
+      const r = await window.recorte.exportarCuadro(proyecto.id, timeline, reproductor.tiempo)
+      onAviso(r.ok && r.archivo ? `Guardé el cuadro en ${r.archivo}` : (r.error ?? 'No pude guardar el cuadro.'))
+    } catch (error) {
+      onAviso(error instanceof Error ? error.message : String(error))
+    } finally {
+      setSacandoCuadro(false)
+    }
+  }
+  /** Estabiliza el clip: su tramo sale estable a la biblioteca y el clip pasa a usarlo, con sus ajustes y sus claves. */
+  const [estabilizando, setEstabilizando] = useState<string | null>(null)
+  async function estabilizar(clipId: string) {
+    const c = timeline.clips.find((x) => x.id === clipId)
+    if (!c || estabilizando) return
+    setEstabilizando(clipId)
+    try {
+      const r = await window.recorte.estabilizar(proyecto.id, c.fuente, c.entrada, c.salida)
+      onMedios(r.project.medios ?? [])
+      historial.aplicar(cambiarATramo(timeline, clipId, r.medio, r.desde))
+      onAviso('Listo: el clip quedó estabilizado (con los bordes un poco recortados). El original sigue en la biblioteca.')
+    } catch (error) {
+      onAviso(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error))
+    } finally {
+      setEstabilizando(null)
+    }
+  }
+  async function congelar() {
+    const u = ubicar(timeline, reproductor.tiempo)
+    if (!u || congelando) return
+    if (u.clip.fuente !== 'principal' && proyecto.medios?.find((m) => m.id === u.clip.fuente)?.tipo !== 'video') {
+      onAviso('Ese clip ya es una imagen quieta.')
+      return
+    }
+    setCongelando(true)
+    try {
+      const r = await window.recorte.congelarCuadro(proyecto.id, u.clip.fuente, u.tFuente)
+      onMedios(r.project.medios ?? [])
+      const puesto = insertarClip(timeline, { fuente: r.medio, entrada: 0, salida: 2 }, reproductor.tiempo)
+      const { zoom, cx, cy, ...resto } = u.clip.ajustes ?? {}
+      const ajustes = { ...resto, ...(zoom !== undefined ? { zoom } : {}), ...(cx !== undefined ? { cx } : {}), ...(cy !== undefined ? { cy } : {}) }
+      historial.aplicar(Object.keys(ajustes).length ? ajustarClip(puesto.timeline, puesto.id, ajustes) : puesto.timeline)
+      onAviso('Listo: el cuadro quedó congelado 2 s en el cabezal. Alárgalo o acórtalo arrastrando su borde.')
+    } catch (error) {
+      onAviso(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error))
+    } finally {
+      setCongelando(false)
     }
   }
 
@@ -353,10 +462,32 @@ export function Editor({
         paneles={{ biblioteca: panelBiblioteca, inspector: panelInspector, transporte: panelTransporte }}
         miniaturaDe={miniaturaDe}
         urlDe={proyecto.demo ? undefined : (archivo) => mediaUrl(proyecto.id, archivo)}
+        ondaDe={proyecto.demo ? undefined : (fuente) => `onda:${proyecto.id}:${fuente}`}
         panelMedios={
           <>
+            {origen && fuentes[origen] && (
+              <MonitorOrigen
+                key={origen}
+                url={fuentes[origen].url}
+                nombre={origen === 'principal' ? proyecto.source.name : (proyecto.medios?.find((m) => m.id === origen)?.nombre ?? 'Video')}
+                duracion={origen === 'principal' ? proyecto.source.duration : (duraciones[origen] ?? 0)}
+                fps={proyecto.source.fps > 0 ? proyecto.source.fps : 30}
+                onInsertar={(entrada, salida) => {
+                  const r = insertarClip(timeline, { fuente: origen, entrada, salida }, reproductor.tiempo)
+                  historial.aplicar(r.timeline)
+                  onAviso('Insertado en el cabezal: lo que venía después se corrió.')
+                }}
+                onSobrescribir={(entrada, salida) => {
+                  const r = sobrescribirClip(timeline, { fuente: origen, entrada, salida }, reproductor.tiempo)
+                  historial.aplicar(r.timeline)
+                  onAviso('Sobrescrito en el cabezal: tapó lo que había ahí.')
+                }}
+                onCerrar={() => setOrigen(null)}
+              />
+            )}
             <MediosPanel
               proyecto={proyecto}
+              onVer={proyecto.demo ? undefined : (fuente) => setOrigen(fuente)}
               agregando={agregando}
               onAgregar={() => void agregarMedios()}
               onPoner={(fuente, donde) => {
@@ -376,11 +507,57 @@ export function Editor({
         }
         pestanasExtra={[
           {
+            id: 'historial',
+            nombre: 'Historial',
+            icono: 'undo' as const,
+            contenido: (
+              <PanelHistorial
+                historial={historial}
+                version={timeline}
+                nombreDe={(f) => (f === 'principal' ? proyecto.source.name : (proyecto.medios?.find((m) => m.id === f)?.nombre ?? 'medio'))}
+              />
+            )
+          },
+          ...(proyecto.demo
+            ? []
+            : [
+                {
+                  id: 'multicam',
+                  nombre: 'Cámaras',
+                  icono: 'film' as const,
+                  contenido: (
+                    <PanelMulticam
+                      timeline={timeline}
+                      historial={historial}
+                      fuentes={fuentes}
+                      nombres={[
+                        { fuente: 'principal', nombre: proyecto.name },
+                        ...(proyecto.medios ?? []).filter((m) => m.tipo === 'video').map((m) => ({ fuente: m.id, nombre: m.nombre }))
+                      ]}
+                      tiempo={reproductor.tiempo}
+                      reproduciendo={reproductor.reproduciendo}
+                      duracionDe={(f) => (f === 'principal' ? proyecto.source.duration : duraciones[f] ?? 0)}
+                      sincronizar={(lista) => window.recorte.sincronizar(proyecto.id, lista)}
+                      sonidoUnico={async (n) => {
+                        const mc = timeline.multicam
+                        const inicio = inicioEscenaMulticam(timeline)
+                        if (!mc || inicio === null) throw new Error('El primer clip no es una de las tomas.')
+                        const a = mc.angulos[n]
+                        const dura = duracionTimeline(timeline)
+                        const r = await window.recorte.extraerAudio(proyecto.id, a.fuente, Math.max(0, inicio + a.desfase), inicio + a.desfase + dura)
+                        historial.aplicar(sonidoUnicoMulticam(timeline, r.archivo, r.nombre, r.duracion))
+                      }}
+                    />
+                  )
+                }
+              ]),
+          {
             id: 'ia',
             nombre: 'IA',
             icono: 'sparkles',
             contenido: (
               <>
+                {!proyecto.demo && <PanelLimpieza timeline={timeline} historial={historial} transcript={proyecto.transcript} onAviso={onAviso} />}
                 <span className="ed-seccion">Edición del agente</span>
                 {proyecto.receta && (
                   <button className="ed-fila" onClick={() => proyecto.receta && llevarATimeline(timelineDesdeReceta(proyecto.receta))}>
@@ -444,6 +621,17 @@ export function Editor({
         }
         onCambiarArchivo={proyecto.demo ? undefined : (clipId) => void cambiarArchivo(clipId)}
         onQuitarFondo={proyecto.demo ? undefined : (capaId) => void quitarFondo(capaId)}
+        onCongelar={proyecto.demo ? undefined : () => void congelar()}
+        onSepararAudio={proyecto.demo ? undefined : (clipId) => void separarAudioDe(clipId)}
+        separando={separando}
+        onAnidar={proyecto.demo ? undefined : (ids) => void anidar(ids)}
+        anidando={anidando}
+        onExportarCuadro={proyecto.demo ? undefined : () => void exportarCuadro()}
+        seguirZona={proyecto.demo ? undefined : (fuente, pedido) => window.recorte.seguirZona(proyecto.id, fuente, pedido)}
+        sacandoCuadro={sacandoCuadro}
+        onEstabilizar={proyecto.demo ? undefined : (clipId) => void estabilizar(clipId)}
+        estabilizando={estabilizando}
+        congelando={congelando}
         onAnimarCapa={proyecto.demo ? undefined : (capaId, tipo) => void animarCapa(capaId, tipo)}
         quitandoFondo={quitandoFondo}
         medios={proyecto.demo ? undefined : (proyecto.medios ?? []).map((m) => ({ id: m.id, nombre: m.nombre, tipo: m.tipo }))}

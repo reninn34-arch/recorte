@@ -10,6 +10,13 @@ function picosDe(url: string): Promise<Float32Array> {
   let p = cache.get(url)
   if (!p) {
     p = (async () => {
+      // `onda:<proyecto>:<fuente>`: un video del proyecto; sus picos los calcula Recorte (no se carga el video aquí).
+      if (url.startsWith('onda:')) {
+        const [, id, fuente] = url.split(':')
+        const picos = await window.recorte.ondaDe(id, fuente)
+        if (!picos) throw new Error('Sin sonido')
+        return Float32Array.from(picos)
+      }
       const datos = await (await fetch(url)).arrayBuffer()
       contexto ??= new AudioContext()
       const audio = await contexto.decodeAudioData(datos)
