@@ -24,6 +24,38 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.43',
+    fecha: '2026-11-12',
+    resumen: 'Un panel de efectos como el de los editores profesionales, y colores correctos al exportar con tarjeta AMD.',
+    novedades: [
+      {
+        icono: 'sliders',
+        titulo: 'Panel de efectos',
+        texto: 'Con buscador y carpetas: looks de color (Cine, Vivo, Vintage, Noche, Blanco y negro…), efectos de video, transiciones, movimientos de cámara y aspectos de película. Cada uno muestra su vista previa sobre tu clip.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Aplícalos con un clic o arrastrando',
+        texto: 'Toca un efecto para ponérselo al clip elegido, o arrástralo sobre cualquier clip de la línea de tiempo. En el inspector ajustas cada uno y lo quitas.'
+      },
+      {
+        icono: 'image',
+        titulo: 'Efectos nuevos de clip',
+        texto: 'Desenfoque, sepia, giro de tono y negativo. Salen en el MP4 exactamente como los ves en el monitor.'
+      },
+      {
+        icono: 'wand',
+        titulo: 'Más herramientas para el agente',
+        texto: 'El agente y la conexión por MCP ya pueden poner looks y efectos, cambiar la velocidad de un clip y ocultar o silenciar pistas.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Colores correctos con tarjeta AMD',
+        texto: 'Con una tarjeta AMD, los colores vivos salían ligeramente cambiados al exportar. Ya salen como en el monitor.'
+      }
+    ]
+  },
+  {
     version: '0.1.42',
     fecha: '2026-11-12',
     resumen: 'Un editor nuevo, ordenado como los editores profesionales, con velocidad, ondas de audio y más atajos.',
