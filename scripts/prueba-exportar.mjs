@@ -385,5 +385,60 @@ assert.ok(Math.abs(centro6(1.7) - centro6(1.4)) > 40, 'en el corte la capa salta
   console.log('fotogramas clave (encuadre y brillo) iguales en el MP4; se conservan al dividir y el agente los pone ✓')
 }
 
+// Claves de capa: un logo que va de izquierda a derecha y se desvanece sale en el MP4 donde lo pone el monitor.
+{
+  const { estadoCapa, ponerClaveCapa, quitarClaveCapa } = await import('../src/shared/timeline.ts')
+  const { aplicarOperaciones, validarOperaciones } = await import('../src/shared/chat.ts')
+  const negro = join(dir, 'negro2.mp4')
+  ff(['-f', 'lavfi', '-i', 'color=c=black:s=640x360:d=2:r=30', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', negro])
+  const p12 = { ...proyecto, source: { ...proyecto.source, path: negro, duration: 2 } }
+  const medios12 = { m1: 0 }
+  let tl = normalizarTimeline(
+    { clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 2 }], textos: [], capas: [{ id: 'k', fuente: 'm1', inicio: 0, duracion: 2, x: 0.2, y: 0.5, ancho: 0.15, entrada: 'ninguna' }] },
+    2,
+    medios12
+  )
+  tl = ponerClaveCapa(tl, 'k', 'x', 0, 0.2, medios12)
+  tl = ponerClaveCapa(tl, 'k', 'x', 2, 0.8, medios12)
+  tl = ponerClaveCapa(tl, 'k', 'opacidad', 1.2, 1, medios12)
+  tl = ponerClaveCapa(tl, 'k', 'opacidad', 2, 0, medios12)
+  const capa = tl.capas[0]
+  assert.ok(Math.abs(estadoCapa(capa, 1, false).x - 0.5) < 0.001, 'a mitad de camino, la capa está en medio')
+  assert.ok(estadoCapa(capa, 1.6, false).opacidad < 0.6, 'la opacidad baja en sus claves')
+  assert.equal(normalizarTimeline(tl, 2, medios12).capas[0].claves.x.length, 2, 'las claves de capa sobreviven a guardar y abrir')
+  const r = await exportarTimeline(p12, tl, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-capa'))
+  assert.ok(r.ok, r.error)
+  const mp4 = join(dir, 'salidas-capa', 'timeline-prueba-original.mp4')
+  // Dónde está lo rojo (el logo) en una fila del cuadro.
+  const rojoEn = (t) => {
+    const s = spawnSync('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', mp4, '-frames:v', '1', '-vf', 'crop=640:2:0:180', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { encoding: 'buffer' }).stdout
+    let suma = 0
+    let n = 0
+    let max = 0
+    for (let x = 0; x < 640; x++) {
+      const r0 = s[x * 3]
+      if (r0 > 60) {
+        suma += x
+        n++
+      }
+      max = Math.max(max, r0)
+    }
+    return { x: n ? suma / n / 640 : NaN, rojo: max }
+  }
+  for (const t of [0.3, 1.0]) {
+    const visto = rojoEn(t).x
+    const quiero = estadoCapa(capa, t, false).x
+    assert.ok(Math.abs(visto - quiero) < 0.03, `a los ${t} s, el MP4 pone la capa en ${visto.toFixed(3)} y el monitor en ${quiero.toFixed(3)}`)
+  }
+  assert.ok(rojoEn(1.9).rojo < rojoEn(1.0).rojo - 80, `al final se desvanece (${rojoEn(1.0).rojo} → ${rojoEn(1.9).rojo})`)
+  // Quitar las claves la deja fija; y el agente las pone con «clave_capa».
+  const sin = quitarClaveCapa(quitarClaveCapa(tl, 'k', 'x', 0, medios12), 'k', 'x', 2, medios12)
+  assert.equal(sin.capas[0].claves?.x, undefined)
+  const ops = validarOperaciones([{ op: 'clave_capa', capa_n: 1, parametro: 'ancho', en: 0, valor: 0.1 }, { op: 'clave_capa', capa_n: 1, parametro: 'ancho', en: 1, valor: 0.4 }])
+  const hecho = aplicarOperaciones(sin, ops, { duracionFuente: 2, medios: medios12 })
+  assert.equal(hecho.timeline.capas[0].claves?.ancho?.length, 2, `la op clave_capa no se aplicó: ${JSON.stringify(hecho.fallos)}`)
+  console.log('claves de capa (recorrido y desvanecer) iguales en el MP4; el agente las pone ✓')
+}
+
 rmSync(dir, { recursive: true, force: true })
 console.log('exportar: ok')

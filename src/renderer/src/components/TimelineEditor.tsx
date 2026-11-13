@@ -2,6 +2,11 @@ import React, { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState,
 import { createPortal } from 'react-dom'
 import {
   ajustarClip,
+  claveCapaEn,
+  estadoCapa,
+  ponerClaveCapa,
+  quitarClaveCapa,
+  type ParametroClaveCapa,
   ajustesEn,
   claveEn,
   PARAMETROS_CLAVE,
@@ -648,6 +653,39 @@ export function TimelineEditor({
   }
   const empezarAjuste = () => (ajustando.current = false)
 
+  /** El rombo de fotograma clave de un ajuste de la capa elegida, con sus flechas a la clave anterior y la siguiente. */
+  function RomboCapa({ clave, nombre, dt, valor }: { clave: ParametroClaveCapa; nombre: string; dt: number; valor: number }) {
+    if (!capaElegida) return null
+    const c = capaElegida
+    const lista = c.claves?.[clave] ?? []
+    const aqui = claveCapaEn(c, clave, dt)
+    const anterior = [...lista].reverse().find((x) => x.f < dt - 0.02)
+    const siguiente = lista.find((x) => x.f > dt + 0.02)
+    return (
+      <span className="ed-claves" onClick={(e) => e.preventDefault()}>
+        {lista.length > 0 && (
+          <button className="ed-clave-ir" disabled={!anterior} title="Ir a la clave anterior" aria-label={`Clave anterior de ${nombre}`} onClick={() => anterior && onBuscar(c.inicio + anterior.f)}>
+            ‹
+          </button>
+        )}
+        <button
+          className={`ed-clave ${aqui ? 'is-on' : lista.length ? 'is-animado' : ''}`}
+          title={aqui ? `Quitar este fotograma clave de ${nombre}` : lista.length ? `Añadir un fotograma clave de ${nombre} en el cabezal` : `Animar ${nombre}: pone un fotograma clave en el cabezal`}
+          aria-label={aqui ? `Quitar la clave de ${nombre}` : `Poner una clave de ${nombre}`}
+          aria-pressed={Boolean(aqui)}
+          onClick={() => historial.aplicar(aqui ? quitarClaveCapa(timeline, c.id, clave, aqui.f, medidas) : ponerClaveCapa(timeline, c.id, clave, dt, valor, medidas))}
+        >
+          ◆
+        </button>
+        {lista.length > 0 && (
+          <button className="ed-clave-ir" disabled={!siguiente} title="Ir a la clave siguiente" aria-label={`Clave siguiente de ${nombre}`} onClick={() => siguiente && onBuscar(c.inicio + siguiente.f)}>
+            ›
+          </button>
+        )}
+      </span>
+    )
+  }
+
   /** El segundo de la fuente del clip elegido que está bajo el cabezal (dentro del clip). */
   const fuenteEnCabezal = clipElegido
     ? Math.min(clipElegido.clip.salida, Math.max(clipElegido.clip.entrada, clipElegido.clip.entrada + (tiempo - clipElegido.inicio) * velocidadDe(clipElegido.clip)))
@@ -1155,6 +1193,10 @@ export function TimelineEditor({
                   >
                     <span className="tl-asa izquierda" onPointerDown={(e) => arrastrarCapa(e, c.id, 'inicio')} />
                     {anchoCapa > 30 && <span className="tl-clip-texto">{nombre}</span>}
+                    {c.claves &&
+                      [...new Set(Object.values(c.claves).flatMap((l) => (l ?? []).map((x) => x.f)))].map((f) => (
+                        <span key={f} className="tl-clave" style={{ left: f * pps }} />
+                      ))}
                     <span className="tl-asa derecha" onPointerDown={(e) => arrastrarCapa(e, c.id, 'fin')} />
                   </div>
                 )
@@ -1693,30 +1735,72 @@ export function TimelineEditor({
               ))}
               {capaElegida.fin && <option value="propio">Recorrido propio</option>}
             </select></label>
+            <span className="ed-seccion">Fotogramas clave</span>
+            <p className="tl-dim">
+              Toca ◆ para animar ese ajuste: pon el cabezal en otro momento de la capa, cámbialo (aquí o arrastrándola en el monitor) y se mueve solo.
+            </p>
             {(
               [
-                ['ancho', 'Tamaño', 0.05, 1],
-                ['x', 'Sitio ↔', 0, 1],
-                ['y', 'Sitio ↕', 0, 1]
+                ['ancho', 'Tamaño', 0.05, 2, 0.01, (v: number) => `${Math.round(v * 100)} %`],
+                ['x', 'Sitio ↔', capaElegida.claves?.x ? -0.5 : 0, capaElegida.claves?.x ? 1.5 : 1, 0.01, (v: number) => `${Math.round(v * 100)} %`],
+                ['y', 'Sitio ↕', capaElegida.claves?.y ? -0.5 : 0, capaElegida.claves?.y ? 1.5 : 1, 0.01, (v: number) => `${Math.round(v * 100)} %`],
+                ['opacidad', 'Opacidad', 0, 1, 0.01, (v: number) => `${Math.round(v * 100)} %`]
               ] as const
-            ).map(([clave, nombre, min, max]) => (
-              <label key={clave} className="tl-ajuste en-linea">
+            ).map(([clave, nombre, min, max, paso, formato]) => {
+              const dt = Math.min(capaElegida.duracion, Math.max(0, tiempo - capaElegida.inicio))
+              const lista = capaElegida.claves?.[clave] ?? []
+              const valor = estadoCapa(capaElegida, dt, false)[clave === 'opacidad' ? 'opacidad' : clave]
+              return (
+                <label key={clave} className={`tl-ajuste en-linea ${lista.length ? 'con-claves' : ''}`}>
+                  <span>
+                    <span className="tl-ajuste-nombre">
+                      {nombre}
+                      <RomboCapa clave={clave} nombre={nombre} dt={dt} valor={valor} />
+                    </span>
+                    <b>{formato(valor)}</b>
+                  </span>
+                  <input
+                    type="range"
+                    min={min}
+                    max={max}
+                    step={paso}
+                    value={valor}
+                    onPointerDown={empezarAjuste}
+                    onFocus={empezarAjuste}
+                    onChange={(e) => {
+                      const v = Number(e.target.value)
+                      deslizar(
+                        lista.length || clave === 'opacidad'
+                          ? ponerClaveCapa(timeline, capaElegida.id, clave, dt, v, medidas)
+                          : cambiarCapa(timeline, capaElegida.id, { [clave]: v }, medidas)
+                      )
+                    }}
+                  />
+                </label>
+              )
+            })}
+            {capaElegida.claves?.giro ? (
+              <label className="tl-ajuste en-linea con-claves">
                 <span>
-                  {nombre} <b>{Math.round(capaElegida[clave] * 100)} %</b>
+                  <span className="tl-ajuste-nombre">
+                    Giro
+                    <RomboCapa clave="giro" nombre="Giro" dt={Math.min(capaElegida.duracion, Math.max(0, tiempo - capaElegida.inicio))} valor={estadoCapa(capaElegida, Math.max(0, tiempo - capaElegida.inicio), false).giro} />
+                  </span>
+                  <b>{Math.round(estadoCapa(capaElegida, Math.max(0, tiempo - capaElegida.inicio), false).giro)}°</b>
                 </span>
                 <input
                   type="range"
-                  min={min}
-                  max={max}
-                  step={0.01}
-                  value={capaElegida[clave]}
+                  min={-180}
+                  max={180}
+                  step={1}
+                  value={estadoCapa(capaElegida, Math.max(0, tiempo - capaElegida.inicio), false).giro}
                   onPointerDown={empezarAjuste}
                   onFocus={empezarAjuste}
-                  onChange={(e) => deslizar(cambiarCapa(timeline, capaElegida.id, { [clave]: Number(e.target.value) }, medidas))}
+                  onChange={(e) => deslizar(ponerClaveCapa(timeline, capaElegida.id, 'giro', Math.min(capaElegida.duracion, Math.max(0, tiempo - capaElegida.inicio)), Number(e.target.value), medidas))}
                 />
               </label>
-            ))}
-            {(
+            ) : null}
+            {!capaElegida.claves?.giro && (
               [
                 ['giro', capaElegida.fin ? 'Giro al empezar' : 'Giro', capaElegida.giro ?? 0],
                 ...(capaElegida.fin ? ([['giroFin', 'Giro al terminar', capaElegida.fin.giro]] as const) : [])
@@ -1724,7 +1808,11 @@ export function TimelineEditor({
             ).map(([clave, nombre, valor]) => (
               <label key={clave} className="tl-ajuste en-linea">
                 <span>
-                  {nombre} <b>{Math.round(valor)}°</b>
+                  <span className="tl-ajuste-nombre">
+                    {nombre}
+                    {clave === 'giro' && <RomboCapa clave="giro" nombre="Giro" dt={Math.min(capaElegida.duracion, Math.max(0, tiempo - capaElegida.inicio))} valor={valor} />}
+                  </span>
+                  <b>{Math.round(valor)}°</b>
                 </span>
                 <input
                   type="range"

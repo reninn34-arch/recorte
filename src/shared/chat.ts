@@ -52,7 +52,11 @@ import {
   ponerClave,
   quitarClave,
   velocidadDe,
-  type ParametroClave
+  type ParametroClave,
+  PARAMETROS_CLAVE_CAPA,
+  ponerClaveCapa,
+  quitarClaveCapa,
+  type ParametroClaveCapa
 } from './timeline'
 import { INSTRUCCIONES_CRITERIO } from './gustos'
 import type { TranscriptSegment } from './types'
@@ -105,6 +109,7 @@ export type OperacionTL =
   | { op: 'color'; clip?: number; look?: string; brillo?: number; contraste?: number; saturacion?: number; desenfoque?: number; sepia?: number; tono?: number; invertir?: number }
   | { op: 'velocidad'; clip: number; velocidad: number }
   | { op: 'clave'; clip: number; parametro: ParametroClave; en: number; valor?: number; quitar?: boolean }
+  | { op: 'clave_capa'; capa_n: number; parametro: ParametroClaveCapa; en: number; valor?: number; quitar?: boolean }
   | { op: 'pista'; pista: PistaId; oculta?: boolean; bloqueada?: boolean }
   | { op: 'musica'; volumen?: number; ducking?: boolean }
   | { op: 'quitar_musica' }
@@ -361,6 +366,15 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
         const campos = (['brillo', 'contraste', 'saturacion', 'desenfoque', 'sepia', 'tono', 'invertir'] as const).filter((k) => num(x[k]) !== null)
         const look = typeof x.look === 'string' && LOOKS.some((l) => l.id === x.look) ? x.look : undefined
         if (campos.length || look) ops.push({ op: 'color', clip: num(x.clip) ?? undefined, ...(look ? { look } : {}), ...Object.fromEntries(campos.map((k) => [k, num(x[k])!])) })
+        break
+      }
+      case 'clave_capa': {
+        const c = num(x.capa_n)
+        const en = num(x.en)
+        const valor = num(x.valor)
+        const parametro = PARAMETROS_CLAVE_CAPA.find((p) => p === x.parametro)
+        if (c !== null && en !== null && parametro && (valor !== null || x.quitar === true))
+          ops.push({ op: 'clave_capa', capa_n: c, parametro, en, ...(valor !== null ? { valor } : {}), ...(x.quitar === true ? { quitar: true } : {}) })
         break
       }
       case 'clave': {
@@ -652,6 +666,23 @@ export function aplicarOperaciones(
         else {
           tl = borrarSonido(tl, s.id)
           cambios.push(`Quité el sonido «${s.nombre}»`)
+        }
+        break
+      }
+      case 'clave_capa': {
+        const capa = tl.capas?.[o.capa_n - 1]
+        if (!capa) {
+          fallos.push(`No existe la capa ${o.capa_n}.`)
+          break
+        }
+        const nueva =
+          o.quitar || o.valor === undefined
+            ? quitarClaveCapa(tl, capa.id, o.parametro, o.en, medios)
+            : ponerClaveCapa(tl, capa.id, o.parametro, o.en, o.valor, medios)
+        if (nueva === tl) fallos.push(`No pude ${o.quitar ? 'quitar' : 'poner'} esa clave en la capa ${o.capa_n}.`)
+        else {
+          tl = nueva
+          cambios.push(o.quitar ? `Quité la clave de ${o.parametro} de la capa ${o.capa_n} en ${o.en} s` : `Capa ${o.capa_n}: ${o.parametro} = ${o.valor} en ${o.en} s`)
         }
         break
       }
@@ -953,6 +984,7 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
   La misma op pone EFECTOS al clip: "desenfoque" 0 a 1 (0.35 para un fondo bajo un texto), "sepia" 0 a 1 (foto antigua), "tono" -180 a 180 (gira los colores), "invertir" 1 (negativo; 0 lo quita).
   Y un LOOK de color completo con "look" (sustituye al color y los efectos que tuviera): ${LOOKS.map((l) => `${l.id} (${l.para})`).join(', ')}. Para un flash en negativo: divide medio segundo y ponle "invertir":1.
 - {"op":"clave","clip":N,"parametro":"zoom|cx|cy|brillo|contraste|saturacion","en":S,"valor":V}  FOTOGRAMA CLAVE: ese ajuste del clip N vale V en el segundo S (contado desde que empieza el clip) y cambia suave hasta la siguiente clave. Con dos o más claves animas a mano: un zoom que entra y vuelve a salir (zoom 1 en 0, 1.4 en 1.5, 1 en 3), el encuadre que va de una cara a otra (cx, cy), un fundido a oscuro (brillo 0 → -0.3), el color que se apaga (saturacion 1 → 0). Hasta 12 claves por ajuste. "quitar":true en vez de "valor" borra la de ese segundo.
+- {"op":"clave_capa","capa_n":N,"parametro":"x|y|ancho|giro|opacidad","en":S,"valor":V}  FOTOGRAMA CLAVE de una capa encima: en el segundo S (desde que aparece la capa) vale V, y cambia suave hasta la siguiente. x, y de -0.5 a 1.5 (fuera del cuadro para entrar o salir volando), ancho 0.05 a 2, giro en grados, opacidad 0 a 1. Así se hace un recorrido con curvas (varias claves de x e y), algo que crece y se encoge, un logo que aparece y se desvanece (opacidad 0 → 1 → 0). Mandan sobre "fin_x"… de anadir_capa. "quitar":true borra la de ese segundo.
 - {"op":"velocidad","clip":N,"velocidad":V}  cámara lenta o rápida de un clip de VIDEO: 0.25 a 4 (1 normal; 0.5 la mitad de rápido, 2 el doble). El clip dura más o menos y lo que sigue se corre. En una foto no hace nada.
 - {"op":"pista","pista":"encima|video|texto|voz|sonidos|musica","oculta":true|false}  oculta (encima, texto) o silencia (video, voz, sonidos, musica) una pista entera, en el monitor y en el MP4, sin borrar lo que tiene. "bloqueada":true la protege de cambios a mano.
 - {"op":"musica","volumen":V,"ducking":true|false}  volumen 0 a 1 de la música ya puesta (bajo la voz suele ir bien 0.2–0.4); ducking hace que baje sola cuando hay voz.

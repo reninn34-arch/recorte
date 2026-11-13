@@ -289,6 +289,8 @@ export interface CapaTL {
   profundidad?: number
   /** Desenfoque (como lo que está fuera de foco, muy cerca o muy lejos), 0 a 1; 0 nítida. */
   desenfoque?: number
+  /** Fotogramas clave: el valor de x, y, ancho, giro u opacidad en ciertos segundos desde que aparece la capa. Mandan sobre `fin`. */
+  claves?: ClavesCapa
 }
 
 export type TipoAnimar =
@@ -666,7 +668,10 @@ export function normalizarCapas(entrada: unknown, total: number, medios: Record<
           }
         : {}),
       ...(typeof c.profundidad === 'number' && Number.isFinite(c.profundidad) ? { profundidad: Math.round(pinza(c.profundidad, 0, 1) * 100) / 100 } : {}),
-      ...(num(c.desenfoque, 0) > 0.005 ? { desenfoque: Math.round(pinza(num(c.desenfoque, 0), 0, 1) * 100) / 100 } : {})
+      ...(num(c.desenfoque, 0) > 0.005 ? { desenfoque: Math.round(pinza(num(c.desenfoque, 0), 0, 1) * 100) / 100 } : {}),
+      ...(normalizarClavesCapa(c.claves, pinza(c.duracion, DURACION_MINIMA, Math.max(DURACION_MINIMA, total - inicio)))
+        ? { claves: normalizarClavesCapa(c.claves, pinza(c.duracion, DURACION_MINIMA, Math.max(DURACION_MINIMA, total - inicio))) }
+        : {})
     })
   }
   return capas.sort((a, b) => a.inicio - b.inicio)
@@ -896,6 +901,70 @@ export function quitarClave(tl: Timeline, id: string, parametro: ParametroClave,
 /** La clave de un ajuste que cae en el segundo `f` (dentro de un cuadro), si la hay. */
 export function claveEn(clip: ClipTL, parametro: ParametroClave, f: number): ClaveTL | undefined {
   return clip.claves?.[parametro]?.find((x) => Math.abs(x.f - f) < MISMA_CLAVE)
+}
+
+// ===== Fotogramas clave de las capas =====
+
+export const PARAMETROS_CLAVE_CAPA = ['x', 'y', 'ancho', 'giro', 'opacidad'] as const
+export type ParametroClaveCapa = (typeof PARAMETROS_CLAVE_CAPA)[number]
+export type ClavesCapa = Partial<Record<ParametroClaveCapa, ClaveTL[]>>
+/** Lo que puede valer cada uno (x e y pueden salir del cuadro, para entrar o salir volando). */
+const LIMITES_CLAVE_CAPA: Record<ParametroClaveCapa, [number, number]> = { x: [-0.5, 1.5], y: [-0.5, 1.5], ancho: [0.05, 2], giro: [-720, 720], opacidad: [0, 1] }
+
+export function normalizarClavesCapa(entrada: unknown, duracion: number): ClavesCapa | undefined {
+  if (!entrada || typeof entrada !== 'object') return undefined
+  const salida: ClavesCapa = {}
+  for (const p of PARAMETROS_CLAVE_CAPA) {
+    const lista = (entrada as Record<string, unknown>)[p]
+    if (!Array.isArray(lista)) continue
+    const [min, max] = LIMITES_CLAVE_CAPA[p]
+    const puntos: ClaveTL[] = []
+    for (const x of [...lista].sort((a, b) => (a?.f ?? 0) - (b?.f ?? 0))) {
+      if (!x || typeof x.f !== 'number' || typeof x.v !== 'number' || !Number.isFinite(x.f) || !Number.isFinite(x.v)) continue
+      const punto = { f: Math.round(pinza(x.f, 0, duracion) * 1000) / 1000, v: Math.round(pinza(x.v, min, max) * 1000) / 1000 }
+      if (puntos.length && punto.f - puntos[puntos.length - 1].f < MISMA_CLAVE) puntos[puntos.length - 1] = punto
+      else puntos.push(punto)
+    }
+    if (puntos.length) salida[p] = puntos.slice(0, MAX_CLAVES)
+  }
+  return Object.keys(salida).length ? salida : undefined
+}
+
+/** El valor que tiene ahora (sin claves) un ajuste de una capa en el segundo `dt` desde que aparece. */
+function valorCapaSinClave(c: CapaTL, p: ParametroClaveCapa, dt: number): number {
+  if (p === 'opacidad') return 1
+  const e = estadoCapa({ ...c, claves: undefined }, dt, false)
+  return e[p]
+}
+
+/** Pone (o cambia) el fotograma clave de un ajuste de una capa en el segundo `dt` desde que aparece. */
+export function ponerClaveCapa(tl: Timeline, id: string, parametro: ParametroClaveCapa, dt: number, v: number, medios: Record<string, number>): Timeline {
+  const c = tl.capas?.find((x) => x.id === id)
+  if (!c) return tl
+  const donde = pinza(dt, 0, c.duracion)
+  const otras = (c.claves?.[parametro] ?? []).filter((x) => Math.abs(x.f - donde) >= MISMA_CLAVE)
+  if (otras.length >= MAX_CLAVES) return tl
+  // La primera clave de un ajuste que se movía con `fin`: se deja una clave al empezar y otra al acabar, para no perder el recorrido.
+  const recorrido =
+    !otras.length && c.fin && parametro !== 'opacidad'
+      ? [{ f: 0, v: valorCapaSinClave(c, parametro, 0) }, { f: c.duracion, v: valorCapaSinClave(c, parametro, c.duracion) }].filter((x) => Math.abs(x.f - donde) >= MISMA_CLAVE)
+      : []
+  return cambiarCapa(tl, id, { claves: { ...(c.claves ?? {}), [parametro]: [...recorrido, ...otras, { f: donde, v }] } }, medios)
+}
+
+/** Quita la clave de un ajuste de una capa en el segundo `dt` (o todas las de ese ajuste, sin `dt`). */
+export function quitarClaveCapa(tl: Timeline, id: string, parametro: ParametroClaveCapa, dt: number | undefined, medios: Record<string, number>): Timeline {
+  const c = tl.capas?.find((x) => x.id === id)
+  if (!c?.claves?.[parametro]) return tl
+  const quedan = dt === undefined ? [] : c.claves[parametro]!.filter((x) => Math.abs(x.f - dt) >= MISMA_CLAVE)
+  // Sin claves, el ajuste se queda fijo en el valor de la última que tenía (la opacidad vuelve a 1).
+  const fijo = !quedan.length && parametro !== 'opacidad' && parametro !== 'giro' ? { [parametro]: c.claves[parametro]![0].v } : !quedan.length && parametro === 'giro' ? { giro: c.claves.giro![0].v } : {}
+  return cambiarCapa(tl, id, { ...fijo, claves: { ...c.claves, [parametro]: quedan } }, medios)
+}
+
+/** La clave de un ajuste de una capa que cae en el segundo `dt` (dentro de un cuadro), si la hay. */
+export function claveCapaEn(c: CapaTL, parametro: ParametroClaveCapa, dt: number): ClaveTL | undefined {
+  return c.claves?.[parametro]?.find((x) => Math.abs(x.f - dt) < MISMA_CLAVE)
 }
 
 // ===== Efectos de clip: color, sepia, tono, negativo y desenfoque (iguales en el monitor y en el MP4) =====
@@ -1434,6 +1503,7 @@ export function cambiarCapa(tl: Timeline, id: string, cambio: Partial<Omit<CapaT
       if ('fin' in cambio && !cambio.fin) delete nueva.fin
       if ('animada' in cambio && !cambio.animada) delete nueva.animada
       if ('profundidad' in cambio && cambio.profundidad == null) delete nueva.profundidad
+      if ('claves' in cambio && !cambio.claves) delete nueva.claves
       return nueva
     }),
     duracionTimeline(tl),
@@ -1470,11 +1540,14 @@ export function origenLado(c: Pick<CapaTL, 'entrada' | 'ancho'>): { x?: number; 
 export function estadoCapa(c: CapaTL, dt: number, conEntrada = true): { x: number; y: number; ancho: number; giro: number; escala: number; opacidad: number } {
   const p = c.fin ? suave(pinza(dt / Math.max(DURACION_MINIMA, c.duracion), 0, 1)) : 0
   const f = c.fin
-  let x = f ? c.x + (f.x - c.x) * p : c.x
-  let y = f ? c.y + (f.y - c.y) * p : c.y
-  const ancho = f ? c.ancho + (f.ancho - c.ancho) * p : c.ancho
-  const giro = f ? (c.giro ?? 0) + (f.giro - (c.giro ?? 0)) * p : (c.giro ?? 0)
-  if (!conEntrada) return { x, y, ancho, giro, escala: 1, opacidad: 1 }
+  const k = c.claves
+  let x = k?.x ? valorClave(k.x, dt) : f ? c.x + (f.x - c.x) * p : c.x
+  let y = k?.y ? valorClave(k.y, dt) : f ? c.y + (f.y - c.y) * p : c.y
+  const ancho = k?.ancho ? valorClave(k.ancho, dt) : f ? c.ancho + (f.ancho - c.ancho) * p : c.ancho
+  const giro = k?.giro ? valorClave(k.giro, dt) : f ? (c.giro ?? 0) + (f.giro - (c.giro ?? 0)) * p : (c.giro ?? 0)
+  // La opacidad de sus claves (se suma a la de la entrada).
+  const vista = k?.opacidad ? valorClave(k.opacidad, dt) : 1
+  if (!conEntrada) return { x, y, ancho, giro, escala: 1, opacidad: vista }
   const lado = origenLado(c)
   if (lado.x !== undefined || lado.y !== undefined) {
     const k = frena(pinza(dt / ENTRADA_LADO_S, 0, 1))
@@ -1482,7 +1555,7 @@ export function estadoCapa(c: CapaTL, dt: number, conEntrada = true): { x: numbe
     if (lado.y !== undefined) y = lado.y + (y - lado.y) * k
   }
   const { escala, opacidad } = animacionCapa(c, dt)
-  return { x, y, ancho, giro, escala, opacidad }
+  return { x, y, ancho, giro, escala, opacidad: opacidad * vista }
 }
 
 // ===== Escena 2.5D =====

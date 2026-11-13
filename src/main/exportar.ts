@@ -392,7 +392,7 @@ export async function exportarTimeline(
   const capas = (timeline.capas ?? []).filter((c) => fuenteDe(c.fuente))
   // FFmpeg pone las capas en píxeles enteros: una que se mueve o crece despacio temblaría. Con alguna así,
   // se compone al doble de tamaño y luego se reduce (medio píxel de paso, imperceptible).
-  const sup = capas.some((c) => c.fin || c.giro || c.profundidad != null || (c.entrada && !['pop', 'fundido'].includes(c.entrada))) ? 2 : 1
+  const sup = capas.some((c) => c.fin || c.claves || c.giro || c.profundidad != null || (c.entrada && !['pop', 'fundido'].includes(c.entrada))) ? 2 : 1
   const anchoC = ancho * sup
   const altoC = alto * sup
   if (sup > 1) {
@@ -410,13 +410,15 @@ export async function exportarTimeline(
     const en = (expr: string, T: string) => expr.replace(/T/g, T)
     const fundido = c.entrada === 'fundido' ? ',fade=t=in:st=0:d=0.35:alpha=1' : c.entrada === 'pop' ? ',fade=t=in:st=0:d=0.08:alpha=1' : ''
     // Con giro, la capa va en un lienzo cuadrado fijo (lo que ocupa en su punto más grande y girada).
-    const gira = Boolean(c.giro) || Boolean(c.fin?.giro)
-    const lado = Math.ceil((anchoC * Math.max(c.ancho, c.fin?.ancho ?? 0) * 1.17 * Math.hypot(1, aspectoDe(c.fuente)) + 4) / 2) * 2
+    const gira = Boolean(c.giro) || Boolean(c.fin?.giro) || Boolean(c.claves?.giro)
+    // Lo más grande que llega a ser (también por sus fotogramas clave).
+    const anchoMax = Math.max(c.ancho, c.fin?.ancho ?? 0, ...(c.claves?.ancho ?? []).map((x) => x.v))
+    const lado = Math.ceil((anchoC * anchoMax * 1.17 * Math.hypot(1, aspectoDe(c.fuente)) + 4) / 2) * 2
     const giro = gira
       ? `,pad=w=${lado}:h=${lado}:x='(ow-iw)/2':y='(oh-ih)/2':color=black@0:eval=frame,rotate=a='(${en(ex.giro, 't')})*PI/180':c=none:ow=${lado}:oh=${lado}`
       : ''
     partes.push(
-      `[${k}:v]setpts=PTS-STARTPTS,fps=${fps},format=rgba,scale=w='max(2,trunc(${anchoC}*${en(ex.ancho, 't')}*${en(ex.escala, 't')}/2)*2)':h=-2:eval=frame:flags=bicubic${giro}${desenfoque(desenfoqueCapa(timeline, c), anchoC)}${fundido},setpts=PTS+${c.inicio.toFixed(3)}/TB[capa${i}]`
+      `[${k}:v]setpts=PTS-STARTPTS,fps=${fps},format=rgba,scale=w='max(2,trunc(${anchoC}*${en(ex.ancho, 't')}*${en(ex.escala, 't')}/2)*2)':h=-2:eval=frame:flags=bicubic${giro}${c.claves?.opacidad ? `,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*(${exprClave(c.claves.opacidad, 'T')})'` : ''}${desenfoque(desenfoqueCapa(timeline, c), anchoC)}${fundido},setpts=PTS+${c.inicio.toFixed(3)}/TB[capa${i}]`
     )
     const salida = `[conCapa${i}]`
     const T = `(t-${c.inicio.toFixed(3)})`
@@ -552,13 +554,15 @@ export function expresionesCapa(
   const f = c.fin
   const E = f ? `(3*pow(clip(T/${n3(Math.max(0.1, c.duracion))},0,1),2)-2*pow(clip(T/${n3(Math.max(0.1, c.duracion))},0,1),3))` : '0'
   const lerp = (a: number, b: number) => (f && Math.abs(b - a) > 1e-4 ? `(${n3(a)}+(${n3(b - a)})*${E})` : `(${n3(a)})`)
-  let x = lerp(c.x, f?.x ?? c.x)
-  let y = lerp(c.y, f?.y ?? c.y)
+  // Con fotogramas clave, cada ajuste sigue su curva (la misma de estadoCapa).
+  const k = c.claves
+  let x = k?.x ? `(${exprClave(k.x, 'T')})` : lerp(c.x, f?.x ?? c.x)
+  let y = k?.y ? `(${exprClave(k.y, 'T')})` : lerp(c.y, f?.y ?? c.y)
   const lado = origenLado(c)
   const K = `(1-pow(1-clip(T/${ENTRADA_LADO_S},0,1),3))`
   if (lado.x !== undefined) x = `(${n3(lado.x)}+(${x}-(${n3(lado.x)}))*${K})`
   if (lado.y !== undefined) y = `(${n3(lado.y)}+(${y}-(${n3(lado.y)}))*${K})`
-  let ancho = lerp(c.ancho, f?.ancho ?? c.ancho)
+  let ancho = k?.ancho ? `(${exprClave(k.ancho, 'T')})` : lerp(c.ancho, f?.ancho ?? c.ancho)
   if (ref) {
     // Escena 2.5D (aplicarParalaje): la cámara del clip de debajo, de cuando aparece la capa a ahora.
     const n6 = (v: number) => (Math.round(v * 1e6) / 1e6).toString()
@@ -623,7 +627,7 @@ export function expresionesCapa(
     x,
     y,
     ancho,
-    giro: lerp(c.giro ?? 0, f?.giro ?? c.giro ?? 0),
+    giro: k?.giro ? `(${exprClave(k.giro, 'T')})` : lerp(c.giro ?? 0, f?.giro ?? c.giro ?? 0),
     // El rebote del «pop»: entra al 45 %, se pasa al 117 % y se asienta en 0,24 s (animacionCapa).
     escala: c.entrada === 'pop' ? 'if(lt(T,0.13),0.45+T/0.13*0.72,if(lt(T,0.24),1.17-(T-0.13)/0.11*0.17,1))' : '1'
   }

@@ -31,7 +31,8 @@ import {
   timelineActiva,
   filtroColorCss,
   DESENFOQUE_CLIP,
-  ajustesEn
+  ajustesEn,
+  ponerClaveCapa,
 } from '../../../shared/timeline'
 import { useMusica, useSincronizar, useTamano, useVoces, type FuentesVista, type Historial, type Reproductor } from '../hooks/timeline'
 import type { Elegido } from './TimelineEditor'
@@ -183,6 +184,18 @@ export function Monitor({
       ultimo = calcular(ev)
       setBorrador(ultimo)
     }
+    /** Una capa con fotogramas clave: lo que tiene claves se cambia en el cabezal; lo demás, fijo. */
+    const moverConClaves = (capa: CapaTL, b: { x: number; y: number; ancho?: number }) => {
+      const dt = reproductor.tiempo - capa.inicio
+      let tl = timeline
+      const fijos: Partial<CapaTL> = {}
+      for (const [p, v] of [['x', b.x], ['y', b.y], ['ancho', b.ancho]] as const) {
+        if (v === undefined) continue
+        if (capa.claves?.[p]) tl = ponerClaveCapa(tl, capa.id, p, dt, v, medios)
+        else fijos[p] = v
+      }
+      return Object.keys(fijos).length ? cambiarCapa(tl, capa.id, fijos, medios) : tl
+    }
     const alSoltar = (ev: PointerEvent) => {
       window.removeEventListener('pointermove', alMover)
       window.removeEventListener('pointerup', alSoltar)
@@ -194,7 +207,9 @@ export function Monitor({
         const capa = tipo === 'capa' ? timeline.capas?.find((c) => c.id === id) : undefined
         historial.aplicar(
           tipo === 'capa'
-            ? b.fin && capa?.fin
+            ? capa?.claves
+              ? moverConClaves(capa, b)
+              : b.fin && capa?.fin
               ? cambiarCapa(timeline, id, { fin: { ...capa.fin, x: b.x, y: b.y, ...(b.ancho !== undefined ? { ancho: b.ancho } : {}) } }, medios)
               : cambiarCapa(timeline, id, { x: b.x, y: b.y, ...(b.ancho !== undefined ? { ancho: b.ancho } : {}) }, medios)
             : cambiarTexto(timeline, id, { x: b.x, y: b.y })
@@ -268,14 +283,14 @@ export function Monitor({
             // de FIN (silueta punteada), las dos para arrastrarlas. Si no, donde va en este momento.
             const editando = elegida && !reproductor.reproduciendo
             const b = borrador?.tipo === 'capa' && borrador.id === c.id ? borrador : null
-            const e0 = editando ? estadoCapa(c, 0, false) : estadoCapa(c, reproductor.tiempo - c.inicio, reproductor.reproduciendo)
+            const e0 = editando && !c.claves ? estadoCapa(c, 0, false) : estadoCapa(c, reproductor.tiempo - c.inicio, reproductor.reproduciendo)
             // Escena 2.5D: con profundidad, la capa sigue a la cámara del clip de debajo (más cuanto más cerca).
             const ref = editando ? null : referenciaParalaje(timeline, c)
             const e = ref ? { ...e0, ...aplicarParalaje(ref, c.profundidad ?? 0, c.inicio, reproductor.tiempo, e0) } : e0
             const x = b && !b.fin ? b.x : e.x
             const y = b && !b.fin ? b.y : e.y
             const ancho = b && !b.fin ? (b.ancho ?? e.ancho) : e.ancho
-            const fin = editando && c.fin ? { ...c.fin, ...(b?.fin ? { x: b.x, y: b.y, ancho: b.ancho ?? c.fin.ancho } : {}) } : null
+            const fin = editando && c.fin && !c.claves ? { ...c.fin, ...(b?.fin ? { x: b.x, y: b.y, ancho: b.ancho ?? c.fin.ancho } : {}) } : null
             return (
               <div key={c.id} className="monitor-capa-grupo">
                 {fin && (
