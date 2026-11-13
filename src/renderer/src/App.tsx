@@ -1040,7 +1040,7 @@ export default function App() {
   ).length
 
   return (
-    <div className="app">
+    <div className={`app ${vista === 'proyectos' ? 'is-editor' : ''}`}>
       <Sidebar
         active={vista}
         onChange={setVista}

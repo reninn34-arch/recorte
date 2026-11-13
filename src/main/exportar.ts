@@ -37,6 +37,9 @@ import {
   timelineActiva,
   velocidadDe,
   matrizColor,
+  curvasColor,
+  cuboDeCurvas,
+  hayMovimiento,
   DESENFOQUE_CLIP,
   exprClave
 } from '../shared/timeline'
@@ -333,7 +336,36 @@ export async function exportarTimeline(
     // Profundidad de campo: el fondo (profundidad 0) desenfocado si el foco está más cerca.
     const borroso = desenfoqueDeCampo(a, 0)
     const fondoBorroso = borroso > 0.005 ? `,gblur=sigma=${(borroso * DESENFOQUE_MAX * ancho).toFixed(2)}` : ''
-    partes.push(`[${iv}:v]${ritmo},fps=${fps},${zoom}${encuadre}${lento}${fondoBorroso},setsar=1${color}${efectos},format=yuv420p,settb=AVTB[v${i}]`)
+    // El color tipo Lumetri (exposición, luces, sombras, blancos, negros, temperatura y tinte): la misma curva que el
+    // monitor, en un archivo .cube que aplica lut1d antes del resto del color.
+    const curvas = curvasColor(a)
+    let lut = ''
+    if (curvas) {
+      const archivo = `color-clip-${i}.cube`
+      writeFileSync(join(carpeta, archivo), cuboDeCurvas(curvas), 'utf8')
+      lut = `,format=gbrp,lut1d=file=${archivo}:interp=linear`
+    }
+    const base = `[${iv}:v]${ritmo},fps=${fps},${zoom}${encuadre}${lento}${fondoBorroso},setsar=1${lut}${color}${efectos}`
+    if (!hayMovimiento(a)) partes.push(`${base},format=yuv420p,settb=AVTB[v${i}]`)
+    else {
+      // Recortar y transformar (como en Premiere): los bordes recortados quedan negros y la imagen, escalada, girada y
+      // corrida, se pone sobre negro; lo que se sale del cuadro se pierde. El monitor hace lo mismo con CSS.
+      const caja = (x: string, y: string, w: number, h: number) => (w > 0 && h > 0 ? `,drawbox=x=${x}:y=${y}:w=${w}:h=${h}:color=black:t=fill` : '')
+      const px = (f: number, lado: number) => Math.round(f * lado)
+      const recorte =
+        caja('0', '0', px(a.recorteIzq, ancho), alto) +
+        caja(String(ancho - px(a.recorteDer, ancho)), '0', px(a.recorteDer, ancho), alto) +
+        caja('0', '0', ancho, px(a.recorteArr, alto)) +
+        caja('0', String(alto - px(a.recorteAba, alto)), ancho, px(a.recorteAba, alto))
+      const escala = a.escala < 0.999 ? `,scale=w=trunc(iw*${a.escala.toFixed(4)}/2)*2:h=trunc(ih*${a.escala.toFixed(4)}/2)*2` : ''
+      const rad = (a.giro * Math.PI) / 180
+      const giro = Math.abs(a.giro) > 0.05 ? `,rotate=${rad.toFixed(5)}:ow='rotw(${rad.toFixed(5)})':oh='roth(${rad.toFixed(5)})':c=none` : ''
+      partes.push(`${base}${recorte},format=rgba${escala}${giro}[mv${i}]`)
+      partes.push(`color=c=black:s=${ancho}x${alto}:r=${fps}:d=${largo.toFixed(3)},format=rgba[mf${i}]`)
+      partes.push(
+        `[mf${i}][mv${i}]overlay=x='(W-w)/2+${a.posx.toFixed(4)}*W':y='(H-h)/2+${a.posy.toFixed(4)}*H':shortest=1,format=yuv420p,settb=AVTB[v${i}]`
+      )
+    }
     if (conAudio) {
       if (f.conAudio && !t.clip.mudo) {
         // apad + atrim: cada tramo de audio dura exactamente lo que su video, o concat se desfasa.

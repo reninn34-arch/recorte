@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { Project } from '../../../shared/types'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
@@ -31,6 +31,8 @@ import {
   type Timeline,
   timelineActiva,
   filtroColorCss,
+  curvasColor,
+  hayMovimiento,
   DESENFOQUE_CLIP,
   ajustesEn,
   ponerClaveCapa,
@@ -104,6 +106,16 @@ export function Monitor({
   const fundido = tr ? tr.opacidad : 1
   const clipPrevio = tr && ubicado ? timeline.clips[ubicado.indice - 1] : undefined
   const previoUrl = clipPrevio && fuentes[clipPrevio.fuente]?.tipo === 'imagen' ? fuentes[clipPrevio.fuente].url : undefined
+  // El color tipo Lumetri: la misma curva por canal que el MP4 (lut1d), como filtro SVG.
+  const idCurvas = `curvas-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
+  const curvas = curvasColor(a)
+  // Recortar y transformar: la imagen entera (ya con su zoom) se recorta, se escala, se gira y se corre.
+  const movimiento: React.CSSProperties | undefined = hayMovimiento(a)
+    ? {
+        transform: `translate(${(a.posx * 100).toFixed(3)}%, ${(a.posy * 100).toFixed(3)}%) rotate(${a.giro.toFixed(2)}deg) scale(${a.escala.toFixed(4)})`,
+        clipPath: `inset(${(a.recorteArr * 100).toFixed(3)}% ${(a.recorteDer * 100).toFixed(3)}% ${(a.recorteAba * 100).toFixed(3)}% ${(a.recorteIzq * 100).toFixed(3)}%)`
+      }
+    : undefined
   const estiloImagen: React.CSSProperties = {
     visibility: vacia ? 'hidden' : 'visible',
     transform:
@@ -114,7 +126,7 @@ export function Monitor({
     transformOrigin: cam.cx !== 0.5 || cam.cy !== 0.5 ? `${(cam.cx * 100).toFixed(3)}% ${(cam.cy * 100).toFixed(3)}%` : undefined,
     opacity: fundido < 1 ? fundido : undefined,
     // El color y los efectos del clip (los mismos filtros que salen en el MP4) y, en una transición, su desenfoque.
-    filter: `${tr?.desenfoque ? `blur(${tr.desenfoque.toFixed(1)}px) ` : ''}${filtroColorCss(a)}`.trim() || undefined
+    filter: `${tr?.desenfoque ? `blur(${tr.desenfoque.toFixed(1)}px) ` : ''}${curvas ? `url(#${idCurvas}) ` : ''}${filtroColorCss(a)}`.trim() || undefined
   }
 
   // El cuadro del video final dentro del monitor (el video se ve con object-fit: contain).
@@ -259,22 +271,37 @@ export function Monitor({
                 }}
               />
             )}
-            <video
-              ref={reproductor.videoRef}
-              preload="auto"
-              style={{ ...estiloImagen, visibility: vacia || enImagen ? 'hidden' : 'visible' }}
-              {...reproductor.eventos}
-            />
-            {enImagen && <img className="monitor-imagen" src={reproductor.imagen!} alt="" style={estiloImagen} />}
+            <div className="monitor-movimiento" style={movimiento}>
+              <video
+                ref={reproductor.videoRef}
+                data-pista-audio="video"
+                crossOrigin="anonymous"
+                preload="auto"
+                style={{ ...estiloImagen, visibility: vacia || enImagen ? 'hidden' : 'visible' }}
+                {...reproductor.eventos}
+              />
+              {enImagen && <img className="monitor-imagen" src={reproductor.imagen!} alt="" style={estiloImagen} />}
+            </div>
+            {curvas && (
+              <svg className="monitor-curvas" width="0" height="0" aria-hidden="true" focusable="false">
+                <filter id={idCurvas} colorInterpolationFilters="sRGB">
+                  <feComponentTransfer>
+                    <feFuncR type="table" tableValues={curvas.r.join(' ')} />
+                    <feFuncG type="table" tableValues={curvas.g.join(' ')} />
+                    <feFuncB type="table" tableValues={curvas.b.join(' ')} />
+                  </feComponentTransfer>
+                </filter>
+              </svg>
+            )}
           </div>
         </>
       ) : (
         <div className="monitor-vacio"><Icon name="play" size={28} /></div>
       )}
       {vista.musica && !proyecto.demo && (
-        <audio ref={musicaRef} src={mediaUrl(proyecto.id, vista.musica.archivo)} preload="auto" loop />
+        <audio ref={musicaRef} data-pista-audio="musica" crossOrigin="anonymous" src={mediaUrl(proyecto.id, vista.musica.archivo)} preload="auto" loop />
       )}
-      {vista.voces?.length && !proyecto.demo ? <audio ref={vocesRef} preload="auto" /> : null}
+      {vista.voces?.length && !proyecto.demo ? <audio ref={vocesRef} data-pista-audio="voz" crossOrigin="anonymous" preload="auto" /> : null}
       {!proyecto.demo &&
         (vista.sonidos ?? []).map((s) => (
           <SonidoVista key={s.id} sonido={s} url={urlDe(s.archivo)} tiempo={reproductor.tiempo} reproduciendo={reproductor.reproduciendo} />
@@ -413,7 +440,7 @@ function SonidoVista({ sonido, url, tiempo, reproduciendo }: { sonido: SonidoTL;
   const ref = useRef<HTMLAudioElement>(null)
   const dentro = tiempo >= sonido.inicio && tiempo < sonido.inicio + sonido.duracion
   useSincronizar(ref, dentro ? tiempo - sonido.inicio : null, reproduciendo, sonido.volumen ?? VOLUMEN_SONIDO)
-  return <audio ref={ref} src={url} preload="auto" />
+  return <audio ref={ref} data-pista-audio="sonidos" crossOrigin="anonymous" src={url} preload="auto" />
 }
 
 /**

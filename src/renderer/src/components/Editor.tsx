@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import type { OpcionesExport, Progreso } from '../../../shared/api'
 import type { ClipSuggestion, MedioProyecto, Project, RenderJob } from '../../../shared/types'
 import { ClipList } from './ClipList'
@@ -7,6 +7,8 @@ import { Inspector } from './Inspector'
 import { RenderQueue } from './RenderQueue'
 import { SourceCard } from './SourceCard'
 import { Icon } from '../Icons'
+
+const CLAVE_ALTO_TL = 'recorte.altoLineaDeTiempo'
 import { mediaUrl } from '../media'
 import { capaNueva, cambiarCapa, cambiarFuente, escalaAnimada, type TipoAnimar, duracionTimeline, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, timelineActiva, type Timeline } from '../../../shared/timeline'
 import { useHistorial, useReproductor, type FuentesVista } from '../hooks/timeline'
@@ -90,6 +92,15 @@ export function Editor({
   const [panelInspector, setPanelInspector] = useState<HTMLElement | null>(null)
   const [panelTransporte, setPanelTransporte] = useState<HTMLElement | null>(null)
   const [elegido, setElegido] = useState<Elegido>(null)
+  // El alto de la línea de tiempo (arrastrando el divisor); null: el de siempre.
+  const [altoTL, setAltoTL] = useState<number | null>(() => {
+    try {
+      const v = Number(localStorage.getItem(CLAVE_ALTO_TL))
+      return v >= 150 ? v : null
+    } catch {
+      return null
+    }
+  })
   const elegir = useCallback((e: Elegido) => setElegido(e), [])
   const timeline = proyecto.timeline ?? timelineVacia()
   const historial = useHistorial(timeline, onCambiarTimeline, proyecto.id)
@@ -272,8 +283,35 @@ export function Editor({
     reproductor.buscar(0)
   }
 
+  /** Arrastrar el divisor entre el monitor y la línea de tiempo (como entre paneles en Premiere). */
+  function arrastrarDivisor(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.button !== 0) return
+    e.preventDefault()
+    const editor = e.currentTarget.parentElement
+    if (!editor) return
+    const caja = editor.getBoundingClientRect()
+    const tlActual = editor.querySelector('.tl')?.getBoundingClientRect().height ?? 260
+    const y0 = e.clientY
+    let alto = tlActual
+    const mover = (ev: PointerEvent) => {
+      alto = Math.round(Math.min(caja.height - 240, Math.max(150, tlActual - (ev.clientY - y0))))
+      setAltoTL(alto)
+    }
+    const soltar = () => {
+      window.removeEventListener('pointermove', mover)
+      window.removeEventListener('pointerup', soltar)
+      try {
+        localStorage.setItem(CLAVE_ALTO_TL, String(alto))
+      } catch {
+        // Sin almacenamiento, el alto dura lo que dura la sesión.
+      }
+    }
+    window.addEventListener('pointermove', mover)
+    window.addEventListener('pointerup', soltar)
+  }
+
   return (
-    <div className="editor ed">
+    <div className="editor ed" style={altoTL ? { gridTemplateRows: `minmax(0, 1fr) auto ${altoTL}px` } : undefined}>
       <div className="ed-arriba">
         <aside className="ed-panel ed-biblioteca" ref={setPanelBiblioteca} aria-label="Biblioteca" />
         <section className="ed-centro">
@@ -293,8 +331,25 @@ export function Editor({
         </section>
         <aside className="ed-panel ed-inspector" ref={setPanelInspector} aria-label="Ajustes de lo elegido" />
       </div>
+      <div
+        className="ed-divisor"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Cambiar el alto de la línea de tiempo"
+        title="Arrastra para agrandar la línea de tiempo o el monitor · doble clic: tamaño normal"
+        onPointerDown={arrastrarDivisor}
+        onDoubleClick={() => {
+          setAltoTL(null)
+          try {
+            localStorage.removeItem(CLAVE_ALTO_TL)
+          } catch {
+            // Nada que olvidar.
+          }
+        }}
+      />
       <TimelineEditor
         key={proyecto.id}
+        fps={proyecto.source.fps > 0 && proyecto.source.fps <= 60 ? proyecto.source.fps : 30}
         paneles={{ biblioteca: panelBiblioteca, inspector: panelInspector, transporte: panelTransporte }}
         miniaturaDe={miniaturaDe}
         urlDe={proyecto.demo ? undefined : (archivo) => mediaUrl(proyecto.id, archivo)}

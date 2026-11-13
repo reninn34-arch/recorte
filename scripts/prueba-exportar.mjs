@@ -542,5 +542,43 @@ assert.ok(Math.abs(centro6(1.7) - centro6(1.4)) > 40, 'en el corte la capa salta
   console.log('varias pistas de video encima: la pista más alta tapa a las de abajo en el monitor y en el MP4; el agente las elige ✓')
 }
 
+// Color tipo Lumetri y Recortar/Transformar: el MP4 sale con la misma curva que el monitor y con la imagen movida.
+{
+  const { curvasColor, ajustesDe } = await import('../src/shared/timeline.ts')
+  const gris = join(dir, 'gris.mp4')
+  ff(['-f', 'lavfi', '-i', 'color=c=0x808080:s=640x360:d=2:r=30', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-color_range', 'tv', gris])
+  const pg = { ...proyecto, source: { path: gris, width: 640, height: 360, fps: 30, duration: 2 }, medios: [] }
+  const exportarCon = async (ajustes, carpeta) => {
+    const tlc = normalizarTimeline({ clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 2, ajustes }], textos: [] }, 2)
+    const r = await exportarTimeline(pg, tlc, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, carpeta))
+    assert.ok(r.ok, r.error)
+    return (x, y) => [...spawnSync('ffmpeg', ['-v', 'error', '-ss', '1', '-i', join(dir, carpeta, 'timeline-prueba-original.mp4'), '-frames:v', '1', '-vf', `crop=8:8:${x}:${y},scale=1:1`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']).stdout]
+  }
+  const base = (await exportarCon(undefined, 'salidas-color0'))(316, 176)
+  const exp = (await exportarCon({ exposicion: 1 }, 'salidas-color1'))(316, 176)
+  // Lo que dice la curva (la misma del monitor) para ese gris.
+  const curva = curvasColor({ ...ajustesDe(undefined), exposicion: 1 })
+  const esperado = Math.round(curva.r[Math.round((base[0] / 255) * (curva.r.length - 1))] * 255)
+  assert.ok(exp[0] > base[0] + 30, `la exposición +1 no aclaró: ${base} → ${exp}`)
+  assert.ok(Math.abs(exp[0] - esperado) <= 8, `el MP4 no sigue la curva del monitor: ${exp[0]} en vez de ~${esperado}`)
+  const calido = (await exportarCon({ temperatura: 1 }, 'salidas-color2'))(316, 176)
+  assert.ok(calido[0] > calido[2] + 25, `la temperatura cálida no subió el rojo frente al azul: ${calido}`)
+  const sombras = (await exportarCon({ sombras: 1, negros: 1 }, 'salidas-color3'))(316, 176)
+  assert.ok(sombras[0] > base[0] + 10, `abrir sombras y negros no aclaró el gris medio: ${base} → ${sombras}`)
+  console.log(`color tipo Lumetri en el MP4: exposición ${base[0]} → ${exp[0]} (curva del monitor: ${esperado}), cálido R${calido[0]}/B${calido[2]}, sombras ${sombras[0]} ✓`)
+
+  const negro = (c) => c[0] < 30 && c[1] < 30 && c[2] < 30
+  const grisV = (c) => c[0] > 90 && c[0] < 170
+  const chica = await exportarCon({ escala: 0.5 }, 'salidas-mov1')
+  assert.ok(negro(chica(20, 20)) && grisV(chica(316, 176)), `escala 50 %: debía quedar negro alrededor (${chica(20, 20)}) y la imagen al centro (${chica(316, 176)})`)
+  const corrida = await exportarCon({ posx: 0.5 }, 'salidas-mov2')
+  assert.ok(negro(corrida(100, 176)) && grisV(corrida(500, 176)), `posición → 50 %: la mitad izquierda debía quedar negra (${corrida(100, 176)}, ${corrida(500, 176)})`)
+  const girada = await exportarCon({ giro: 45 }, 'salidas-mov3')
+  assert.ok(negro(girada(2, 2)) && grisV(girada(316, 176)), `rotación 45°: las esquinas debían quedar negras (${girada(2, 2)})`)
+  const recortada = await exportarCon({ recorteIzq: 0.25, recorteAba: 0.2 }, 'salidas-mov4')
+  assert.ok(negro(recortada(60, 100)) && negro(recortada(400, 340)) && grisV(recortada(400, 100)), `recortar: el borde izquierdo y el de abajo debían quedar negros (${recortada(60, 100)}, ${recortada(400, 340)}, ${recortada(400, 100)})`)
+  console.log('recortar y transformar en el MP4: escala, posición, rotación y recorte de bordes ✓')
+}
+
 rmSync(dir, { recursive: true, force: true })
 console.log('exportar: ok')

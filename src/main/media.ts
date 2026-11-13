@@ -74,6 +74,12 @@ export function registrarMedia(proyectos: Proyectos, creaciones: Creaciones, car
   })
 }
 
+/**
+ * La propia interfaz puede leer el sonido de sus medios (los medidores del mezclador lo copian con `captureStream`, que
+ * exige que el medio no sea de otro origen). Solo la app pide a este esquema.
+ */
+const CORS = { 'Access-Control-Allow-Origin': '*' }
+
 function servirArchivo(archivo: string, request: Request): Response {
   let tamano: number
   try {
@@ -104,7 +110,8 @@ function servirArchivo(archivo: string, request: Request): Response {
             'Content-Length': String(fin - inicio + 1),
             'Content-Range': `bytes ${inicio}-${fin}/${tamano}`,
             'Accept-Ranges': 'bytes',
-            'Cache-Control': 'no-cache'
+            'Cache-Control': 'no-cache',
+            ...CORS
           }
         })
       }
@@ -121,7 +128,8 @@ function servirArchivo(archivo: string, request: Request): Response {
       'Content-Type': tipo,
       'Content-Length': String(tamano),
       'Accept-Ranges': 'bytes',
-      'Cache-Control': 'no-cache'
+      'Cache-Control': 'no-cache',
+      ...CORS
     }
   })
 }

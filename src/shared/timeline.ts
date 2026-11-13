@@ -125,6 +125,34 @@ export interface AjustesClip {
   tono?: number
   /** Efecto: negativo (1 = colores invertidos). */
   invertir?: number
+  // ----- Color (como el panel Lumetri de Premiere): curvas que salen iguales en el monitor y en el MP4 -----
+  /** Exposición en pasos de diafragma, -2 a 2; 0 neutro. */
+  exposicion?: number
+  /** Altas luces, -1 (recuperar) a 1 (más luz); 0 neutro. */
+  altas?: number
+  /** Sombras, -1 (más oscuras) a 1 (abrirlas); 0 neutro. */
+  sombras?: number
+  /** Blancos (el punto más claro), -1 a 1; 0 neutro. */
+  blancos?: number
+  /** Negros (el punto más oscuro), -1 (más profundos) a 1 (levantados); 0 neutro. */
+  negros?: number
+  /** Temperatura, -1 (frío, azul) a 1 (cálido, ámbar); 0 neutro. */
+  temperatura?: number
+  /** Tinte, -1 (verde) a 1 (magenta); 0 neutro. */
+  tinte?: number
+  // ----- Transformar y recortar (como «Movimiento» y «Recortar» de Premiere) -----
+  /** Escala por debajo del 100 %, 0.1 a 1 (para agrandar está `zoom`); 1 neutro. Alrededor queda negro. */
+  escala?: number
+  /** Posición: cuánto se corre la imagen, en fracción del cuadro, -1 a 1; 0 centrada. */
+  posx?: number
+  posy?: number
+  /** Rotación, -180 a 180 grados; 0 derecha. */
+  giro?: number
+  /** Recortar los bordes, en fracción del cuadro, 0 a 0.45 (lo recortado queda negro). */
+  recorteIzq?: number
+  recorteDer?: number
+  recorteArr?: number
+  recorteAba?: number
 }
 
 export const LIMITES_AJUSTES = {
@@ -143,7 +171,22 @@ export const LIMITES_AJUSTES = {
   desenfoque: [0, 1, 0],
   sepia: [0, 1, 0],
   tono: [-180, 180, 0],
-  invertir: [0, 1, 0]
+  invertir: [0, 1, 0],
+  exposicion: [-2, 2, 0],
+  altas: [-1, 1, 0],
+  sombras: [-1, 1, 0],
+  blancos: [-1, 1, 0],
+  negros: [-1, 1, 0],
+  temperatura: [-1, 1, 0],
+  tinte: [-1, 1, 0],
+  escala: [0.1, 1, 1],
+  posx: [-1, 1, 0],
+  posy: [-1, 1, 0],
+  giro: [-180, 180, 0],
+  recorteIzq: [0, 0.45, 0],
+  recorteDer: [0, 0.45, 0],
+  recorteArr: [0, 0.45, 0],
+  recorteAba: [0, 0.45, 0]
 } as const satisfies Record<keyof AjustesClip, readonly [number, number, number]>
 
 /** Una pista de música bajo toda la edición (se repite si es corta y se funde al final). */
@@ -425,6 +468,119 @@ export interface Timeline {
   pistas?: Partial<Record<PistaId, PistaTL>>
   /** Grano, polvo, trama, viñeta y parpadeo de todo el video. */
   filtros?: FiltrosTL
+  /** Marcas en la regla para ubicarse (no salen en el video). */
+  marcadores?: MarcadorTL[]
+}
+
+export const COLORES_MARCADOR = {
+  verde: '#5fd38a',
+  rojo: '#ff6b6b',
+  azul: '#5aa9ff',
+  amarillo: '#f2c14e',
+  morado: '#b48cff'
+} as const
+export type ColorMarcador = keyof typeof COLORES_MARCADOR
+
+/** Una marca en la regla, como en Premiere (M): un segundo de la timeline con su nombre y color. */
+export interface MarcadorTL {
+  id: string
+  t: number
+  nombre?: string
+  color?: ColorMarcador
+}
+
+export function normalizarMarcadores(entrada: unknown, total: number): MarcadorTL[] {
+  const salida: MarcadorTL[] = []
+  for (const m of Array.isArray(entrada) ? entrada : []) {
+    if (!m || typeof m.t !== 'number' || !Number.isFinite(m.t)) continue
+    const t = Math.round(pinza(m.t, 0, Math.max(0, total)) * 1000) / 1000
+    salida.push({
+      id: typeof m.id === 'string' && m.id ? m.id : nuevoId('marca'),
+      t,
+      ...(typeof m.nombre === 'string' && m.nombre.trim() ? { nombre: m.nombre.trim().slice(0, 80) } : {}),
+      ...(typeof m.color === 'string' && m.color in COLORES_MARCADOR && m.color !== 'verde' ? { color: m.color as ColorMarcador } : {})
+    })
+  }
+  return salida.sort((a, b) => a.t - b.t).slice(0, 500)
+}
+
+/** Pone una marca en `t` (si ya hay una a menos de un cuadro, la devuelve sin poner otra). */
+export function ponerMarcador(tl: Timeline, t: number): { timeline: Timeline; id: string } {
+  const cerca = tl.marcadores?.find((m) => Math.abs(m.t - t) < 1 / 60)
+  if (cerca) return { timeline: tl, id: cerca.id }
+  const id = nuevoId('marca')
+  const marcadores = normalizarMarcadores([...(tl.marcadores ?? []), { id, t }], duracionTimeline(tl))
+  return { timeline: { ...tl, marcadores }, id }
+}
+
+export function cambiarMarcador(tl: Timeline, id: string, cambio: Partial<Omit<MarcadorTL, 'id'>>): Timeline {
+  if (!tl.marcadores?.some((m) => m.id === id)) return tl
+  const marcadores = normalizarMarcadores(
+    tl.marcadores.map((m) => (m.id === id ? { ...m, ...cambio } : m)),
+    duracionTimeline(tl)
+  )
+  return { ...tl, marcadores }
+}
+
+export function borrarMarcador(tl: Timeline, id: string): Timeline {
+  if (!tl.marcadores?.some((m) => m.id === id)) return tl
+  const { marcadores: _m, ...resto } = tl
+  const quedan = tl.marcadores.filter((m) => m.id !== id)
+  return quedan.length ? { ...resto, marcadores: quedan } : resto
+}
+
+/**
+ * Extraer (como la tecla ' de Premiere): quita de la timeline todo lo que hay entre `a` y `b` y cierra el hueco.
+ * El video se corta en los dos puntos; los textos y capas que cruzan el tramo se acortan, los audios sueltos
+ * (frases y sonidos) que lo cruzan se quitan, y todo lo que viene después se corre hacia atrás.
+ */
+export function extraerRango(tl: Timeline, a: number, b: number): Timeline {
+  const total = duracionTimeline(tl)
+  a = pinza(Math.min(a, b), 0, total)
+  b = pinza(Math.max(a, b), 0, total)
+  const L = b - a
+  if (L < DURACION_MINIMA) return tl
+  const cortada = dividir(dividir(tl, b), a)
+  const dentro = new Set(
+    tramos(cortada)
+      .filter((t) => t.inicio >= a - EPSILON && t.fin <= b + EPSILON)
+      .map((t) => t.clip.id)
+  )
+  if (!dentro.size || dentro.size === cortada.clips.length) return tl
+  type ConTramo = { inicio: number; duracion: number }
+  const correr = <T extends ConTramo>(x: T, acortable: boolean): T | null => {
+    const i = x.inicio
+    const f = x.inicio + x.duracion
+    if (f <= a + EPSILON) return x
+    if (i >= b - EPSILON) return { ...x, inicio: i - L }
+    if (!acortable) return null
+    const ni = Math.min(i, a)
+    const nf = f > b ? f - L : a
+    return nf - ni < DURACION_MINIMA ? null : { ...x, inicio: ni, duracion: nf - ni }
+  }
+  const lista = <T extends ConTramo>(xs: T[] | undefined, acortable: boolean): T[] =>
+    (xs ?? []).map((x) => correr(x, acortable)).filter((x): x is T => x !== null)
+  // Las marcas de dentro se van; las de después se corren. Dos que quedan en el mismo punto (la de la entrada y la de
+  // la salida) se juntan en una.
+  const marcadores = (tl.marcadores ?? [])
+    .filter((m) => m.t <= a + EPSILON || m.t >= b - EPSILON)
+    .map((m) => (m.t >= b - EPSILON ? { ...m, t: m.t - L } : m))
+    .filter((m, i, todas) => !todas.slice(0, i).some((o) => Math.abs(o.t - m.t) < 1 / 60))
+  const { voces: _v, capas: _c, sonidos: _s, marcadores: _m, ...resto } = cortada
+  const voces = lista(cortada.voces, false)
+  const capas = lista(cortada.capas, true)
+  const sonidos = lista(cortada.sonidos, false)
+  return conClips(
+    {
+      ...resto,
+      textos: lista(cortada.textos, true),
+      ...(voces.length ? { voces } : {}),
+      ...(capas.length ? { capas } : {}),
+      ...(sonidos.length ? { sonidos } : {}),
+      ...(marcadores.length ? { marcadores } : {})
+    },
+    cortada.clips.filter((c) => !dentro.has(c.id))
+  )
 }
 
 /** Un clip con su lugar en la timeline ya calculado. */
@@ -476,7 +632,12 @@ export interface PistaTL {
   oculta?: boolean
   /** No se puede tocar en la línea de tiempo. */
   bloqueada?: boolean
+  /** El volumen de toda la pista (el fader del mezclador), 0 a 2; 1 sin cambio. Solo en las pistas de audio. */
+  volumen?: number
 }
+
+/** Hasta dónde sube el fader de una pista (200 %, +6 dB). */
+export const MAX_VOLUMEN_PISTA = 2
 export const PISTAS: { id: PistaId; nombre: string; audio: boolean }[] = [
   { id: 'encima', nombre: 'Encima', audio: false },
   { id: 'video', nombre: 'Video', audio: true },
@@ -491,7 +652,14 @@ function normalizarPistas(entrada: unknown): Timeline['pistas'] | undefined {
   const pistas: NonNullable<Timeline['pistas']> = {}
   for (const p of PISTAS) {
     const x = (entrada as Record<string, PistaTL | undefined>)[p.id]
-    if (x?.oculta === true || x?.bloqueada === true) pistas[p.id] = { ...(x.oculta === true ? { oculta: true } : {}), ...(x.bloqueada === true ? { bloqueada: true } : {}) }
+    const volumen =
+      p.audio && typeof x?.volumen === 'number' && Number.isFinite(x.volumen) ? Math.round(pinza(x.volumen, 0, MAX_VOLUMEN_PISTA) * 100) / 100 : 1
+    if (x?.oculta === true || x?.bloqueada === true || Math.abs(volumen - 1) > 1e-3)
+      pistas[p.id] = {
+        ...(x?.oculta === true ? { oculta: true } : {}),
+        ...(x?.bloqueada === true ? { bloqueada: true } : {}),
+        ...(Math.abs(volumen - 1) > 1e-3 ? { volumen } : {})
+      }
   }
   return Object.keys(pistas).length ? pistas : undefined
 }
@@ -508,16 +676,29 @@ export function cambiarPista(tl: Timeline, id: PistaId, cambio: PistaTL): Timeli
  */
 export function timelineActiva(tl: Timeline): Timeline {
   const p = tl.pistas
-  if (!p || !PISTAS.some((x) => p[x.id]?.oculta)) return tl
+  if (!p || !PISTAS.some((x) => p[x.id]?.oculta || (p[x.id]?.volumen ?? 1) !== 1)) return tl
   const { capas, voces, sonidos, musica, ...resto } = tl
+  // El fader de cada pista multiplica el volumen de todo lo suyo (así el monitor y el MP4 lo oyen igual).
+  const fader = (id: PistaId) => p[id]?.volumen ?? 1
+  const vVideo = fader('video')
+  const vVoz = fader('voz')
+  const vSonidos = fader('sonidos')
+  const vMusica = fader('musica')
+  const clips = p.video?.oculta
+    ? tl.clips.map((c) => ({ ...c, mudo: true }))
+    : vVideo !== 1
+      ? tl.clips.map((c) => ({ ...c, sonido: { ...(c.sonido ?? {}), volumen: (c.sonido?.volumen ?? 1) * vVideo } }))
+      : tl.clips
   return {
     ...resto,
-    clips: p.video?.oculta ? tl.clips.map((c) => ({ ...c, mudo: true })) : tl.clips,
+    clips,
     textos: p.texto?.oculta ? [] : tl.textos,
     ...(capas && !p.encima?.oculta ? { capas } : {}),
-    ...(voces && !p.voz?.oculta ? { voces } : {}),
-    ...(sonidos && !p.sonidos?.oculta ? { sonidos } : {}),
-    ...(musica && !p.musica?.oculta ? { musica } : {})
+    ...(voces && !p.voz?.oculta ? { voces: vVoz !== 1 ? voces.map((v) => ({ ...v, volumen: (v.volumen ?? 1) * vVoz })) : voces } : {}),
+    ...(sonidos && !p.sonidos?.oculta
+      ? { sonidos: vSonidos !== 1 ? sonidos.map((x) => ({ ...x, volumen: (x.volumen ?? VOLUMEN_SONIDO) * vSonidos })) : sonidos }
+      : {}),
+    ...(musica && !p.musica?.oculta ? { musica: vMusica !== 1 ? { ...musica, volumen: musica.volumen * vMusica } : musica } : {})
   }
 }
 
@@ -625,7 +806,8 @@ export function normalizarTimeline(entrada: unknown, duracionFuente: number, otr
     ...(capas.length ? { capas } : {}),
     ...(sonidos.length ? { sonidos } : {}),
     ...(filtros ? { filtros } : {}),
-    ...(normalizarPistas(crudo.pistas) ? { pistas: normalizarPistas(crudo.pistas) } : {})
+    ...(normalizarPistas(crudo.pistas) ? { pistas: normalizarPistas(crudo.pistas) } : {}),
+    ...(normalizarMarcadores(crudo.marcadores, total).length ? { marcadores: normalizarMarcadores(crudo.marcadores, total) } : {})
   }
 }
 
@@ -814,8 +996,65 @@ export function ajustesDe(clip: ClipTL | undefined): Required<AjustesClip> {
     desenfoque: clip?.ajustes?.desenfoque ?? 0,
     sepia: clip?.ajustes?.sepia ?? 0,
     tono: clip?.ajustes?.tono ?? 0,
-    invertir: clip?.ajustes?.invertir ?? 0
+    invertir: clip?.ajustes?.invertir ?? 0,
+    exposicion: clip?.ajustes?.exposicion ?? 0,
+    altas: clip?.ajustes?.altas ?? 0,
+    sombras: clip?.ajustes?.sombras ?? 0,
+    blancos: clip?.ajustes?.blancos ?? 0,
+    negros: clip?.ajustes?.negros ?? 0,
+    temperatura: clip?.ajustes?.temperatura ?? 0,
+    tinte: clip?.ajustes?.tinte ?? 0,
+    escala: clip?.ajustes?.escala ?? 1,
+    posx: clip?.ajustes?.posx ?? 0,
+    posy: clip?.ajustes?.posy ?? 0,
+    giro: clip?.ajustes?.giro ?? 0,
+    recorteIzq: clip?.ajustes?.recorteIzq ?? 0,
+    recorteDer: clip?.ajustes?.recorteDer ?? 0,
+    recorteArr: clip?.ajustes?.recorteArr ?? 0,
+    recorteAba: clip?.ajustes?.recorteAba ?? 0
   }
+}
+
+// ===== Color tipo Lumetri: una curva por canal, la misma en el monitor (filtro SVG) y en el MP4 (lut1d) =====
+
+export const PUNTOS_CURVA = 33
+const CLAVES_CURVA = ['exposicion', 'altas', 'sombras', 'blancos', 'negros', 'temperatura', 'tinte'] as const
+
+/**
+ * Las curvas de color del clip (rojo, verde y azul, de 0 a 1, con PUNTOS_CURVA puntos), o null si no hay ninguna.
+ * La exposición y el balance de blancos se hacen en luz lineal; las luces, sombras, blancos y negros, sobre la imagen.
+ */
+export function curvasColor(a: Required<AjustesClip>): { r: number[]; g: number[]; b: number[] } | null {
+  if (CLAVES_CURVA.every((k) => Math.abs(a[k]) < 1e-3)) return null
+  const ganancia = Math.pow(2, a.exposicion)
+  const canal = [1 + 0.22 * a.temperatura + 0.04 * a.tinte, 1 - 0.16 * a.tinte, 1 - 0.22 * a.temperatura + 0.04 * a.tinte]
+  const curvas = canal.map((k) =>
+    Array.from({ length: PUNTOS_CURVA }, (_, i) => {
+      let v = i / (PUNTOS_CURVA - 1)
+      v = Math.pow(Math.min(1, Math.pow(v, 2.2) * ganancia * k), 1 / 2.2)
+      // Cada control pesa en su zona: sombras hacia 1/3, altas luces hacia 2/3, negros y blancos en los extremos.
+      v += a.sombras * 0.22 * 6.75 * v * (1 - v) * (1 - v)
+      v += a.altas * 0.22 * 6.75 * v * v * (1 - v)
+      v += a.negros * 0.18 * Math.pow(1 - v, 3)
+      v += a.blancos * 0.2 * Math.pow(v, 3)
+      return Math.round(Math.min(1, Math.max(0, v)) * 10000) / 10000
+    })
+  )
+  return { r: curvas[0], g: curvas[1], b: curvas[2] }
+}
+
+/** Las curvas como archivo .cube de 1D (lo lee el filtro lut1d de FFmpeg). */
+export function cuboDeCurvas(c: { r: number[]; g: number[]; b: number[] }): string {
+  const filas = c.r.map((_, i) => `${c.r[i].toFixed(5)} ${c.g[i].toFixed(5)} ${c.b[i].toFixed(5)}`)
+  return ['TITLE "Recorte"', `LUT_1D_SIZE ${c.r.length}`, 'DOMAIN_MIN 0 0 0', 'DOMAIN_MAX 1 1 1', ...filas, ''].join(String.fromCharCode(10))
+}
+
+/** Si el clip se escala por debajo del 100 %, se corre, se gira o se recorta. */
+export function hayMovimiento(a: Required<AjustesClip>): boolean {
+  return a.escala < 0.999 || Math.abs(a.posx) > 1e-3 || Math.abs(a.posy) > 1e-3 || Math.abs(a.giro) > 0.05 || hayRecorte(a)
+}
+export function hayRecorte(a: Required<AjustesClip>): boolean {
+  return a.recorteIzq > 1e-3 || a.recorteDer > 1e-3 || a.recorteArr > 1e-3 || a.recorteAba > 1e-3
 }
 
 // ===== Fotogramas clave: un ajuste del clip que cambia a lo largo del tiempo =====
@@ -1000,7 +1239,22 @@ export function claveCapaEn(c: CapaTL, parametro: ParametroClaveCapa, dt: number
 export const DESENFOQUE_CLIP = 0.03
 
 /** El color y los efectos de un clip en neutro: lo que pone un look antes de aplicar lo suyo. */
-export const COLOR_NEUTRO: AjustesClip = { brillo: 0, contraste: 1, saturacion: 1, desenfoque: 0, sepia: 0, tono: 0, invertir: 0 }
+export const COLOR_NEUTRO: AjustesClip = {
+  brillo: 0,
+  contraste: 1,
+  saturacion: 1,
+  desenfoque: 0,
+  sepia: 0,
+  tono: 0,
+  invertir: 0,
+  exposicion: 0,
+  altas: 0,
+  sombras: 0,
+  blancos: 0,
+  negros: 0,
+  temperatura: 0,
+  tinte: 0
+}
 
 /**
  * La matriz de color (3×3, por filas) de la sepia y el giro de tono de un clip, en ese orden; null si no hay ninguno.
@@ -1299,6 +1553,66 @@ export function recortarClip(
     return { ...c, salida: pinza(segundoFuente, c.entrada + DURACION_MINIMA, duracionFuente) }
   })
   return conClips(tl, clips)
+}
+
+// ===== Edición fina (las herramientas de Premiere): recorte rodado, deslizar el contenido y desplazar el clip =====
+
+/** Lo que puede durar una fuente (un video, su duración; una imagen, hasta MAX_IMAGEN). */
+type DuracionDe = (fuente: FuenteId) => number
+
+/**
+ * Recorte rodado (N en Premiere): corre el corte entre el clip `indice` y el siguiente `dt` segundos de la timeline.
+ * Uno se alarga lo que el otro se acorta: la duración total y todo lo demás no se mueven.
+ */
+export function rodarCorte(tl: Timeline, indice: number, dt: number, duracionDe: DuracionDe): Timeline {
+  const a = tl.clips[indice]
+  const b = tl.clips[indice + 1]
+  if (!a || !b || !Number.isFinite(dt)) return tl
+  const va = velocidadDe(a)
+  const vb = velocidadDe(b)
+  // Lo más que se puede correr: a no pasa del final de su fuente ni b de su principio, y ninguno baja del mínimo.
+  const max = Math.min((duracionDe(a.fuente) - a.salida) / va, (b.salida - b.entrada) / vb - DURACION_MINIMA)
+  const min = Math.max(-((a.salida - a.entrada) / va - DURACION_MINIMA), -b.entrada / vb)
+  const d = pinza(dt, Math.min(0, min), Math.max(0, max))
+  if (Math.abs(d) < EPSILON) return tl
+  const clips = [...tl.clips]
+  clips[indice] = { ...a, salida: a.salida + d * va }
+  clips[indice + 1] = { ...b, entrada: b.entrada + d * vb }
+  return { ...tl, clips }
+}
+
+/**
+ * Deslizar el contenido (Y en Premiere): el clip queda en su sitio y con su duración, pero muestra otro tramo de su
+ * fuente, `dt` segundos de la timeline más adelante (o atrás, negativo).
+ */
+export function deslizarContenido(tl: Timeline, id: string, dt: number, duracionDe: DuracionDe): Timeline {
+  const c = tl.clips.find((x) => x.id === id)
+  if (!c || !Number.isFinite(dt)) return tl
+  const v = velocidadDe(c)
+  const d = pinza(dt * v, -c.entrada, duracionDe(c.fuente) - c.salida)
+  if (Math.abs(d) < EPSILON) return tl
+  return { ...tl, clips: tl.clips.map((x) => (x.id === id ? { ...x, entrada: x.entrada + d, salida: x.salida + d } : x)) }
+}
+
+/**
+ * Desplazar el clip (U en Premiere): el clip se corre `dt` segundos sin cambiar lo que muestra; el anterior se alarga o
+ * se acorta para seguirlo y el siguiente, al revés. Necesita un clip a cada lado; la duración total no cambia.
+ */
+export function desplazarClip(tl: Timeline, id: string, dt: number, duracionDe: DuracionDe): Timeline {
+  const i = tl.clips.findIndex((x) => x.id === id)
+  if (i <= 0 || i >= tl.clips.length - 1 || !Number.isFinite(dt)) return tl
+  const p = tl.clips[i - 1]
+  const n = tl.clips[i + 1]
+  const vp = velocidadDe(p)
+  const vn = velocidadDe(n)
+  const max = Math.min((duracionDe(p.fuente) - p.salida) / vp, (n.salida - n.entrada) / vn - DURACION_MINIMA)
+  const min = Math.max(-((p.salida - p.entrada) / vp - DURACION_MINIMA), -n.entrada / vn)
+  const d = pinza(dt, Math.min(0, min), Math.max(0, max))
+  if (Math.abs(d) < EPSILON) return tl
+  const clips = [...tl.clips]
+  clips[i - 1] = { ...p, salida: p.salida + d * vp }
+  clips[i + 1] = { ...n, entrada: n.entrada + d * vn }
+  return { ...tl, clips }
 }
 
 /** Lleva un clip a otra posición de la pista principal. */

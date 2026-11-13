@@ -31,7 +31,7 @@ export function Sidebar({
         <span className="brand-name">recorte</span>
       </div>
 
-      <button className="btn primary sidebar-nuevo" onClick={onNuevo}>
+      <button className="btn primary sidebar-nuevo" onClick={onNuevo} title="Nuevo proyecto">
         <Icon name="upload" size={16} /> <span>Nuevo proyecto</span>
       </button>
 
@@ -41,6 +41,7 @@ export function Sidebar({
             key={item.id}
             className={`nav-item ${active === item.id ? 'is-active' : ''}`}
             onClick={() => onChange(item.id)}
+            title={item.label}
           >
             <Icon name={item.icon} size={17} />
             <span>{item.label}</span>

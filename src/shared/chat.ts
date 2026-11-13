@@ -70,6 +70,11 @@ import type { TranscriptSegment } from './types'
  * API— edita con las mismas herramientas que el usuario, y todo se puede revertir.
  */
 
+/** Lo que la op «color» puede cambiar de un clip (el color tipo Lumetri incluido). */
+const CAMPOS_COLOR = ['brillo', 'contraste', 'saturacion', 'desenfoque', 'sepia', 'tono', 'invertir', 'exposicion', 'altas', 'sombras', 'blancos', 'negros', 'temperatura', 'tinte'] as const
+/** Lo que la op «zoom» puede cambiar: la cámara, y transformar y recortar la imagen. */
+const CAMPOS_CAMARA = ['zoom', 'acercar', 'cx', 'cy', 'panx', 'pany', 'temblor', 'campo', 'foco', 'escala', 'posx', 'posy', 'giro', 'recorteIzq', 'recorteDer', 'recorteArr', 'recorteAba'] as const
+
 export type OperacionTL =
   | { op: 'borrar_tramo'; desde: number; hasta: number }
   | { op: 'quitar_pausas'; minimo?: number }
@@ -107,8 +112,8 @@ export type OperacionTL =
   | { op: 'cambiar_sonido'; sonido_n: number; inicio?: number; volumen?: number }
   | { op: 'borrar_sonido'; sonido_n: number }
   | { op: 'reconstruir'; cortes: { entrada: number; salida: number }[] }
-  | { op: 'zoom'; clip?: number; zoom?: number; acercar?: number; cx?: number; cy?: number; panx?: number; pany?: number; temblor?: number; campo?: number; foco?: number }
-  | { op: 'color'; clip?: number; look?: string; brillo?: number; contraste?: number; saturacion?: number; desenfoque?: number; sepia?: number; tono?: number; invertir?: number }
+  | ({ op: 'zoom'; clip?: number } & { [K in (typeof CAMPOS_CAMARA)[number]]?: number })
+  | ({ op: 'color'; clip?: number; look?: string } & { [K in (typeof CAMPOS_COLOR)[number]]?: number })
   | { op: 'velocidad'; clip: number; velocidad: number }
   | { op: 'audio_clip'; clip: number; volumen?: number; entra?: number; sale?: number; limpio?: number }
   | { op: 'clave'; clip: number; parametro: ParametroClave; en: number; valor?: number; quitar?: boolean }
@@ -363,13 +368,13 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
       }
       case 'zoom': {
         // La cámara del clip: zoom, acercamiento lento, hacia dónde y paneo (lo que no venga no cambia).
-        const campos = (['zoom', 'acercar', 'cx', 'cy', 'panx', 'pany', 'temblor', 'campo', 'foco'] as const).filter((k) => num(x[k]) !== null)
+        const campos = (CAMPOS_CAMARA).filter((k) => num(x[k]) !== null)
         if (campos.length) ops.push({ op: 'zoom', clip: num(x.clip) ?? undefined, ...Object.fromEntries(campos.map((k) => [k, num(x[k])!])) })
         break
       }
       case 'color': {
         // El color y los efectos del clip (lo que no venga no cambia); un `look` los pone todos de una vez.
-        const campos = (['brillo', 'contraste', 'saturacion', 'desenfoque', 'sepia', 'tono', 'invertir'] as const).filter((k) => num(x[k]) !== null)
+        const campos = (CAMPOS_COLOR).filter((k) => num(x[k]) !== null)
         const look = typeof x.look === 'string' && LOOKS.some((l) => l.id === x.look) ? x.look : undefined
         if (campos.length || look) ops.push({ op: 'color', clip: num(x.clip) ?? undefined, ...(look ? { look } : {}), ...Object.fromEntries(campos.map((k) => [k, num(x[k])!])) })
         break
@@ -757,12 +762,12 @@ export function aplicarOperaciones(
         const cambio =
           o.op === 'zoom'
             ? Object.fromEntries(
-                (['zoom', 'acercar', 'cx', 'cy', 'panx', 'pany', 'temblor', 'campo', 'foco'] as const).filter((k) => o[k] !== undefined).map((k) => [k, o[k]])
+                (CAMPOS_CAMARA).filter((k) => o[k] !== undefined).map((k) => [k, o[k]])
               )
             : {
                 // Un look pone el color en neutro y luego lo suyo; después, lo que se pida suelto.
                 ...(o.look ? { ...COLOR_NEUTRO, ...(LOOKS.find((l) => l.id === o.look)?.ajustes ?? {}) } : {}),
-                ...Object.fromEntries((['brillo', 'contraste', 'saturacion', 'desenfoque', 'sepia', 'tono', 'invertir'] as const).filter((k) => o[k] !== undefined).map((k) => [k, o[k]]))
+                ...Object.fromEntries((CAMPOS_COLOR).filter((k) => o[k] !== undefined).map((k) => [k, o[k]]))
               }
         tl = ajustarClip(tl, destino ? destino.id : null, cambio)
         const donde = destino ? `al clip ${o.clip}` : 'a todos los clips'
@@ -1005,8 +1010,8 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
 - {"op":"borrar_texto","texto_n":N}
 - {"op":"reconstruir","cortes":[{"entrada":F,"salida":F}, …]}  rehace la pista de video con estos tramos de la FUENTE, en este orden (para resúmenes, versiones cortas o reordenar por contenido). Los clips nuevos salen sin zoom ni color.
 - {"op":"zoom","clip":N,"zoom":Z}  acercamiento centrado del clip N, de 1 (nada) a 2 (el doble). Sin "clip", a todos. Para enfatizar una frase: divide antes y después y pon zoom 1.15–1.3 a ese clip (punch-in).
-  La misma op mueve la CÁMARA del clip (lo que no pongas no cambia): "acercar" (acercamiento lento durante el clip, 0 a 0.3; negativo se ALEJA, hasta -0.3, con zoom 1.3 o más), "cx","cy" (hacia qué punto, 0 a 1) y "panx","pany" (paneo: cuánto se desplaza ese punto al acabar, -0.5 a 0.5; necesita zoom 1.15 o más para tener imagen de sobra). "temblor" (cámara en mano, 0 a 1; 0.3 es sutil) y "campo" + "foco" (profundidad de campo: "foco" es la distancia nítida, 0 el fondo a 1 lo más cercano; lo demás se desenfoca según "campo", 0 a 1). Con capas con profundidad encima, todo esto se ve en 3D. Ej.: {"op":"zoom","clip":3,"zoom":1.2,"acercar":0.06,"panx":0.2,"temblor":0.3,"campo":0.6,"foco":0.6}.
-- {"op":"color","clip":N,"brillo":B,"contraste":C,"saturacion":S}  brillo -0.3 a 0.3 (0 neutro), contraste 0.5 a 1.8 (1 neutro), saturación 0 (blanco y negro) a 2 (1 neutro). Sin "clip", a todos. Pon solo lo que cambies.
+  La misma op mueve la CÁMARA del clip (lo que no pongas no cambia): "acercar" (acercamiento lento durante el clip, 0 a 0.3; negativo se ALEJA, hasta -0.3, con zoom 1.3 o más), "cx","cy" (hacia qué punto, 0 a 1) y "panx","pany" (paneo: cuánto se desplaza ese punto al acabar, -0.5 a 0.5; necesita zoom 1.15 o más para tener imagen de sobra). "temblor" (cámara en mano, 0 a 1; 0.3 es sutil) y "campo" + "foco" (profundidad de campo: "foco" es la distancia nítida, 0 el fondo a 1 lo más cercano; lo demás se desenfoca según "campo", 0 a 1). Con capas con profundidad encima, todo esto se ve en 3D. Ej.: {"op":"zoom","clip":3,"zoom":1.2,"acercar":0.06,"panx":0.2,"temblor":0.3,"campo":0.6,"foco":0.6}. Y transforma la imagen como en Premiere: "escala" (0.1 a 1, achica con negro alrededor; para agrandar, "zoom"), "posx","posy" (-1 a 1, la corre en fracción del cuadro), "giro" (grados) y "recorteIzq","recorteDer","recorteArr","recorteAba" (0 a 0.45, recorta ese borde a negro).
+- {"op":"color","clip":N,"brillo":B,"contraste":C,"saturacion":S}  brillo -0.3 a 0.3 (0 neutro), contraste 0.5 a 1.8 (1 neutro), saturación 0 (blanco y negro) a 2 (1 neutro). Sin "clip", a todos. Pon solo lo que cambies. También corrige el color como en Lumetri: "exposicion" (-2 a 2 pasos), "altas", "sombras", "blancos", "negros" (-1 a 1; sombras +0.3 abre una cara oscura), "temperatura" (-1 frío a 1 cálido) y "tinte" (-1 verde a 1 magenta).
   La misma op pone EFECTOS al clip: "desenfoque" 0 a 1 (0.35 para un fondo bajo un texto), "sepia" 0 a 1 (foto antigua), "tono" -180 a 180 (gira los colores), "invertir" 1 (negativo; 0 lo quita).
   Y un LOOK de color completo con "look" (sustituye al color y los efectos que tuviera): ${LOOKS.map((l) => `${l.id} (${l.para})`).join(', ')}. Para un flash en negativo: divide medio segundo y ponle "invertir":1.
 - {"op":"clave","clip":N,"parametro":"zoom|cx|cy|brillo|contraste|saturacion","en":S,"valor":V}  FOTOGRAMA CLAVE: ese ajuste del clip N vale V en el segundo S (contado desde que empieza el clip) y cambia suave hasta la siguiente clave. Con dos o más claves animas a mano: un zoom que entra y vuelve a salir (zoom 1 en 0, 1.4 en 1.5, 1 en 3), el encuadre que va de una cara a otra (cx, cy), un fundido a oscuro (brillo 0 → -0.3), el color que se apaga (saturacion 1 → 0). Hasta 12 claves por ajuste. "quitar":true en vez de "valor" borra la de ese segundo.

@@ -81,13 +81,24 @@ import {
   type TransicionClip,
   MOVIMIENTOS_CAPA,
   type EntradaCapa,
-  type FinCapa
+  type FinCapa,
+  COLORES_MARCADOR,
+  LIMITES_AJUSTES,
+  ponerMarcador,
+  cambiarMarcador,
+  borrarMarcador,
+  extraerRango,
+  rodarCorte,
+  deslizarContenido,
+  desplazarClip,
+  type ColorMarcador
 } from '../../../shared/timeline'
 import type { OpcionesExport } from '../../../shared/api'
 import type { TranscriptSegment } from '../../../shared/types'
 import type { Historial } from '../hooks/timeline'
 import { Icon, type IconName } from '../Icons'
 import { Onda } from './Onda'
+import { Medidor, Mezclador, useNiveles } from './Mezclador'
 import { InspectorVoz, type GenerarVoz, type GrabarVoz } from './InspectorVoz'
 
 /**
@@ -123,6 +134,33 @@ export function tc(segundos: number, decimas = true): string {
   const base = `${min}:${String(entero).padStart(2, '0')}`
   return decimas ? `${base}.${Math.floor((resto - entero) * 10)}` : base
 }
+
+/** El código de tiempo de Premiere: 75.4 s a 30 cuadros → "00:01:15:12". */
+export function tcCuadros(segundos: number, fps = 30): string {
+  const f = Math.max(1, Math.round(fps))
+  const total = Math.round(Math.max(0, segundos) * f)
+  const cuadro = total % f
+  const s = Math.floor(total / f)
+  const dos = (n: number) => String(n).padStart(2, '0')
+  return `${dos(Math.floor(s / 3600))}:${dos(Math.floor(s / 60) % 60)}:${dos(s % 60)}:${dos(cuadro)}`
+}
+
+/** Las herramientas de la línea de tiempo (como la paleta de Premiere). */
+export type Herramienta = 'seleccion' | 'rodar' | 'deslizar' | 'desplazar' | 'cuchilla' | 'mano'
+const HERRAMIENTAS: { id: Herramienta; nombre: string; tecla: string; icono: IconName; para: string }[] = [
+  {
+    id: 'seleccion',
+    nombre: 'Selección',
+    tecla: 'V',
+    icono: 'seleccion',
+    para: 'elegir, mover y recortar (en la pista de video, recortar un borde corre todo lo de después: es el recorte de onda)'
+  },
+  { id: 'rodar', nombre: 'Recorte rodado', tecla: 'N', icono: 'rodar', para: 'arrastra un corte entre dos clips: uno se alarga lo que el otro se acorta' },
+  { id: 'deslizar', nombre: 'Deslizar', tecla: 'Y', icono: 'deslizar', para: 'arrastra un clip para mostrar otro tramo de su video sin moverlo ni cambiar su duración' },
+  { id: 'desplazar', nombre: 'Desplazar', tecla: 'U', icono: 'desplazar', para: 'arrastra un clip entre sus vecinos: él no cambia y los de los lados se ajustan' },
+  { id: 'cuchilla', nombre: 'Cuchilla', tecla: 'C', icono: 'scissors', para: 'cortar un clip donde hagas clic' },
+  { id: 'mano', nombre: 'Mano', tecla: 'H', icono: 'mano', para: 'arrastrar para recorrer la línea de tiempo' }
+]
 
 function esCampoDeTexto(objetivo: EventTarget | null): boolean {
   const el = objetivo as HTMLElement | null
@@ -160,8 +198,11 @@ export function TimelineEditor({
   panelMedios,
   pestanasExtra,
   miniaturaDe,
-  urlDe
+  urlDe,
+  fps = 30
 }: {
+  /** Los cuadros por segundo del proyecto (para el código de tiempo y el avance cuadro a cuadro). */
+  fps?: number
   /** La miniatura de una fuente (el video principal o un medio), para verla dentro de sus clips. */
   miniaturaDe?: (fuente: string) => string | undefined
   /** La dirección de un archivo del proyecto (para dibujar la onda de un audio). */
@@ -286,6 +327,16 @@ export function TimelineEditor({
   const [borrador, setBorrador] = useState<Timeline | null>(null)
   const [insercion, setInsercion] = useState<number | null>(null)
   const [zoom, setZoom] = useState(1)
+  // La paleta de herramientas, el imán, la entrada/salida (I/O) y la marca elegida.
+  const [herramienta, setHerramienta] = useState<Herramienta>('seleccion')
+  const [conIman, setConIman] = useState(true)
+  const [rango, setRango] = useState<{ entrada?: number; salida?: number }>({})
+  const [repetir, setRepetir] = useState(false)
+  const [marcaElegida, setMarcaElegida] = useState<string | null>(null)
+  const [cortePrevio, setCortePrevio] = useState<number | null>(null)
+  const [mezclador, setMezclador] = useState(false)
+  const niveles = useNiveles(reproduciendo || mezclador)
+  const cuadro = 1 / Math.max(1, Math.round(fps))
   const [, forzar] = useState(0)
   const [anchoVisible, setAnchoVisible] = useState(800)
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -373,6 +424,8 @@ export function TimelineEditor({
 
   /** Imán: pega `t` al borde más cercano (o al cabezal) si está a menos de IMAN_PX. */
   function iman(t: number, puntos: number[]): number {
+    if (!conIman) return t
+    puntos = [...puntos, ...(tl.marcadores ?? []).map((m) => m.t)]
     let mejor = t
     let distancia = IMAN_PX / pps
     for (const p of [...puntos, tiempo]) {
@@ -439,6 +492,19 @@ export function TimelineEditor({
   // ===== Pista de video =====
 
   function arrastrarClip(e: React.PointerEvent, id: string) {
+    if (herramienta === 'cuchilla') {
+      if (e.button !== 0) return
+      e.preventDefault()
+      e.stopPropagation()
+      const t = iman(segundoEn(e.clientX), puntosIman(timeline))
+      const cortada = dividir(timeline, t)
+      if (cortada !== timeline) historial.aplicar(cortada)
+      return
+    }
+    if (herramienta === 'rodar' || herramienta === 'deslizar' || herramienta === 'desplazar') {
+      editarFino(e, id)
+      return
+    }
     onElegir({ tipo: 'clip', id })
     const base = timeline
     const otros = tramos(base).filter((t) => t.clip.id !== id)
@@ -457,7 +523,54 @@ export function TimelineEditor({
     })
   }
 
+  /** Un segundo llevado al cuadro más cercano. */
+  const aCuadro = (x: number) => Math.round(x / cuadro) * cuadro
+  /** Lo que puede durar la fuente de un clip. */
+  const limiteFuente = (fuente: string) => (duracionDe ? duracionDe(fuente) : duracionFuente)
+
+  /**
+   * Las herramientas finas sobre un clip de video: el recorte rodado corre el corte más cercano al puntero, deslizar
+   * cambia el tramo que muestra y desplazar lo corre entre sus vecinos. El monitor enseña el cuadro que cambia.
+   */
+  function editarFino(e: React.PointerEvent, id: string, lado?: 'entrada' | 'salida') {
+    const base = timeline
+    const lista0 = tramos(base)
+    const t = lista0.find((x) => x.clip.id === id)
+    if (!t) return
+    onElegir({ tipo: 'clip', id })
+    if (herramienta === 'rodar') {
+      const enX = segundoEn(e.clientX)
+      const izquierda = lado ? lado === 'entrada' : enX - t.inicio < t.fin - enX
+      const indice = izquierda ? t.indice - 1 : t.indice
+      if (indice < 0 || indice >= base.clips.length - 1) return
+      const corte = izquierda ? t.inicio : t.fin
+      // El corte cae siempre en un cuadro (y se pega al cabezal y a las marcas con el imán).
+      arrastrar(e, (dx) => {
+        const r = rodarCorte(base, indice, aCuadro(iman(corte + dx, tiemposMarcas)) - corte, limiteFuente)
+        onBuscar(tramos(r)[indice].fin)
+        return r
+      })
+    } else if (herramienta === 'deslizar') {
+      arrastrar(e, (dx) => {
+        const r = deslizarContenido(base, id, -aCuadro(dx), limiteFuente)
+        onBuscar(t.inicio)
+        return r
+      })
+    } else {
+      if (t.indice === 0 || t.indice === lista0.length - 1) return
+      arrastrar(e, (dx) => {
+        const r = desplazarClip(base, id, aCuadro(iman(t.inicio + dx, tiemposMarcas)) - t.inicio, limiteFuente)
+        onBuscar(tramos(r)[t.indice].inicio)
+        return r
+      })
+    }
+  }
+
   function recortar(e: React.PointerEvent, id: string, lado: 'entrada' | 'salida') {
+    if (herramienta === 'rodar') {
+      editarFino(e, id, lado)
+      return
+    }
     onElegir({ tipo: 'clip', id })
     const base = timeline
     const tramo = tramos(base).find((t) => t.clip.id === id)
@@ -775,6 +888,50 @@ export function TimelineEditor({
     }
   }
 
+  // ===== Marcas, entrada/salida y saltos (como en Premiere) =====
+
+  function accionMarcador() {
+    if (total <= 0) return
+    const r = ponerMarcador(timeline, Math.min(tiempo, total))
+    if (r.timeline !== timeline) historial.aplicar(r.timeline)
+    setMarcaElegida(r.id)
+  }
+  /** Los cortes de la pista de video (para ir de uno a otro con ↑ y ↓). */
+  const cortes = useMemo(() => [...new Set(lista.flatMap((t) => [t.inicio, t.fin]))].sort((a, b) => a - b), [lista])
+  function saltar(puntos: number[], adelante: boolean) {
+    const destino = adelante ? puntos.find((p) => p > tiempo + cuadro / 2) : [...puntos].reverse().find((p) => p < tiempo - cuadro / 2)
+    if (destino !== undefined) onBuscar(Math.min(destino, total))
+  }
+  const tiemposMarcas = (tl.marcadores ?? []).map((m) => m.t)
+  const hayRango = rango.entrada !== undefined && rango.salida !== undefined && rango.salida - rango.entrada >= DURACION_MINIMA
+  function accionExtraer() {
+    if (!hayRango) return
+    const r = extraerRango(timeline, rango.entrada!, rango.salida!)
+    if (r === timeline) return
+    historial.aplicar(r)
+    onBuscar(rango.entrada!)
+    setRango({})
+  }
+  function marcarEntrada() {
+    const t = Math.min(tiempo, total)
+    setRango((r) => ({ entrada: t, ...(r.salida !== undefined && r.salida > t ? { salida: r.salida } : {}) }))
+  }
+  function marcarSalida() {
+    const t = Math.min(tiempo, total)
+    setRango((r) => ({ ...(r.entrada !== undefined && r.entrada < t ? { entrada: r.entrada } : {}), salida: t }))
+  }
+  // «Repetir»: al llegar a la salida vuelve a la entrada (o al final, al principio).
+  useEffect(() => {
+    if (!reproduciendo || !repetir) return
+    const desde = rango.entrada ?? 0
+    const hasta = rango.salida ?? total
+    if (tiempo >= hasta - cuadro / 2 || tiempo < desde - 0.5) onBuscar(desde)
+  }, [tiempo, reproduciendo, repetir, rango, total, cuadro, onBuscar])
+  // Si la timeline se acorta, la entrada/salida no se queda fuera.
+  useEffect(() => {
+    if ((rango.entrada ?? 0) > total || (rango.salida ?? 0) > total) setRango({})
+  }, [total, rango])
+
   // ===== Teclado =====
 
   const teclas = useRef<(e: KeyboardEvent) => void>(() => {})
@@ -803,6 +960,24 @@ export function TimelineEditor({
     // Dividir, como en CapCut (Ctrl+B) y en Premiere (Ctrl+K).
     else if (ctrl && (tecla === 'b' || tecla === 'k')) accionDividir()
     else if (ctrl) return
+    else if (tecla === 'v') setHerramienta('seleccion')
+    else if (tecla === 'c') setHerramienta('cuchilla')
+    else if (tecla === 'n') setHerramienta('rodar')
+    else if (tecla === 'y') setHerramienta('deslizar')
+    else if (tecla === 'u') setHerramienta('desplazar')
+    else if (tecla === 'h') setHerramienta('mano')
+    else if (tecla === 'm' && e.shiftKey) saltar(tiemposMarcas, true)
+    else if (tecla === 'm') accionMarcador()
+    else if (tecla === 'i' && e.shiftKey) rango.entrada !== undefined && onBuscar(rango.entrada)
+    else if (tecla === 'o' && e.shiftKey) rango.salida !== undefined && onBuscar(rango.salida)
+    else if (tecla === 'i') marcarEntrada()
+    else if (tecla === 'o') marcarSalida()
+    else if (e.key === "'") accionExtraer()
+    else if (tecla === 'k') reproduciendo && onAlternar()
+    else if (tecla === 'l') (reproduciendo ? onBuscar(Math.min(total, tiempo + 5)) : onAlternar())
+    else if (tecla === 'j') onBuscar(Math.max(0, tiempo - 5))
+    else if (e.key === 'ArrowUp') saltar(cortes, false)
+    else if (e.key === 'ArrowDown') saltar(cortes, true)
     else if (e.key === '+' || e.key === '=') setZoom((z) => Math.min(zoomMax, z * 1.25))
     else if (e.key === '-') setZoom((z) => Math.max(1, z * 0.8))
     else if (e.key === ' ') {
@@ -813,9 +988,9 @@ export function TimelineEditor({
     else if (tecla === 's') accionDividir()
     else if (tecla === 't') accionTexto()
     else if (e.key === 'Delete' || e.key === 'Backspace') accionBorrar()
-    else if (e.key === 'Escape') onElegir(null)
-    else if (e.key === 'ArrowLeft') onBuscar(tiempo - (e.shiftKey ? 1 : 1 / 30))
-    else if (e.key === 'ArrowRight') onBuscar(tiempo + (e.shiftKey ? 1 : 1 / 30))
+    else if (e.key === 'Escape') (herramienta !== 'seleccion' ? setHerramienta('seleccion') : (onElegir(null), setMarcaElegida(null)))
+    else if (e.key === 'ArrowLeft') onBuscar(Math.max(0, tiempo - (e.shiftKey ? 1 : cuadro)))
+    else if (e.key === 'ArrowRight') onBuscar(Math.min(total, tiempo + (e.shiftKey ? 1 : cuadro)))
     else if (e.key === 'Home') onBuscar(0)
     else if (e.key === 'End') onBuscar(total)
     else return
@@ -860,14 +1035,52 @@ export function TimelineEditor({
 
   return (
     <div className="tl">
+      {mezclador && <Mezclador timeline={timeline} historial={historial} niveles={niveles} onCerrar={() => setMezclador(false)} />}
       {paneles.transporte &&
         createPortal(
           <>
-            <button className="ed-play" onClick={onAlternar} title={reproduciendo ? 'Pausa (Espacio)' : 'Reproducir (Espacio)'} aria-label={reproduciendo ? 'Pausa' : 'Reproducir'}>
-              <Icon name={reproduciendo ? 'pause' : 'play'} size={18} />
-            </button>
-            <span className="tl-tc">
-              {tc(tiempo)} <span>/ {tc(total)}</span>
+            <span className="tr-tc is-actual" title="Código de tiempo del cabezal: horas:minutos:segundos:cuadros">
+              {tcCuadros(tiempo, fps)}
+            </span>
+            <div className="tr-botones" role="toolbar" aria-label="Transporte">
+              <button className={`tr-boton tr-llave ${rango.entrada !== undefined ? 'is-on' : ''}`} onClick={marcarEntrada} disabled={total <= 0} title="Marcar la entrada en el cabezal (I) · Mayús+I: ir a la entrada" aria-label="Marcar entrada">
+                {'{'}
+              </button>
+              <button className={`tr-boton tr-llave ${rango.salida !== undefined ? 'is-on' : ''}`} onClick={marcarSalida} disabled={total <= 0} title="Marcar la salida en el cabezal (O) · Mayús+O: ir a la salida" aria-label="Marcar salida">
+                {'}'}
+              </button>
+              <span className="tr-separador" />
+              <button className="tr-boton" onClick={() => onBuscar(0)} title="Ir al principio (Inicio)" aria-label="Ir al principio">
+                <Icon name="inicio" size={15} />
+              </button>
+              <button className="tr-boton" onClick={() => onBuscar(Math.max(0, tiempo - cuadro))} title="Un cuadro atrás (←)" aria-label="Un cuadro atrás">
+                <Icon name="cuadro-atras" size={15} />
+              </button>
+              <button className="ed-play" onClick={onAlternar} title={reproduciendo ? 'Pausa (Espacio o K)' : 'Reproducir (Espacio o L)'} aria-label={reproduciendo ? 'Pausa' : 'Reproducir'}>
+                <Icon name={reproduciendo ? 'pause' : 'play'} size={18} />
+              </button>
+              <button className="tr-boton" onClick={() => onBuscar(Math.min(total, tiempo + cuadro))} title="Un cuadro adelante (→)" aria-label="Un cuadro adelante">
+                <Icon name="cuadro-adelante" size={15} />
+              </button>
+              <button className="tr-boton" onClick={() => onBuscar(total)} title="Ir al final (Fin)" aria-label="Ir al final">
+                <Icon name="final" size={15} />
+              </button>
+              <span className="tr-separador" />
+              <button className={`tr-boton ${repetir ? 'is-on' : ''}`} onClick={() => setRepetir((r) => !r)} aria-pressed={repetir} title={hayRango ? 'Repetir entre la entrada y la salida' : 'Repetir todo el video'} aria-label="Repetir">
+                <Icon name="repetir" size={15} />
+              </button>
+              <button className="tr-boton" onClick={accionExtraer} disabled={!hayRango} title="Extraer: quita lo que hay entre la entrada y la salida y cierra el hueco (tecla ')" aria-label="Extraer entre entrada y salida">
+                <Icon name="extraer" size={15} />
+              </button>
+            </div>
+            <span className="tr-tc" title={hayRango ? 'Lo que dura el tramo entre la entrada y la salida' : 'Lo que dura todo el video'}>
+              {hayRango ? (
+                <>
+                  <i>{'{ }'}</i> {tcCuadros(rango.salida! - rango.entrada!, fps)}
+                </>
+              ) : (
+                tcCuadros(total, fps)
+              )}
             </span>
           </>,
           paneles.transporte
@@ -1112,6 +1325,66 @@ export function TimelineEditor({
         )}
 
       <div className="tl-barra">
+        <span className="tl-tc-grande" title="Código de tiempo del cabezal">{tcCuadros(tiempo, fps)}</span>
+        <div className="tl-paleta" role="toolbar" aria-label="Herramientas">
+          {HERRAMIENTAS.map((h) => (
+            <button
+              key={h.id}
+              className={`tl-herr ${herramienta === h.id ? 'is-on' : ''}`}
+              onClick={() => setHerramienta(h.id)}
+              aria-pressed={herramienta === h.id}
+              title={`${h.nombre} (${h.tecla}): ${h.para}`}
+              aria-label={h.nombre}
+            >
+              <Icon name={h.icono} size={15} />
+            </button>
+          ))}
+          <span className="tl-paleta-sep" />
+          <button
+            className={`tl-herr ${conIman ? 'is-on' : ''}`}
+            onClick={() => setConIman((v) => !v)}
+            aria-pressed={conIman}
+            title={conIman ? 'Imán activado: los clips se pegan a los bordes, al cabezal y a las marcas' : 'Imán apagado: mueves libre'}
+            aria-label="Imán"
+          >
+            <Icon name="iman" size={15} />
+          </button>
+          <button className="tl-herr" onClick={accionMarcador} disabled={total <= 0} title="Añadir una marca en el cabezal (M) · Mayús+M: ir a la siguiente" aria-label="Añadir marca">
+            <Icon name="marcador" size={15} />
+          </button>
+        </div>
+        {(() => {
+          const m = tl.marcadores?.find((x) => x.id === marcaElegida)
+          if (!m) return null
+          return (
+            <span className="tl-marca-editor" aria-label="La marca elegida">
+              <input
+                className="tl-texto-input"
+                value={m.nombre ?? ''}
+                placeholder={`Marca en ${tcCuadros(m.t, fps)}`}
+                onChange={(e) => historial.aplicar(cambiarMarcador(timeline, m.id, { nombre: e.target.value }))}
+                aria-label="Nombre de la marca"
+              />
+              {(Object.keys(COLORES_MARCADOR) as ColorMarcador[]).map((c) => (
+                <button
+                  key={c}
+                  className={`tl-marca-color ${(m.color ?? 'verde') === c ? 'is-on' : ''}`}
+                  style={{ background: COLORES_MARCADOR[c] }}
+                  onClick={() => historial.aplicar(cambiarMarcador(timeline, m.id, { color: c }))}
+                  title={`Color ${c}`}
+                  aria-label={`Color ${c}`}
+                />
+              ))}
+              <button className="tl-boton" onClick={() => (historial.aplicar(borrarMarcador(timeline, m.id)), setMarcaElegida(null))} title="Quitar la marca" aria-label="Quitar la marca">
+                <Icon name="trash" size={14} />
+              </button>
+              <button className="tl-boton" onClick={() => setMarcaElegida(null)} title="Cerrar" aria-label="Cerrar">
+                <Icon name="x" size={14} />
+              </button>
+            </span>
+          )
+        })()}
+        <span className="tl-separador" />
         <button className="tl-boton" onClick={accionDividir} title="Dividir en el cabezal (S)" disabled={total <= 0}>
           <Icon name="scissors" size={16} /> Dividir
         </button>
@@ -1129,6 +1402,15 @@ export function TimelineEditor({
           <Icon name="redo" size={16} />
         </button>
         <span className="tl-flex" />
+        <button
+          className={`tl-boton tl-boton-mezclador ${mezclador ? 'is-activo' : ''}`}
+          onClick={() => setMezclador((v) => !v)}
+          aria-pressed={mezclador}
+          title="Mezclador de audio: el volumen de cada pista y sus medidores"
+        >
+          <Icon name="mezclador" size={15} />
+          <Medidor horizontal nivel={niveles.general} />
+        </button>
         <label className="tl-zoom" title="Acercar (Ctrl+rueda)">
           <Icon name="search" size={14} />
           <input
@@ -1186,13 +1468,60 @@ export function TimelineEditor({
           })}
         </div>
 
-        <div className="tl-scroll" ref={scrollRef} onWheel={rueda}>
+        <div
+          className={`tl-scroll herramienta-${herramienta}`}
+          ref={scrollRef}
+          onWheel={rueda}
+          onPointerDownCapture={(e) => {
+            if (herramienta !== 'mano' || e.button !== 0) return
+            // La mano recorre la línea de tiempo sin tocar nada.
+            e.preventDefault()
+            e.stopPropagation()
+            const el = scrollRef.current
+            if (!el) return
+            const x0 = e.clientX
+            const s0 = el.scrollLeft
+            el.classList.add('is-arrastrando')
+            const mover = (ev: PointerEvent) => (el.scrollLeft = s0 - (ev.clientX - x0))
+            const soltar = () => {
+              el.classList.remove('is-arrastrando')
+              window.removeEventListener('pointermove', mover)
+              window.removeEventListener('pointerup', soltar)
+            }
+            window.addEventListener('pointermove', mover)
+            window.addEventListener('pointerup', soltar)
+          }}
+          onPointerMove={(e) => herramienta === 'cuchilla' && setCortePrevio(iman(segundoEn(e.clientX), puntosIman(timeline)))}
+          onPointerLeave={() => setCortePrevio(null)}
+        >
           <div className="tl-lienzo" ref={lienzoRef} style={{ width: ancho }}>
             <div className="tl-regla" onPointerDown={arrastrarCabezal}>
               {marcas.map((t) => (
                 <span key={t} className="tl-marca" style={{ left: t * pps }}>
                   {tc(t, paso < 1)}
                 </span>
+              ))}
+              {(rango.entrada !== undefined || rango.salida !== undefined) && (
+                <span
+                  className="tl-rango"
+                  style={{ left: (rango.entrada ?? 0) * pps, width: Math.max(2, ((rango.salida ?? total) - (rango.entrada ?? 0)) * pps) }}
+                  title="Entre la entrada y la salida"
+                />
+              )}
+              {(tl.marcadores ?? []).map((m) => (
+                <button
+                  key={m.id}
+                  className={`tl-marca-m ${marcaElegida === m.id ? 'is-on' : ''}`}
+                  style={{ left: m.t * pps, ['--marca' as string]: COLORES_MARCADOR[m.color ?? 'verde'] }}
+                  title={`${m.nombre ? `${m.nombre} · ` : ''}${tcCuadros(m.t, fps)} (clic: ir y editar)`}
+                  aria-label={`Marca ${m.nombre ?? tcCuadros(m.t, fps)}`}
+                  onPointerDown={(e) => {
+                    e.stopPropagation()
+                    e.preventDefault()
+                    onBuscar(m.t)
+                    setMarcaElegida(m.id)
+                  }}
+                />
               ))}
             </div>
 
@@ -1385,6 +1714,11 @@ export function TimelineEditor({
             </div>
 
             {insercion !== null && <span className="tl-insercion" style={{ left: insercion * pps }} />}
+            {hayRango && <span className="tl-rango-zona" style={{ left: rango.entrada! * pps, width: (rango.salida! - rango.entrada!) * pps }} />}
+            {(tl.marcadores ?? []).map((m) => (
+              <span key={m.id} className="tl-marca-linea" style={{ left: m.t * pps, ['--marca' as string]: COLORES_MARCADOR[m.color ?? 'verde'] }} />
+            ))}
+            {herramienta === 'cuchilla' && cortePrevio !== null && <span className="tl-corte-previo" style={{ left: cortePrevio * pps }} />}
             <span className="tl-cabezal" style={{ left: Math.min(tiempo, total) * pps }} />
           </div>
         </div>
@@ -1590,9 +1924,21 @@ export function TimelineEditor({
                   [
                     'Color',
                     [
-                      ['brillo', 'Brillo', -0.3, 0.3, 0.01, (v: number) => `${v > 0 ? '+' : ''}${Math.round(v * 100)}`],
+                      ['exposicion', 'Exposición', -2, 2, 0.05, (v: number) => (v ? `${v > 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}` : '0')],
                       ['contraste', 'Contraste', 0.5, 1.8, 0.01, (v: number) => `${Math.round(v * 100)} %`],
-                      ['saturacion', 'Saturación', 0, 2, 0.01, (v: number) => `${Math.round(v * 100)} %`]
+                      ['altas', 'Altas luces', -1, 1, 0.01, (v: number) => (v ? `${v > 0 ? '+' : '−'}${Math.round(Math.abs(v) * 100)}` : '0')],
+                      ['sombras', 'Sombras', -1, 1, 0.01, (v: number) => (v ? `${v > 0 ? '+' : '−'}${Math.round(Math.abs(v) * 100)}` : '0')],
+                      ['blancos', 'Blancos', -1, 1, 0.01, (v: number) => (v ? `${v > 0 ? '+' : '−'}${Math.round(Math.abs(v) * 100)}` : '0')],
+                      ['negros', 'Negros', -1, 1, 0.01, (v: number) => (v ? `${v > 0 ? '+' : '−'}${Math.round(Math.abs(v) * 100)}` : '0')],
+                      ['saturacion', 'Saturación', 0, 2, 0.01, (v: number) => `${Math.round(v * 100)} %`],
+                      ['brillo', 'Brillo', -0.3, 0.3, 0.01, (v: number) => `${v > 0 ? '+' : ''}${Math.round(v * 100)}`]
+                    ]
+                  ],
+                  [
+                    'Balance de blancos',
+                    [
+                      ['temperatura', 'Temperatura', -1, 1, 0.01, (v: number) => (v ? `${v > 0 ? 'cálido +' : 'frío −'}${Math.round(Math.abs(v) * 100)}` : '0')],
+                      ['tinte', 'Tinte', -1, 1, 0.01, (v: number) => (v ? `${v > 0 ? 'magenta +' : 'verde −'}${Math.round(Math.abs(v) * 100)}` : '0')]
                     ]
                   ],
                   [
@@ -1602,6 +1948,24 @@ export function TimelineEditor({
                       ['sepia', 'Sepia', 0, 1, 0.01, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no')],
                       ['tono', 'Tono', -180, 180, 1, (v: number) => (v ? `${v > 0 ? '+' : ''}${Math.round(v)}°` : 'no')],
                       ['invertir', 'Negativo', 0, 1, 1, (v: number) => (v >= 0.5 ? 'sí' : 'no')]
+                    ]
+                  ],
+                  [
+                    'Transformar',
+                    [
+                      ['escala', 'Escala', 0.1, 1, 0.01, (v: number) => `${Math.round(v * 100)} %`],
+                      ['posx', 'Posición ↔', -1, 1, 0.005, (v: number) => (v ? `${v > 0 ? '→' : '←'} ${Math.round(Math.abs(v) * 100)} %` : 'centro')],
+                      ['posy', 'Posición ↕', -1, 1, 0.005, (v: number) => (v ? `${v > 0 ? '↓' : '↑'} ${Math.round(Math.abs(v) * 100)} %` : 'centro')],
+                      ['giro', 'Rotación', -180, 180, 0.5, (v: number) => (v ? `${v > 0 ? '+' : ''}${v.toFixed(1)}°` : '0°')]
+                    ]
+                  ],
+                  [
+                    'Recortar',
+                    [
+                      ['recorteIzq', 'Izquierda', 0, 0.45, 0.005, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no')],
+                      ['recorteDer', 'Derecha', 0, 0.45, 0.005, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no')],
+                      ['recorteArr', 'Arriba', 0, 0.45, 0.005, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no')],
+                      ['recorteAba', 'Abajo', 0, 0.45, 0.005, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no')]
                     ]
                   ],
                   [
@@ -1617,19 +1981,22 @@ export function TimelineEditor({
                   ]
                 ] as const
               ).map(([grupo, filas]) => (
-                <Fragment key={grupo}>
-                  <span className="ed-seccion">
+                <details key={grupo} className="ed-grupo" open={grupo === 'Encuadre' || grupo === 'Color' || filas.some(([clave]) => clipElegido.clip.ajustes?.[clave] !== undefined)}>
+                  <summary className="ed-seccion">
                     {grupo}
-                    {(grupo === 'Color' || grupo === 'Efectos') && filas.some(([clave]) => clipElegido.clip.ajustes?.[clave] !== undefined) && (
+                    {grupo !== 'Encuadre' && grupo !== 'Cámara' && filas.some(([clave]) => clipElegido.clip.ajustes?.[clave] !== undefined) && (
                       <button
                         className="ed-seccion-quitar"
-                        title={`Quitar ${grupo === 'Color' ? 'el color' : 'los efectos'} de este clip`}
-                        onClick={() => historial.aplicar(ajustarClip(timeline, clipElegido.clip.id, Object.fromEntries(filas.map(([clave]) => [clave, COLOR_NEUTRO[clave as keyof AjustesClip]]))))}
+                        title={`Dejar «${grupo}» como viene en este clip`}
+                        onClick={(e) => {
+                          e.preventDefault()
+                          historial.aplicar(ajustarClip(timeline, clipElegido.clip.id, Object.fromEntries(filas.map(([clave]) => [clave, LIMITES_AJUSTES[clave as keyof AjustesClip][2]]))))
+                        }}
                       >
                         Quitar
                       </button>
                     )}
-                  </span>
+                  </summary>
                   {filas.map(([clave, nombre, min, max, paso, formato]) => {
                 const valor = ajustesEn(clipElegido.clip, fuenteEnCabezal)[clave]
                 const lista = esClave(clave) ? (clipElegido.clip.claves?.[clave] ?? []) : []
@@ -1694,7 +2061,7 @@ export function TimelineEditor({
                   </label>
                 )
               })}
-                </Fragment>
+                </details>
               ))}
               <select
                 value=""
@@ -2159,6 +2526,20 @@ export function TimelineEditor({
               <dd>Deshacer</dd>
               <dt>Ctrl+rueda</dt>
               <dd>Acercar la línea de tiempo</dd>
+              <dt>V · C · H</dt>
+              <dd>Selección, cuchilla (corta donde haces clic) y mano</dd>
+              <dt>N · Y · U</dt>
+              <dd>Recorte rodado, deslizar el contenido y desplazar el clip</dd>
+              <dt>J · K · L</dt>
+              <dd>Atrás 5 s, pausa, reproducir (otra vez L: adelante 5 s)</dd>
+              <dt>I · O</dt>
+              <dd>Marcar entrada y salida (con Mayús, ir a ellas)</dd>
+              <dt>'</dt>
+              <dd>Extraer lo que hay entre la entrada y la salida</dd>
+              <dt>M</dt>
+              <dd>Poner una marca (Mayús+M, ir a la siguiente)</dd>
+              <dt>↑ ↓</dt>
+              <dd>Ir al corte anterior o al siguiente</dd>
             </dl>
           </div>
         )}

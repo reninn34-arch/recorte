@@ -39,6 +39,21 @@ import {
   Undo2,
   Upload,
   X,
+  MousePointer2,
+  Hand,
+  Magnet,
+  Bookmark,
+  SkipBack,
+  SkipForward,
+  StepBack,
+  StepForward,
+  Repeat,
+  ScissorsLineDashed,
+  Maximize,
+  ArrowLeftRight,
+  MoveHorizontal,
+  ChevronsLeftRight,
+  SlidersVertical,
   type LucideIcon
 } from 'lucide-react'
 
@@ -88,7 +103,22 @@ const ICONOS = {
   volumen: Volume2,
   'volumen-no': VolumeX,
   carpeta: FolderOpen,
-  cubo: Box
+  cubo: Box,
+  seleccion: MousePointer2,
+  mano: Hand,
+  iman: Magnet,
+  marcador: Bookmark,
+  inicio: SkipBack,
+  final: SkipForward,
+  'cuadro-atras': StepBack,
+  'cuadro-adelante': StepForward,
+  repetir: Repeat,
+  extraer: ScissorsLineDashed,
+  pantalla: Maximize,
+  rodar: ArrowLeftRight,
+  deslizar: MoveHorizontal,
+  desplazar: ChevronsLeftRight,
+  mezclador: SlidersVertical
 } satisfies Record<string, LucideIcon>
 
 export type IconName = keyof typeof ICONOS

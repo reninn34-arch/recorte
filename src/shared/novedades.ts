@@ -24,6 +24,33 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.47',
+    fecha: '2026-11-13',
+    resumen: 'El editor da un salto hacia Premiere: transporte con código de tiempo, herramientas de edición, color tipo Lumetri, transformar y un mezclador de audio.',
+    novedades: [
+      {
+        icono: 'clock',
+        titulo: 'Transporte y código de tiempo',
+        texto: 'Código de tiempo con cuadros (00:00:04:03), cuadro a cuadro, entrada y salida (I/O), «Extraer» lo que hay entre ellas (tecla \'), repetir, J/K/L, marcas en la regla (M) y saltos entre cortes con ↑ ↓.'
+      },
+      {
+        icono: 'scissors',
+        titulo: 'Herramientas de edición',
+        texto: 'Paleta como la de Premiere: Selección (V), Recorte rodado (N), Deslizar (Y), Desplazar (U), Cuchilla (C) y Mano (H), con imán. Arrastra el divisor para agrandar la línea de tiempo.'
+      },
+      {
+        icono: 'palette',
+        titulo: 'Color, transformar y recortar',
+        texto: 'Por clip: exposición, altas luces, sombras, blancos, negros, temperatura y tinte; escala, posición y rotación; y recortar los bordes. El monitor y el MP4 salen iguales.'
+      },
+      {
+        icono: 'volumen',
+        titulo: 'Mezclador de audio',
+        texto: 'Un fader por pista (video, voz, sonidos y música) con su medidor de nivel, y el medidor general siempre a la vista en la barra de la línea de tiempo.'
+      }
+    ]
+  },
+  {
     version: '0.1.46',
     fecha: '2026-11-13',
     resumen: '«Explicativo 3D» trae piezas afinadas: la voz con ritmo natural, el texto palabra por palabra al segundo, el sonido y modelos 3D que se guardan.',
