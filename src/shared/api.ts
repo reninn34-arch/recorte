@@ -275,6 +275,13 @@ export interface RecorteApi {
   extraerAudio: (id: string, fuente: string, desde: number, hasta: number) => Promise<{ archivo: string; duracion: number; nombre: string }>
   /** Saca el cuadro de un video (en ese segundo de su fuente) a la biblioteca como imagen, para congelarlo. */
   congelarCuadro: (id: string, fuente: string, segundo: number) => Promise<{ project: Project; medio: string }>
+  /** La ruta en el disco de un archivo soltado o pegado (de Windows). */
+  rutaDeArchivo: (archivo: File) => string | null
+  /** Importa archivos soltados o pegados: videos y fotos a la biblioteca, audios a la carpeta del proyecto. */
+  importarRutas: (
+    id: string,
+    rutas: string[]
+  ) => Promise<{ project: Project; agregados: string[]; audios: { archivo: string; nombre: string; duracion: number }[]; fallos: string[] }>
   /** Los picos del audio de una fuente (50 por segundo, 0 a 1) para dibujar su onda; null si no tiene sonido. */
   ondaDe: (id: string, fuente: string) => Promise<number[] | null>
   /** Quita un medio del proyecto y sus clips de la timeline (el archivo no se toca). */
@@ -447,6 +454,11 @@ export interface RecorteApi {
   onHerramienta: (cb: (p: { id: string; pct: number; texto: string }) => void) => () => void
   /** La sesión de un agente se cayó mientras trabajaba: hay que volver a conectarlo. */
   onSesionCaida: (cb: (id: EstadoAgente['id']) => void) => () => void
+  /** El tamaño de la interfaz: automático (según la ventana) o fijo. */
+  interfazEstado: () => Promise<{ automatica: boolean; escala: number }>
+  /** Fija el tamaño (0.7 a 2.2) o lo vuelve automático (null). */
+  interfazEscala: (valor: number | null) => Promise<{ automatica: boolean; escala: number }>
+  onInterfaz: (cb: (e: { automatica: boolean; escala: number }) => void) => () => void
   onProgreso: (cb: (p: Progreso) => void) => () => void
   platform: string
 }

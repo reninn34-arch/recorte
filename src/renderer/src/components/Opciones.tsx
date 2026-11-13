@@ -36,6 +36,36 @@ function Seccion({ titulo, extra, children, nota }: { titulo: string; extra?: Re
   )
 }
 
+/** El tamaño de la interfaz: automático o fijo, con − y +. */
+function TamanoInterfaz() {
+  const [e, setE] = useState<{ automatica: boolean; escala: number } | null>(null)
+  useEffect(() => {
+    void window.recorte.interfazEstado().then(setE).catch(() => {})
+    return window.recorte.onInterfaz(setE)
+  }, [])
+  if (!e) return null
+  const fijar = (v: number | null) => void window.recorte.interfazEscala(v).then(setE)
+  return (
+    <div className="op-fila">
+      <div className="op-fila-texto">
+        <strong>{Math.round(e.escala * 100)} %</strong>
+        <span>{e.automatica ? 'Automático: según el tamaño de la ventana' : 'Fijo: lo elegiste tú'}</span>
+      </div>
+      <div className="op-fila-lado">
+        <button className="btn small ghost" onClick={() => fijar(e.escala - 0.1)} aria-label="Más chica" title="Más chica (Ctrl −)">
+          −
+        </button>
+        <button className="btn small ghost" onClick={() => fijar(e.escala + 0.1)} aria-label="Más grande" title="Más grande (Ctrl +)">
+          +
+        </button>
+        <button className={`btn small ${e.automatica ? 'primary' : 'ghost'}`} onClick={() => fijar(null)} title="Según el tamaño de la ventana (Ctrl 0)">
+          Automático
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function Interruptor({ activo, onCambiar, etiqueta }: { activo: boolean; onCambiar: (v: boolean) => void; etiqueta: string }) {
   return (
     <label className="op-interruptor">
@@ -288,6 +318,10 @@ export function Opciones({
           </button>
         )}
         <h2 className="op-encabezado">Ajustes</h2>
+
+        <Seccion titulo="Tamaño de la interfaz" nota="En automático crece con la ventana: en un monitor grande todo se ve proporcionado. También con Ctrl + y Ctrl − (Ctrl 0 vuelve a automático).">
+          <TamanoInterfaz />
+        </Seccion>
 
         <Seccion titulo="Tus videos">
           <CarpetaVideos modo="ajustes" />

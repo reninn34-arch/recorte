@@ -248,6 +248,21 @@ export function CajaCrear({
     if (rutas.length) setAdjuntos((a) => [...a, ...rutas.filter((r) => !a.includes(r))].slice(0, 12))
   }
 
+  // Archivos soltados o pegados en la caja (fotos, videos, audios, .zip o carpetas): entran como adjuntos.
+  const [soltando, setSoltando] = useState(false)
+  function adjuntarArchivos(archivos: File[]) {
+    const rutas = archivos.map((f) => window.recorte.rutaDeArchivo(f)).filter((r): r is string => Boolean(r))
+    if (!rutas.length) return
+    if (chat) {
+      chat.onAdjuntar(rutas)
+      return
+    }
+    // Una carpeta llega como un archivo sin tipo ni extensión: se marca para verla como carpeta.
+    const sinExtension = archivos.filter((f) => !f.type && !/\.[a-z0-9]{2,5}$/i.test(f.name)).map((f) => window.recorte.rutaDeArchivo(f))
+    setCarpetas((c) => [...c, ...sinExtension.filter((r): r is string => Boolean(r) && !c.includes(r!))])
+    setAdjuntos((a) => [...a, ...rutas.filter((r) => !a.includes(r))].slice(0, 12))
+  }
+
   async function elegirCarpeta() {
     const ruta = await window.recorte.elegirCarpeta()
     if (!ruta) return
@@ -406,8 +421,35 @@ export function CajaCrear({
 
   return (
     <>
-      <div className={`crear-caja cc ${falta ? 'is-falta' : ''} ${chat ? 'is-chat' : ''}`}>
+      <div
+        className={`crear-caja cc ${falta ? 'is-falta' : ''} ${chat ? 'is-chat' : ''} ${soltando ? 'soltando-archivos' : ''}`}
+        data-soltar="Suelta aquí tus fotos, videos, audios o una carpeta"
+        onDragOver={(e) => {
+          if (!e.dataTransfer.types.includes('Files')) return
+          e.preventDefault()
+          e.stopPropagation()
+          e.dataTransfer.dropEffect = 'copy'
+          if (!soltando) setSoltando(true)
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setSoltando(false)
+        }}
+        onDrop={(e) => {
+          if (!e.dataTransfer.files.length) return
+          e.preventDefault()
+          e.stopPropagation()
+          setSoltando(false)
+          adjuntarArchivos([...e.dataTransfer.files])
+        }}
+      >
         <textarea
+          onPaste={(e) => {
+            // Pegar archivos copiados en el Explorador (Ctrl+V) los adjunta; el texto se pega como siempre.
+            const archivos = [...e.clipboardData.files]
+            if (!archivos.length) return
+            e.preventDefault()
+            adjuntarArchivos(archivos)
+          }}
           autoFocus
           value={peticion}
           rows={chat ? 2 : 3}

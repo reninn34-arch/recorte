@@ -124,6 +124,7 @@ import type { Historial } from '../hooks/timeline'
 import { Icon, type IconName } from '../Icons'
 import { Onda } from './Onda'
 import { Medidor, Mezclador, useNiveles } from './Mezclador'
+import { useMenuContextual, type OpcionMenu } from './MenuContextual'
 import { InspectorVoz, type GenerarVoz, type GrabarVoz } from './InspectorVoz'
 
 /**
@@ -1046,6 +1047,114 @@ export function TimelineEditor({
     if ((rango.entrada ?? 0) > total || (rango.salida ?? 0) > total) setRango({})
   }, [total, rango])
 
+  // ===== Menú de clic derecho =====
+
+  const [menuCtx, abrirMenu] = useMenuContextual()
+  /** Las acciones de este momento: el menú las llama al hacer clic, cuando lo elegido ya cambió. */
+  const acciones = useRef({ accionCopiar, accionPegar, accionBorrar, accionDuplicar })
+  acciones.current = { accionCopiar, accionPegar, accionBorrar, accionDuplicar }
+  const copiarCortar: OpcionMenu[] = [
+    { nombre: 'Copiar', atajo: 'Ctrl+C', accion: () => acciones.current.accionCopiar() },
+    { nombre: 'Cortar', atajo: 'Ctrl+X', accion: () => acciones.current.accionCopiar() && acciones.current.accionBorrar() }
+  ]
+  const borrar = { nombre: 'Borrar', atajo: 'Supr', peligro: true, accion: () => acciones.current.accionBorrar() }
+
+  /** Clic derecho sobre algo de la línea de tiempo: lo elige y abre su menú. */
+  function menuDe(e: React.MouseEvent, cual: NonNullable<Elegido>) {
+    const enVariosYa = varios.length > 1 && varios.some((v) => v.id === cual.id)
+    if (enVariosYa) {
+      const clipsV = varios.filter((v) => v.tipo === 'clip').map((v) => v.id)
+      abrirMenu(e, [
+        { tipo: 'titulo', nombre: `${varios.length} elegidos` },
+        ...(onAnidar && clipsV.length === varios.length && clipsSeguidos(timeline, clipsV)
+          ? [{ nombre: `Anidar los ${varios.length} en un clip`, accion: () => onAnidar(clipsV) }]
+          : []),
+        { nombre: `Borrar los ${varios.length}`, atajo: 'Supr', peligro: true, accion: () => acciones.current.accionBorrar() }
+      ])
+      return
+    }
+    onElegir(cual)
+    const t = segundoEn(e.clientX)
+    if (cual.tipo === 'clip') {
+      const c = timeline.clips.find((x) => x.id === cual.id)
+      if (!c) return
+      const video = esVideo(c.fuente)
+      abrirMenu(e, [
+        { nombre: 'Dividir aquí', atajo: 'S', accion: () => historial.aplicar(dividir(timeline, t)) },
+        { nombre: 'Duplicar', atajo: 'Ctrl+D', accion: () => historial.aplicar(duplicarClip(timeline, c.id)) },
+        ...copiarCortar,
+        { nombre: 'Pegar en el cabezal', atajo: 'Ctrl+V', desactivada: !portapapeles.current, accion: () => acciones.current.accionPegar() },
+        { tipo: 'separador' },
+        ...(video ? [{ nombre: c.mudo ? 'Volver a oír' : 'Silenciar', accion: () => historial.aplicar(silenciarClip(timeline, c.id, !c.mudo)) }] : []),
+        ...(video && onSepararAudio && !c.mudo ? [{ nombre: 'Separar audio', accion: () => onSepararAudio(c.id) }] : []),
+        ...(video && onEstabilizar ? [{ nombre: 'Estabilizar', accion: () => onEstabilizar(c.id) }] : []),
+        ...(onCongelar && video ? [{ nombre: 'Congelar el cuadro del cabezal', atajo: 'Mayús+F', accion: () => onCongelar() }] : []),
+        ...(video && !c.rampa
+          ? [
+              { tipo: 'titulo' as const, nombre: 'Velocidad' },
+              ...[0.5, 1, 2].map((v) => ({ nombre: `${v}×${Math.abs(velocidadDe(c) - v) < 0.005 ? '  ✓' : ''}`, accion: () => historial.aplicar(cambiarVelocidad(timeline, c.id, v)) }))
+            ]
+          : []),
+        ...(c.anidado ? [{ nombre: `Desanidar (${c.anidado.length} clips)`, accion: () => historial.aplicar(desanidarClip(timeline, c.id)) }] : []),
+        { tipo: 'separador' },
+        { ...borrar, nombre: 'Borrar y cerrar el hueco' }
+      ])
+      return
+    }
+    const nombres: Record<string, string> = { texto: 'Texto', capa: 'Capa', sonido: 'Sonido', voz: 'Frase de voz', ajuste: 'Capa de ajuste' }
+    abrirMenu(e, [
+      { tipo: 'titulo', nombre: nombres[cual.tipo] ?? '' },
+      ...(cual.tipo === 'texto' || cual.tipo === 'capa' || cual.tipo === 'sonido' ? copiarCortar : []),
+      ...(cual.tipo === 'texto' || cual.tipo === 'capa' || cual.tipo === 'sonido'
+        ? [{ nombre: 'Pegar en el cabezal', atajo: 'Ctrl+V', desactivada: !portapapeles.current, accion: () => acciones.current.accionPegar() }]
+        : []),
+      ...(cual.tipo === 'capa' ? [{ nombre: 'Ir a su principio', accion: () => onBuscar(tl.capas?.find((x) => x.id === cual.id)?.inicio ?? tiempo) }] : []),
+      { tipo: 'separador' },
+      borrar
+    ])
+  }
+
+  /** Clic derecho en un hueco de la línea de tiempo (o en la regla): lo que se puede poner ahí. */
+  function menuHueco(e: React.MouseEvent) {
+    if (total <= 0) return
+    const t = Math.min(total, segundoEn(e.clientX))
+    abrirMenu(e, [
+      { nombre: 'Pegar aquí', atajo: 'Ctrl+V', desactivada: !portapapeles.current, accion: () => (onBuscar(t), setTimeout(() => acciones.current.accionPegar(), 0)) },
+      { tipo: 'separador' },
+      {
+        nombre: 'Añadir un texto aquí',
+        atajo: 'T',
+        accion: () => {
+          const r = anadirTexto(timeline, t)
+          if (r.timeline !== timeline) (historial.aplicar(r.timeline), onElegir({ tipo: 'texto', id: r.id }))
+        }
+      },
+      {
+        nombre: 'Añadir una capa de ajuste aquí',
+        accion: () => {
+          const r = anadirAjusteCapa(timeline, Math.min(t, Math.max(0, total - DURACION_MINIMA)))
+          historial.aplicar(r.timeline)
+          onElegir({ tipo: 'ajuste', id: r.id })
+        }
+      },
+      {
+        nombre: 'Poner una marca aquí',
+        atajo: 'M',
+        accion: () => {
+          const r = ponerMarcador(timeline, t)
+          if (r.timeline !== timeline) historial.aplicar(r.timeline)
+          setMarcaElegida(r.id)
+        }
+      },
+      { tipo: 'separador' },
+      { nombre: 'Marcar la entrada aquí', atajo: 'I', accion: () => setRango((r) => ({ entrada: t, ...(r.salida !== undefined && r.salida > t ? { salida: r.salida } : {}) })) },
+      { nombre: 'Marcar la salida aquí', atajo: 'O', accion: () => setRango((r) => ({ ...(r.entrada !== undefined && r.entrada < t ? { entrada: r.entrada } : {}), salida: t })) },
+      ...(hayRango ? [{ nombre: 'Extraer entre la entrada y la salida', atajo: "'", accion: accionExtraer }] : []),
+      { tipo: 'separador' },
+      { nombre: 'Ver toda la línea de tiempo', accion: ajustar }
+    ])
+  }
+
   // ===== Teclado =====
 
   const teclas = useRef<(e: KeyboardEvent) => void>(() => {})
@@ -1156,6 +1265,7 @@ export function TimelineEditor({
 
   return (
     <div className="tl">
+      {menuCtx}
       {mezclador && <Mezclador timeline={timeline} historial={historial} niveles={niveles} onCerrar={() => setMezclador(false)} />}
       {paneles.transporte &&
         createPortal(
@@ -1692,7 +1802,7 @@ export function TimelineEditor({
           onPointerMove={(e) => herramienta === 'cuchilla' && setCortePrevio(iman(segundoEn(e.clientX), puntosIman(timeline)))}
           onPointerLeave={() => setCortePrevio(null)}
         >
-          <div className="tl-lienzo" ref={lienzoRef} style={{ width: ancho }}>
+          <div className="tl-lienzo" ref={lienzoRef} style={{ width: ancho }} data-pps={pps} onContextMenu={menuHueco}>
             <div className="tl-regla" onPointerDown={arrastrarCabezal}>
               {marcas.map((t) => (
                 <span key={t} className="tl-marca" style={{ left: t * pps }}>
@@ -1719,6 +1829,13 @@ export function TimelineEditor({
                     onBuscar(m.t)
                     setMarcaElegida(m.id)
                   }}
+                  onContextMenu={(e) =>
+                    abrirMenu(e, [
+                      { tipo: 'titulo', nombre: m.nombre || `Marca en ${tcCuadros(m.t, fps)}` },
+                      { nombre: 'Ir a la marca', accion: () => onBuscar(m.t) },
+                      { nombre: 'Quitar la marca', peligro: true, accion: () => historial.aplicar(borrarMarcador(timeline, m.id)) }
+                    ])
+                  }
                 />
               ))}
             </div>
@@ -1744,7 +1861,8 @@ export function TimelineEditor({
                   className={`tl-rotulo tl-ajuste-capa ${(elegido?.tipo === 'ajuste' && elegido.id === x.id) || enVarios(x.id) ? 'is-elegido' : ''}`}
                   style={{ left: x.inicio * pps, width: Math.max(6, x.duracion * pps - 1) }}
                   title="Capa de ajuste: cambia el color o desenfoca todo lo de abajo en este tramo"
-                  onPointerDown={(e) => sumar(e, { tipo: 'ajuste', id: x.id }) || arrastrarAjuste(e, x.id, 'mover')}
+                  onContextMenu={(e) => menuDe(e, { tipo: 'ajuste', id: x.id })}
+                    onPointerDown={(e) => sumar(e, { tipo: 'ajuste', id: x.id }) || arrastrarAjuste(e, x.id, 'mover')}
                 >
                   <span className="tl-asa izquierda" onPointerDown={(e) => arrastrarAjuste(e, x.id, 'inicio')} />
                   {x.duracion * pps > 50 && <span className="tl-clip-texto">Ajuste</span>}
@@ -1776,6 +1894,7 @@ export function TimelineEditor({
                       ...(filasEncima > 1 ? { top: (filasEncima - Math.min(filasEncima, pistaDeCapa(c))) * ALTO_FILA + 3, bottom: 'auto', height: ALTO_FILA - 7 } : {}),
                       ...fondoMini(c.fuente)
                     }}
+                    onContextMenu={(e) => menuDe(e, { tipo: 'capa', id: c.id })}
                     onPointerDown={(e) => sumar(e, { tipo: 'capa', id: c.id }) || arrastrarCapa(e, c.id, 'mover')}
                     title={`${nombre} · ${c.duracion.toFixed(1)} s`}
                   >
@@ -1802,6 +1921,7 @@ export function TimelineEditor({
                     {...recibeEfecto(t.clip.id)}
                     data-efecto={sobreClip === t.clip.id ? 'si' : undefined}
                     style={{ left: t.inicio * pps, width: anchoClip, ...fondoMini(t.clip.fuente) }}
+                    onContextMenu={(e) => menuDe(e, { tipo: 'clip', id: t.clip.id })}
                     onPointerDown={(e) => sumar(e, { tipo: 'clip', id: t.clip.id }) || arrastrarClip(e, t.clip.id)}
                     title={`Clip ${t.indice + 1} · ${nombreDe ? nombreDe(t.clip.fuente) : 'fuente'} ${tc(t.clip.entrada)}–${tc(t.clip.salida)}`}
                   >
@@ -1848,7 +1968,8 @@ export function TimelineEditor({
                   key={x.id}
                   className={`tl-rotulo ${elegido?.id === x.id || enVarios(x.id) ? 'is-elegido' : ''}`}
                   style={{ left: x.inicio * pps, width: Math.max(4, x.duracion * pps) }}
-                  onPointerDown={(e) => sumar(e, { tipo: 'texto', id: x.id }) || arrastrarTexto(e, x.id, 'mover')}
+                  onContextMenu={(e) => menuDe(e, { tipo: 'texto', id: x.id })}
+                    onPointerDown={(e) => sumar(e, { tipo: 'texto', id: x.id }) || arrastrarTexto(e, x.id, 'mover')}
                   onDoubleClick={() => textoRef.current?.select()}
                   title={x.texto}
                 >
@@ -1868,6 +1989,7 @@ export function TimelineEditor({
                     className={`tl-voz tl-frase ${(elegido?.tipo === 'voz' && elegido.id === v.id) || enVarios(v.id) ? 'is-elegido' : ''}`}
                     style={{ left: v.inicio * pps, width: Math.max(4, anchoFrase - 1) }}
                     title={v.texto || 'Narración'}
+                    onContextMenu={(e) => menuDe(e, { tipo: 'voz', id: v.id })}
                     onPointerDown={(e) => sumar(e, { tipo: 'voz', id: v.id }) || arrastrarFrase(e, v.id)}
                   >
                     {urlDe && v.archivo && <Onda url={urlDe(v.archivo)} duracion={v.duracion} />}
@@ -1916,6 +2038,7 @@ export function TimelineEditor({
                       ...(filasSonidos > 1 ? { top: (filasSonidos - Math.min(filasSonidos, s.pista ?? 1)) * ALTO_FILA + 4, bottom: 'auto', height: ALTO_FILA - 8 } : {})
                     }}
                     title={`${s.nombre}${filasSonidos > 1 ? ` · pista ${s.pista ?? 1}` : ''}`}
+                    onContextMenu={(e) => menuDe(e, { tipo: 'sonido', id: s.id })}
                     onPointerDown={(e) => sumar(e, { tipo: 'sonido', id: s.id }) || arrastrarSonido(e, s.id)}
                   >
                     {urlDe && <Onda url={urlDe(s.archivo)} duracion={s.duracion} desde={s.desde ?? 0} />}

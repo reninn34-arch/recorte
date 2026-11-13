@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, shell } from 'electron'
 import { ANIMAR_CAPA, duracionTimeline, duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, SONIDOS_INCLUIDOS, timelineInicial, timelineVacia, type Timeline } from '../shared/timeline'
 import { randomUUID } from 'node:crypto'
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -50,6 +50,7 @@ import { guardarModelos } from './modelos3d'
 import { picosDeArchivo } from './onda'
 import { estabilizarTramo } from './estabilizar'
 import { desfasePorSonido } from './multicam'
+import { prepararEscala } from './escala'
 import { atenderVoz } from './vozagente'
 import { proyectoDesdeReceta } from './recetaeditor'
 import { medirReferencia } from './estilo/referencia'
@@ -92,10 +93,42 @@ function crearVentana(): void {
   })
 
   ventana.on('ready-to-show', () => ventana.show())
+  // La interfaz crece o se achica con la ventana (o con Ctrl + / Ctrl −).
+  prepararEscala(ventana)
 
   ventana.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
     return { action: 'deny' }
+  })
+
+  // Un archivo soltado donde nadie lo recibe no abre ese archivo en la ventana (se perdería la app).
+  ventana.webContents.on('will-navigate', (evento, url) => {
+    if (url.startsWith('file:') && !url.includes('/renderer/index.html')) evento.preventDefault()
+  })
+
+  // Clic derecho en un texto (la caja del chat, un rótulo, cualquier campo): cortar, copiar, pegar, seleccionar todo y
+  // la ortografía, como en cualquier programa. Donde la app tiene su propio menú (el editor), ese manda.
+  ventana.webContents.on('context-menu', (_evento, p) => {
+    const editable = p.isEditable
+    if (!editable && !p.selectionText.trim()) return
+    const plantilla: Electron.MenuItemConstructorOptions[] = []
+    if (editable && p.misspelledWord) {
+      for (const s of p.dictionarySuggestions.slice(0, 5)) plantilla.push({ label: s, click: () => ventana.webContents.replaceMisspelling(s) })
+      if (!p.dictionarySuggestions.length) plantilla.push({ label: 'Sin sugerencias', enabled: false })
+      plantilla.push(
+        { label: 'Agregar al diccionario', click: () => ventana.webContents.session.addWordToSpellCheckerDictionary(p.misspelledWord) },
+        { type: 'separator' }
+      )
+    }
+    if (editable) plantilla.push({ label: 'Deshacer', role: 'undo', enabled: p.editFlags.canUndo }, { label: 'Rehacer', role: 'redo', enabled: p.editFlags.canRedo }, { type: 'separator' })
+    plantilla.push(
+      ...(editable ? [{ label: 'Cortar', role: 'cut' as const, enabled: p.editFlags.canCut }] : []),
+      { label: 'Copiar', role: 'copy', enabled: p.editFlags.canCopy },
+      ...(editable ? [{ label: 'Pegar', role: 'paste' as const, enabled: p.editFlags.canPaste }] : []),
+      { type: 'separator' },
+      { label: 'Seleccionar todo', role: 'selectAll' }
+    )
+    Menu.buildFromTemplate(plantilla).popup({ window: ventana })
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -1490,6 +1523,42 @@ app.whenReady().then(() => {
     proyectos.save(actual)
     return { project: actual, agregados: nuevos.map((m) => m.id), fallos }
   }
+  /** Copia un audio a `media/` del proyecto (para ponerlo como sonido o música). */
+  async function copiarAudio(id: string, origen: string): Promise<{ archivo: string; nombre: string; duracion: number }> {
+    const duracion = await duracionMedio(origen)
+    if (!(duracion > 0)) throw new Error(`No pude leer el audio «${basename(origen)}».`)
+    const base =
+      basename(origen, extname(origen))
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^\w-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 40) || 'sonido'
+    const archivo = `sonido-${base}-${Date.now().toString(36)}${extname(origen).toLowerCase()}`
+    const carpetaMedia = join(proyectos.carpeta(id), 'media')
+    mkdirSync(carpetaMedia, { recursive: true })
+    copyFileSync(origen, join(carpetaMedia, archivo))
+    return { archivo: `media/${archivo}`, nombre: basename(origen, extname(origen)).slice(0, 60), duracion }
+  }
+  // Archivos soltados o pegados en el editor: los videos y las fotos van a la biblioteca; los audios, a `media/`.
+  ipcMain.handle('proyecto:importar-rutas', async (_evento, id: unknown, rutas: unknown) => {
+    if (typeof id !== 'string' || !Array.isArray(rutas)) throw new Error('Datos inválidos.')
+    if (!proyectos.get(id)) throw new Error('El proyecto ya no existe.')
+    const lista = rutas.filter((r): r is string => typeof r === 'string' && existsSync(r) && statSync(r).isFile()).slice(0, 50)
+    const esAudio = (r: string) => ['.mp3', '.wav', '.m4a', '.aac', '.ogg', '.opus', '.flac'].includes(extname(r).toLowerCase())
+    const audios: { archivo: string; nombre: string; duracion: number }[] = []
+    const fallos: string[] = []
+    for (const r of lista.filter(esAudio)) {
+      try {
+        audios.push(await copiarAudio(id, r))
+      } catch {
+        fallos.push(basename(r))
+      }
+    }
+    const otros = lista.filter((r) => !esAudio(r))
+    const r = otros.length ? await agregarRutas(id, otros) : { project: proyectos.abrir(id)!, agregados: [], fallos: [] }
+    return { project: r.project, agregados: r.agregados, audios, fallos: [...fallos, ...r.fallos] }
+  })
   /**
    * La muestra de una voz de Gemini para oírla antes de elegirla. Cada voz se genera una sola vez
    * (la misma que da probar_voz por MCP) y queda en `userData/muestras-voz`.

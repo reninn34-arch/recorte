@@ -2,6 +2,7 @@ import { DURACION_IMAGEN, TIPO_ARRASTRE_MEDIO } from '../../../shared/timeline'
 import type { MedioProyecto, Project } from '../../../shared/types'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
+import { useMenuContextual } from './MenuContextual'
 
 /**
  * La biblioteca del proyecto: el video principal y los videos e imágenes que agregues.
@@ -31,6 +32,17 @@ export function MediosPanel({
   onQuitar: (medio: MedioProyecto) => void
 }) {
   const medios = proyecto.medios ?? []
+  const [menu, abrirMenu] = useMenuContextual()
+  /** Clic derecho en un medio: todo lo que se puede hacer con él. */
+  const menuDe = (e: React.MouseEvent, fuente: string, m?: MedioProyecto) =>
+    abrirMenu(e, [
+      { tipo: 'titulo', nombre: m?.nombre ?? proyecto.source.name },
+      { nombre: 'Poner al final', accion: () => onPoner(fuente, 'final') },
+      { nombre: 'Poner en el cabezal', accion: () => onPoner(fuente, 'cabezal') },
+      ...(m ? [{ nombre: 'Poner encima, en el cabezal', accion: () => onPoner(fuente, 'encima') }] : []),
+      ...(onVer && (!m || m.tipo === 'video') ? [{ nombre: 'Ver en el monitor de origen', accion: () => onVer(fuente) }] : []),
+      ...(m ? [{ tipo: 'separador' as const }, { nombre: 'Quitar del proyecto', peligro: true, accion: () => onQuitar(m) }] : [])
+    ])
   const usos = (id: string) =>
     (proyecto.timeline?.clips ?? []).filter((c) => c.fuente === id).length + (proyecto.timeline?.capas ?? []).filter((c) => c.fuente === id).length
   /** Se arrastra a la pista de video, a la de «Encima» o al monitor. */
@@ -45,6 +57,7 @@ export function MediosPanel({
 
   return (
     <div className="medios">
+      {menu}
       <div className="medios-cabeza">
         <div>
           <strong>Medios del proyecto</strong>
@@ -58,7 +71,7 @@ export function MediosPanel({
       </div>
 
       <div className="medios-grid">
-        <div className="medio" {...arrastrable('principal')}>
+        <div className="medio" {...arrastrable('principal')} onContextMenu={(e) => menuDe(e, 'principal')}>
           <span className="medio-mini">
             {proyecto.thumbnail ? <img src={mediaUrl(proyecto.id, proyecto.thumbnail)} alt="" draggable={false} /> : <Icon name="film" size={20} />}
             <span className="inicio-duracion">{mmss(proyecto.source.duration)}</span>
@@ -83,7 +96,7 @@ export function MediosPanel({
         </div>
 
         {medios.map((m) => (
-          <div key={m.id} className="medio" {...arrastrable(m.id)}>
+          <div key={m.id} className="medio" {...arrastrable(m.id)} onContextMenu={(e) => menuDe(e, m.id, m)}>
             <span className="medio-mini">
               {m.tipo === 'imagen' ? (
                 <img src={mediaUrl(proyecto.id, `medio/${m.id}`)} alt="" draggable={false} />

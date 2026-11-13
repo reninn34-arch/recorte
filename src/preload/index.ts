@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { EstadoActualizacion, Progreso, RecorteApi } from '../shared/api'
 import type { Project } from '../shared/types'
 
@@ -13,6 +13,14 @@ const api: RecorteApi = {
   agregarMedios: (id) => ipcRenderer.invoke('proyecto:agregar-medios', id),
   quitarFondo: (id, medio) => ipcRenderer.invoke('proyecto:quitar-fondo', id, medio),
   ondaDe: (id, fuente) => ipcRenderer.invoke('proyecto:onda', id, fuente),
+  rutaDeArchivo: (archivo) => {
+    try {
+      return webUtils.getPathForFile(archivo) || null
+    } catch {
+      return null
+    }
+  },
+  importarRutas: (id, rutas) => ipcRenderer.invoke('proyecto:importar-rutas', id, rutas),
   congelarCuadro: (id, fuente, segundo) => ipcRenderer.invoke('proyecto:congelar', id, fuente, segundo),
   exportarCuadro: (id, timeline, segundo) => ipcRenderer.invoke('proyecto:exportar-cuadro', id, timeline, segundo),
   seguirZona: (id, fuente, pedido) => ipcRenderer.invoke('proyecto:seguir-zona', id, fuente, pedido),
@@ -132,6 +140,13 @@ const api: RecorteApi = {
   actualizacionEstado: () => ipcRenderer.invoke('actualizacion:estado'),
   actualizacionBuscar: () => ipcRenderer.invoke('actualizacion:buscar'),
   actualizacionInstalar: () => ipcRenderer.invoke('actualizacion:instalar'),
+  interfazEstado: () => ipcRenderer.invoke('interfaz:estado'),
+  interfazEscala: (valor) => ipcRenderer.invoke('interfaz:escala', valor),
+  onInterfaz: (cb) => {
+    const listener = (_evento: Electron.IpcRendererEvent, e: { automatica: boolean; escala: number }) => cb(e)
+    ipcRenderer.on('interfaz:escala', listener)
+    return () => ipcRenderer.removeListener('interfaz:escala', listener)
+  },
   onActualizacion: (cb) => {
     const listener = (_evento: Electron.IpcRendererEvent, e: EstadoActualizacion) => cb(e)
     ipcRenderer.on('actualizacion', listener)

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { OpcionesExport, Progreso } from '../../../shared/api'
 import type { ClipSuggestion, MedioProyecto, Project, RenderJob } from '../../../shared/types'
 import { ClipList } from './ClipList'
@@ -9,12 +9,13 @@ import { SourceCard } from './SourceCard'
 import { Icon } from '../Icons'
 import { PanelMulticam } from './Multicam'
 import { MonitorOrigen } from './MonitorOrigen'
+import { useMenuContextual } from './MenuContextual'
 import { PanelHistorial } from './PanelHistorial'
 import { PanelLimpieza } from './PanelLimpieza'
 
 const CLAVE_ALTO_TL = 'recorte.altoLineaDeTiempo'
 import { mediaUrl } from '../media'
-import { ajustarClip, sobrescribirClip, separarAudio, sonidoUnicoMulticam, inicioEscenaMulticam, anidarClips, clipsSeguidos, cambiarATramo, ubicar, capaNueva, cambiarCapa, cambiarFuente, escalaAnimada, type TipoAnimar, duracionTimeline, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, timelineActiva, type Timeline } from '../../../shared/timeline'
+import { ajustarClip, ponerMusica, anadirSonido, sobrescribirClip, separarAudio, sonidoUnicoMulticam, inicioEscenaMulticam, anidarClips, clipsSeguidos, cambiarATramo, ubicar, capaNueva, cambiarCapa, cambiarFuente, escalaAnimada, type TipoAnimar, duracionTimeline, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, timelineActiva, type Timeline } from '../../../shared/timeline'
 import { useHistorial, useReproductor, type FuentesVista } from '../hooks/timeline'
 import { Monitor } from './Monitor'
 import { MediosPanel } from './MediosPanel'
@@ -392,6 +393,71 @@ export function Editor({
     reproductor.buscar(0)
   }
 
+  // Clic derecho en el monitor.
+  const [menuMonitor, abrirMenuMonitor] = useMenuContextual()
+  // ===== Archivos de Windows soltados o pegados en el editor =====
+  const [soltando, setSoltando] = useState(false)
+  /**
+   * Importa archivos de fuera y los pone donde se soltaron: en la pista de video (en ese segundo), encima, en la de
+   * sonidos o de música, o en el monitor (como capa, ahí mismo). Soltados en otra parte, van a la biblioteca (y los
+   * audios, como sonido en el cabezal).
+   */
+  async function importarArchivos(archivos: File[], donde: Element | null, x: number, y: number) {
+    const rutas = archivos.map((f) => window.recorte.rutaDeArchivo(f)).filter((r): r is string => Boolean(r))
+    if (!rutas.length || proyecto.demo) return
+    const carril = donde?.closest('.tl-carril')
+    const lienzo = document.querySelector('.tl-lienzo')
+    const pps = Number((lienzo as HTMLElement | null)?.dataset.pps) || 0
+    const enLinea = carril && lienzo && pps ? Math.max(0, (x - lienzo.getBoundingClientRect().left) / pps) : reproductor.tiempo
+    const monitor = donde?.closest('.monitor')
+    try {
+      const r = await window.recorte.importarRutas(proyecto.id, rutas)
+      onMedios(r.project.medios ?? [])
+      const nuevos = (r.project.medios ?? []).filter((m) => r.agregados.includes(m.id))
+      const dur: Record<string, number> = { ...duraciones, ...Object.fromEntries(nuevos.map((m) => [m.id, m.tipo === 'imagen' ? MAX_IMAGEN : m.duracion])) }
+      let tl = timeline
+      let t = enLinea
+      for (const m of nuevos) {
+        if (carril?.classList.contains('video')) {
+          tl = insertarClip(tl, { fuente: m.id, entrada: 0, salida: m.tipo === 'imagen' ? DURACION_IMAGEN : m.duracion }, t).timeline
+          t += m.tipo === 'imagen' ? DURACION_IMAGEN : m.duracion
+        } else if (carril?.classList.contains('encima') || monitor) {
+          const cuadro = document.querySelector('.monitor-cuadro')?.getBoundingClientRect()
+          const px = monitor && cuadro ? Math.max(0, Math.min(1, (x - cuadro.left) / cuadro.width)) : 0.5
+          const py = monitor && cuadro ? Math.max(0, Math.min(1, (y - cuadro.top) / cuadro.height)) : 0.5
+          tl = capaNueva(tl, m.id, m.tipo, monitor ? reproductor.tiempo : t, dur, px, py).timeline
+        }
+      }
+      for (const a of r.audios) {
+        if (carril?.classList.contains('musica')) tl = ponerMusica(tl, { archivo: a.archivo, nombre: a.nombre, volumen: 0.3, ducking: true })
+        else tl = anadirSonido(tl, { inicio: carril?.classList.contains('sonidos') ? enLinea : reproductor.tiempo, duracion: a.duracion, largo: a.duracion, archivo: a.archivo, nombre: a.nombre, volumen: 1 }).timeline
+      }
+      if (tl !== timeline) historial.aplicar(tl)
+      const partes = [
+        nuevos.length ? `${nuevos.length} ${nuevos.length === 1 ? 'archivo' : 'archivos'} a la biblioteca` : '',
+        r.audios.length ? `${r.audios.length} ${r.audios.length === 1 ? 'audio' : 'audios'} a ${carril?.classList.contains('musica') ? 'la música' : 'los sonidos'}` : ''
+      ].filter(Boolean)
+      onAviso(`${partes.length ? `Listo: ${partes.join(' y ')}.` : 'No pude agregar esos archivos.'}${r.fallos.length ? ` No pude leer: ${r.fallos.join(', ')}.` : ''}`)
+    } catch (error) {
+      onAviso(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error))
+    }
+  }
+  // Pegar archivos copiados en el Explorador (Ctrl+V): van a la biblioteca (o a los sonidos) y al cabezal.
+  const pegarRef = useRef<(e: ClipboardEvent) => void>(() => {})
+  pegarRef.current = (e: ClipboardEvent) => {
+    const el = e.target as HTMLElement | null
+    if (el && (el.isContentEditable || ['INPUT', 'TEXTAREA'].includes(el.tagName))) return
+    const archivos = [...(e.clipboardData?.files ?? [])]
+    if (!archivos.length) return
+    e.preventDefault()
+    void importarArchivos(archivos, document.querySelector('.tl-carril.video'), 0, 0)
+  }
+  useEffect(() => {
+    const oyente = (e: ClipboardEvent) => pegarRef.current(e)
+    window.addEventListener('paste', oyente)
+    return () => window.removeEventListener('paste', oyente)
+  }, [])
+
   /** Arrastrar el divisor entre el monitor y la línea de tiempo (como entre paneles en Premiere). */
   function arrastrarDivisor(e: React.PointerEvent<HTMLDivElement>) {
     if (e.button !== 0) return
@@ -420,11 +486,46 @@ export function Editor({
   }
 
   return (
-    <div className="editor ed" style={altoTL ? { gridTemplateRows: `minmax(0, 1fr) auto ${altoTL}px` } : undefined}>
+    <div
+      className={`editor ed ${soltando ? 'soltando-archivos' : ''}`}
+      data-soltar="Suéltalos en la línea de tiempo, en el monitor o en la biblioteca"
+      style={altoTL ? { gridTemplateRows: `minmax(0, 1fr) auto ${altoTL}px` } : undefined}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes('Files') || proyecto.demo) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'copy'
+        if (!soltando) setSoltando(true)
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setSoltando(false)
+      }}
+      onDrop={(e) => {
+        if (!e.dataTransfer.files.length) return
+        e.preventDefault()
+        setSoltando(false)
+        void importarArchivos([...e.dataTransfer.files], e.target as Element, e.clientX, e.clientY)
+      }}
+    >
       <div className="ed-arriba">
         <aside className="ed-panel ed-biblioteca" ref={setPanelBiblioteca} aria-label="Biblioteca" />
         <section className="ed-centro">
-          <div className="ed-visor">
+          <div
+            className="ed-visor"
+            onContextMenu={(e) =>
+              abrirMenuMonitor(e, [
+                { nombre: reproductor.reproduciendo ? 'Pausa' : 'Reproducir', atajo: 'Espacio', accion: reproductor.alternar },
+                { nombre: 'Ir al principio', atajo: 'Inicio', accion: () => reproductor.buscar(0) },
+                { tipo: 'separador' },
+                ...(proyecto.demo
+                  ? []
+                  : [
+                      { nombre: 'Guardar este cuadro como imagen', atajo: 'Mayús+E', accion: () => void exportarCuadro() },
+                      { nombre: 'Congelar este cuadro', atajo: 'Mayús+F', accion: () => void congelar() }
+                    ])
+              ])
+            }
+          >
+            {menuMonitor}
             <Monitor
               proyecto={proyecto}
               timeline={timeline}

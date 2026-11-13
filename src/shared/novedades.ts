@@ -24,6 +24,28 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.49',
+    fecha: '2026-11-13',
+    resumen: 'Arrastra archivos a donde los quieras, usa el clic derecho en todo el editor y la app se ve bien en cualquier pantalla, también en monitores grandes.',
+    novedades: [
+      {
+        icono: 'download',
+        titulo: 'Arrastra tus archivos',
+        texto: 'Suelta videos, fotos o audios desde Windows en el editor: en la pista de video entran en ese punto, sobre el monitor quedan encima y en Sonidos o Música suenan donde los dejas. También puedes pegarlos con Ctrl+V, y en la caja de Crear con IA se adjuntan solos.'
+      },
+      {
+        icono: 'scissors',
+        titulo: 'Clic derecho en todo el editor',
+        texto: 'En un clip, un texto, una capa, un sonido, un hueco de la línea de tiempo, una marca, un medio o el monitor: dividir, duplicar, copiar, pegar, velocidad, estabilizar, añadir un texto aquí y más, a un clic. En los campos de texto, corregir la ortografía, copiar y pegar.'
+      },
+      {
+        icono: 'sliders',
+        titulo: 'Se adapta a tu pantalla',
+        texto: 'En un monitor grande todo crece en proporción y ya no se ve diminuto. Ajústalo con Ctrl + y Ctrl − (Ctrl 0 vuelve a automático) o en Ajustes › Tamaño de la interfaz.'
+      }
+    ]
+  },
+  {
     version: '0.1.48',
     fecha: '2026-11-13',
     resumen: 'El editor completa sus herramientas: multicámara, rampas de velocidad, seguimiento, capas de ajuste, subtítulos editables, limpieza automática y mucho más.',
