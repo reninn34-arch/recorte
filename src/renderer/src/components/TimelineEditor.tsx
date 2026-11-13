@@ -21,6 +21,10 @@ import {
   PELICULAS,
   cambiarPista,
   cambiarVelocidad,
+  PISTAS_ENCIMA,
+  pistaDeCapa,
+  ajustarSonidoClip,
+  sonidoDe,
   LIMITES_VELOCIDAD,
   PISTAS,
   velocidadDe,
@@ -291,6 +295,16 @@ export function TimelineEditor({
   const anclaZoom = useRef<{ t: number; x: number } | null>(null)
 
   const tl = borrador ?? timeline
+  // «Encima» tiene varias pistas de video: las usadas y una libre arriba (hasta PISTAS_ENCIMA) para subir algo.
+  const ALTO_FILA = 30
+  const filasEncima = Math.min(PISTAS_ENCIMA, Math.max(1, ...(tl.capas ?? []).map(pistaDeCapa)) + (tl.capas?.length ? 1 : 0))
+  const encimaRef = useRef<HTMLDivElement | null>(null)
+  /** La pista de «Encima» que hay bajo el puntero (la de arriba es la más alta). */
+  const pistaEn = (clientY: number): number => {
+    const caja = encimaRef.current?.getBoundingClientRect()
+    if (!caja) return 1
+    return Math.min(filasEncima, Math.max(1, filasEncima - Math.floor((clientY - caja.top) / ALTO_FILA)))
+  }
   const total = duracionTimeline(tl)
   // La escala no se encoge sola al recortar: saltaría todo bajo el ratón. Crece si la
   // timeline crece y vuelve a ajustarse con «Ajustar» o al cambiar de proyecto.
@@ -510,14 +524,16 @@ export function TimelineEditor({
     if (!c) return
     const puntos = puntosIman(base)
     const fin = c.inicio + c.duracion
-    arrastrar(e, (dx) => {
+    arrastrar(e, (dx, ev) => {
       if (modo === 'mover') {
+        // Arriba o abajo cambia de pista (la más alta tapa a las demás).
+        const pista = pistaEn(ev.clientY)
         let inicio = c.inicio + dx
         const pegadoInicio = iman(inicio, puntos)
         const pegadoFin = iman(inicio + c.duracion, puntos)
         if (pegadoInicio !== inicio) inicio = pegadoInicio
         else if (pegadoFin !== inicio + c.duracion) inicio = pegadoFin - c.duracion
-        return cambiarCapa(base, id, { inicio: Math.max(0, inicio) }, medidas)
+        return cambiarCapa(base, id, { inicio: Math.max(0, inicio), pista }, medidas)
       }
       if (modo === 'inicio') {
         const inicio = Math.max(0, Math.min(iman(c.inicio + dx, puntos), fin - DURACION_MINIMA))
@@ -537,12 +553,12 @@ export function TimelineEditor({
   }
 
   /** Pone un medio de la biblioteca encima, en el cabezal (un logo, un ícono, una toma de apoyo). */
-  function accionEncima(fuente: string, inicio = tiempo, x = 0.5, y = 0.5) {
+  function accionEncima(fuente: string, inicio = tiempo, x = 0.5, y = 0.5, pista = 1) {
     const m = medios?.find((x) => x.id === fuente)
     if (!m) return
     const r = capaNueva(timeline, fuente, m.tipo, inicio, medidas, x, y)
     if (r.timeline === timeline) return
-    historial.aplicar(r.timeline)
+    historial.aplicar(pista > 1 ? cambiarCapa(r.timeline, r.id, { pista }, medidas) : r.timeline)
     onElegir({ tipo: 'capa', id: r.id })
   }
 
@@ -554,7 +570,7 @@ export function TimelineEditor({
     e.preventDefault()
     const t = Math.min(total, segundoEn(e.clientX))
     if (pista === 'encima') {
-      if (fuente !== 'principal') accionEncima(fuente, t)
+      if (fuente !== 'principal') accionEncima(fuente, t, 0.5, 0.5, pistaEn(e.clientY))
       return
     }
     const m = medios?.find((x) => x.id === fuente)
@@ -1137,8 +1153,16 @@ export function TimelineEditor({
             const quitar = p.audio ? 'Silenciar' : 'Ocultar'
             const poner = p.audio ? 'Volver a oír' : 'Volver a mostrar'
             return (
-              <span key={p.id} className={`tl-nombre ${estado?.oculta ? 'is-oculta' : ''}`}>
-                <span className="tl-nombre-texto">{p.nombre}</span>
+              <span key={p.id} className={`tl-nombre ${estado?.oculta ? 'is-oculta' : ''}`} style={p.id === 'encima' && filasEncima > 1 ? { height: filasEncima * ALTO_FILA } : undefined}>
+                {p.id === 'encima' && filasEncima > 1 ? (
+                  <span className="tl-nombre-texto tl-nombre-filas" title="Varias pistas de video encima: arrastra una capa arriba o abajo para cambiarla de pista. La de arriba tapa a las demás.">
+                    {Array.from({ length: filasEncima }, (_, i) => (
+                      <i key={i}>Encima {filasEncima - i}</i>
+                    ))}
+                  </span>
+                ) : (
+                  <span className="tl-nombre-texto">{p.nombre}</span>
+                )}
                 <button
                   className={`tl-pista-boton ${estado?.oculta ? 'is-on' : ''}`}
                   onClick={() => historial.aplicar(cambiarPista(timeline, p.id, { oculta: !estado?.oculta }))}
@@ -1173,7 +1197,9 @@ export function TimelineEditor({
             </div>
 
             <div
-              className={`tl-carril encima ${destino === 'encima' ? 'is-destino' : ''} ${clasePista('encima')}`}
+              ref={encimaRef}
+              className={`tl-carril encima ${filasEncima > 1 ? 'con-filas' : ''} ${destino === 'encima' ? 'is-destino' : ''} ${clasePista('encima')}`}
+              style={filasEncima > 1 ? { height: filasEncima * ALTO_FILA } : undefined}
               onPointerDown={arrastrarCabezal}
               {...receptor('encima')}
             >
@@ -1187,7 +1213,12 @@ export function TimelineEditor({
                   <div
                     key={c.id}
                     className={`tl-rotulo tl-capa ${(elegido?.tipo === 'capa' && elegido.id === c.id) || enVarios(c.id) ? 'is-elegido' : ''}`}
-                    style={{ left: c.inicio * pps, width: Math.max(4, anchoCapa), ...fondoMini(c.fuente) }}
+                    style={{
+                      left: c.inicio * pps,
+                      width: Math.max(4, anchoCapa),
+                      ...(filasEncima > 1 ? { top: (filasEncima - Math.min(filasEncima, pistaDeCapa(c))) * ALTO_FILA + 3, bottom: 'auto', height: ALTO_FILA - 7 } : {}),
+                      ...fondoMini(c.fuente)
+                    }}
                     onPointerDown={(e) => sumar(e, { tipo: 'capa', id: c.id }) || arrastrarCapa(e, c.id, 'mover')}
                     title={`${nombre} · ${c.duracion.toFixed(1)} s`}
                   >
@@ -1510,6 +1541,42 @@ export function TimelineEditor({
                   </div>
                 </>
               )}
+              {esVideo(clipElegido.clip.fuente) && !clipElegido.clip.mudo && (
+                <>
+                  <span className="ed-seccion">
+                    Sonido
+                    {clipElegido.clip.sonido && (
+                      <button className="btn small ghost" title="Deja el sonido como viene" onClick={() => historial.aplicar(ajustarSonidoClip(timeline, clipElegido.clip.id, { volumen: 1, entra: 0, sale: 0, limpio: 0 }))}>
+                        Restablecer
+                      </button>
+                    )}
+                  </span>
+                  {(
+                    [
+                      ['volumen', 'Volumen', 0, 1.5, 0.01, (v: number) => `${Math.round(v * 100)} %`, 'Más de 100 % solo se oye en el video exportado'],
+                      ['entra', 'Entra fundiéndose', 0, Math.min(5, clipElegido.fin - clipElegido.inicio), 0.05, (v: number) => (v ? `${v.toFixed(1)} s` : 'no'), 'El sonido sube desde el silencio al empezar el clip'],
+                      ['sale', 'Sale fundiéndose', 0, Math.min(5, clipElegido.fin - clipElegido.inicio), 0.05, (v: number) => (v ? `${v.toFixed(1)} s` : 'no'), 'El sonido baja al silencio al acabar el clip'],
+                      ['limpio', 'Quitar ruido de fondo', 0, 1, 0.05, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no'), 'Quita el zumbido, el aire o el siseo. Se oye en el video exportado, no en el monitor']
+                    ] as const
+                  ).map(([clave, nombre, min, max, paso, formato, ayuda]) => (
+                    <label key={clave} className="tl-ajuste en-linea" title={ayuda}>
+                      <span>
+                        {nombre} <b>{formato(sonidoDe(clipElegido.clip)[clave])}</b>
+                      </span>
+                      <input
+                        type="range"
+                        min={min}
+                        max={max}
+                        step={paso}
+                        value={sonidoDe(clipElegido.clip)[clave]}
+                        onPointerDown={empezarAjuste}
+                        onFocus={empezarAjuste}
+                        onChange={(e) => deslizar(ajustarSonidoClip(timeline, clipElegido.clip.id, { [clave]: Number(e.target.value) }))}
+                      />
+                    </label>
+                  ))}
+                </>
+              )}
               {(
                 [
                   [
@@ -1744,7 +1811,8 @@ export function TimelineEditor({
                 ['ancho', 'Tamaño', 0.05, 2, 0.01, (v: number) => `${Math.round(v * 100)} %`],
                 ['x', 'Sitio ↔', capaElegida.claves?.x ? -0.5 : 0, capaElegida.claves?.x ? 1.5 : 1, 0.01, (v: number) => `${Math.round(v * 100)} %`],
                 ['y', 'Sitio ↕', capaElegida.claves?.y ? -0.5 : 0, capaElegida.claves?.y ? 1.5 : 1, 0.01, (v: number) => `${Math.round(v * 100)} %`],
-                ['opacidad', 'Opacidad', 0, 1, 0.01, (v: number) => `${Math.round(v * 100)} %`]
+                ['opacidad', 'Opacidad', 0, 1, 0.01, (v: number) => `${Math.round(v * 100)} %`],
+                ['desenfoque', 'Desenfoque', 0, 1, 0.01, (v: number) => (v > 0.005 ? `${Math.round(v * 100)} %` : 'no')]
               ] as const
             ).map(([clave, nombre, min, max, paso, formato]) => {
               const dt = Math.min(capaElegida.duracion, Math.max(0, tiempo - capaElegida.inicio))
@@ -1853,21 +1921,6 @@ export function TimelineEditor({
                   const v = Number(e.target.value)
                   deslizar(cambiarCapa(timeline, capaElegida.id, { profundidad: v < 0 ? undefined : v }, medidas))
                 }}
-              />
-            </label>
-            <label className="tl-ajuste en-linea" title="Fuera de foco: para lo que está muy cerca de la cámara (o muy lejos)">
-              <span>
-                Desenfoque <b>{capaElegida.desenfoque ? `${Math.round(capaElegida.desenfoque * 100)} %` : 'no'}</b>
-              </span>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={capaElegida.desenfoque ?? 0}
-                onPointerDown={empezarAjuste}
-                onFocus={empezarAjuste}
-                onChange={(e) => deslizar(cambiarCapa(timeline, capaElegida.id, { desenfoque: Number(e.target.value) }, medidas))}
               />
             </label>
             {onAnimarCapa && (capaElegida.animada || medios?.find((m) => m.id === capaElegida.fuente)?.tipo === 'imagen') && (

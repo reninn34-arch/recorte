@@ -285,6 +285,49 @@ assert.ok(Math.abs(centro6(1.7) - centro6(1.4)) > 40, 'en el corte la capa salta
   const max = Number(/max_volume: (-?[\d.]+|-inf)/.exec(vol)?.[1] ?? '-inf')
   assert.ok(!/audio/.test(pistas(mp4(r9, 'salidas9'))) || !(max > -60), `con la pista de video silenciada, el MP4 no suena (máx ${max} dB)`)
   console.log('velocidad (2× y 0,25×) y pistas ocultas en el MP4 ✓')
+
+  // El sonido del clip: volumen, fundidos de entrada y salida y quitar el ruido de fondo, medidos en el MP4.
+  const { ajustarSonidoClip, sonidoDe, volumenClipEn } = await import('../src/shared/timeline.ts')
+  const { aplicarOperaciones, validarOperaciones } = await import('../src/shared/chat.ts')
+  // El volumen medio (dB) de un tramo del MP4.
+  const medio = (ruta, desde, largo) => {
+    const e = spawnSync('ffmpeg', ['-v', 'info', '-ss', String(desde), '-t', String(largo), '-i', ruta, '-af', 'volumedetect', '-f', 'null', '-'], { encoding: 'utf8' }).stderr
+    return Number(/mean_volume: (-?[\d.]+)/.exec(e)?.[1] ?? '-91')
+  }
+  const r10 = await exportarTimeline(p7, base, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-son0'))
+  assert.ok(r10.ok, r10.error)
+  const tal = mp4(r10, 'salidas-son0')
+  const baja = ajustarSonidoClip(base, 'c1', { volumen: 0.5, entra: 1, sale: 1 })
+  assert.deepEqual(sonidoDe(baja.clips[0]), { volumen: 0.5, entra: 1, sale: 1, limpio: 0 })
+  assert.ok(Math.abs(volumenClipEn(baja.clips[0], 0.5, 4) - 0.25) < 0.001 && Math.abs(volumenClipEn(baja.clips[0], 2, 4) - 0.5) < 0.001, 'el monitor sube y baja el volumen con los fundidos')
+  assert.deepEqual(normalizarTimeline(baja, 4, {}).clips[0].sonido, { volumen: 0.5, entra: 1, sale: 1 }, 'el sonido del clip sobrevive a guardar y abrir')
+  const dos = dividir(baja, 2)
+  assert.ok(dos.clips[0].sonido.entra === 1 && dos.clips[0].sonido.sale === undefined && dos.clips[1].sonido.sale === 1 && dos.clips[1].sonido.entra === undefined, 'al dividir, entra en el primer trozo y sale en el segundo')
+  assert.equal(ajustarSonidoClip(baja, 'c1', { volumen: 1, entra: 0, sale: 0 }).clips[0].sonido, undefined, 'lo neutro no se guarda')
+  const r11 = await exportarTimeline(p7, baja, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-son1'))
+  assert.ok(r11.ok, r11.error)
+  const con = mp4(r11, 'salidas-son1')
+  const centro = medio(con, 1.5, 1) - medio(tal, 1.5, 1)
+  assert.ok(Math.abs(centro + 6) < 1.2, `a la mitad de volumen, el centro suena 6 dB menos (${centro.toFixed(1)} dB)`)
+  assert.ok(medio(con, 0, 0.25) < medio(con, 1.5, 1) - 8, `entra fundiéndose (${medio(con, 0, 0.25)} dB al empezar, ${medio(con, 1.5, 1)} dB en el centro)`)
+  assert.ok(medio(con, 3.75, 0.25) < medio(con, 1.5, 1) - 8, `sale fundiéndose (${medio(con, 3.75, 0.25)} dB al acabar)`)
+  // Ruido de fondo: una voz sintética (tono que va y viene) con siseo debajo; al limpiar, el siseo baja y el tono se queda.
+  const ruidoso = join(dir, 'ruidoso.mp4')
+  ff(['-f', 'lavfi', '-i', 'testsrc2=s=640x360:d=4:r=30', '-f', 'lavfi', '-i', "aevalsrc='0.4*sin(2*PI*300*t)*gt(mod(t,2),1)+0.02*(random(0)*2-1)':d=4:s=48000", '-shortest', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', ruidoso])
+  const p13 = { ...proyecto, source: { ...proyecto.source, path: ruidoso, duration: 4 }, medios: [] }
+  const r12 = await exportarTimeline(p13, base, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-ruido0'))
+  const r13 = await exportarTimeline(p13, ajustarSonidoClip(base, 'c1', { limpio: 1 }), dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-ruido1'))
+  assert.ok(r12.ok && r13.ok, r12.error ?? r13.error)
+  const sucio = mp4(r12, 'salidas-ruido0')
+  const limpio = mp4(r13, 'salidas-ruido1')
+  // De 0 a 1 s y de 2 a 3 s solo hay siseo; de 1 a 2 y de 3 a 4, el tono.
+  const bajaRuido = medio(sucio, 2.2, 0.6) - medio(limpio, 2.2, 0.6)
+  const bajaTono = medio(sucio, 3.2, 0.6) - medio(limpio, 3.2, 0.6)
+  assert.ok(bajaRuido > 6, `quitar el ruido baja el siseo (${bajaRuido.toFixed(1)} dB menos)`)
+  assert.ok(Math.abs(bajaTono) < 2, `y deja la señal como estaba (${bajaTono.toFixed(1)} dB)`)
+  const hecho = aplicarOperaciones(base, validarOperaciones([{ op: 'audio_clip', clip: 1, volumen: 0.8, sale: 0.5, limpio: 0.5 }]), { duracionFuente: 4, medios: {} })
+  assert.deepEqual(hecho.timeline.clips[0].sonido, { volumen: 0.8, sale: 0.5, limpio: 0.5 }, `la op audio_clip no se aplicó: ${JSON.stringify(hecho.fallos)}`)
+  console.log(`sonido del clip en el MP4: volumen (${centro.toFixed(1)} dB), fundidos y ruido de fondo (−${bajaRuido.toFixed(1)} dB el siseo, ${bajaTono.toFixed(1)} dB la señal); el agente lo pone ✓`)
 }
 
 // Efectos de clip: la sepia, el tono y el negativo salen en el MP4 con el mismo color que calcula el monitor (la matriz
@@ -438,6 +481,65 @@ assert.ok(Math.abs(centro6(1.7) - centro6(1.4)) > 40, 'en el corte la capa salta
   const hecho = aplicarOperaciones(sin, ops, { duracionFuente: 2, medios: medios12 })
   assert.equal(hecho.timeline.capas[0].claves?.ancho?.length, 2, `la op clave_capa no se aplicó: ${JSON.stringify(hecho.fallos)}`)
   console.log('claves de capa (recorrido y desvanecer) iguales en el MP4; el agente las pone ✓')
+
+  // Desenfoque animado: la capa empieza nítida y acaba borrosa (se ensancha y pierde fuerza en el MP4).
+  let borr = normalizarTimeline(
+    { clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 2 }], textos: [], capas: [{ id: 'k', fuente: 'm1', inicio: 0, duracion: 2, x: 0.5, y: 0.5, ancho: 0.15, entrada: 'ninguna' }] },
+    2,
+    medios12
+  )
+  borr = ponerClaveCapa(borr, 'k', 'desenfoque', 0, 0, medios12)
+  borr = ponerClaveCapa(borr, 'k', 'desenfoque', 2, 1, medios12)
+  assert.ok(Math.abs(estadoCapa(borr.capas[0], 1, false).desenfoque - 0.5) < 0.001, 'a mitad, el desenfoque va por la mitad')
+  assert.equal(normalizarTimeline(borr, 2, medios12).capas[0].claves.desenfoque.length, 2, 'las claves de desenfoque sobreviven a guardar y abrir')
+  const rb = await exportarTimeline(p12, borr, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-capa-borrosa'))
+  assert.ok(rb.ok, rb.error)
+  const mp4b = join(dir, 'salidas-capa-borrosa', 'timeline-prueba-original.mp4')
+  const anchoRojo = (t) => {
+    const s = spawnSync('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', mp4b, '-frames:v', '1', '-vf', 'crop=640:2:0:180', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { encoding: 'buffer' }).stdout
+    let n = 0
+    for (let x = 0; x < 640; x++) if (s[x * 3] > 8) n++
+    return n
+  }
+  assert.ok(anchoRojo(1.9) > anchoRojo(0.1) + 6, `al final la capa está más difuminada (${anchoRojo(0.1)} → ${anchoRojo(1.9)} px)`)
+  assert.ok(anchoRojo(1.0) > anchoRojo(0.1) && anchoRojo(1.0) < anchoRojo(1.9), `y a mitad, a medias (${anchoRojo(0.1)}, ${anchoRojo(1.0)}, ${anchoRojo(1.9)} px)`)
+  console.log(`desenfoque animado de una capa en el MP4 (${anchoRojo(0.1)} → ${anchoRojo(1.0)} → ${anchoRojo(1.9)} px de ancho) ✓`)
+}
+
+// Varias pistas de video: dos capas que se pisan; la de la pista más alta queda encima aunque esté antes en la lista.
+{
+  const { capasEn, cambiarCapa } = await import('../src/shared/timeline.ts')
+  const { aplicarOperaciones, validarOperaciones } = await import('../src/shared/chat.ts')
+  const medios14 = { m1: 5, m2: 3 }
+  const apiladas = normalizarTimeline(
+    {
+      clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 3 }],
+      textos: [],
+      capas: [
+        { id: 'rojo', fuente: 'm1', inicio: 0, duracion: 3, x: 0.5, y: 0.5, ancho: 0.3, pista: 2 },
+        { id: 'azul', fuente: 'm2', inicio: 0, duracion: 3, x: 0.5, y: 0.5, ancho: 0.5 }
+      ]
+    },
+    4,
+    medios14
+  )
+  assert.equal(apiladas.capas[0].pista, 2, 'la pista sobrevive a guardar y abrir')
+  assert.deepEqual(capasEn(apiladas, 1).map((c) => c.id), ['azul', 'rojo'], 'el monitor pinta primero la pista 1 y encima la 2')
+  const centro = async (tl, carpeta) => {
+    const r = await exportarTimeline(proyecto, tl, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, carpeta))
+    assert.ok(r.ok, r.error)
+    const px = spawnSync('ffmpeg', ['-v', 'error', '-ss', '1', '-i', join(dir, carpeta, 'timeline-prueba-original.mp4'), '-frames:v', '1', '-vf', 'crop=4:4:318:178', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { encoding: 'buffer' }).stdout
+    return px[0] > 150 && px[2] < 90 ? 'rojo' : px[2] > 150 && px[0] < 90 ? 'azul' : `otro (${px[0]},${px[1]},${px[2]})`
+  }
+  assert.equal(await centro(apiladas, 'salidas-pistas1'), 'rojo', 'en el MP4, la capa de la pista 2 tapa a la de la 1')
+  // Al revés: se sube la azul a la pista 3 y pasa a tapar a la roja.
+  const subida = cambiarCapa(apiladas, 'azul', { pista: 3 }, medios14)
+  assert.equal(await centro(subida, 'salidas-pistas2'), 'azul', 'al subirla a la pista 3, la azul queda encima')
+  assert.equal(cambiarCapa(subida, 'azul', { pista: 9 }, medios14).capas.find((c) => c.id === 'azul').pista, 3, 'no hay más de 3 pistas encima')
+  assert.equal(cambiarCapa(subida, 'azul', { pista: 1 }, medios14).capas.find((c) => c.id === 'azul').pista, undefined, 'la pista 1 no se guarda')
+  const hecho = aplicarOperaciones(apiladas, validarOperaciones([{ op: 'cambiar_capa', capa_n: 2, pista: 3 }]), { duracionFuente: 4, medios: medios14 })
+  assert.equal(hecho.timeline.capas[1].pista, 3, `el agente no pudo cambiar la pista: ${JSON.stringify(hecho.fallos)}`)
+  console.log('varias pistas de video encima: la pista más alta tapa a las de abajo en el monitor y en el MP4; el agente las elige ✓')
 }
 
 rmSync(dir, { recursive: true, force: true })

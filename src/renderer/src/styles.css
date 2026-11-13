@@ -3057,3 +3057,8 @@ button { cursor: pointer; }
 .tl-ajuste.con-claves input[type='range'] { accent-color: var(--accent-2); }
 .tl-clave { position: absolute; bottom: 2px; width: 7px; height: 7px; margin-left: -3.5px; transform: rotate(45deg); background: var(--accent); border: 1px solid var(--ink); pointer-events: none; }
 .tl-clip-anim { background: none; color: var(--accent); padding: 0; }
+
+/* Varias pistas de video encima: el carril «Encima» con sus filas */
+.tl-carril.encima.con-filas { background-image: repeating-linear-gradient(to bottom, transparent 0 29px, var(--line) 29px 30px); }
+.tl-nombre-filas { display: flex; flex-direction: column; align-self: stretch; }
+.tl-nombre-filas i { flex: 1; display: flex; align-items: center; font-style: normal; white-space: nowrap; }

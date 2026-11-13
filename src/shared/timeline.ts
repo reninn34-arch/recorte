@@ -30,6 +30,8 @@ export interface ClipTL {
   ajustes?: AjustesClip
   /** Sin su sonido: un tramo que solo aporta imagen (la voz y la música van en sus pistas). */
   mudo?: boolean
+  /** El sonido del clip: su volumen, que entre y salga fundiéndose, y quitarle el ruido de fondo. */
+  sonido?: SonidoClip
   /** A qué velocidad va (0.25 a 4; sin ella, normal). En la timeline dura su tramo de la fuente entre la velocidad. */
   velocidad?: number
   /** Fotogramas clave: el valor de un ajuste en ciertos segundos de la FUENTE; entre ellos cambia suave. */
@@ -41,6 +43,19 @@ export interface ClipTL {
 }
 
 export const MAX_FUNDIDO = 1.5
+
+/** El sonido de un clip de video. Los valores neutros (volumen 1, sin fundidos, sin limpiar) no se guardan. */
+export interface SonidoClip {
+  /** 0 (callado) a 1.5 (más fuerte); 1 como viene. */
+  volumen?: number
+  /** Segundos en que el sonido entra subiendo desde el silencio (0 a 5). */
+  entra?: number
+  /** Segundos en que sale bajando al silencio (0 a 5). */
+  sale?: number
+  /** Quitar el ruido de fondo (el zumbido, el aire, el siseo): 0 (nada) a 1 (fuerte). Se oye en el MP4. */
+  limpio?: number
+}
+export const LIMITES_SONIDO_CLIP = { volumen: [0, 1.5, 1], entra: [0, 5, 0], sale: [0, 5, 0], limpio: [0, 1, 0] } as const satisfies Record<keyof SonidoClip, readonly [number, number, number]>
 
 /** Cómo entra un clip sobre el anterior (con `fundido` = lo que dura). Sin tipo, un fundido cruzado. */
 export type TransicionClip =
@@ -291,6 +306,16 @@ export interface CapaTL {
   desenfoque?: number
   /** Fotogramas clave: el valor de x, y, ancho, giro u opacidad en ciertos segundos desde que aparece la capa. Mandan sobre `fin`. */
   claves?: ClavesCapa
+  /** En qué pista de «Encima» va, 1 a 3 (sin ella, la 1). Las de una pista más alta tapan a las de las de abajo. */
+  pista?: number
+}
+
+/** Cuántas pistas de video hay encima de la principal. */
+export const PISTAS_ENCIMA = 3
+export const pistaDeCapa = (c: Pick<CapaTL, 'pista'>): number => c.pista ?? 1
+/** Las capas en el orden en que se pintan: primero las de la pista 1 y encima las de las pistas más altas. */
+export function capasEnOrden<T extends Pick<CapaTL, 'pista'>>(capas: T[]): T[] {
+  return capas.map((c, i) => ({ c, i })).sort((a, b) => pistaDeCapa(a.c) - pistaDeCapa(b.c) || a.i - b.i).map((x) => x.c)
 }
 
 export type TipoAnimar =
@@ -559,6 +584,7 @@ export function normalizarTimeline(entrada: unknown, duracionFuente: number, otr
       salida: s,
       ...(ajustes ? { ajustes } : {}),
       ...(c.mudo === true ? { mudo: true } : {}),
+      ...(normalizarSonidoClip(c.sonido, (s - e) / (typeof c.velocidad === 'number' && c.velocidad > 0 ? c.velocidad : 1)) ? { sonido: normalizarSonidoClip(c.sonido, (s - e) / (typeof c.velocidad === 'number' && c.velocidad > 0 ? c.velocidad : 1)) } : {}),
       ...(normalizarClaves(c.claves) ? { claves: normalizarClaves(c.claves) } : {}),
       ...(typeof c.velocidad === 'number' && Number.isFinite(c.velocidad) && Math.abs(c.velocidad - 1) >= 0.005
         ? { velocidad: Math.round(pinza(c.velocidad, LIMITES_VELOCIDAD[0], LIMITES_VELOCIDAD[1]) * 100) / 100 }
@@ -645,6 +671,7 @@ export function normalizarCapas(entrada: unknown, total: number, medios: Record<
       y: Math.round(pinza(num(c.y, 0.5), 0, 1) * 1000) / 1000,
       ancho: Math.round(pinza(num(c.ancho, 0.3), 0.05, 2) * 1000) / 1000,
       ...(c.entrada && ENTRADAS_CAPA.includes(c.entrada) ? { entrada: c.entrada } : {}),
+      ...(typeof c.pista === 'number' && Math.round(c.pista) >= 2 ? { pista: Math.min(PISTAS_ENCIMA, Math.round(c.pista)) } : {}),
       ...(typeof c.desde === 'number' && c.desde > 0 ? { desde: Math.min(c.desde, Math.max(0, medios[c.fuente] - DURACION_MINIMA)) } : {}),
       ...(Math.abs(num(c.giro, 0)) > 0.05 ? { giro: Math.round(pinza(num(c.giro, 0), -720, 720) * 10) / 10 } : {}),
       ...(c.fin && typeof c.fin === 'object'
@@ -905,11 +932,11 @@ export function claveEn(clip: ClipTL, parametro: ParametroClave, f: number): Cla
 
 // ===== Fotogramas clave de las capas =====
 
-export const PARAMETROS_CLAVE_CAPA = ['x', 'y', 'ancho', 'giro', 'opacidad'] as const
+export const PARAMETROS_CLAVE_CAPA = ['x', 'y', 'ancho', 'giro', 'opacidad', 'desenfoque'] as const
 export type ParametroClaveCapa = (typeof PARAMETROS_CLAVE_CAPA)[number]
 export type ClavesCapa = Partial<Record<ParametroClaveCapa, ClaveTL[]>>
 /** Lo que puede valer cada uno (x e y pueden salir del cuadro, para entrar o salir volando). */
-const LIMITES_CLAVE_CAPA: Record<ParametroClaveCapa, [number, number]> = { x: [-0.5, 1.5], y: [-0.5, 1.5], ancho: [0.05, 2], giro: [-720, 720], opacidad: [0, 1] }
+const LIMITES_CLAVE_CAPA: Record<ParametroClaveCapa, [number, number]> = { x: [-0.5, 1.5], y: [-0.5, 1.5], ancho: [0.05, 2], giro: [-720, 720], opacidad: [0, 1], desenfoque: [0, 1] }
 
 export function normalizarClavesCapa(entrada: unknown, duracion: number): ClavesCapa | undefined {
   if (!entrada || typeof entrada !== 'object') return undefined
@@ -946,7 +973,7 @@ export function ponerClaveCapa(tl: Timeline, id: string, parametro: ParametroCla
   if (otras.length >= MAX_CLAVES) return tl
   // La primera clave de un ajuste que se movía con `fin`: se deja una clave al empezar y otra al acabar, para no perder el recorrido.
   const recorrido =
-    !otras.length && c.fin && parametro !== 'opacidad'
+    !otras.length && c.fin && parametro !== 'opacidad' && parametro !== 'desenfoque'
       ? [{ f: 0, v: valorCapaSinClave(c, parametro, 0) }, { f: c.duracion, v: valorCapaSinClave(c, parametro, c.duracion) }].filter((x) => Math.abs(x.f - donde) >= MISMA_CLAVE)
       : []
   return cambiarCapa(tl, id, { claves: { ...(c.claves ?? {}), [parametro]: [...recorrido, ...otras, { f: donde, v }] } }, medios)
@@ -1235,11 +1262,18 @@ export function dividir(tl: Timeline, t: number): Timeline {
   const u = ubicar(tl, t)
   if (!u) return tl
   if (u.tFuente - u.clip.entrada < DURACION_MINIMA || u.clip.salida - u.tFuente < DURACION_MINIMA) return tl
-  const izquierda: ClipTL = { ...u.clip, salida: u.tFuente }
-  const derecha: ClipTL = { ...u.clip, id: nuevoId('clip'), entrada: u.tFuente }
+  // El sonido entra al principio del primer trozo y sale al final del segundo (no en el corte).
+  const sinClave = (s: SonidoClip | undefined, clave: 'entra' | 'sale'): { sonido?: SonidoClip } => {
+    if (!s) return {}
+    const { [clave]: _fuera, ...resto } = s
+    return Object.keys(resto).length ? { sonido: resto } : {}
+  }
+  const { sonido, ...base } = u.clip
+  const izquierda: ClipTL = { ...base, ...sinClave(sonido, 'sale'), salida: u.tFuente }
+  const derecha: ClipTL = { ...base, ...sinClave(sonido, 'entra'), id: nuevoId('clip'), entrada: u.tFuente }
   const clips = [...tl.clips]
   clips.splice(u.indice, 1, izquierda, derecha)
-  return { ...tl, clips }
+  return normalizarSonidos2({ ...tl, clips })
 }
 
 /** Quita un clip y cierra el hueco. */
@@ -1446,6 +1480,68 @@ export function silenciarClip(tl: Timeline, id: string, mudo: boolean): Timeline
   }
 }
 
+/** El sonido de un clip, con lo neutro puesto (volumen 1, sin fundidos, sin limpiar). */
+export function sonidoDe(c: Pick<ClipTL, 'sonido'> | undefined): Required<SonidoClip> {
+  return { volumen: c?.sonido?.volumen ?? 1, entra: c?.sonido?.entra ?? 0, sale: c?.sonido?.sale ?? 0, limpio: c?.sonido?.limpio ?? 0 }
+}
+
+/** Deja el sonido de un clip dentro de sus límites; los fundidos caben en lo que dura (`largo`, en la timeline). */
+export function normalizarSonidoClip(entrada: unknown, largo: number): SonidoClip | undefined {
+  if (!entrada || typeof entrada !== 'object') return undefined
+  const x = entrada as Record<string, unknown>
+  const salida: SonidoClip = {}
+  for (const clave of ['volumen', 'entra', 'sale', 'limpio'] as const) {
+    const v = x[clave]
+    if (typeof v !== 'number' || !Number.isFinite(v)) continue
+    const [min, max, neutro] = LIMITES_SONIDO_CLIP[clave]
+    const tope = clave === 'entra' || clave === 'sale' ? Math.min(max, Math.max(0, largo)) : max
+    const valor = Math.round(pinza(v, min, tope) * 100) / 100
+    if (Math.abs(valor - neutro) >= 0.005) salida[clave] = valor
+  }
+  // Los dos fundidos juntos no pueden durar más que el clip.
+  const suma = (salida.entra ?? 0) + (salida.sale ?? 0)
+  if (suma > largo && suma > 0) {
+    if (salida.entra) salida.entra = Math.round(((salida.entra * largo) / suma) * 100) / 100
+    if (salida.sale) salida.sale = Math.round(((salida.sale * largo) / suma) * 100) / 100
+  }
+  return Object.keys(salida).length ? salida : undefined
+}
+
+/** Tras partir o recortar: los fundidos de cada clip vuelven a caber en lo que dura. */
+function normalizarSonidos2(tl: Timeline): Timeline {
+  if (!tl.clips.some((c) => c.sonido)) return tl
+  return {
+    ...tl,
+    clips: tl.clips.map((c) => {
+      if (!c.sonido) return c
+      const { sonido, ...resto } = c
+      const s = normalizarSonidoClip(sonido, largo(c))
+      return s ? { ...resto, sonido: s } : resto
+    })
+  }
+}
+
+/** Cambia el sonido de un clip (volumen, fundidos, limpieza). */
+export function ajustarSonidoClip(tl: Timeline, id: string, cambio: SonidoClip): Timeline {
+  return {
+    ...tl,
+    clips: tl.clips.map((c) => {
+      if (c.id !== id) return c
+      const { sonido, ...resto } = c
+      const s = normalizarSonidoClip({ ...(sonido ?? {}), ...cambio }, largo(c))
+      return s ? { ...resto, sonido: s } : resto
+    })
+  }
+}
+
+/** A qué volumen suena un clip `dt` segundos después de empezar (con sus fundidos), de 0 a 1.5. */
+export function volumenClipEn(c: Pick<ClipTL, 'sonido'>, dt: number, largoClip: number): number {
+  const s = sonidoDe(c)
+  const sube = s.entra > 0 ? pinza(dt / s.entra, 0, 1) : 1
+  const baja = s.sale > 0 ? pinza((largoClip - dt) / s.sale, 0, 1) : 1
+  return s.volumen * sube * baja
+}
+
 /** Añade una frase de narración (su audio ya está en `media/`). Devuelve la timeline y su id. */
 export function anadirVoz(tl: Timeline, frase: Omit<VozTL, 'id'>): { timeline: Timeline; id: string } {
   const id = nuevoId('voz')
@@ -1458,7 +1554,7 @@ export function anadirVoz(tl: Timeline, frase: Omit<VozTL, 'id'>): { timeline: T
 
 /** Las capas visibles en el segundo `t`, de abajo a arriba. */
 export function capasEn(tl: Timeline, t: number): CapaTL[] {
-  return (tl.capas ?? []).filter((c) => t >= c.inicio && t < c.inicio + c.duracion)
+  return capasEnOrden((tl.capas ?? []).filter((c) => t >= c.inicio && t < c.inicio + c.duracion))
 }
 
 /** Pone un medio encima del video. `medios`: lo que dura cada uno (para validar). */
@@ -1537,7 +1633,7 @@ export function origenLado(c: Pick<CapaTL, 'entrada' | 'ancho'>): { x?: number; 
  * Dónde está una capa `dt` segundos después de aparecer: su recorrido (de su sitio a `fin`, suave) y
  * su entrada (pop, fundido o desde un lado). `conEntrada: false` la deja sin la entrada (para editarla).
  */
-export function estadoCapa(c: CapaTL, dt: number, conEntrada = true): { x: number; y: number; ancho: number; giro: number; escala: number; opacidad: number } {
+export function estadoCapa(c: CapaTL, dt: number, conEntrada = true): { x: number; y: number; ancho: number; giro: number; escala: number; opacidad: number; desenfoque: number } {
   const p = c.fin ? suave(pinza(dt / Math.max(DURACION_MINIMA, c.duracion), 0, 1)) : 0
   const f = c.fin
   const k = c.claves
@@ -1547,7 +1643,9 @@ export function estadoCapa(c: CapaTL, dt: number, conEntrada = true): { x: numbe
   const giro = k?.giro ? valorClave(k.giro, dt) : f ? (c.giro ?? 0) + (f.giro - (c.giro ?? 0)) * p : (c.giro ?? 0)
   // La opacidad de sus claves (se suma a la de la entrada).
   const vista = k?.opacidad ? valorClave(k.opacidad, dt) : 1
-  if (!conEntrada) return { x, y, ancho, giro, escala: 1, opacidad: vista }
+  // Su desenfoque propio (el de la profundidad de campo se suma aparte: desenfoqueCapaEn).
+  const desenfoque = k?.desenfoque ? valorClave(k.desenfoque, dt) : (c.desenfoque ?? 0)
+  if (!conEntrada) return { x, y, ancho, giro, escala: 1, opacidad: vista, desenfoque }
   const lado = origenLado(c)
   if (lado.x !== undefined || lado.y !== undefined) {
     const k = frena(pinza(dt / ENTRADA_LADO_S, 0, 1))
@@ -1555,7 +1653,7 @@ export function estadoCapa(c: CapaTL, dt: number, conEntrada = true): { x: numbe
     if (lado.y !== undefined) y = lado.y + (y - lado.y) * k
   }
   const { escala, opacidad } = animacionCapa(c, dt)
-  return { x, y, ancho, giro, escala, opacidad: opacidad * vista }
+  return { x, y, ancho, giro, escala, opacidad: opacidad * vista, desenfoque }
 }
 
 // ===== Escena 2.5D =====
@@ -1635,6 +1733,13 @@ export function aplicarParalaje(
 export function desenfoqueCapa(tl: Timeline, c: CapaTL): number {
   const ref = referenciaParalaje(tl, c)
   return Math.min(1, (c.desenfoque ?? 0) + (ref ? desenfoqueDeCampo(ref.ajustes, c.profundidad ?? 0) : 0))
+}
+
+/** Lo mismo en el segundo `dt` desde que aparece la capa: con fotogramas clave, su desenfoque cambia. */
+export function desenfoqueCapaEn(tl: Timeline, c: CapaTL, dt: number): number {
+  if (!c.claves?.desenfoque) return desenfoqueCapa(tl, c)
+  const ref = referenciaParalaje(tl, c)
+  return Math.min(1, valorClave(c.claves.desenfoque, dt) + (ref ? desenfoqueDeCampo(ref.ajustes, c.profundidad ?? 0) : 0))
 }
 
 /**

@@ -24,6 +24,28 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.45',
+    fecha: '2026-11-13',
+    resumen: 'El editor suma varias pistas de video, el sonido de cada clip y el desenfoque animado de las capas.',
+    novedades: [
+      {
+        icono: 'layers',
+        titulo: 'Varias pistas de video',
+        texto: '«Encima» ahora tiene hasta tres pistas: arrastra una capa arriba o abajo para cambiarla de pista, o suelta un medio en la fila que quieras. La de arriba tapa a las demás, en el monitor y en el video exportado.'
+      },
+      {
+        icono: 'volumen',
+        titulo: 'El sonido de cada clip',
+        texto: 'Con un clip de video elegido: su volumen, que entre y salga fundiéndose, y quitar el ruido de fondo (el zumbido, el aire, el siseo). El ruido y el volumen por encima de 100 % se oyen en el video exportado.'
+      },
+      {
+        icono: 'film',
+        titulo: 'Desenfoque animado y exportación más rápida',
+        texto: 'El desenfoque de una capa ya tiene su rombo ◆ de fotograma clave: que algo empiece nítido y se vaya de foco, o al revés. Y los videos con capas de opacidad animada se exportan varias veces más rápido.'
+      }
+    ]
+  },
+  {
     version: '0.1.44',
     fecha: '2026-11-13',
     resumen: 'Fotogramas clave: anima a mano el encuadre, el color y el movimiento de tus clips y capas.',

@@ -128,7 +128,7 @@ function sonidos(antes: SonidoTL[] | undefined, ahora: SonidoTL[] | undefined, c
 
 /** Lo que importa de un clip para saber si se tocó (sin su id). */
 const huellaClip = (c: ClipTL): string =>
-  JSON.stringify({ f: c.fuente, e: c.entrada.toFixed(2), s: c.salida.toFixed(2), a: c.ajustes ?? null, m: Boolean(c.mudo), d: c.fundido ?? 0, t: c.transicion ?? null })
+  JSON.stringify({ f: c.fuente, e: c.entrada.toFixed(2), s: c.salida.toFixed(2), a: c.ajustes ?? null, m: Boolean(c.mudo), so: c.sonido ?? null, d: c.fundido ?? 0, t: c.transicion ?? null })
 
 function clips(antes: Timeline, ahora: Timeline, ctx: ContextoRetoques): string[] {
   const x = antes.clips.map(huellaClip)

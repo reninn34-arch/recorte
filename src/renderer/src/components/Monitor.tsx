@@ -13,7 +13,8 @@ import {
   camaraEn,
   referenciaParalaje,
   DESENFOQUE_MAX,
-  desenfoqueCapa,
+  desenfoqueCapaEn,
+  volumenClipEn,
   desenfoqueDeCampo,
   TIPO_ARRASTRE_MEDIO,
   cambiarCapa,
@@ -83,6 +84,11 @@ export function Monitor({
   useEffect(() => {
     if (reproductor.videoRef.current) reproductor.videoRef.current.muted = Boolean(clipActual?.mudo)
   }, [clipActual?.id, clipActual?.mudo, reproductor.videoRef])
+  // El volumen del clip con sus fundidos (el monitor llega hasta 1; por encima solo se oye en el MP4).
+  const volumenClip = ubicado && clipActual ? Math.min(1, volumenClipEn(clipActual, reproductor.tiempo - ubicado.inicio, ubicado.fin - ubicado.inicio)) : 1
+  useEffect(() => {
+    if (reproductor.videoRef.current) reproductor.videoRef.current.volume = volumenClip
+  }, [volumenClip, reproductor.videoRef])
   // Zoom, encuadre, acercamiento y color del clip bajo el cabezal; en el render son crop,
   // zoompan y eq de FFmpeg.
   // Con fotogramas clave, los ajustes son los de este instante.
@@ -322,7 +328,7 @@ export function Monitor({
                   width: `${ancho * 100}%`,
                   transform: `translate(-50%, -50%) rotate(${e.giro}deg) scale(${e.escala})`,
                   opacity: e.opacidad,
-                  filter: desenfoqueCapa(timeline, c) > 0.005 ? `blur(${(desenfoqueCapa(timeline, c) * DESENFOQUE_MAX * cw).toFixed(2)}px)` : undefined
+                  filter: desenfoqueCapaEn(timeline, c, reproductor.tiempo - c.inicio) > 0.005 ? `blur(${(desenfoqueCapaEn(timeline, c, reproductor.tiempo - c.inicio) * DESENFOQUE_MAX * cw).toFixed(2)}px)` : undefined
                 }}
                 onClick={(ev) => ev.stopPropagation()}
                 onPointerDown={(ev) => arrastrar(ev, 'capa', c.id, { x: c.x, y: c.y, ancho: c.ancho })}

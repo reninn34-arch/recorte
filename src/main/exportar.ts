@@ -7,6 +7,10 @@ import {
   camaraEn,
   DESENFOQUE_MAX,
   desenfoqueCapa,
+  desenfoqueCapaEn,
+  capasEnOrden,
+  sonidoDe,
+  valorClave,
   desenfoqueDeCampo,
   PARALAJE,
   TEMBLOR_AMPLITUD,
@@ -333,7 +337,16 @@ export async function exportarTimeline(
     if (conAudio) {
       if (f.conAudio && !t.clip.mudo) {
         // apad + atrim: cada tramo de audio dura exactamente lo que su video, o concat se desfasa.
-        partes.push(`[${iv}:a]asetpts=PTS-STARTPTS,${tempo}aresample=48000,aformat=channel_layouts=stereo,apad,atrim=0:${largo.toFixed(3)}[a${i}]`)
+        // El sonido del clip: sin ruido de fondo (afftdn), a su volumen y con sus fundidos de entrada y salida.
+        // afftdn quita lo que queda por debajo de `nf` (dB): con más limpieza sube el umbral (−50 a −25) y la reducción (10 a 30 dB).
+        // Sin «tn» (seguir el ruido): medido, con él no quitaba nada.
+        const so = sonidoDe(t.clip)
+        const sonido =
+          (so.limpio > 0.005 ? `,afftdn=nr=${(10 + 20 * so.limpio).toFixed(1)}:nf=${(-50 + 25 * so.limpio).toFixed(1)}` : '') +
+          (Math.abs(so.volumen - 1) > 0.005 ? `,volume=${so.volumen.toFixed(3)}` : '') +
+          (so.entra > 0.005 ? `,afade=t=in:st=0:d=${so.entra.toFixed(3)}` : '') +
+          (so.sale > 0.005 ? `,afade=t=out:st=${Math.max(0, largo - so.sale).toFixed(3)}:d=${so.sale.toFixed(3)}` : '')
+        partes.push(`[${iv}:a]asetpts=PTS-STARTPTS,${tempo}aresample=48000,aformat=channel_layouts=stereo,apad,atrim=0:${largo.toFixed(3)}${sonido}[a${i}]`)
       } else {
         // Una imagen o un video mudo: silencio de su misma duración.
         entradas.push('-f', 'lavfi', '-t', largo.toFixed(3), '-i', 'anullsrc=r=48000:cl=stereo')
@@ -389,7 +402,8 @@ export async function exportarTimeline(
   // Lo que va encima (imágenes, logos, íconos, tomas de apoyo): cada capa en su sitio, su tamaño y
   // su entrada, igual que en el monitor. Va debajo de los rótulos.
   let capaBase = '[vcat]'
-  const capas = (timeline.capas ?? []).filter((c) => fuenteDe(c.fuente))
+  // En el orden de sus pistas: las de una pista más alta se pintan después (tapan a las de abajo).
+  const capas = capasEnOrden((timeline.capas ?? []).filter((c) => fuenteDe(c.fuente)))
   // FFmpeg pone las capas en píxeles enteros: una que se mueve o crece despacio temblaría. Con alguna así,
   // se compone al doble de tamaño y luego se reduce (medio píxel de paso, imperceptible).
   const sup = capas.some((c) => c.fin || c.claves || c.giro || c.profundidad != null || (c.entrada && !['pop', 'fundido'].includes(c.entrada))) ? 2 : 1
@@ -417,8 +431,10 @@ export async function exportarTimeline(
     const giro = gira
       ? `,pad=w=${lado}:h=${lado}:x='(ow-iw)/2':y='(oh-ih)/2':color=black@0:eval=frame,rotate=a='(${en(ex.giro, 't')})*PI/180':c=none:ow=${lado}:oh=${lado}`
       : ''
+    // La opacidad y el desenfoque animados: FFmpeg recibe su valor en cada cuadro (sendcmd), sin calcular píxel a píxel.
+    const animados = ordenesCapa(carpeta, timeline, c, i, fps, anchoC)
     partes.push(
-      `[${k}:v]setpts=PTS-STARTPTS,fps=${fps},format=rgba,scale=w='max(2,trunc(${anchoC}*${en(ex.ancho, 't')}*${en(ex.escala, 't')}/2)*2)':h=-2:eval=frame:flags=bicubic${giro}${c.claves?.opacidad ? `,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*(${exprClave(c.claves.opacidad, 'T')})'` : ''}${desenfoque(desenfoqueCapa(timeline, c), anchoC)}${fundido},setpts=PTS+${c.inicio.toFixed(3)}/TB[capa${i}]`
+      `[${k}:v]setpts=PTS-STARTPTS,fps=${fps},format=rgba${animados.ordenes},scale=w='max(2,trunc(${anchoC}*${en(ex.ancho, 't')}*${en(ex.escala, 't')}/2)*2)':h=-2:eval=frame:flags=bicubic${giro}${animados.opacidad}${animados.desenfoque ?? desenfoque(desenfoqueCapa(timeline, c), anchoC)}${fundido},setpts=PTS+${c.inicio.toFixed(3)}/TB[capa${i}]`
     )
     const salida = `[conCapa${i}]`
     const T = `(t-${c.inicio.toFixed(3)})`
@@ -535,12 +551,50 @@ export async function exportarTimeline(
 
 const n3 = (v: number) => (Math.round(v * 1000) / 1000).toString()
 
+/**
+ * La opacidad y el desenfoque con fotogramas clave de una capa. `geq` los calculaba píxel a píxel (lentísimo) y
+ * `gblur` no admite expresiones: en su lugar se escribe un archivo con el valor de cada cuadro y `sendcmd` se lo
+ * manda a `colorchannelmixer` (la transparencia) y a `gblur` (el desenfoque), que aceptan órdenes en marcha.
+ */
+function ordenesCapa(carpeta: string, timeline: Timeline, c: CapaTL, i: number, fps: number, anchoC: number): { ordenes: string; opacidad: string; desenfoque: string | null } {
+  const conOpacidad = Boolean(c.claves?.opacidad)
+  const conDesenfoque = Boolean(c.claves?.desenfoque)
+  if (!conOpacidad && !conDesenfoque) return { ordenes: '', opacidad: '', desenfoque: null }
+  const lineas: string[] = []
+  let sigmaMax = 0
+  let antes = ''
+  const cuadros = Math.ceil(c.duracion * fps) + 1
+  for (let j = 0; j < cuadros; j++) {
+    const dt = Math.min(c.duracion, j / fps)
+    const cosas: string[] = []
+    if (conOpacidad) cosas.push(`colorchannelmixer@op${i} aa ${valorClave(c.claves!.opacidad!, dt).toFixed(4)}`)
+    if (conDesenfoque) {
+      const sigma = desenfoqueCapaEn(timeline, c, dt) * DESENFOQUE_MAX * anchoC
+      sigmaMax = Math.max(sigmaMax, sigma)
+      cosas.push(`gblur@bl${i} sigma ${sigma.toFixed(2)}`, `gblur@bl${i} sigmaV ${sigma.toFixed(2)}`)
+    }
+    const orden = cosas.join(', ')
+    // Solo cuando cambia: un tramo quieto no llena el archivo.
+    if (orden !== antes) lineas.push(`${(j / fps).toFixed(4)} ${orden};`)
+    antes = orden
+  }
+  const archivo = `ordenes-capa-${i}.txt`
+  writeFileSync(join(carpeta, archivo), lineas.join(String.fromCharCode(10)), 'utf8')
+  // El margen transparente, para el desenfoque más fuerte que llega a tener.
+  const m = Math.ceil((sigmaMax * 3) / 2) * 2
+  return {
+    ordenes: `,sendcmd=f=${archivo}`,
+    opacidad: conOpacidad ? `,colorchannelmixer@op${i}=aa=${valorClave(c.claves!.opacidad!, 0).toFixed(4)}` : '',
+    desenfoque: conDesenfoque ? (m > 0 ? `,pad=w=iw+${2 * m}:h=ih+${2 * m}:x=${m}:y=${m}:color=black@0:eval=frame,premultiply=inplace=1,gblur@bl${i}=sigma=${(desenfoqueCapaEn(timeline, c, 0) * DESENFOQUE_MAX * anchoC).toFixed(2)},unpremultiply=inplace=1` : '') : null
+  }
+}
+
 /** El desenfoque de una capa: con margen transparente alrededor, para que el borde se difumine sin cortarse. */
 function desenfoque(valor: number, anchoC: number): string {
   if (valor < 0.005) return ''
   const sigma = valor * DESENFOQUE_MAX * anchoC
   const m = Math.ceil(sigma * 3 / 2) * 2
-  return `,pad=w=iw+${2 * m}:h=ih+${2 * m}:x=${m}:y=${m}:color=black@0:eval=frame,gblur=sigma=${sigma.toFixed(2)}`
+  return `,pad=w=iw+${2 * m}:h=ih+${2 * m}:x=${m}:y=${m}:color=black@0:eval=frame,premultiply=inplace=1,gblur=sigma=${sigma.toFixed(2)},unpremultiply=inplace=1`
 }
 
 /**

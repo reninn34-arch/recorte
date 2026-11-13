@@ -12,6 +12,8 @@ import {
   cambiarVoz,
   anadirVoz,
   silenciarClip,
+  ajustarSonidoClip,
+  sonidoDe,
   capaNueva,
   cambiarCapa,
   borrarCapa,
@@ -108,6 +110,7 @@ export type OperacionTL =
   | { op: 'zoom'; clip?: number; zoom?: number; acercar?: number; cx?: number; cy?: number; panx?: number; pany?: number; temblor?: number; campo?: number; foco?: number }
   | { op: 'color'; clip?: number; look?: string; brillo?: number; contraste?: number; saturacion?: number; desenfoque?: number; sepia?: number; tono?: number; invertir?: number }
   | { op: 'velocidad'; clip: number; velocidad: number }
+  | { op: 'audio_clip'; clip: number; volumen?: number; entra?: number; sale?: number; limpio?: number }
   | { op: 'clave'; clip: number; parametro: ParametroClave; en: number; valor?: number; quitar?: boolean }
   | { op: 'clave_capa'; capa_n: number; parametro: ParametroClaveCapa; en: number; valor?: number; quitar?: boolean }
   | { op: 'pista'; pista: PistaId; oculta?: boolean; bloqueada?: boolean }
@@ -205,6 +208,8 @@ type CamposCapa = {
   fin?: Partial<FinCapa> | null
   /** null: deja de seguir a la cámara (fija en la pantalla). */
   profundidad?: number | null
+  /** En qué pista de «Encima» va (1 a 3). */
+  pista?: number
   desenfoque?: number
 }
 
@@ -223,6 +228,7 @@ function camposCapa(x: Record<string, unknown>): CamposCapa {
     ...(num(x.ancho) !== null ? { ancho: num(x.ancho)! } : {}),
     ...(num(x.giro) !== null ? { giro: num(x.giro)! } : {}),
     ...(x.profundidad === null || x.profundidad === 'fija' ? { profundidad: null } : num(x.profundidad) !== null ? { profundidad: num(x.profundidad)! } : {}),
+    ...(num(x.pista) !== null ? { pista: num(x.pista)! } : {}),
     ...(num(x.desenfoque) !== null ? { desenfoque: num(x.desenfoque)! } : {}),
     ...(x.entrada === 'corte' || (typeof x.entrada === 'string' && ENTRADAS_CAPA.includes(x.entrada as EntradaCapa)) ? { entrada: x.entrada as EntradaCapa | 'corte' } : {}),
     ...(x.fin === null || x.quieta === true
@@ -384,6 +390,12 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
         const parametro = PARAMETROS_CLAVE.find((p) => p === x.parametro)
         if (c !== null && en !== null && parametro && (valor !== null || x.quitar === true))
           ops.push({ op: 'clave', clip: c, parametro, en, ...(valor !== null ? { valor } : {}), ...(x.quitar === true ? { quitar: true } : {}) })
+        break
+      }
+      case 'audio_clip': {
+        const c = num(x.clip)
+        const cambio = Object.fromEntries((['volumen', 'entra', 'sale', 'limpio'] as const).flatMap((k) => (num(x[k]) !== null ? [[k, num(x[k])!]] : [])))
+        if (c !== null && Object.keys(cambio).length) ops.push({ op: 'audio_clip', clip: c, ...cambio })
         break
       }
       case 'velocidad': {
@@ -702,6 +714,18 @@ export function aplicarOperaciones(
         }
         break
       }
+      case 'audio_clip': {
+        const destino = clipEn(o.clip)
+        if (!destino) {
+          fallos.push(`No existe el clip ${o.clip}.`)
+          break
+        }
+        const { op: _op, clip: _clip, ...cambio } = o
+        tl = ajustarSonidoClip(tl, destino.id, cambio)
+        const s = sonidoDe(tl.clips.find((c) => c.id === destino.id))
+        cambios.push(`Sonido del clip ${o.clip}: volumen ${Math.round(s.volumen * 100)} %${s.entra ? `, entra en ${s.entra} s` : ''}${s.sale ? `, sale en ${s.sale} s` : ''}${s.limpio ? `, ruido de fondo −${Math.round(s.limpio * 100)} %` : ''}`)
+        break
+      }
       case 'velocidad': {
         const destino = clipEn(o.clip)
         if (!destino) {
@@ -853,6 +877,7 @@ function cambioDeCapa(o: CamposCapa, actual?: CapaTL): Partial<Omit<CapaTL, 'id'
     ...(o.ancho !== undefined ? { ancho: o.ancho } : {}),
     ...(o.giro !== undefined ? { giro: o.giro } : {}),
     ...(o.profundidad !== undefined ? { profundidad: o.profundidad ?? undefined } : {}),
+    ...(o.pista !== undefined ? { pista: o.pista } : {}),
     ...(o.desenfoque !== undefined ? { desenfoque: o.desenfoque } : {}),
     ...(o.entrada !== undefined ? { entrada: o.entrada === 'corte' ? undefined : o.entrada } : {}),
     ...(o.fin === null ? { fin: undefined } : o.fin ? { fin: { ...base, ...o.fin } } : {})
@@ -878,7 +903,7 @@ export function describirTimelineParaAgente(
       : ''
     const origen = tr.clip.fuente === FUENTE_PRINCIPAL ? 'video principal' : (nombres[tr.clip.fuente] ?? 'otro medio')
     lineas.push(
-      `  ${tr.indice + 1}. timeline ${tr.inicio.toFixed(2)}–${tr.fin.toFixed(2)} ← ${origen} ${tr.clip.entrada.toFixed(2)}–${tr.clip.salida.toFixed(2)}${extra}${tr.clip.mudo ? ' (sin sonido)' : ''}`
+      `  ${tr.indice + 1}. timeline ${tr.inicio.toFixed(2)}–${tr.fin.toFixed(2)} ← ${origen} ${tr.clip.entrada.toFixed(2)}–${tr.clip.salida.toFixed(2)}${extra}${tr.clip.mudo ? ' (sin sonido)' : tr.clip.sonido ? ` (sonido: ${JSON.stringify(tr.clip.sonido)})` : ''}`
     )
   }
   if (tl.clips.length === 0) lineas.push('  (vacía)')
@@ -905,6 +930,7 @@ export function describirTimelineParaAgente(
       lineas.push(
         `  ${i + 1}. ${c.inicio.toFixed(2)}–${(c.inicio + c.duracion).toFixed(2)} ${nombres[c.fuente] ?? c.fuente} (${c.fuente}) en x ${c.x} y ${c.y}, ancho ${c.ancho}${c.giro ? `, giro ${c.giro}°` : ''}, ${c.entrada ?? 'sin entrada'}` +
           (c.profundidad != null ? `, profundidad ${c.profundidad}` : '') +
+          (c.pista ? `, pista ${c.pista}` : '') +
           (c.desenfoque ? `, desenfoque ${c.desenfoque}` : '') +
           (c.fin ? ` → termina en x ${c.fin.x} y ${c.fin.y}, ancho ${c.fin.ancho}${c.fin.giro ? `, giro ${c.fin.giro}°` : ''}` : '')
       )
@@ -985,6 +1011,7 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
   Y un LOOK de color completo con "look" (sustituye al color y los efectos que tuviera): ${LOOKS.map((l) => `${l.id} (${l.para})`).join(', ')}. Para un flash en negativo: divide medio segundo y ponle "invertir":1.
 - {"op":"clave","clip":N,"parametro":"zoom|cx|cy|brillo|contraste|saturacion","en":S,"valor":V}  FOTOGRAMA CLAVE: ese ajuste del clip N vale V en el segundo S (contado desde que empieza el clip) y cambia suave hasta la siguiente clave. Con dos o más claves animas a mano: un zoom que entra y vuelve a salir (zoom 1 en 0, 1.4 en 1.5, 1 en 3), el encuadre que va de una cara a otra (cx, cy), un fundido a oscuro (brillo 0 → -0.3), el color que se apaga (saturacion 1 → 0). Hasta 12 claves por ajuste. "quitar":true en vez de "valor" borra la de ese segundo.
 - {"op":"clave_capa","capa_n":N,"parametro":"x|y|ancho|giro|opacidad","en":S,"valor":V}  FOTOGRAMA CLAVE de una capa encima: en el segundo S (desde que aparece la capa) vale V, y cambia suave hasta la siguiente. x, y de -0.5 a 1.5 (fuera del cuadro para entrar o salir volando), ancho 0.05 a 2, giro en grados, opacidad 0 a 1. Así se hace un recorrido con curvas (varias claves de x e y), algo que crece y se encoge, un logo que aparece y se desvanece (opacidad 0 → 1 → 0). Mandan sobre "fin_x"… de anadir_capa. "quitar":true borra la de ese segundo.
+- {"op":"audio_clip","clip":N,"volumen":V,"entra":S,"sale":S,"limpio":L}  el sonido de un clip de VIDEO: «volumen» 0 a 1.5 (1 como viene), «entra» y «sale» segundos de fundido de entrada y de salida (0 a 5), «limpio» 0 a 1 para quitar el ruido de fondo (zumbido, aire, siseo; 0.5 suele bastar). Solo los campos que cambian.
 - {"op":"velocidad","clip":N,"velocidad":V}  cámara lenta o rápida de un clip de VIDEO: 0.25 a 4 (1 normal; 0.5 la mitad de rápido, 2 el doble). El clip dura más o menos y lo que sigue se corre. En una foto no hace nada.
 - {"op":"pista","pista":"encima|video|texto|voz|sonidos|musica","oculta":true|false}  oculta (encima, texto) o silencia (video, voz, sonidos, musica) una pista entera, en el monitor y en el MP4, sin borrar lo que tiene. "bloqueada":true la protege de cambios a mano.
 - {"op":"musica","volumen":V,"ducking":true|false}  volumen 0 a 1 de la música ya puesta (bajo la voz suele ir bien 0.2–0.4); ducking hace que baje sola cuando hay voz.
@@ -998,6 +1025,7 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
 - {"op":"anadir_capa","medio":"ID","inicio":T,"duracion":S,"x":0.5,"y":0.5,"ancho":0.25,"giro":0,"entrada":"pop|fundido|izquierda|derecha|arriba|abajo|corte"}  pone encima del video un medio de la biblioteca (un logo, un ícono, una foto, una toma de apoyo), por su id. x, y = su centro y ancho = su ancho, en fracción del cuadro; giro en grados. "pop" (por defecto) entra rebotando; úsalo para logos e íconos que aparecen cuando se nombran. "izquierda/derecha/arriba/abajo" entra deslizándose desde fuera. No tapes caras ni manos que importan.
   Para que SE MUEVA mientras está, di dónde termina: "fin_x","fin_y","fin_ancho","fin_giro" (lo que no pongas, igual que al empezar; se puede terminar fuera del cuadro, de -0.5 a 1.5). Va suave de un sitio al otro durante toda su duración. Ejemplos: un avión que cruza ("x":-0.2 → "fin_x":1.2), paralaje (un fondo que se desliza 0.04 y crece 1.05), una foto que se acerca ("fin_ancho" 1.3 veces el ancho), algo que gira ("fin_giro":15). Con "quieta":true deja de moverse.
   ESCENA 2.5D: "profundidad" de 0 a 1 hace que la capa siga a la cámara del clip de debajo (su zoom, acercamiento y paneo): 0 se mueve pegada al fondo, 1 (muy cerca) se mueve y crece 2,5 veces más. Así un paisaje armado con recortes (montañas 0.2, una casa 0.5, una bandera 0.6, la persona 0.4) se siente con distancia cuando la cámara se mueve. "profundidad":"fija" la vuelve a pegar a la pantalla (para logos y textos). "desenfoque" de 0 a 1: fuera de foco, para lo que está muy cerca (un primer plano) o muy lejos.
+  PISTAS: "pista" 1 a 3 es en qué pista de video de «Encima» va la capa (sin ella, la 1): las de una pista más alta tapan a las de abajo. Úsalo para apilar varias cosas a la vez (una toma de apoyo en la 1, un marco en la 2 y el logo en la 3).
 - {"op":"cambiar_capa","capa_n":N, …los mismos campos…}  y {"op":"borrar_capa","capa_n":N}
 - {"op":"transicion","clip":N,"tipo":"fundido|barrido-izquierda|barrido-derecha|barrido-arriba|barrido-abajo|zoom|desenfoque|destello|circulo|corte","duracion":0.45}  cómo entra el clip N sobre el anterior (sin "clip": en todos los cortes). Los barridos empujan la imagen hacia ese lado (como un paneo rápido); destello pasa por blanco; corte = sin transición. Con medida: un documental rápido usa cortes secos y alguna transición en los cambios de tema.
 - {"op":"filtros","grano":0.3,"polvo":0.2,"trama":0.4,"vineta":0.5,"parpadeo":0.1}  filtros para TODO el video, de 0 (nada) a 1 (fuerte): grano de película, polvo y rayas, trama de puntos de imprenta, viñeta (bordes oscuros) y parpadeo de proyector. Un 0 quita ese filtro. Para un aire de documental o de archivo: grano 0.3, polvo 0.2, viñeta 0.5; trama 0.4 para un aire de revista.
