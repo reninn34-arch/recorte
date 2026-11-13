@@ -29,6 +29,15 @@ export function useCatalogos(ids: AgenteId[]): { modelos: Partial<Record<AgenteI
       .catch(() => {})
       .finally(() => setCargando((c) => c.filter((x) => x !== id)))
   }
+  useEffect(
+    () =>
+      // Si el agente suma o quita modelos mientras la app está abierta, la lista cambia sola.
+      window.recorte.onModelosCambiaron((id, m) => {
+        catalogos.set(id as AgenteId, m)
+        setVersion((v) => v + 1)
+      }),
+    []
+  )
   useEffect(() => {
     // Siempre se vuelve a pedir al abrir: el proceso principal responde al instante con lo
     // recordado y lo pone al día de fondo (así un modelo nuevo aparece sin reiniciar).

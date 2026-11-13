@@ -231,6 +231,8 @@ export function TimelineEditor({
   onEstabilizar,
   estabilizando,
   onExportarCuadro,
+  onPantallaCompleta,
+  pantallaCompleta,
   sacandoCuadro,
   onAnidar,
   anidando,
@@ -252,6 +254,9 @@ export function TimelineEditor({
   anidando?: boolean
   /** Guarda el cuadro del cabezal como imagen. */
   onExportarCuadro?: () => void
+  /** Ver el monitor a pantalla completa (o volver). */
+  onPantallaCompleta?: () => void
+  pantallaCompleta?: boolean
   sacandoCuadro?: boolean
   /** Estabiliza un clip de video (su tramo sale estable a la biblioteca). */
   onEstabilizar?: (clipId: string) => void
@@ -1187,6 +1192,7 @@ export function TimelineEditor({
     else if (tecla === 'c') setHerramienta('cuchilla')
     else if (tecla === 'f' && e.shiftKey) onCongelar?.()
     else if (tecla === 'e' && e.shiftKey) onExportarCuadro?.()
+    else if (tecla === 'f' && !e.shiftKey && !e.altKey && onPantallaCompleta) onPantallaCompleta()
     else if (/^[1-9]$/.test(e.key) && tl.multicam) {
       // Multicámara: 1, 2, 3… cortan a esa toma en el cabezal (también reproduciendo, como en Premiere).
       const r = cambiarAngulo(timeline, tiempo, Number(e.key) - 1, limiteFuente)
@@ -1296,16 +1302,16 @@ export function TimelineEditor({
               <button className="tr-boton" onClick={() => onBuscar(total)} title="Ir al final (Fin)" aria-label="Ir al final">
                 <Icon name="final" size={15} />
               </button>
-              <span className="tr-separador" />
-              <button className={`tr-boton ${repetir ? 'is-on' : ''}`} onClick={() => setRepetir((r) => !r)} aria-pressed={repetir} title={hayRango ? 'Repetir entre la entrada y la salida' : 'Repetir todo el video'} aria-label="Repetir">
+              <span className="tr-separador tr-extra" />
+              <button className={`tr-boton tr-extra ${repetir ? 'is-on' : ''}`} onClick={() => setRepetir((r) => !r)} aria-pressed={repetir} title={hayRango ? 'Repetir entre la entrada y la salida' : 'Repetir todo el video'} aria-label="Repetir">
                 <Icon name="repetir" size={15} />
               </button>
-              <button className="tr-boton" onClick={accionExtraer} disabled={!hayRango} title="Extraer: quita lo que hay entre la entrada y la salida y cierra el hueco (tecla ')" aria-label="Extraer entre entrada y salida">
+              <button className="tr-boton tr-extra" onClick={accionExtraer} disabled={!hayRango} title="Extraer: quita lo que hay entre la entrada y la salida y cierra el hueco (tecla ')" aria-label="Extraer entre entrada y salida">
                 <Icon name="extraer" size={15} />
               </button>
               {onExportarCuadro && (
                 <button
-                  className={`tr-boton ${sacandoCuadro ? 'is-on' : ''}`}
+                  className={`tr-boton tr-extra ${sacandoCuadro ? 'is-on' : ''}`}
                   onClick={onExportarCuadro}
                   disabled={total <= 0 || sacandoCuadro}
                   title="Exportar cuadro: guarda lo que se ve en el cabezal como imagen PNG (Mayús+E)"
@@ -1315,6 +1321,7 @@ export function TimelineEditor({
                 </button>
               )}
             </div>
+            <span className="tr-fin">
             <span className="tr-tc" title={hayRango ? 'Lo que dura el tramo entre la entrada y la salida' : 'Lo que dura todo el video'}>
               {hayRango ? (
                 <>
@@ -1323,6 +1330,17 @@ export function TimelineEditor({
               ) : (
                 tcCuadros(total, fps)
               )}
+            </span>
+            {onPantallaCompleta && (
+              <button
+                className={`tr-boton ${pantallaCompleta ? 'is-on' : ''}`}
+                onClick={onPantallaCompleta}
+                title={pantallaCompleta ? 'Salir de la pantalla completa (F o Esc)' : 'Ver el monitor a pantalla completa (F)'}
+                aria-label={pantallaCompleta ? 'Salir de la pantalla completa' : 'Pantalla completa'}
+              >
+                <Icon name={pantallaCompleta ? 'achicar' : 'pantalla'} size={15} />
+              </button>
+            )}
             </span>
           </>,
           paneles.transporte

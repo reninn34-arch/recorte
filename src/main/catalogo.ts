@@ -15,7 +15,10 @@ import { matarArbol } from './ia'
  * - OpenCode: `opencode models --verbose`, con el precio (0 = gratis) y sus variantes.
  * - Antigravity: las opciones de una sesión ACP (antigravity.ts).
  * - Codex: su propia lista (`~/.codex/models_cache.json`, la que baja Codex), con los niveles.
- * - Kimi y Gemini CLI no tienen cómo listar sus modelos: van los conocidos.
+ * - Kimi: los de tu cuenta que Kimi Code guarda en su `config.toml`.
+ * - Gemini CLI: los nombres que trae el paquete instalado (si no se encuentra, los conocidos).
+ * Cuando la lista de un agente cambia, se avisa a la interfaz (alCambiarCatalogo), y una
+ * elección con un modelo que ya no está vuelve al modelo de siempre (eleccionVigente).
  * Lo recordado se da al instante y, si tiene más de una hora, se vuelve a preguntar de fondo:
  * así un modelo nuevo aparece sin esperar un día. «forzar» pregunta ya.
  */
@@ -205,16 +208,125 @@ function modelosCodex(): ModeloAgente[] {
   }
 }
 
+/**
+ * Los modelos de Kimi: los que Kimi Code bajó de tu cuenta a su `config.toml` (`[models."…"]`,
+ * con su `display_name`). Kimi los pone al día solo; Recorte solo los lee.
+ */
+function modelosKimi(): ModeloAgente[] {
+  const dirs = [process.env.KIMI_SHARE_DIR, join(homedir(), '.kimi-code'), join(homedir(), '.kimi')].filter((d): d is string => !!d)
+  for (const dir of dirs) {
+    let texto: string
+    try {
+      texto = readFileSync(join(dir, 'config.toml'), 'utf8')
+    } catch {
+      continue
+    }
+    const defecto = /^\s*default_model\s*=\s*"([^"]+)"/m.exec(texto)?.[1]
+    const modelos: ModeloAgente[] = []
+    // Cada sección [models."id"] hasta la siguiente sección.
+    const re = /^\[models\."([^"]+)"\]\s*$([\s\S]*?)(?=^\[|(?![\s\S]))/gm
+    for (let m = re.exec(texto); m; m = re.exec(texto)) {
+      const id = m[1]
+      if (!ID_SEGURO.test(id)) continue
+      const nombre = /^\s*display_name\s*=\s*"([^"]+)"/m.exec(m[2])?.[1] ?? id.split('/').pop() ?? id
+      modelos.push({ id, nombre, esfuerzos: [], ...(id === defecto ? { recomendado: true } : {}) })
+    }
+    // Todos a la vista (sus nombres no siguen una versión clara); el que Kimi usa por defecto, primero.
+    if (modelos.length) return modelos.sort((a, b) => Number(Boolean(b.recomendado)) - Number(Boolean(a.recomendado)))
+  }
+  return FIJOS.kimi ?? []
+}
+
+/**
+ * Los modelos de Gemini CLI: los nombres que trae el paquete instalado (cuando Gemini CLI se
+ * actualiza y suma un modelo, aparece). Si no se encuentra el paquete, los conocidos.
+ */
+function modelosGemini(): ModeloAgente[] {
+  const bin = resolverBinario('gemini')
+  if (!bin) return FIJOS.gemini ?? []
+  const base = join(bin, '..', 'node_modules', '@google')
+  const archivos = [
+    join(base, 'gemini-cli', 'node_modules', '@google', 'gemini-cli-core', 'dist', 'src', 'config', 'models.js'),
+    join(base, 'gemini-cli-core', 'dist', 'src', 'config', 'models.js')
+  ]
+  for (const archivo of archivos) {
+    let texto: string
+    try {
+      texto = readFileSync(archivo, 'utf8')
+    } catch {
+      continue
+    }
+    const ids = [...new Set(texto.match(/\bgemini-\d+(?:\.\d+)?-(?:pro|flash(?:-lite)?)(?:-preview(?:-\d\d-\d\d)?)?\b/g) ?? [])]
+    if (!ids.length) continue
+    const nombre = (id: string) =>
+      id
+        .replace(/^gemini-/, 'Gemini ')
+        .replace(/-flash-lite/, ' Flash-Lite')
+        .replace(/-flash/, ' Flash')
+        .replace(/-pro/, ' Pro')
+        .replace(/-preview.*/, ' (preview)')
+    const modelos = ids.map((id) => ({ id, nombre: nombre(id), esfuerzos: [] as string[] }))
+    // La versión más nueva primero; dentro de una versión, Pro, Flash y Flash-Lite.
+    const orden = (id: string) => (/-pro/.test(id) ? 0 : /-lite/.test(id) ? 2 : 1)
+    const version = (id: string) => Number(/gemini-(\d+(?:\.\d+)?)/.exec(id)?.[1] ?? 0)
+    modelos.sort((a, b) => version(b.id) - version(a.id) || orden(a.id) - orden(b.id))
+    const mayor = version(modelos[0].id)
+    return modelos.map((m) => (version(m.id) < mayor ? { ...m, anterior: true } : m))
+  }
+  return FIJOS.gemini ?? []
+}
+
 const enCurso = new Map<AgenteId, Promise<ModeloAgente[]>>()
 
-export async function catalogoAgente(id: AgenteId, forzar = false): Promise<ModeloAgente[]> {
-  if (FIJOS[id]) return FIJOS[id]!
-  // Codex guarda su propia lista al día: se lee cada vez (es un archivo local).
+/** Lo último que se le dijo a la interfaz de cada agente, para avisar solo cuando cambia. */
+const avisado = new Map<AgenteId, string>()
+let alCambiar: ((id: AgenteId, modelos: ModeloAgente[]) => void) | null = null
+/** Avisa cuando la lista de modelos de un agente cambia (un modelo nuevo o uno que ya no está). */
+export function alCambiarCatalogo(cb: (id: AgenteId, modelos: ModeloAgente[]) => void): void {
+  alCambiar = cb
+}
+function anotar(id: AgenteId, modelos: ModeloAgente[]): ModeloAgente[] {
+  if (!modelos.length) return modelos
+  const huella = JSON.stringify(modelos)
+  const antes = avisado.get(id)
+  avisado.set(id, huella)
+  if (antes !== undefined && antes !== huella) alCambiar?.(id, modelos)
+  return modelos
+}
+
+/** Lo que ya se sabe de un agente, sin preguntarle nada (para revisar una elección al instante). */
+export function catalogoRecordado(id: AgenteId): ModeloAgente[] {
+  if (id === 'kimi') return modelosKimi()
+  if (id === 'gemini') return modelosGemini()
   if (id === 'codex') return modelosCodex()
+  return leer()[id]?.modelos ?? []
+}
+
+/** Quita de una elección el modelo (o el esfuerzo) que el agente ya no tiene: así no falla. */
+export function eleccionVigente<T extends { agente: AgenteId; modelo?: string; esfuerzo?: string }>(e: T): T {
+  if (!e.modelo) return e
+  const lista = catalogoRecordado(e.agente)
+  if (!lista.length) return e
+  const m = lista.find((x) => x.id === e.modelo)
+  if (!m) {
+    const { modelo: _m, esfuerzo: _e, ...resto } = e
+    return resto as T
+  }
+  if (e.esfuerzo && !m.esfuerzos.includes(e.esfuerzo)) {
+    const { esfuerzo: _e, ...resto } = e
+    return resto as T
+  }
+  return e
+}
+
+export async function catalogoAgente(id: AgenteId, forzar = false): Promise<ModeloAgente[]> {
+  // Kimi, Gemini CLI y Codex guardan su lista al día en archivos locales: se leen cada vez.
+  if (id === 'kimi' || id === 'gemini' || id === 'codex') return anotar(id, catalogoRecordado(id))
   const guardado = leer()[id]
   if (!forzar && guardado?.modelos.length) {
     // Lo recordado al instante; si es de hace más de una hora, se pregunta de fondo para la próxima.
     if (Date.now() - guardado.fecha > UNA_HORA && !enCurso.has(id)) void catalogoAgente(id, true).catch(() => [])
+    if (!avisado.has(id)) avisado.set(id, JSON.stringify(guardado.modelos))
     return guardado.modelos
   }
   const ya = enCurso.get(id)
@@ -232,7 +344,8 @@ export async function catalogoAgente(id: AgenteId, forzar = false): Promise<Mode
       } catch {
         // Solo es una caché.
       }
-      return modelos
+      if (!avisado.has(id) && guardado?.modelos.length) avisado.set(id, JSON.stringify(guardado.modelos))
+      return anotar(id, modelos)
     }
     // Si no se pudo preguntar, lo último que se supo.
     return guardado?.modelos ?? []

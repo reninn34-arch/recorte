@@ -24,7 +24,7 @@ import { estadoChatGPT, generarImagenChatGPT } from './imagenchatgpt'
 import { atenderMedios } from './mediosagente'
 import { avisarSesionCaida, definirEntornoAgentes, empezarTrabajo, esParado, pararTrabajo, terminarTrabajo } from './ia'
 import { comandoConEleccion } from './modelos'
-import { catalogoAgente } from './catalogo'
+import { alCambiarCatalogo, catalogoAgente, eleccionVigente } from './catalogo'
 import { crearMiniatura, crearProxy, duracionMedio, probeVideo } from './ffmpeg'
 import { proponerClipsConAgente, proponerClipsConIA, proponerRecetaConAgente, proponerRecetaConIA } from './ia'
 import { registrarMedia } from './media'
@@ -273,7 +273,7 @@ app.whenReady().then(() => {
     if (eleccion) {
       const agente = (await estadoAgentes()).find((a) => a.id === eleccion.agente)
       if (agente?.conectado && agente.instalado) {
-        return { activa: true, proveedor: 'cli', comandoCli: comandoConEleccion(agente.comando, eleccion.agente, eleccion) }
+        return { activa: true, proveedor: 'cli', comandoCli: comandoConEleccion(agente.comando, eleccion.agente, eleccionVigente(eleccion)) }
       }
     }
     return configAgente()
@@ -1983,6 +1983,21 @@ app.whenReady().then(() => {
   ipcMain.handle('agentes:modelos', (_evento, id: unknown, forzar: unknown) =>
     typeof id === 'string' && (AGENTE_IDS as readonly string[]).includes(id) ? catalogoAgente(id as AgenteId, forzar === true) : []
   )
+  // Si un agente suma o quita modelos, la interfaz se entera sola.
+  alCambiarCatalogo((id, modelos) => {
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('agentes:modelos-cambiaron', id, modelos)
+  })
+  // Al abrir y cada hora se pregunta a los agentes conectados qué modelos tienen (no gasta nada).
+  const revisarModelos = async () => {
+    try {
+      const conectados = (await estadoAgentes()).filter((a) => a.instalado && a.conectado)
+      for (const a of conectados) await catalogoAgente(a.id as AgenteId, a.id === 'claude' || a.id === 'opencode' || a.id === 'antigravity').catch(() => [])
+    } catch {
+      // Se intenta en la próxima vuelta.
+    }
+  }
+  setTimeout(() => void revisarModelos(), 20_000)
+  setInterval(() => void revisarModelos(), 60 * 60_000)
   ipcMain.handle('agentes:versiones', () => versionesAgentes())
   ipcMain.handle('agentes:pago', async (_evento, id: unknown, cambio: unknown) => {
     if (typeof id !== 'string') return agentesConPago()

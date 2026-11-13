@@ -397,6 +397,18 @@ export function Editor({
   const [menuMonitor, abrirMenuMonitor] = useMenuContextual()
   // ===== Archivos de Windows soltados o pegados en el editor =====
   const [soltando, setSoltando] = useState(false)
+  // El monitor (con su barra) a pantalla completa.
+  const centroRef = useRef<HTMLElement>(null)
+  const [pantallaCompleta, setPantallaCompleta] = useState(false)
+  useEffect(() => {
+    const al = () => setPantallaCompleta(!!document.fullscreenElement && document.fullscreenElement === centroRef.current)
+    document.addEventListener('fullscreenchange', al)
+    return () => document.removeEventListener('fullscreenchange', al)
+  }, [])
+  const alternarPantalla = () => {
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {})
+    else void centroRef.current?.requestFullscreen().catch(() => {})
+  }
   /**
    * Importa archivos de fuera y los pone donde se soltaron: en la pista de video (en ese segundo), encima, en la de
    * sonidos o de música, o en el monitor (como capa, ahí mismo). Soltados en otra parte, van a la biblioteca (y los
@@ -508,13 +520,14 @@ export function Editor({
     >
       <div className="ed-arriba">
         <aside className="ed-panel ed-biblioteca" ref={setPanelBiblioteca} aria-label="Biblioteca" />
-        <section className="ed-centro">
+        <section className={`ed-centro ${pantallaCompleta ? 'is-completa' : ''}`} ref={centroRef}>
           <div
             className="ed-visor"
             onContextMenu={(e) =>
               abrirMenuMonitor(e, [
                 { nombre: reproductor.reproduciendo ? 'Pausa' : 'Reproducir', atajo: 'Espacio', accion: reproductor.alternar },
                 { nombre: 'Ir al principio', atajo: 'Inicio', accion: () => reproductor.buscar(0) },
+                { nombre: pantallaCompleta ? 'Salir de la pantalla completa' : 'Pantalla completa', atajo: 'F', accion: alternarPantalla },
                 { tipo: 'separador' },
                 ...(proyecto.demo
                   ? []
@@ -728,6 +741,8 @@ export function Editor({
         onAnidar={proyecto.demo ? undefined : (ids) => void anidar(ids)}
         anidando={anidando}
         onExportarCuadro={proyecto.demo ? undefined : () => void exportarCuadro()}
+        onPantallaCompleta={alternarPantalla}
+        pantallaCompleta={pantallaCompleta}
         seguirZona={proyecto.demo ? undefined : (fuente, pedido) => window.recorte.seguirZona(proyecto.id, fuente, pedido)}
         sacandoCuadro={sacandoCuadro}
         onEstabilizar={proyecto.demo ? undefined : (clipId) => void estabilizar(clipId)}

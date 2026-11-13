@@ -294,6 +294,8 @@ export interface RecorteApi {
   agentesEstado: () => Promise<EstadoAgente[]>
   /** Los modelos del agente con sus esfuerzos, tal como los dice el agente (se recuerdan un día). */
   agentesModelos: (id: string, forzar?: boolean) => Promise<ModeloAgente[]>
+  /** Cuando un agente suma o quita modelos (se revisa al abrir y cada hora). */
+  onModelosCambiaron: (cb: (id: string, modelos: ModeloAgente[]) => void) => () => void
   agentesConectar: (id: string) => Promise<ConexionResultado>
   agentesDesconectar: (id: string) => Promise<ConexionResultado>
   agentesDesactivar: () => Promise<AjustesIA>

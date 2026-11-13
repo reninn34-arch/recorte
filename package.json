@@ -22,6 +22,7 @@
     "prueba:adaptadores": "node --experimental-strip-types --no-warnings scripts/prueba-adaptadores.mjs",
     "prueba:exportar": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-exportar.mjs",
     "prueba:mcp": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-mcp.mjs",
+    "prueba:catalogo": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-catalogo.mjs",
     "prueba:retoques": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-retoques.mjs",
     "prueba:edicion": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs scripts/prueba-edicion.mjs",
     "prueba:estabilizar": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-estabilizar.mjs",

@@ -2210,8 +2210,12 @@ button { cursor: pointer; }
   font-size: 12.5px;
   line-height: 1.45;
   user-select: text;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .chat-msg p { margin: 0; white-space: pre-wrap; }
+/* Rutas de archivo y enlaces largos (sin espacios) no se salen del panel. */
+.agente-panel, .chat-lista, .cr-plan, .cr-guion, .cr-registro { min-width: 0; overflow-wrap: anywhere; }
 .chat-msg.usuario { align-self: flex-end; background: color-mix(in srgb, var(--accent) 16%, var(--panel-2)); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); }
 .chat-msg.agente { align-self: flex-start; background: var(--panel-2); border: 1px solid var(--line); }
 .chat-msg.is-error { border-color: color-mix(in srgb, var(--danger) 50%, var(--line)); color: #ffc9c9; }
@@ -3144,7 +3148,26 @@ button { cursor: pointer; }
 .app.is-editor .recientes { display: none; }
 .app.is-editor .nav-item, .app.is-editor .sidebar-nuevo { justify-content: center; padding-left: 0; padding-right: 0; }
 .tl-marca-editor .tl-texto-input { width: 120px; }
-@container (max-width: 560px) { .ed-transporte .tr-tc:last-child { display: none; } }
+/* La barra del monitor siempre cabe: el tiempo se achica y lo menos usado se esconde antes de cortarse. */
+.ed-transporte { min-width: 0; overflow: hidden; }
+.tr-tc { min-width: 0; }
+.tr-tc.is-actual { flex-shrink: 0; }
+.tr-botones { flex-shrink: 0; }
+.tr-fin { display: flex; align-items: center; justify-content: flex-end; gap: 4px; min-width: 0; flex-shrink: 1; }
+.tr-fin .tr-tc { overflow: hidden; text-overflow: clip; }
+@container (max-width: 640px) {
+  .ed-transporte { padding: 0 8px; gap: 6px; }
+  .tr-tc { font-size: 11px; }
+  .tr-tc.is-actual { font-size: 13px; }
+  .tr-boton { width: 26px; }
+}
+@container (max-width: 560px) { .tr-extra { display: none; } }
+@container (max-width: 470px) { .tr-fin .tr-tc { display: none; } }
+@container (max-width: 380px) { .tr-tc.is-actual { display: none; } .tr-botones .tr-separador { display: none; } }
+/* Pantalla completa: el monitor llena la pantalla y la barra queda abajo. */
+.ed-centro.is-completa { background: #000; padding: 12px; gap: 10px; display: flex; flex-direction: column; }
+.ed-centro.is-completa .ed-visor { flex: 1; min-height: 0; border: none; background: #000; }
+.ed-centro.is-completa .ed-transporte { max-width: 1100px; width: 100%; margin: 0 auto; }
 /* En la biblioteca del editor la tarjeta del video es angosta: la imagen arriba y los datos debajo. */
 .ed-bib .source-card { grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 10px; }
 .ed-bib .source-side { display: none; }

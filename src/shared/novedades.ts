@@ -24,6 +24,28 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.50',
+    fecha: '2026-11-13',
+    resumen: 'El monitor a pantalla completa, una barra de controles que siempre cabe y los modelos de tus agentes al día solos.',
+    novedades: [
+      {
+        icono: 'play',
+        titulo: 'Monitor a pantalla completa',
+        texto: 'Con el botón nuevo de la barra del monitor, la tecla F o el clic derecho, el video llena la pantalla con sus controles abajo. Sales con F o Esc.'
+      },
+      {
+        icono: 'sliders',
+        titulo: 'Controles que siempre caben',
+        texto: 'En una ventana angosta la barra del monitor se acomoda sola en vez de cortarse, y las rutas largas del chat ya no se salen del panel.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Los modelos de tus agentes, al día',
+        texto: 'Si tu cuenta de Kimi, Claude, ChatGPT (Codex), Gemini, OpenCode o Antigravity suma o quita un modelo, Recorte lo muestra solo: revisa al abrir y cada hora, sin gastar nada. Kimi ahora muestra todos los de tu cuenta, y si un modelo que elegiste ya no está, se usa el de siempre en vez de fallar.'
+      }
+    ]
+  },
+  {
     version: '0.1.49',
     fecha: '2026-11-13',
     resumen: 'Arrastra archivos a donde los quieras, usa el clic derecho en todo el editor y la app se ve bien en cualquier pantalla, también en monitores grandes.',

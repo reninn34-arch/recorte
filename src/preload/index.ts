@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { EstadoActualizacion, Progreso, RecorteApi } from '../shared/api'
 import type { Project } from '../shared/types'
+import type { ModeloAgente } from '../shared/creacion'
 
 const api: RecorteApi = {
   openVideo: () => ipcRenderer.invoke('dialog:open-video'),
@@ -36,6 +37,11 @@ const api: RecorteApi = {
   guardarAjustes: (ajustes, clave) => ipcRenderer.invoke('ajustes:guardar', ajustes, clave),
   agentesEstado: () => ipcRenderer.invoke('agentes:estado'),
   agentesModelos: (id, forzar) => ipcRenderer.invoke('agentes:modelos', id, forzar),
+  onModelosCambiaron: (cb) => {
+    const listener = (_evento: Electron.IpcRendererEvent, id: string, modelos: ModeloAgente[]) => cb(id, modelos)
+    ipcRenderer.on('agentes:modelos-cambiaron', listener)
+    return () => ipcRenderer.removeListener('agentes:modelos-cambiaron', listener)
+  },
   agentesConectar: (id) => ipcRenderer.invoke('agentes:conectar', id),
   agentesDesconectar: (id) => ipcRenderer.invoke('agentes:desconectar', id),
   agentesDesactivar: () => ipcRenderer.invoke('agentes:desactivar'),
