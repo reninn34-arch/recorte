@@ -24,6 +24,33 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.44',
+    fecha: '2026-11-13',
+    resumen: 'Fotogramas clave: anima a mano el encuadre, el color y el movimiento de tus clips y capas.',
+    novedades: [
+      {
+        icono: 'film',
+        titulo: 'Fotogramas clave en los clips',
+        texto: 'Toca el rombo ◆ junto al zoom, el encuadre o el color de un clip, pon el cabezal en otro momento, cambia el valor y se anima solo, acelerando y frenando suave. Un zoom que entra y sale, un fundido a oscuro, el color que se apaga.'
+      },
+      {
+        icono: 'layers',
+        titulo: 'Fotogramas clave en las capas',
+        texto: 'Los logos, personajes y fotos encima pueden animar su sitio, tamaño, giro y opacidad: entrar volando, crecer, girar, aparecer y desvanecerse. Mover la capa en el monitor pone la clave en el cabezal.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Igual en el monitor y en el MP4',
+        texto: 'Las claves van pegadas al material (se conservan al dividir y recortar) y el video exportado se mueve exactamente como lo ves en el monitor.'
+      },
+      {
+        icono: 'wand',
+        titulo: 'El agente también las usa',
+        texto: 'El agente y la conexión por MCP pueden poner fotogramas clave en clips y capas para hacer animaciones a medida.'
+      }
+    ]
+  },
+  {
     version: '0.1.43',
     fecha: '2026-11-12',
     resumen: 'Un panel de efectos como el de los editores profesionales, y colores correctos al exportar con tarjeta AMD.',
