@@ -47,7 +47,12 @@ import {
   COLOR_NEUTRO,
   LOOKS,
   PISTAS,
-  type PistaId
+  type PistaId,
+  PARAMETROS_CLAVE,
+  ponerClave,
+  quitarClave,
+  velocidadDe,
+  type ParametroClave
 } from './timeline'
 import { INSTRUCCIONES_CRITERIO } from './gustos'
 import type { TranscriptSegment } from './types'
@@ -99,6 +104,7 @@ export type OperacionTL =
   | { op: 'zoom'; clip?: number; zoom?: number; acercar?: number; cx?: number; cy?: number; panx?: number; pany?: number; temblor?: number; campo?: number; foco?: number }
   | { op: 'color'; clip?: number; look?: string; brillo?: number; contraste?: number; saturacion?: number; desenfoque?: number; sepia?: number; tono?: number; invertir?: number }
   | { op: 'velocidad'; clip: number; velocidad: number }
+  | { op: 'clave'; clip: number; parametro: ParametroClave; en: number; valor?: number; quitar?: boolean }
   | { op: 'pista'; pista: PistaId; oculta?: boolean; bloqueada?: boolean }
   | { op: 'musica'; volumen?: number; ducking?: boolean }
   | { op: 'quitar_musica' }
@@ -355,6 +361,15 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
         const campos = (['brillo', 'contraste', 'saturacion', 'desenfoque', 'sepia', 'tono', 'invertir'] as const).filter((k) => num(x[k]) !== null)
         const look = typeof x.look === 'string' && LOOKS.some((l) => l.id === x.look) ? x.look : undefined
         if (campos.length || look) ops.push({ op: 'color', clip: num(x.clip) ?? undefined, ...(look ? { look } : {}), ...Object.fromEntries(campos.map((k) => [k, num(x[k])!])) })
+        break
+      }
+      case 'clave': {
+        const c = num(x.clip)
+        const en = num(x.en)
+        const valor = num(x.valor)
+        const parametro = PARAMETROS_CLAVE.find((p) => p === x.parametro)
+        if (c !== null && en !== null && parametro && (valor !== null || x.quitar === true))
+          ops.push({ op: 'clave', clip: c, parametro, en, ...(valor !== null ? { valor } : {}), ...(x.quitar === true ? { quitar: true } : {}) })
         break
       }
       case 'velocidad': {
@@ -640,6 +655,22 @@ export function aplicarOperaciones(
         }
         break
       }
+      case 'clave': {
+        const destino = clipEn(o.clip)
+        if (!destino) {
+          fallos.push(`No existe el clip ${o.clip}.`)
+          break
+        }
+        // `en` son segundos desde que empieza el clip en la timeline; la clave se guarda en el segundo de su fuente.
+        const f = destino.entrada + o.en * velocidadDe(destino)
+        const nueva = o.quitar || o.valor === undefined ? quitarClave(tl, destino.id, o.parametro, f) : ponerClave(tl, destino.id, o.parametro, f, o.valor)
+        if (nueva === tl) fallos.push(`No pude ${o.quitar ? 'quitar' : 'poner'} esa clave en el clip ${o.clip}.`)
+        else {
+          tl = nueva
+          cambios.push(o.quitar ? `Quité la clave de ${o.parametro} del clip ${o.clip} en ${o.en} s` : `Clip ${o.clip}: ${o.parametro} = ${o.valor} en ${o.en} s`)
+        }
+        break
+      }
       case 'velocidad': {
         const destino = clipEn(o.clip)
         if (!destino) {
@@ -921,6 +952,7 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
 - {"op":"color","clip":N,"brillo":B,"contraste":C,"saturacion":S}  brillo -0.3 a 0.3 (0 neutro), contraste 0.5 a 1.8 (1 neutro), saturación 0 (blanco y negro) a 2 (1 neutro). Sin "clip", a todos. Pon solo lo que cambies.
   La misma op pone EFECTOS al clip: "desenfoque" 0 a 1 (0.35 para un fondo bajo un texto), "sepia" 0 a 1 (foto antigua), "tono" -180 a 180 (gira los colores), "invertir" 1 (negativo; 0 lo quita).
   Y un LOOK de color completo con "look" (sustituye al color y los efectos que tuviera): ${LOOKS.map((l) => `${l.id} (${l.para})`).join(', ')}. Para un flash en negativo: divide medio segundo y ponle "invertir":1.
+- {"op":"clave","clip":N,"parametro":"zoom|cx|cy|brillo|contraste|saturacion","en":S,"valor":V}  FOTOGRAMA CLAVE: ese ajuste del clip N vale V en el segundo S (contado desde que empieza el clip) y cambia suave hasta la siguiente clave. Con dos o más claves animas a mano: un zoom que entra y vuelve a salir (zoom 1 en 0, 1.4 en 1.5, 1 en 3), el encuadre que va de una cara a otra (cx, cy), un fundido a oscuro (brillo 0 → -0.3), el color que se apaga (saturacion 1 → 0). Hasta 12 claves por ajuste. "quitar":true en vez de "valor" borra la de ese segundo.
 - {"op":"velocidad","clip":N,"velocidad":V}  cámara lenta o rápida de un clip de VIDEO: 0.25 a 4 (1 normal; 0.5 la mitad de rápido, 2 el doble). El clip dura más o menos y lo que sigue se corre. En una foto no hace nada.
 - {"op":"pista","pista":"encima|video|texto|voz|sonidos|musica","oculta":true|false}  oculta (encima, texto) o silencia (video, voz, sonidos, musica) una pista entera, en el monitor y en el MP4, sin borrar lo que tiene. "bloqueada":true la protege de cambios a mano.
 - {"op":"musica","volumen":V,"ducking":true|false}  volumen 0 a 1 de la música ya puesta (bajo la voz suele ir bien 0.2–0.4); ducking hace que baje sola cuando hay voz.

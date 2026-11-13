@@ -2,6 +2,12 @@ import React, { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState,
 import { createPortal } from 'react-dom'
 import {
   ajustarClip,
+  ajustesEn,
+  claveEn,
+  PARAMETROS_CLAVE,
+  ponerClave,
+  quitarClave,
+  type ParametroClave,
   aplicarLook,
   COLOR_NEUTRO,
   EFECTOS_VIDEO,
@@ -642,8 +648,23 @@ export function TimelineEditor({
   }
   const empezarAjuste = () => (ajustando.current = false)
 
+  /** El segundo de la fuente del clip elegido que está bajo el cabezal (dentro del clip). */
+  const fuenteEnCabezal = clipElegido
+    ? Math.min(clipElegido.clip.salida, Math.max(clipElegido.clip.entrada, clipElegido.clip.entrada + (tiempo - clipElegido.inicio) * velocidadDe(clipElegido.clip)))
+    : 0
+  const esClave = (clave: string): clave is ParametroClave => (PARAMETROS_CLAVE as readonly string[]).includes(clave)
+
   function ajustarImagen(cambio: AjustesClip) {
-    if (clipElegido) deslizar(ajustarClip(timeline, clipElegido.clip.id, cambio))
+    if (!clipElegido) return
+    // Un ajuste con fotogramas clave no se cambia entero: se pone (o se mueve) su clave en el cabezal.
+    let nueva = timeline
+    const fijos: AjustesClip = {}
+    for (const [clave, valor] of Object.entries(cambio) as [keyof AjustesClip, number][]) {
+      if (esClave(clave) && clipElegido.clip.claves?.[clave]?.length) nueva = ponerClave(nueva, clipElegido.clip.id, clave, fuenteEnCabezal, valor)
+      else fijos[clave] = valor
+    }
+    if (Object.keys(fijos).length) nueva = ajustarClip(nueva, clipElegido.clip.id, fijos)
+    deslizar(nueva)
   }
 
   function accionDuplicar() {
@@ -1159,6 +1180,7 @@ export function TimelineEditor({
                       <span className="tl-clip-texto">
                         <b>{t.indice + 1}</b>
                         {t.clip.velocidad ? <i className="tl-clip-vel">{t.clip.velocidad}×</i> : null}
+                        {t.clip.claves ? <i className="tl-clip-vel tl-clip-anim" title="Tiene fotogramas clave">◆</i> : null}
                         {anchoClip > 120 &&
                           (t.clip.fuente !== 'principal' && nombreDe ? <> {nombreDe(t.clip.fuente)}</> : <> {tc(t.clip.entrada, false)}–{tc(t.clip.salida, false)}</>)}
                       </span>
@@ -1177,6 +1199,10 @@ export function TimelineEditor({
                         <Icon name="x" size={11} />
                       </button>
                     )}
+                    {t.clip.claves &&
+                      [...new Set(Object.values(t.clip.claves).flatMap((l) => (l ?? []).map((x) => x.f)))]
+                        .filter((f) => f >= t.clip.entrada - 0.001 && f <= t.clip.salida + 0.001)
+                        .map((f) => <span key={f} className="tl-clave" style={{ left: ((f - t.clip.entrada) / velocidadDe(t.clip)) * pps }} />)}
                     <span className="tl-asa derecha" onPointerDown={(e) => recortar(e, t.clip.id, 'salida')} />
                   </div>
                 )
@@ -1496,11 +1522,55 @@ export function TimelineEditor({
                     )}
                   </span>
                   {filas.map(([clave, nombre, min, max, paso, formato]) => {
-                const valor = ajustesDe(clipElegido.clip)[clave]
+                const valor = ajustesEn(clipElegido.clip, fuenteEnCabezal)[clave]
+                const lista = esClave(clave) ? (clipElegido.clip.claves?.[clave] ?? []) : []
+                const aqui = esClave(clave) ? claveEn(clipElegido.clip, clave, fuenteEnCabezal) : undefined
+                // A qué segundo de la timeline cae una clave (para saltar a ella).
+                const aTimeline = (f: number) => clipElegido.inicio + (f - clipElegido.clip.entrada) / velocidadDe(clipElegido.clip)
+                const anterior = [...lista].reverse().find((x) => x.f < fuenteEnCabezal - 0.02)
+                const siguiente = lista.find((x) => x.f > fuenteEnCabezal + 0.02)
                 return (
-                  <label key={clave} className="tl-ajuste">
+                  <label key={clave} className={`tl-ajuste ${lista.length ? 'con-claves' : ''}`}>
                     <span>
-                      {nombre} <b>{formato(valor)}</b>
+                      <span className="tl-ajuste-nombre">
+                        {nombre}
+                        {esClave(clave) && (
+                          <span className="ed-claves" onClick={(e) => e.preventDefault()}>
+                            {lista.length > 0 && (
+                              <button className="ed-clave-ir" disabled={!anterior} title="Ir a la clave anterior" aria-label={`Clave anterior de ${nombre}`} onClick={() => anterior && onBuscar(aTimeline(anterior.f))}>
+                                ‹
+                              </button>
+                            )}
+                            <button
+                              className={`ed-clave ${aqui ? 'is-on' : lista.length ? 'is-animado' : ''}`}
+                              title={
+                                aqui
+                                  ? `Quitar este fotograma clave de ${nombre}`
+                                  : lista.length
+                                    ? `Añadir un fotograma clave de ${nombre} en el cabezal`
+                                    : `Animar ${nombre}: pone un fotograma clave en el cabezal. Mueve el cabezal, cambia el valor y se anima solo.`
+                              }
+                              aria-label={aqui ? `Quitar la clave de ${nombre}` : `Poner una clave de ${nombre}`}
+                              aria-pressed={Boolean(aqui)}
+                              onClick={() =>
+                                historial.aplicar(
+                                  aqui
+                                    ? quitarClave(timeline, clipElegido.clip.id, clave, aqui.f)
+                                    : ponerClave(timeline, clipElegido.clip.id, clave, fuenteEnCabezal, valor)
+                                )
+                              }
+                            >
+                              ◆
+                            </button>
+                            {lista.length > 0 && (
+                              <button className="ed-clave-ir" disabled={!siguiente} title="Ir a la clave siguiente" aria-label={`Clave siguiente de ${nombre}`} onClick={() => siguiente && onBuscar(aTimeline(siguiente.f))}>
+                                ›
+                              </button>
+                            )}
+                          </span>
+                        )}
+                      </span>
+                      <b>{formato(valor)}</b>
                     </span>
                     <input
                       type="range"
@@ -1932,6 +2002,8 @@ export function TimelineEditor({
               <dd>Copiar, cortar y pegar en el cabezal</dd>
               <dt>Ctrl+D</dt>
               <dd>Duplicar el clip</dd>
+              <dt>◆</dt>
+              <dd>Junto a un ajuste del clip: pone un fotograma clave para animarlo</dd>
               <dt>Ctrl+clic</dt>
               <dd>Elegir varios (Ctrl+A, todos los clips)</dd>
               <dt>+ · −</dt>

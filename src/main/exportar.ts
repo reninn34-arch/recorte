@@ -33,7 +33,8 @@ import {
   timelineActiva,
   velocidadDe,
   matrizColor,
-  DESENFOQUE_CLIP
+  DESENFOQUE_CLIP,
+  exprClave
 } from '../shared/timeline'
 import type { OpcionesExport } from '../shared/api'
 import type { ClipSuggestion, Project } from '../shared/types'
@@ -286,7 +287,14 @@ export async function exportarTimeline(
     const a = ajustesDe(t.clip)
     // Con paneo, todo (zoom, acercamiento y desplazamiento) va en el zoompan: el centro se mueve en cada cuadro.
     // También al alejarse y con la cámara en mano (el encuadre se mueve en cada cuadro).
-    const paneo = Math.abs(a.panx) > 0.001 || Math.abs(a.pany) > 0.001 || a.acercar < -0.001 || a.temblor > 0.001
+    // Fotogramas clave: el zoom, el centro y el color salen como expresiones del segundo de la fuente en cada cuadro.
+    const cl = t.clip.claves
+    const Fz = `(${t.clip.entrada.toFixed(3)}+on/${fps}*${vel})`
+    const Ft = `(${t.clip.entrada.toFixed(3)}+t*${vel})`
+    const Z = cl?.zoom ? exprClave(cl.zoom, Fz) : a.zoom.toFixed(4)
+    const CX = cl?.cx ? exprClave(cl.cx, Fz) : a.cx.toFixed(4)
+    const CY = cl?.cy ? exprClave(cl.cy, Fz) : a.cy.toFixed(4)
+    const paneo = Math.abs(a.panx) > 0.001 || Math.abs(a.pany) > 0.001 || a.acercar < -0.001 || a.temblor > 0.001 || Boolean(cl?.zoom || cl?.cx || cl?.cy)
     const zoom =
       a.zoom > 1.001 && !paneo
         ? `crop=trunc(iw/${a.zoom}/2)*2:trunc(ih/${a.zoom}/2)*2:(iw-ow)*${a.cx.toFixed(3)}:(ih-oh)*${a.cy.toFixed(3)},`
@@ -300,16 +308,18 @@ export async function exportarTimeline(
     const vx = `(0.6*sin(2*PI*0.53*${S})+0.3*sin(2*PI*1.37*${S}+1.3)+0.1*sin(2*PI*3.1*${S}+2.1))`
     const vy = `(0.6*sin(2*PI*0.41*${S}+0.7)+0.3*sin(2*PI*1.13*${S}+2.4)+0.1*sin(2*PI*2.7*${S}+0.4))`
     const lento = paneo
-      ? `,scale=${ancho * 2}:${alto * 2},zoompan=z='max(1,${a.zoom.toFixed(4)}*(1+(${a.acercar.toFixed(4)})*on/${cuadros}))*${(1 + TEMBLOR_ZOOM * a.temblor).toFixed(4)}'` +
-        `:x='(iw-iw/zoom)*clip(${a.cx.toFixed(4)}+(${a.panx.toFixed(4)})*${E}+${k}*${vx},0,1)'` +
-        `:y='(ih-ih/zoom)*clip(${a.cy.toFixed(4)}+(${a.pany.toFixed(4)})*${E}+${k}*${vy},0,1)':d=1:s=${ancho}x${alto}:fps=${fps}`
+      ? `,scale=${ancho * 2}:${alto * 2},zoompan=z='max(1,(${Z})*(1+(${a.acercar.toFixed(4)})*on/${cuadros}))*${(1 + TEMBLOR_ZOOM * a.temblor).toFixed(4)}'` +
+        `:x='(iw-iw/zoom)*clip((${CX})+(${a.panx.toFixed(4)})*${E}+${k}*${vx},0,1)'` +
+        `:y='(ih-ih/zoom)*clip((${CY})+(${a.pany.toFixed(4)})*${E}+${k}*${vy},0,1)':d=1:s=${ancho}x${alto}:fps=${fps}`
       : a.acercar > 0.001
         ? `,scale=${ancho * 2}:${alto * 2},zoompan=z='1+${a.acercar.toFixed(4)}*on/${cuadros}':x='(iw-iw/zoom)*${a.cx.toFixed(3)}':y='(ih-ih/zoom)*${a.cy.toFixed(3)}':d=1:s=${ancho}x${alto}:fps=${fps}`
         : ''
     const color =
-      a.brillo !== 0 || a.contraste !== 1 || a.saturacion !== 1
-        ? `,eq=brightness=${a.brillo.toFixed(3)}:contrast=${a.contraste.toFixed(3)}:saturation=${a.saturacion.toFixed(3)}`
-        : ''
+      cl?.brillo || cl?.contraste || cl?.saturacion
+        ? `,eq=brightness='${cl.brillo ? exprClave(cl.brillo, Ft) : a.brillo.toFixed(3)}':contrast='${cl.contraste ? exprClave(cl.contraste, Ft) : a.contraste.toFixed(3)}':saturation='${cl.saturacion ? exprClave(cl.saturacion, Ft) : a.saturacion.toFixed(3)}':eval=frame`
+        : a.brillo !== 0 || a.contraste !== 1 || a.saturacion !== 1
+          ? `,eq=brightness=${a.brillo.toFixed(3)}:contrast=${a.contraste.toFixed(3)}:saturation=${a.saturacion.toFixed(3)}`
+          : ''
     // Efectos del clip: sepia y tono (la misma matriz que el monitor), negativo y desenfoque.
     const M = matrizColor(a)
     const efectos =

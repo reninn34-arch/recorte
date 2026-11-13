@@ -30,7 +30,8 @@ import {
   type Timeline,
   timelineActiva,
   filtroColorCss,
-  DESENFOQUE_CLIP
+  DESENFOQUE_CLIP,
+  ajustesEn
 } from '../../../shared/timeline'
 import { useMusica, useSincronizar, useTamano, useVoces, type FuentesVista, type Historial, type Reproductor } from '../hooks/timeline'
 import type { Elegido } from './TimelineEditor'
@@ -83,7 +84,8 @@ export function Monitor({
   }, [clipActual?.id, clipActual?.mudo, reproductor.videoRef])
   // Zoom, encuadre, acercamiento y color del clip bajo el cabezal; en el render son crop,
   // zoompan y eq de FFmpeg.
-  const a = ajustesDe(clipActual)
+  // Con fotogramas clave, los ajustes son los de este instante.
+  const a = ubicado ? ajustesEn(clipActual, ubicado.tFuente) : ajustesDe(clipActual)
   const largoClip = ubicado ? ubicado.fin - ubicado.inicio : 1
   const enClip = ubicado ? reproductor.tiempo - ubicado.inicio : 0
   // La cámara del clip: zoom, acercamiento lento y paneo (el punto hacia el que se acerca se desplaza).

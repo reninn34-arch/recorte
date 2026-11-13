@@ -339,5 +339,51 @@ assert.ok(Math.abs(centro6(1.7) - centro6(1.4)) > 40, 'en el corte la capa salta
   console.log('efectos de clip (sepia, tono, negativo, desenfoque) iguales en el MP4; looks y ops del agente ✓')
 }
 
+// Fotogramas clave: el encuadre que viaja de un lado al otro y el brillo que baja salen en el MP4 como en el monitor.
+{
+  const { ajustarClip, ajustesEn, dividir, ponerClave, quitarClave, valorClave } = await import('../src/shared/timeline.ts')
+  const { aplicarOperaciones, validarOperaciones } = await import('../src/shared/chat.ts')
+  const dos = join(dir, 'dos.mp4')
+  ff(['-f', 'lavfi', '-i', 'color=c=0xC83232:s=320x360:d=2:r=30', '-f', 'lavfi', '-i', 'color=c=0x3232C8:s=320x360:d=2:r=30', '-filter_complex', 'hstack', '-c:v', 'libx264', '-pix_fmt', 'yuv444p', dos])
+  const p11 = { ...proyecto, source: { ...proyecto.source, path: dos, duration: 2 }, medios: [] }
+  const base = normalizarTimeline({ clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 2 }], textos: [] }, 2, {})
+  const centro = (ruta, t) => {
+    const r = spawnSync('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', ruta, '-frames:v', '1', '-vf', 'crop=40:40:300:160,scale=1:1:flags=area', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { encoding: 'buffer' })
+    return [...r.stdout.subarray(0, 3)]
+  }
+  // El encuadre va de la izquierda (rojo) a la derecha (azul) con zoom 2.
+  let viaja = ajustarClip(base, 'c1', { zoom: 2 })
+  viaja = ponerClave(ponerClave(viaja, 'c1', 'cx', 0, 0), 'c1', 'cx', 2, 1)
+  assert.ok(Math.abs(valorClave(viaja.clips[0].claves.cx, 1) - 0.5) < 0.001, 'a mitad de camino, el centro está en medio')
+  assert.ok(Math.abs(ajustesEn(viaja.clips[0], 0.5).cx - 0.15625) < 0.001, 'entre dos claves cambia suave (acelera y frena)')
+  assert.equal(normalizarTimeline(viaja, 2, {}).clips[0].claves.cx.length, 2, 'las claves sobreviven a guardar y abrir')
+  const rv = await exportarTimeline(p11, viaja, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-claves'))
+  assert.ok(rv.ok, rv.error)
+  const mp4 = join(dir, 'salidas-claves', 'timeline-prueba-original.mp4')
+  const [ini, fin] = [centro(mp4, 0.1), centro(mp4, 1.9)]
+  assert.ok(ini[0] > 150 && ini[2] < 90, `al empezar, el centro del cuadro es rojo (es ${ini})`)
+  assert.ok(fin[2] > 150 && fin[0] < 90, `al acabar, el centro del cuadro es azul (es ${fin})`)
+  // Dividir conserva las claves en los dos trozos (van pegadas al material).
+  const partida = dividir(viaja, 1)
+  assert.ok(partida.clips.length === 2 && partida.clips.every((c) => c.claves?.cx?.length === 2), 'dividir conserva las claves')
+  // El brillo que baja: al final, más oscuro.
+  const oscurece = ponerClave(ponerClave(base, 'c1', 'brillo', 0, 0), 'c1', 'brillo', 2, -0.3)
+  const ro = await exportarTimeline(p11, oscurece, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-claves2'))
+  assert.ok(ro.ok, ro.error)
+  const mp42 = join(dir, 'salidas-claves2', 'timeline-prueba-original.mp4')
+  const izq = (t) => {
+    const r = spawnSync('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', mp42, '-frames:v', '1', '-vf', 'crop=40:40:60:160,scale=1:1:flags=area', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { encoding: 'buffer' })
+    return r.stdout[0]
+  }
+  assert.ok(izq(0.1) - izq(1.9) > 40, `con el brillo de 0 a -0,3, el final es más oscuro (${izq(0.1)} → ${izq(1.9)})`)
+  // Quitar la última clave deja el ajuste fijo; y el agente las pone con la op «clave».
+  const sin = quitarClave(quitarClave(oscurece, 'c1', 'brillo', 0), 'c1', 'brillo', 2)
+  assert.equal(sin.clips[0].claves, undefined)
+  const ops = validarOperaciones([{ op: 'clave', clip: 1, parametro: 'zoom', en: 0, valor: 1 }, { op: 'clave', clip: 1, parametro: 'zoom', en: 1, valor: 1.4 }])
+  const hecho = aplicarOperaciones(base, ops, { duracionFuente: 2, medios: {} })
+  assert.equal(hecho.timeline.clips[0].claves?.zoom?.length, 2, `la op clave no se aplicó: ${JSON.stringify(hecho.fallos)}`)
+  console.log('fotogramas clave (encuadre y brillo) iguales en el MP4; se conservan al dividir y el agente los pone ✓')
+}
+
 rmSync(dir, { recursive: true, force: true })
 console.log('exportar: ok')

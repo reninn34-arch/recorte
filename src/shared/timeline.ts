@@ -32,6 +32,8 @@ export interface ClipTL {
   mudo?: boolean
   /** A qué velocidad va (0.25 a 4; sin ella, normal). En la timeline dura su tramo de la fuente entre la velocidad. */
   velocidad?: number
+  /** Fotogramas clave: el valor de un ajuste en ciertos segundos de la FUENTE; entre ellos cambia suave. */
+  claves?: ClavesClip
   /** Entra fundiéndose sobre el clip anterior, en estos segundos (0.1 a 1.5). */
   fundido?: number
   /** Cómo entra en esos segundos: barrido, zoom, desenfoque, destello, círculo (sin él, fundido). */
@@ -555,6 +557,7 @@ export function normalizarTimeline(entrada: unknown, duracionFuente: number, otr
       salida: s,
       ...(ajustes ? { ajustes } : {}),
       ...(c.mudo === true ? { mudo: true } : {}),
+      ...(normalizarClaves(c.claves) ? { claves: normalizarClaves(c.claves) } : {}),
       ...(typeof c.velocidad === 'number' && Number.isFinite(c.velocidad) && Math.abs(c.velocidad - 1) >= 0.005
         ? { velocidad: Math.round(pinza(c.velocidad, LIMITES_VELOCIDAD[0], LIMITES_VELOCIDAD[1]) * 100) / 100 }
         : {}),
@@ -781,6 +784,118 @@ export function ajustesDe(clip: ClipTL | undefined): Required<AjustesClip> {
     tono: clip?.ajustes?.tono ?? 0,
     invertir: clip?.ajustes?.invertir ?? 0
   }
+}
+
+// ===== Fotogramas clave: un ajuste del clip que cambia a lo largo del tiempo =====
+
+/** Los ajustes que se pueden animar con fotogramas clave (los que el MP4 puede cambiar cuadro a cuadro). */
+export const PARAMETROS_CLAVE = ['zoom', 'cx', 'cy', 'brillo', 'contraste', 'saturacion'] as const
+export type ParametroClave = (typeof PARAMETROS_CLAVE)[number]
+/** Un fotograma clave: en el segundo `f` de la fuente, el ajuste vale `v`. Van pegados al material: al recortar o dividir no se mueven. */
+export interface ClaveTL {
+  f: number
+  v: number
+}
+export type ClavesClip = Partial<Record<ParametroClave, ClaveTL[]>>
+export const MAX_CLAVES = 12
+/** Dos claves más cerca que esto son la misma (un cuadro a 30 fps). */
+const MISMA_CLAVE = 0.034
+
+function normalizarClaves(entrada: unknown): ClavesClip | undefined {
+  if (!entrada || typeof entrada !== 'object') return undefined
+  const salida: ClavesClip = {}
+  for (const p of PARAMETROS_CLAVE) {
+    const lista = (entrada as Record<string, unknown>)[p]
+    if (!Array.isArray(lista)) continue
+    const [min, max] = LIMITES_AJUSTES[p]
+    const puntos: ClaveTL[] = []
+    for (const x of [...lista].sort((a, b) => (a?.f ?? 0) - (b?.f ?? 0))) {
+      if (!x || typeof x.f !== 'number' || typeof x.v !== 'number' || !Number.isFinite(x.f) || !Number.isFinite(x.v)) continue
+      const punto = { f: Math.round(Math.max(0, x.f) * 1000) / 1000, v: Math.round(pinza(x.v, min, max) * 1000) / 1000 }
+      // Dos en el mismo cuadro: vale la última.
+      if (puntos.length && punto.f - puntos[puntos.length - 1].f < MISMA_CLAVE) puntos[puntos.length - 1] = punto
+      else puntos.push(punto)
+    }
+    if (puntos.length) salida[p] = puntos.slice(0, MAX_CLAVES)
+  }
+  return Object.keys(salida).length ? salida : undefined
+}
+
+/** El valor de una lista de claves en el segundo `f` de la fuente: quieto antes y después, suave entre dos. */
+export function valorClave(lista: ClaveTL[], f: number): number {
+  if (f <= lista[0].f) return lista[0].v
+  for (let i = 0; i < lista.length - 1; i++) {
+    const a = lista[i]
+    const b = lista[i + 1]
+    if (f < b.f) {
+      const k = (f - a.f) / (b.f - a.f)
+      return a.v + (b.v - a.v) * k * k * (3 - 2 * k)
+    }
+  }
+  return lista[lista.length - 1].v
+}
+
+/** Los ajustes de un clip en un segundo de su fuente: los fijos, con lo que digan sus fotogramas clave. */
+export function ajustesEn(clip: ClipTL | undefined, f: number): Required<AjustesClip> {
+  const a = ajustesDe(clip)
+  if (clip?.claves) for (const p of PARAMETROS_CLAVE) if (clip.claves[p]?.length) a[p] = valorClave(clip.claves[p]!, f)
+  return a
+}
+
+/**
+ * La misma curva como expresión de FFmpeg, con `F` = la expresión del segundo de la fuente (p. ej. `(2.5+on/30)`).
+ * Sale igual que `valorClave`: el MP4 se mueve como el monitor.
+ */
+export function exprClave(lista: ClaveTL[], F: string): string {
+  const n = (x: number) => (Math.round(x * 10000) / 10000).toString()
+  let e = n(lista[lista.length - 1].v)
+  for (let i = lista.length - 2; i >= 0; i--) {
+    const a = lista[i]
+    const b = lista[i + 1]
+    const k = `((${F}-${n(a.f)})/${n(b.f - a.f)})`
+    e = `if(lt(${F},${n(b.f)}),${n(a.v)}+(${n(b.v - a.v)})*${k}*${k}*(3-2*${k}),${e})`
+  }
+  return `if(lt(${F},${n(lista[0].f)}),${n(lista[0].v)},${e})`
+}
+
+function conClaves(c: ClipTL, claves: ClavesClip | undefined): ClipTL {
+  const { claves: _antes, ...resto } = c
+  const limpias = normalizarClaves(claves)
+  return limpias ? { ...resto, claves: limpias } : resto
+}
+
+/** Pone (o cambia) el fotograma clave de un ajuste en el segundo `f` de la fuente del clip. */
+export function ponerClave(tl: Timeline, id: string, parametro: ParametroClave, f: number, v: number): Timeline {
+  return {
+    ...tl,
+    clips: tl.clips.map((c) => {
+      if (c.id !== id) return c
+      const donde = pinza(f, c.entrada, c.salida)
+      const otras = (c.claves?.[parametro] ?? []).filter((x) => Math.abs(x.f - donde) >= MISMA_CLAVE)
+      if (otras.length >= MAX_CLAVES) return c
+      return conClaves(c, { ...(c.claves ?? {}), [parametro]: [...otras, { f: donde, v }] })
+    })
+  }
+}
+
+/** Quita el fotograma clave de un ajuste en el segundo `f` (o todos los de ese ajuste, sin `f`). */
+export function quitarClave(tl: Timeline, id: string, parametro: ParametroClave, f?: number): Timeline {
+  return {
+    ...tl,
+    clips: tl.clips.map((c) => {
+      if (c.id !== id || !c.claves?.[parametro]) return c
+      const quedan = f === undefined ? [] : c.claves[parametro]!.filter((x) => Math.abs(x.f - f) >= MISMA_CLAVE)
+      // Al quitar la última, el ajuste se queda con el valor que tenía ahí.
+      const fijo = quedan.length ? c : { ...c, ajustes: normalizarAjustes({ ...ajustesDe(c), [parametro]: c.claves[parametro]![0].v }) }
+      const { ajustes, ...sinAjustes } = fijo
+      return conClaves(ajustes ? fijo : (sinAjustes as ClipTL), { ...c.claves, [parametro]: quedan })
+    })
+  }
+}
+
+/** La clave de un ajuste que cae en el segundo `f` (dentro de un cuadro), si la hay. */
+export function claveEn(clip: ClipTL, parametro: ParametroClave, f: number): ClaveTL | undefined {
+  return clip.claves?.[parametro]?.find((x) => Math.abs(x.f - f) < MISMA_CLAVE)
 }
 
 // ===== Efectos de clip: color, sepia, tono, negativo y desenfoque (iguales en el monitor y en el MP4) =====
