@@ -4017,6 +4017,374 @@ def medir_equipo():
 
 
 # ---------------------------------------------------------------------------
+# Para los videos hechos con código (las plantillas 3D): las palabras con su tiempo, el ritmo de la voz,
+# la mezcla del sonido y la biblioteca de modelos 3D
+# ---------------------------------------------------------------------------
+
+def _sin_tildes(p):
+    import unicodedata
+    p = unicodedata.normalize('NFD', str(p).lower())
+    return re.sub(r'[^a-z0-9]+', '', ''.join(ch for ch in p if unicodedata.category(ch) != 'Mn'))
+
+
+def leer_palabras(ruta):
+    """Las palabras con su tiempo, de la transcripción de Recorte (vistazo/narracion-NN.json), de una lista
+    [{"w", "s", "e"}] o de lo que deja `kit.py palabras` ({"palabras": [{"p", "desde", "hasta"}]})."""
+    with open(ruta, encoding='utf-8-sig') as f:
+        d = json.load(f)
+    if isinstance(d, dict) and 'segments' in d:
+        return [{'p': w['text'].strip(), 'desde': float(w['start']), 'hasta': float(w['end'])}
+                for s in d['segments'] for w in s.get('words') or [] if str(w.get('text', '')).strip()]
+    lista = d.get('palabras', []) if isinstance(d, dict) else d
+    salida = []
+    for w in lista:
+        p = w.get('p') or w.get('w') or w.get('text') or w.get('word')
+        a = w.get('desde', w.get('s', w.get('start')))
+        b = w.get('hasta', w.get('e', w.get('end')))
+        if p and a is not None and b is not None:
+            salida.append({'p': str(p).strip(), 'desde': float(a), 'hasta': float(b)})
+    return salida
+
+
+def _frases(lista, pausa=0.55, largo=14):
+    """Agrupa las palabras en frases: corta en el punto, en una pausa larga o, si la frase ya es larga, en la coma."""
+    frases, ini = [], 0
+    for i, w in enumerate(lista):
+        fin = i == len(lista) - 1
+        hueco = 0 if fin else lista[i + 1]['desde'] - w['hasta']
+        n = i - ini + 1
+        if fin or re.search(r'[.?!…:;]["»”)]*$', w['p']) or hueco > pausa or (n >= largo and w['p'].endswith(',')):
+            trozo = lista[ini:i + 1]
+            frases.append({'texto': ' '.join(x['p'] for x in trozo), 'desde': trozo[0]['desde'],
+                           'hasta': trozo[-1]['hasta'], 'palabras': [ini, i]})
+            ini = i + 1
+    return frases
+
+
+def palabras(ruta, guion=None, desde=0.0, salida=None, pausa=0.55):
+    """Cada palabra con su segundo, lista para animar texto palabra por palabra al ritmo de la voz.
+
+    Con `guion` (el texto bien escrito, en un .txt/.md o entre comillas) se quedan SUS palabras, con su ortografía y
+    sus signos, y los tiempos de lo que se oye: la transcripción se equivoca en nombres y marcas, el guion no. Las
+    palabras del guion que no se oyen toman el hueco entre sus vecinas. `desde`: lo que se recortó del principio.
+    """
+    import difflib
+    oidas = leer_palabras(ruta)
+    if not oidas:
+        raise SystemExit(f'No hay palabras con tiempo en {ruta}.')
+    coinciden = len(oidas)
+    if guion:
+        texto = open(guion, encoding='utf-8-sig').read() if os.path.isfile(guion) else guion
+        texto = '\n'.join(l for l in texto.splitlines() if not l.lstrip().startswith('#'))
+        escritas = texto.split()
+        a = [_sin_tildes(w['p']) for w in oidas]
+        b = [_sin_tildes(w) for w in escritas]
+        tiempos = [None] * len(escritas)
+        # Alineación palabra a palabra (como la de dos secuencias de ADN): una palabra oída y una escrita se emparejan
+        # si se parecen («odontohaus» ~ «OdontoHouse»); las que sobran del guion quedan sin pareja.
+        n, m = len(a), len(b)
+        hueco_ = -0.5
+        cache = {}
+
+        def parecido(x, y):
+            if x == y:
+                return 2.0
+            k = (x, y)
+            if k not in cache:
+                cache[k] = 2.4 * difflib.SequenceMatcher(None, x, y).ratio() - 1.2
+            return cache[k]
+
+        puntos = [[0.0] * (m + 1) for _ in range(n + 1)]
+        for i in range(1, n + 1):
+            puntos[i][0] = i * hueco_
+        for j in range(1, m + 1):
+            puntos[0][j] = j * hueco_
+        for i in range(1, n + 1):
+            fila_, previa = puntos[i], puntos[i - 1]
+            for j in range(1, m + 1):
+                fila_[j] = max(previa[j - 1] + parecido(a[i - 1], b[j - 1]), previa[j] + hueco_, fila_[j - 1] + hueco_)
+        i, j, iguales = n, m, 0
+        while i > 0 and j > 0:
+            if puntos[i][j] == puntos[i - 1][j - 1] + parecido(a[i - 1], b[j - 1]):
+                tiempos[j - 1] = (oidas[i - 1]['desde'], oidas[i - 1]['hasta'])
+                iguales += a[i - 1] == b[j - 1]
+                i, j = i - 1, j - 1
+            elif puntos[i][j] == puntos[i - 1][j] + hueco_:
+                i -= 1
+            else:
+                j -= 1
+        # Un trozo largo del guion que no se oye (una nota, un título, una frase que no grabó) no va al video.
+        fuera, no_se_oyen, j = set(), [], 0
+        while j < m:
+            if tiempos[j] is None:
+                k = j
+                while k < m and tiempos[k] is None:
+                    k += 1
+                if k - j > 3:
+                    fuera.update(range(j, k))
+                    no_se_oyen.append(' '.join(escritas[j:k]))
+                j = k
+            else:
+                j += 1
+        escritas = [w for j, w in enumerate(escritas) if j not in fuera]
+        tiempos = [t for j, t in enumerate(tiempos) if j not in fuera]
+        n = len(escritas)
+        for j in range(n):
+            if tiempos[j] is not None:
+                continue
+            k = j
+            while k < n and tiempos[k] is None:
+                k += 1
+            t0 = tiempos[j - 1][1] if j > 0 else (tiempos[k][0] if k < n else 0.0)
+            t1 = tiempos[k][0] if k < n else t0 + 0.3 * (k - j)
+            paso = max(0.0, t1 - t0) / (k - j)
+            for m in range(j, k):
+                tiempos[m] = (t0 + paso * (m - j), t0 + paso * (m - j + 1))
+        lista = [{'p': w, 'desde': t[0], 'hasta': t[1]} for w, t in zip(escritas, tiempos)]
+        coinciden = iguales
+    else:
+        lista = oidas
+    for w in lista:
+        w['desde'] = round(max(0.0, w['desde'] - desde), 3)
+        w['hasta'] = round(max(w['desde'], w['hasta'] - desde), 3)
+    frases = _frases(lista, pausa)
+    if salida:
+        os.makedirs(os.path.dirname(os.path.abspath(salida)), exist_ok=True)
+        with open(salida, 'w', encoding='utf-8') as f:
+            json.dump({'palabras': lista, 'frases': frases}, f, ensure_ascii=False, indent=1)
+    return {'salida': salida, 'palabras': len(lista), 'frases': len(frases),
+            **({'del_guion_que_se_oyen': f'{coinciden} de {len(lista)}'} if guion else {}),
+            **({'del_guion_no_se_oye': [t[:120] for t in no_se_oyen]} if guion and no_se_oyen else {}),
+            'primeras': [f'[{f["desde"]:.2f}–{f["hasta"]:.2f}] {f["texto"]}' for f in frases[:4]],
+            'uso': 'Cada palabra aparece en su "desde"; cada frase es un momento de la animación (su texto arriba, '
+                   'con la palabra clave resaltada). Léelo desde la plantilla, no copies los tiempos a mano.'}
+
+
+def _silencios(audio, umbral_db=-35, minimo=0.2):
+    r = subprocess.run([FFMPEG, '-hide_banner', '-i', audio, '-af', f'silencedetect=n={umbral_db}dB:d={minimo}', '-f', 'null', '-'],
+                       capture_output=True, text=True, encoding='utf-8', errors='replace')
+    inicios = [float(x) for x in re.findall(r'silence_start: (-?[\d.]+)', r.stderr)]
+    finales = [float(x) for x in re.findall(r'silence_end: ([\d.]+)', r.stderr)]
+    return list(zip(inicios, finales + [None] * (len(inicios) - len(finales))))
+
+
+def ritmo(audio, ruta_palabras=None, pausa_max=0.35, velocidad='auto', objetivo=2.6, salida=None, salida_palabras=None):
+    """La voz grabada con un ritmo natural de video: acorta las pausas largas (sin tocar las palabras) y, si habla
+    lento, la acelera un poco sin cambiar el tono (como mucho ×1,15). Con las palabras, devuelve sus tiempos nuevos."""
+    info = probar(audio)
+    total = info['duracion']
+    if total <= 0:
+        raise SystemExit(f'No puedo leer el audio {audio}.')
+    lista = leer_palabras(ruta_palabras) if ruta_palabras else []
+    # Los tramos con voz: de las palabras si las hay (más fino), si no, de los silencios.
+    # Tras un punto se respira más que tras una coma: esa pausa queda en medio segundo.
+    pausa_frase = max(pausa_max, 0.5)
+    if lista:
+        habla = []  # [desde, hasta, ¿acaba una frase?]
+        for w in sorted(lista, key=lambda x: x['desde']):
+            permitida = pausa_frase if habla and habla[-1][2] else pausa_max
+            fin = bool(re.search(r'[.?!…]["»”)]*$', w['p']))
+            if habla and w['desde'] - habla[-1][1] <= permitida:
+                habla[-1][1] = max(habla[-1][1], w['hasta'])
+                habla[-1][2] = fin
+            else:
+                habla.append([w['desde'], w['hasta'], fin])
+    else:
+        habla, t = [], 0.0
+        for a, b in _silencios(audio, minimo=pausa_max):
+            if a > t:
+                habla.append([t, a, False])
+            t = b if b is not None else total
+        if t < total:
+            habla.append([t, total, False])
+    if not habla:
+        raise SystemExit('No oigo voz en ese audio.')
+    # Lo que se conserva: cada tramo de voz con aire a cada lado (la pausa larga queda en su medida).
+    tramos = []
+    for i, (a, b, _) in enumerate(habla):
+        antes = 0.15 if i == 0 else (pausa_frase if habla[i - 1][2] else pausa_max) / 2
+        despues = 0.35 if i == len(habla) - 1 else (pausa_frase if habla[i][2] else pausa_max) / 2
+        a = max(0.0, a - antes)
+        b = min(total, b + despues)
+        if tramos and a <= tramos[-1][1]:
+            tramos[-1][1] = max(tramos[-1][1], b)
+        else:
+            tramos.append([a, b])
+    dura_habla = sum(b - a for a, b, _ in habla)
+    por_seg = len(lista) / dura_habla if lista and dura_habla > 0 else None
+    if velocidad == 'auto':
+        # Solo se acelera una voz de verdad lenta, y poco: acelerada se oye apurada y falsa. Nunca se frena sola.
+        tempo = min(1.12, objetivo / por_seg) if por_seg and por_seg < objetivo - 0.3 else 1.0
+    else:
+        tempo = min(1.5, max(0.8, float(velocidad)))
+    salida = salida or os.path.splitext(audio)[0] + '-ritmo.wav'
+    os.makedirs(os.path.dirname(os.path.abspath(salida)), exist_ok=True)
+    partes = [f'[0:a]asplit={len(tramos)}' + ''.join(f'[e{i}]' for i in range(len(tramos)))] if len(tramos) > 1 else []
+    for i, (a, b) in enumerate(tramos):
+        fuente_ = f'[e{i}]' if len(tramos) > 1 else '[0:a]'
+        # Fundidos de 8 ms en cada unión: sin chasquidos.
+        partes.append(f'{fuente_}atrim={a:.4f}:{b:.4f},asetpts=PTS-STARTPTS,afade=t=in:d=0.008,'
+                      f'afade=t=out:st={max(0, b - a - 0.008):.4f}:d=0.008[t{i}]')
+    partes.append(''.join(f'[t{i}]' for i in range(len(tramos))) + f'concat=n={len(tramos)}:v=0:a=1'
+                  + (f',atempo={tempo:.4f}' if abs(tempo - 1) > 0.005 else '') + '[a]')
+    guion_filtro = os.path.splitext(salida)[0] + '.filtro.txt'
+    with open(guion_filtro, 'w', encoding='utf-8') as f:
+        f.write(';\n'.join(partes))
+    # FFmpeg 7+ lee el filtro de un archivo con `-/filter_complex`; los anteriores, con `-filter_complex_script`.
+    for opcion in ('-/filter_complex', '-filter_complex_script'):
+        r = subprocess.run([FFMPEG, '-y', '-v', 'error', '-i', audio, opcion, guion_filtro, '-map', '[a]',
+                            '-ar', '48000', salida], capture_output=True, text=True, encoding='utf-8', errors='replace')
+        if r.returncode == 0 or 'nrecognized option' not in r.stderr:
+            break
+    os.remove(guion_filtro)
+    if r.returncode != 0:
+        raise SystemExit(f'FFmpeg no pudo ajustar la voz: {r.stderr[-600:]}')
+
+    def nuevo(t):
+        acumulado = 0.0
+        for a, b in tramos:
+            if t < a:
+                return acumulado / tempo
+            if t <= b:
+                return (acumulado + t - a) / tempo
+            acumulado += b - a
+        return acumulado / tempo
+
+    res = {'salida': salida, 'antes': round(total, 2), 'despues': round(probar(salida)['duracion'], 2),
+           'pausas_acortadas': len(habla) - 1,
+           'tempo': round(tempo, 3)}
+    if por_seg:
+        res['palabras_por_segundo'] = f'{por_seg:.2f} → {por_seg * tempo:.2f}'
+    if lista:
+        for w in lista:
+            w['desde'], w['hasta'] = round(nuevo(w['desde']), 3), round(nuevo(w['hasta']), 3)
+        salida_palabras = salida_palabras or os.path.splitext(salida)[0] + '-palabras.json'
+        with open(salida_palabras, 'w', encoding='utf-8') as f:
+            json.dump({'palabras': lista, 'frases': _frases(lista)}, f, ensure_ascii=False, indent=1)
+        res['palabras'] = salida_palabras
+    res['uso'] = ('Esta es la voz del video y estos sus tiempos. Si pasaste un guion a `palabras`, vuelve a correrlo con '
+                  'las palabras nuevas para tener la ortografía del guion con los tiempos de esta voz.')
+    return res
+
+
+def mezclar(ruta_mezcla):
+    """Pone el sonido a un video hecho con código (HyperFrames, Three.js…): la voz, la música que baja sola cuando
+    hay voz y los efectos de sonido de Recorte, cada uno en su segundo. La imagen no se vuelve a codificar.
+
+    mezcla.json: {"video": "salida/render.mp4", "salida": "salida/final.mp4",
+                  "voz": {"archivo": "voz/voz-ritmo.wav", "en": 0},
+                  "musica": {"archivo": "medios/x.mp3", "volumen": 0.18},
+                  "sonidos": [{"sonido": "pop", "en": 1.2, "volumen": 0.5}],
+                  "audio_del_video": false}
+    """
+    with open(ruta_mezcla, encoding='utf-8-sig') as f:
+        m = json.load(f)
+    base = os.path.dirname(os.path.abspath(ruta_mezcla))
+    ruta = lambda p: p if os.path.isabs(p) else os.path.join(base, p)
+    video = ruta(m['video'])
+    info = probar(video)
+    dur = info['duracion']
+    if dur <= 0:
+        raise SystemExit(f'No puedo leer el video {m["video"]}.')
+    salida = ruta(m.get('salida', 'salida/final.mp4'))
+    if os.path.abspath(salida) == os.path.abspath(video):
+        raise SystemExit('La salida tiene que ser otro archivo que el video.')
+    os.makedirs(os.path.dirname(salida), exist_ok=True)
+    entradas, partes, pistas = ['-i', video], [], []
+    voz = m.get('voz')
+    musica_ = m.get('musica')
+    if voz:
+        entradas += ['-i', ruta(voz['archivo'])]
+        n = sum(1 for x in entradas if x == '-i') - 1
+        partes.append(f'[{n}:a]aresample=48000,aformat=channel_layouts=stereo,volume={float(voz.get("volumen", 1))},'
+                      f'adelay={int(float(voz.get("en", 0)) * 1000)}:all=1' + (',asplit=2[voz][vozsc]' if musica_ else '[voz]'))
+        pistas.append('[voz]')
+    if musica_:
+        entradas += ['-stream_loop', '-1', '-i', ruta(musica_['archivo'])]
+        n = sum(1 for x in entradas if x == '-i') - 1
+        en = float(musica_.get('en', 0))
+        fundido = float(musica_.get('fundido', 1.5))
+        largo = max(0.1, dur - en)
+        partes.append(f'[{n}:a]aresample=48000,aformat=channel_layouts=stereo,atrim=0:{largo:.3f},asetpts=PTS-STARTPTS,'
+                      f'volume={float(musica_.get("volumen", 0.18 if voz else 0.8))},'
+                      f'afade=t=out:st={max(0, largo - fundido):.3f}:d={fundido},adelay={int(en * 1000)}:all=1[mus0]')
+        if voz:
+            # La música se agacha cuando habla la voz y vuelve en las pausas.
+            partes.append('[mus0][vozsc]sidechaincompress=threshold=0.04:ratio=5:attack=30:release=450[mus]')
+        else:
+            partes.append('[mus0]anull[mus]')
+        pistas.append('[mus]')
+    for i, s in enumerate(m.get('sonidos') or []):
+        archivo = sonido_incluido(s['sonido']) if s.get('sonido') else ruta(s.get('archivo', ''))
+        if not os.path.isfile(archivo):
+            raise SystemExit(f'Sonido {i + 1}: no encuentro «{s.get("sonido") or s.get("archivo")}» (mira `kit.py sonidos`).')
+        entradas += ['-i', archivo]
+        n = sum(1 for x in entradas if x == '-i') - 1
+        partes.append(f'[{n}:a]aresample=48000,aformat=channel_layouts=stereo,volume={float(s.get("volumen", 0.5))},'
+                      f'adelay={int(float(s.get("en", 0)) * 1000)}:all=1[s{i}]')
+        pistas.append(f'[s{i}]')
+    if m.get('audio_del_video') and info['audio']:
+        partes.append('[0:a]aresample=48000,aformat=channel_layouts=stereo[orig]')
+        pistas.append('[orig]')
+    if not pistas:
+        raise SystemExit('La mezcla no tiene voz, música ni sonidos.')
+    partes.append(''.join(pistas) + f'amix=inputs={len(pistas)}:normalize=0:dropout_transition=0,'
+                  'alimiter=limit=0.95:level=false,apad[a]')
+    r = subprocess.run([FFMPEG, '-y', '-v', 'error', *entradas, '-filter_complex', ';'.join(partes), '-map', '0:v', '-map', '[a]',
+                        '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-t', f'{dur:.3f}', '-movflags', '+faststart', salida],
+                       capture_output=True, text=True, encoding='utf-8', errors='replace')
+    if r.returncode != 0:
+        raise SystemExit(f'FFmpeg no pudo mezclar: {r.stderr[-800:]}')
+    return {'salida': os.path.relpath(salida, base), 'duracion': round(probar(salida)['duracion'], 2),
+            'pistas': len(pistas), 'sonidos': len(m.get('sonidos') or [])}
+
+
+def carpeta_modelos_3d():
+    """La biblioteca de modelos 3D que Recorte dejó en la carpeta de trabajo (los de videos anteriores)."""
+    aqui = os.path.dirname(os.path.abspath(__file__))
+    try:
+        with open(os.path.join(aqui, 'biblioteca.json'), encoding='utf-8') as f:
+            ruta = json.load(f).get('modelos')
+        if ruta and os.path.isdir(ruta):
+            return ruta
+    except (OSError, ValueError):
+        pass
+    for r in (os.path.join(os.path.dirname(aqui), 'modelos-3d'), os.path.join(aqui, 'modelos-3d')):
+        if os.path.isdir(r):
+            return r
+    return None
+
+
+def modelos(buscar=None):
+    """Los modelos 3D guardados de videos anteriores: antes de modelar algo, mira si ya está."""
+    base = carpeta_modelos_3d()
+    lista = []
+    for n in sorted(os.listdir(base)) if base else []:
+        ficha = os.path.join(base, n, 'ficha.json')
+        if not os.path.isfile(ficha) or not os.path.isfile(os.path.join(base, n, 'modelo.js')):
+            continue
+        try:
+            with open(ficha, encoding='utf-8-sig') as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            continue
+        item = {'id': n, 'nombre': d.get('nombre', n), 'que_es': d.get('descripcion', ''), 'etiquetas': d.get('etiquetas', []),
+                'opciones': d.get('opciones', {}), 'estados': d.get('estados', []),
+                'archivo': os.path.relpath(os.path.join(base, n, 'modelo.js'), os.getcwd())}
+        vista = os.path.join(base, n, 'vista.jpg')
+        if os.path.isfile(vista):
+            item['vista'] = os.path.relpath(vista, os.getcwd())
+        lista.append(item)
+    if buscar:
+        q = _sin_tildes(buscar)
+        lista = [x for x in lista if q in _sin_tildes(' '.join([x['id'], x['nombre'], x['que_es'], *map(str, x['etiquetas'])]))]
+    return {'modelos': lista,
+            'uso': 'Copia el modelo.js a tu composición e impórtalo: `crear(THREE, opciones)` devuelve el grupo y '
+                   '`animar(grupo, t, estado)` lo mueve. Si lo mejoras o haces uno nuevo, déjalo en modelos-3d/<id>/ con su '
+                   'ficha.json y una vista.jpg: Recorte lo guarda para los siguientes videos (lee modelos-3d/LEEME.md).'}
+
+
+# ---------------------------------------------------------------------------
 # La biblioteca de música libre que trae Recorte (CC0: se puede usar en cualquier video, sin dar crédito)
 # ---------------------------------------------------------------------------
 
@@ -4169,8 +4537,31 @@ def main():
     rc.add_argument('--tolerancia', type=float)
     rc.add_argument('--modo', choices=['auto', 'liso', 'modelo'], default='auto',
                     help='auto: fondo liso si lo es y si no el modelo (se baja una vez, 178 MB)')
+    pa = sub.add_parser('palabras', help='cada palabra de la voz con su segundo (con la ortografía del guion)')
+    pa.add_argument('transcripcion', help='vistazo/narracion-NN.json o el -palabras.json de `ritmo`')
+    pa.add_argument('--guion', help='el texto bien escrito (.txt/.md o entre comillas)')
+    pa.add_argument('--desde', type=float, default=0.0, help='segundos recortados del principio')
+    pa.add_argument('--salida', default='plantilla/palabras.json')
+    ri = sub.add_parser('ritmo', help='la voz grabada con ritmo de video: pausas cortas y, si va lenta, un poco más rápida')
+    ri.add_argument('audio')
+    ri.add_argument('--palabras', help='sus palabras con tiempo (vistazo/narracion-NN.json): mide mejor y las reajusta')
+    ri.add_argument('--pausa', type=float, default=0.35, help='la pausa más larga que se deja (s)')
+    ri.add_argument('--velocidad', default='auto', help='auto (≈2,6 palabras/s) o un factor: 1.08')
+    ri.add_argument('--salida', default='voz/voz-ritmo.wav')
+    mz = sub.add_parser('mezclar', help='voz, música y efectos de sonido sobre un video hecho con código')
+    mz.add_argument('mezcla', help='mezcla.json (lee la ayuda: `kit.py mezclar --help` o RECETA.md)')
+    mo = sub.add_parser('modelos', help='los modelos 3D guardados de videos anteriores')
+    mo.add_argument('--buscar')
     x = p.parse_args()
-    if x.orden == 'voz':
+    if x.orden == 'palabras':
+        print(json.dumps(palabras(x.transcripcion, x.guion, x.desde, x.salida), ensure_ascii=False))
+    elif x.orden == 'ritmo':
+        print(json.dumps(ritmo(x.audio, x.palabras, x.pausa, x.velocidad, salida=x.salida), ensure_ascii=False))
+    elif x.orden == 'mezclar':
+        print(json.dumps(mezclar(x.mezcla), ensure_ascii=False))
+    elif x.orden == 'modelos':
+        print(json.dumps(modelos(x.buscar), ensure_ascii=False))
+    elif x.orden == 'voz':
         voz(x.archivo, nueva=x.nueva)
     elif x.orden in ('imagen', 'clip'):
         # Un clip puede tardar varios minutos en Flow.

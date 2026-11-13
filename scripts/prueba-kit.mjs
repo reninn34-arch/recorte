@@ -462,6 +462,49 @@ try {
   if (conSala.status === 0) throw new Error('Una imagen de un solo color entera no tiene sujeto: debía decirlo')
   console.log(`recortes: el sujeto queda solo (${rec.ancho}×${rec.alto}), con sus huecos vacíos, y sin sujeto lo dice ✓`)
   console.log(`piezas de documental: título, etiqueta, palabras, objeto con giro 3D (${izq} frente a ${der}) y apiladas ✓`)
+
+  // Videos hechos con código: una «voz» de pitidos (una palabra cada uno) con una pausa larga tras el punto.
+  const oidas = [
+    ['ola', 0.5, 0.8], ['odontohaus', 0.9, 1.4], ['cuida', 1.5, 1.8], ['tu', 1.85, 1.95], ['sonrisa.', 2.0, 2.5],
+    ['ven', 4.0, 4.3], ['hoy.', 4.4, 4.8]
+  ]
+  const tonos = oidas.map(([, a, b]) => `between(t,${a},${b})`).join('+')
+  correr('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', `aevalsrc='0.5*sin(2*PI*300*t)*(${tonos})':d=5.4:s=48000`, 'voz-cruda.wav'], trabajo)
+  writeFileSync(join(trabajo, 'voz-cruda.json'), JSON.stringify({ segments: [{ start: 0.5, end: 4.8, text: '', words: oidas.map(([text, start, end]) => ({ text, start, end })) }] }))
+  const rit = json(correr(python, ['kit/kit.py', 'ritmo', 'voz-cruda.wav', '--palabras', 'voz-cruda.json'], trabajo))
+  const nuevas = JSON.parse(readFileSync(join(trabajo, rit.palabras), 'utf8')).palabras
+  const hueco = nuevas[5].desde - nuevas[4].hasta
+  // 0,35 s antes de la primera palabra se quedan en 0,15; la pausa de 1,5 s tras el punto, en 0,5.
+  if (!(Math.abs(hueco - 0.5) < 0.03 && Math.abs(nuevas[0].desde - 0.15) < 0.03 && rit.tempo === 1 && Math.abs(rit.despues - (5.4 - 0.35 - 1.0 - 0.25)) < 0.08))
+    throw new Error(`El ritmo de la voz no quedó bien: ${JSON.stringify(rit)} · hueco ${hueco}`)
+  console.log(`ritmo de la voz: ${rit.antes} → ${rit.despues} s, la pausa tras el punto queda en ${hueco.toFixed(2)} s y las palabras se reajustan ✓`)
+  writeFileSync(join(trabajo, 'guion.txt'), '# Título que no se dice\nNotas del guion que no se graban nunca.\n\nHola, OdontoHouse cuida tu sonrisa. Ven hoy.\n', 'utf8')
+  const pal = json(correr(python, ['kit/kit.py', 'palabras', rit.palabras, '--guion', 'guion.txt'], trabajo))
+  const alineadas = JSON.parse(readFileSync(join(trabajo, 'plantilla', 'palabras.json'), 'utf8'))
+  const textos = alineadas.palabras.map((w) => w.p).join(' ')
+  if (textos !== 'Hola, OdontoHouse cuida tu sonrisa. Ven hoy.' || alineadas.frases.length !== 2 || !pal.del_guion_no_se_oye?.length
+      || Math.abs(alineadas.palabras[5].desde - nuevas[5].desde) > 0.001)
+    throw new Error(`Las palabras no salieron del guion con los tiempos de la voz: ${textos} · ${JSON.stringify(pal)}`)
+  console.log(`palabras: las del guion («${alineadas.palabras[1].p}»), con los tiempos de la voz, en ${alineadas.frases.length} frases y sin las notas ✓`)
+  correr('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=0x0e2a52:s=270x480:d=4.5:r=12', '-pix_fmt', 'yuv420p', 'salida/render.mp4'], trabajo)
+  writeFileSync(join(trabajo, 'mezcla.json'), JSON.stringify({
+    video: 'salida/render.mp4', salida: 'salida/con-sonido.mp4', voz: { archivo: rit.salida, en: 0 },
+    musica: { archivo: 'musica.wav', volumen: 0.2 }, sonidos: [{ sonido: 'pop', en: 1.0 }]
+  }))
+  const mez = json(correr(python, ['kit/kit.py', 'mezclar', 'mezcla.json'], trabajo))
+  const conSonido = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,codec_name', '-of', 'csv=p=0', 'salida/con-sonido.mp4'], { cwd: trabajo, encoding: 'utf8' }).stdout
+  if (!(Math.abs(mez.duracion - 4.5) < 0.1 && mez.pistas === 3 && /h264,video/.test(conSonido) && /aac,audio/.test(conSonido)))
+    throw new Error(`La mezcla no salió bien: ${JSON.stringify(mez)} · ${conSonido}`)
+  console.log(`mezcla: voz, música y un «pop» sobre el video sin recodificar la imagen (${mez.duracion} s) ✓`)
+  mkdirSync(join(trabajo, 'modelos-3d'), { recursive: true })
+  for (const n of readdirSync(join(raiz, 'python', 'modelos-3d')).filter((n) => existsSync(join(raiz, 'python', 'modelos-3d', n, 'modelo.js')))) {
+    mkdirSync(join(trabajo, 'modelos-3d', n), { recursive: true })
+    for (const f of readdirSync(join(raiz, 'python', 'modelos-3d', n))) copyFileSync(join(raiz, 'python', 'modelos-3d', n, f), join(trabajo, 'modelos-3d', n, f))
+  }
+  const mods = json(correr(python, ['kit/kit.py', 'modelos', '--buscar', 'odontologia'], trabajo))
+  if (!(mods.modelos.length === 1 && mods.modelos[0].id === 'sonrisa' && mods.modelos[0].vista))
+    throw new Error(`La biblioteca de modelos no encontró la sonrisa: ${JSON.stringify(mods)}`)
+  console.log('modelos 3D: «odontologia» encuentra la sonrisa, con su vista ✓')
   console.log('prueba kit: ok')
 } catch (error) {
   console.error(`prueba kit: error · ${error instanceof Error ? error.message : String(error)}`)

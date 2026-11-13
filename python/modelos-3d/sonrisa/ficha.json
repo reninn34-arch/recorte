@@ -1,0 +1,8 @@
+{
+ "nombre": "Sonrisa de caricatura",
+ "descripcion": "Boca con labios gorditos y brillantes, interior oscuro y dientes que asoman al abrirla. Muestra problemas en un diente (mancha, roto, desgastado, que falta) y el brillo blanco del después.",
+ "etiquetas": ["boca", "dientes", "sonrisa", "dental", "odontología", "labios", "diente"],
+ "opciones": {"colorLabios": "#e46f7f", "colorDiente": "#fbfaf4", "colorInterior": "#4a1020", "dientes": 8, "ancho": 1.2},
+ "estados": ["apertura 0-1", "sonrisa 0-1", "mancha <n>", "roto <n>", "desgaste <n>", "espacio <n>", "brillo 0-1", "respira"],
+ "origen": "Recorte"
+}

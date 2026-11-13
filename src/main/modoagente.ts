@@ -23,6 +23,7 @@ import { agenteConHerramientas, SesionPerdida, turnoAgente } from './turnoagente
 import { mediosDisponibles } from './mediosagente'
 import { buscarPython, rutaScriptPython, transcribirArchivo } from './transcribir'
 import { PIEZAS_ENCIMA } from './recetaeditor'
+import { traerModelos } from './modelos3d'
 
 /**
  * El modo agente (ver shared/modoagente.ts). Cada creación en este modo tiene su carpeta
@@ -359,6 +360,14 @@ function seccionPlantilla(c: Creacion, trabajo: string): string {
   const estilo = estiloPorId(c.estilo)
   if (!estilo.plantilla) return ''
   const hay = existsSync(join(trabajo, 'plantilla'))
+  let modelos: string[] = []
+  try {
+    traerModelos(trabajo)
+    modelos = readdirSync(join(trabajo, 'modelos-3d')).filter((n) => existsSync(join(trabajo, 'modelos-3d', n, 'modelo.js')))
+  } catch {
+    // Sin biblioteca, el agente modela lo que necesite.
+  }
+  const narracion = c.adjuntos.some((a) => a.tipo === 'audio')
   return `## La plantilla de «${estilo.nombre}»
 Este tipo de video tiene su estilo visual propio y NO se hace con el kit (el kit no hace 3D): se hace con código
 (HyperFrames con Three.js) dentro de \`plantilla/\`, en esta carpeta.
@@ -374,6 +383,28 @@ próximo video solo cambie los datos. Cuando el video salga bien, Recorte la gua
   }
 Aquí no hay receta del kit: los textos van dentro de la animación (en \`plantilla/momentos.json\`, para cambiarlos fácil).
 Renderiza a \`salida/\` en primer plano (nada de renders en segundo plano) y comprueba fotogramas antes de entregar.
+
+### Las piezas afinadas para este video (úsalas: no las rehagas)
+- **Modelos 3D** (\`modelos-3d/\`${modelos.length ? `: ${modelos.join(', ')}` : ''}): antes de modelar un objeto, \`python kit/kit.py modelos --buscar <tema>\`
+  y mira su \`vista.jpg\`. Si está, úsalo (cámbiale los colores con sus opciones); si no está o le falta algo, hazlo o
+  mejóralo en \`modelos-3d/<id>/\` con el formato de \`modelos-3d/LEEME.md\` y Recorte lo guarda para los siguientes.
+${
+    narracion
+      ? `- **El ritmo de la voz**: \`python kit/kit.py ritmo vistazo/narracion-01.wav --palabras vistazo/narracion-01.json\` deja
+  \`voz/voz-ritmo.wav\` con las pausas largas acortadas (sin tocar las palabras) y sus tiempos nuevos. Úsala como la voz
+  del video (en este tipo de video sí se acortan las pausas de dentro: es lo único que se le toca a su narración). No la
+  aceleres más de lo que hace sola: acelerada suena apurada y falsa.
+- **Las palabras con su segundo**: \`python kit/kit.py palabras voz/voz-ritmo-palabras.json --guion <guion corregido>\` deja
+  \`plantilla/palabras.json\` con cada palabra (con la ortografía del guion, no la de la transcripción) y las frases.
+  Escribe primero el guion corregido (lo que dice, con nombres y marcas bien escritos) en un .txt. La plantilla
+  LEE ese archivo para el texto palabra por palabra y los momentos: no copies tiempos a mano.`
+      : `- **Las palabras con su segundo**: si generas la voz, transcríbela o usa los tiempos de \`kit.py voz\`; con un .json de
+  palabras, \`python kit/kit.py palabras <json> --guion <guion.txt>\` deja \`plantilla/palabras.json\` para la plantilla.`
+  }
+- **El sonido**: renderiza la animación SIN audio y luego \`python kit/kit.py mezclar mezcla.json\` le pone la voz, la
+  música (baja sola cuando hay voz) y los efectos de sonido de Recorte (\`kit.py sonidos\`): un «pop» o «swish» cuando
+  entra un ícono o una tarjetita, un «whoosh» en el cambio de ambiente, siempre por debajo de la voz. El formato está en
+  «Videos hechos con código» de \`kit/RECETA.md\`.
 
 `
 }

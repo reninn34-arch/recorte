@@ -24,6 +24,28 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.46',
+    fecha: '2026-11-13',
+    resumen: '«Explicativo 3D» trae piezas afinadas: la voz con ritmo natural, el texto palabra por palabra al segundo, el sonido y modelos 3D que se guardan.',
+    novedades: [
+      {
+        icono: 'velocidad',
+        titulo: 'Tu voz, con ritmo de video',
+        texto: 'Con tu narración grabada, el agente acorta las pausas largas sin tocar tus palabras ni tu tono, y cada palabra en pantalla sale justo cuando la dices, escrita como en tu guion (los nombres y las marcas, bien escritos).'
+      },
+      {
+        icono: 'music',
+        titulo: 'El sonido del video 3D',
+        texto: 'La música baja sola cuando hablas y entran los efectos de Recorte en su momento: un «pop» cuando aparece un ícono, un «whoosh» al cambiar de ambiente.'
+      },
+      {
+        icono: 'cubo',
+        titulo: 'Modelos 3D que se guardan',
+        texto: 'Lo que el agente modela (una sonrisa, una muela, un frasco) queda guardado y el siguiente video lo reutiliza. Ya viene una sonrisa 3D que abre la boca y muestra un diente manchado, roto o que falta, y el brillo blanco del después.'
+      }
+    ]
+  },
+  {
     version: '0.1.45',
     fecha: '2026-11-13',
     resumen: 'El editor suma varias pistas de video, el sonido de cada clip y el desenfoque animado de las capas.',

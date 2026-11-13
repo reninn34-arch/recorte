@@ -374,3 +374,23 @@ Si el usuario eligió generar imágenes o clips (lo dice AGENTS.md), Recorte los
 - Pide varias a la vez con `&` o en paralelo si las necesitas todas: Recorte las reparte entre sus cuentas.
 - Úsalas en la receta como cualquier archivo: `{"tipo": "foto", "archivo": "medios/img-….png", …}` o `{"tipo": "video", "archivo": "medios/clip-….mp4", …}`.
 - Si responde que el usuario no eligió generar, o falla, sigue con lo que tienes y dilo en el resumen.
+
+## Videos hechos con código (plantillas 3D, HyperFrames, Three.js)
+Cuando el video no sale de una receta (el «Explicativo 3D», por ejemplo), el kit igual pone las piezas finas:
+- `python kit/kit.py ritmo <voz.wav> --palabras <transcripción.json>`: la voz grabada con ritmo de video. Deja las
+  pausas en 0,35 s (0,5 s tras un punto) sin tocar las palabras y, solo si habla muy lento, la acelera un poco sin
+  cambiar el tono. Deja `voz/voz-ritmo.wav` y `voz/voz-ritmo-palabras.json` (los tiempos nuevos).
+- `python kit/kit.py palabras <json de palabras> --guion guion.txt [--salida plantilla/palabras.json]`: cada palabra
+  con su `desde`/`hasta` y las `frases` (texto, desde, hasta y qué palabras abarca). Las palabras son las del guion
+  (bien escritas); los tiempos, los de la voz. Lo que el guion tiene y no se oye se avisa y no entra.
+- `python kit/kit.py modelos [--buscar diente]`: los modelos 3D guardados (lee `modelos-3d/LEEME.md`).
+- `python kit/kit.py mezclar mezcla.json`: el sonido sobre el video ya renderizado (la imagen no se toca):
+
+      {"video": "salida/render.mp4", "salida": "salida/final.mp4",
+       "voz": {"archivo": "voz/voz-ritmo.wav", "en": 0},
+       "musica": {"archivo": "medios/<pista>.mp3", "volumen": 0.18},
+       "sonidos": [{"sonido": "pop", "en": 2.4, "volumen": 0.5}, {"sonido": "whoosh", "en": 9.8, "volumen": 0.4}],
+       "audio_del_video": false}
+
+  La música baja sola mientras habla la voz y se funde al final; los efectos son los de `kit.py sonidos` (o
+  `"archivo"`). Pon cada efecto en el segundo en que entra lo que suena (el `desde` de su palabra en palabras.json).

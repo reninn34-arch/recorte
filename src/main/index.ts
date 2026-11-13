@@ -46,6 +46,7 @@ import { anotar, archivoEntregado, copiarEntrada, definirConectadas, LimiteUso, 
 import { prepararArchivos } from './archivos'
 import { clipsDelPlan, esAprobacion, MAX_CLIPS_GUION, pasoAnunciado } from '../shared/modoagente'
 import { estiloPorId } from '../shared/estilos'
+import { guardarModelos } from './modelos3d'
 import { atenderVoz } from './vozagente'
 import { proyectoDesdeReceta } from './recetaeditor'
 import { medirReferencia } from './estilo/referencia'
@@ -649,6 +650,7 @@ app.whenReady().then(() => {
         delete c.agente.pausa
         try {
           guardarPlantilla(c)
+          if (estiloPorId(c.estilo).plantilla) guardarModelos(join(creaciones.carpeta(c.id), 'trabajo'))
         } catch {
           // Si no se pudo guardar, el video igual está bien: la próxima vez la arma otra vez.
         }
