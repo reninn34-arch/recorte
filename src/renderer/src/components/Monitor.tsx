@@ -28,7 +28,9 @@ import {
   type SonidoTL,
   type TextoTL,
   type Timeline,
-  timelineActiva
+  timelineActiva,
+  filtroColorCss,
+  DESENFOQUE_CLIP
 } from '../../../shared/timeline'
 import { useMusica, useSincronizar, useTamano, useVoces, type FuentesVista, type Historial, type Reproductor } from '../hooks/timeline'
 import type { Elegido } from './TimelineEditor'
@@ -102,12 +104,8 @@ export function Monitor({
     clipPath: tr?.circulo != null ? `circle(${(tr.circulo * 75).toFixed(2)}% at 50% 50%)` : undefined,
     transformOrigin: cam.cx !== 0.5 || cam.cy !== 0.5 ? `${(cam.cx * 100).toFixed(3)}% ${(cam.cy * 100).toFixed(3)}%` : undefined,
     opacity: fundido < 1 ? fundido : undefined,
-    filter:
-      tr?.desenfoque
-        ? `blur(${tr.desenfoque.toFixed(1)}px) brightness(${(1 + a.brillo * 1.5).toFixed(3)}) contrast(${a.contraste}) saturate(${a.saturacion})`
-        : a.brillo !== 0 || a.contraste !== 1 || a.saturacion !== 1
-        ? `brightness(${(1 + a.brillo * 1.5).toFixed(3)}) contrast(${a.contraste}) saturate(${a.saturacion})`
-        : undefined
+    // El color y los efectos del clip (los mismos filtros que salen en el MP4) y, en una transición, su desenfoque.
+    filter: `${tr?.desenfoque ? `blur(${tr.desenfoque.toFixed(1)}px) ` : ''}${filtroColorCss(a)}`.trim() || undefined
   }
 
   // El cuadro del video final dentro del monitor (el video se ve con object-fit: contain).
@@ -118,6 +116,7 @@ export function Monitor({
   const ch = cw / proporcion
   // Profundidad de campo: el fondo (a profundidad 0) se desenfoca si el foco está más cerca.
   const fondoBorroso = desenfoqueDeCampo(a, 0)
+  if (a.desenfoque > 0.005) estiloImagen.filter = `${estiloImagen.filter ?? ''} blur(${(a.desenfoque * DESENFOQUE_CLIP * cw).toFixed(2)}px)`.trim()
   if (fondoBorroso > 0.005) estiloImagen.filter = `${estiloImagen.filter ?? ''} blur(${(fondoBorroso * DESENFOQUE_MAX * cw).toFixed(2)}px)`.trim()
   // El tamaño de letra sigue al de la exportación (una fracción del lado corto).
   const letra = Math.min(cw, ch) * (ch > cw ? 0.06 : 0.065) * 0.93

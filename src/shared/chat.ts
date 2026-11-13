@@ -41,7 +41,13 @@ import {
   timelineDesdeCortes,
   tramos,
   type PosicionTexto,
-  type Timeline
+  type Timeline,
+  cambiarPista,
+  cambiarVelocidad,
+  COLOR_NEUTRO,
+  LOOKS,
+  PISTAS,
+  type PistaId
 } from './timeline'
 import { INSTRUCCIONES_CRITERIO } from './gustos'
 import type { TranscriptSegment } from './types'
@@ -91,7 +97,9 @@ export type OperacionTL =
   | { op: 'borrar_sonido'; sonido_n: number }
   | { op: 'reconstruir'; cortes: { entrada: number; salida: number }[] }
   | { op: 'zoom'; clip?: number; zoom?: number; acercar?: number; cx?: number; cy?: number; panx?: number; pany?: number; temblor?: number; campo?: number; foco?: number }
-  | { op: 'color'; clip?: number; brillo?: number; contraste?: number; saturacion?: number }
+  | { op: 'color'; clip?: number; look?: string; brillo?: number; contraste?: number; saturacion?: number; desenfoque?: number; sepia?: number; tono?: number; invertir?: number }
+  | { op: 'velocidad'; clip: number; velocidad: number }
+  | { op: 'pista'; pista: PistaId; oculta?: boolean; bloqueada?: boolean }
   | { op: 'musica'; volumen?: number; ducking?: boolean }
   | { op: 'quitar_musica' }
   | { op: 'sonido_clip'; clip: number; sonido: boolean }
@@ -343,8 +351,21 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
         break
       }
       case 'color': {
-        const o2 = { op: 'color' as const, clip: num(x.clip) ?? undefined, brillo: num(x.brillo) ?? undefined, contraste: num(x.contraste) ?? undefined, saturacion: num(x.saturacion) ?? undefined }
-        if (o2.brillo !== undefined || o2.contraste !== undefined || o2.saturacion !== undefined) ops.push(o2)
+        // El color y los efectos del clip (lo que no venga no cambia); un `look` los pone todos de una vez.
+        const campos = (['brillo', 'contraste', 'saturacion', 'desenfoque', 'sepia', 'tono', 'invertir'] as const).filter((k) => num(x[k]) !== null)
+        const look = typeof x.look === 'string' && LOOKS.some((l) => l.id === x.look) ? x.look : undefined
+        if (campos.length || look) ops.push({ op: 'color', clip: num(x.clip) ?? undefined, ...(look ? { look } : {}), ...Object.fromEntries(campos.map((k) => [k, num(x[k])!])) })
+        break
+      }
+      case 'velocidad': {
+        const c = num(x.clip)
+        const v = num(x.velocidad)
+        if (c !== null && v !== null) ops.push({ op: 'velocidad', clip: c, velocidad: v })
+        break
+      }
+      case 'pista': {
+        if (typeof x.pista === 'string' && PISTAS.some((p) => p.id === x.pista) && (typeof x.oculta === 'boolean' || typeof x.bloqueada === 'boolean'))
+          ops.push({ op: 'pista', pista: x.pista as PistaId, ...(typeof x.oculta === 'boolean' ? { oculta: x.oculta } : {}), ...(typeof x.bloqueada === 'boolean' ? { bloqueada: x.bloqueada } : {}) })
         break
       }
       case 'musica': {
@@ -619,6 +640,27 @@ export function aplicarOperaciones(
         }
         break
       }
+      case 'velocidad': {
+        const destino = clipEn(o.clip)
+        if (!destino) {
+          fallos.push(`No existe el clip ${o.clip}.`)
+          break
+        }
+        const nueva = cambiarVelocidad(tl, destino.id, o.velocidad)
+        if (nueva === tl) fallos.push(`El clip ${o.clip} ya va a esa velocidad.`)
+        else {
+          tl = nueva
+          cambios.push(`Puse el clip ${o.clip} a ${o.velocidad}×`)
+        }
+        break
+      }
+      case 'pista': {
+        const p = PISTAS.find((x) => x.id === o.pista)!
+        tl = cambiarPista(tl, o.pista, { ...(o.oculta !== undefined ? { oculta: o.oculta } : {}), ...(o.bloqueada !== undefined ? { bloqueada: o.bloqueada } : {}) })
+        if (o.oculta !== undefined) cambios.push(o.oculta ? `${p.audio ? 'Silencié' : 'Oculté'} la pista ${p.nombre}` : `${p.audio ? 'Volví a activar' : 'Volví a mostrar'} la pista ${p.nombre}`)
+        if (o.bloqueada !== undefined) cambios.push(o.bloqueada ? `Bloqueé la pista ${p.nombre}` : `Desbloqueé la pista ${p.nombre}`)
+        break
+      }
       case 'zoom':
       case 'color': {
         const destino = o.clip === undefined ? null : clipEn(o.clip)
@@ -632,9 +674,9 @@ export function aplicarOperaciones(
                 (['zoom', 'acercar', 'cx', 'cy', 'panx', 'pany', 'temblor', 'campo', 'foco'] as const).filter((k) => o[k] !== undefined).map((k) => [k, o[k]])
               )
             : {
-                ...(o.brillo !== undefined ? { brillo: o.brillo } : {}),
-                ...(o.contraste !== undefined ? { contraste: o.contraste } : {}),
-                ...(o.saturacion !== undefined ? { saturacion: o.saturacion } : {})
+                // Un look pone el color en neutro y luego lo suyo; después, lo que se pida suelto.
+                ...(o.look ? { ...COLOR_NEUTRO, ...(LOOKS.find((l) => l.id === o.look)?.ajustes ?? {}) } : {}),
+                ...Object.fromEntries((['brillo', 'contraste', 'saturacion', 'desenfoque', 'sepia', 'tono', 'invertir'] as const).filter((k) => o[k] !== undefined).map((k) => [k, o[k]]))
               }
         tl = ajustarClip(tl, destino ? destino.id : null, cambio)
         const donde = destino ? `al clip ${o.clip}` : 'a todos los clips'
@@ -877,6 +919,10 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
 - {"op":"zoom","clip":N,"zoom":Z}  acercamiento centrado del clip N, de 1 (nada) a 2 (el doble). Sin "clip", a todos. Para enfatizar una frase: divide antes y después y pon zoom 1.15–1.3 a ese clip (punch-in).
   La misma op mueve la CÁMARA del clip (lo que no pongas no cambia): "acercar" (acercamiento lento durante el clip, 0 a 0.3; negativo se ALEJA, hasta -0.3, con zoom 1.3 o más), "cx","cy" (hacia qué punto, 0 a 1) y "panx","pany" (paneo: cuánto se desplaza ese punto al acabar, -0.5 a 0.5; necesita zoom 1.15 o más para tener imagen de sobra). "temblor" (cámara en mano, 0 a 1; 0.3 es sutil) y "campo" + "foco" (profundidad de campo: "foco" es la distancia nítida, 0 el fondo a 1 lo más cercano; lo demás se desenfoca según "campo", 0 a 1). Con capas con profundidad encima, todo esto se ve en 3D. Ej.: {"op":"zoom","clip":3,"zoom":1.2,"acercar":0.06,"panx":0.2,"temblor":0.3,"campo":0.6,"foco":0.6}.
 - {"op":"color","clip":N,"brillo":B,"contraste":C,"saturacion":S}  brillo -0.3 a 0.3 (0 neutro), contraste 0.5 a 1.8 (1 neutro), saturación 0 (blanco y negro) a 2 (1 neutro). Sin "clip", a todos. Pon solo lo que cambies.
+  La misma op pone EFECTOS al clip: "desenfoque" 0 a 1 (0.35 para un fondo bajo un texto), "sepia" 0 a 1 (foto antigua), "tono" -180 a 180 (gira los colores), "invertir" 1 (negativo; 0 lo quita).
+  Y un LOOK de color completo con "look" (sustituye al color y los efectos que tuviera): ${LOOKS.map((l) => `${l.id} (${l.para})`).join(', ')}. Para un flash en negativo: divide medio segundo y ponle "invertir":1.
+- {"op":"velocidad","clip":N,"velocidad":V}  cámara lenta o rápida de un clip de VIDEO: 0.25 a 4 (1 normal; 0.5 la mitad de rápido, 2 el doble). El clip dura más o menos y lo que sigue se corre. En una foto no hace nada.
+- {"op":"pista","pista":"encima|video|texto|voz|sonidos|musica","oculta":true|false}  oculta (encima, texto) o silencia (video, voz, sonidos, musica) una pista entera, en el monitor y en el MP4, sin borrar lo que tiene. "bloqueada":true la protege de cambios a mano.
 - {"op":"musica","volumen":V,"ducking":true|false}  volumen 0 a 1 de la música ya puesta (bajo la voz suele ir bien 0.2–0.4); ducking hace que baje sola cuando hay voz.
 - {"op":"quitar_musica"}
 - {"op":"sonido_clip","clip":N,"sonido":true|false}  quita o devuelve el sonido propio del clip N.

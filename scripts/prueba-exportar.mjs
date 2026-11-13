@@ -287,5 +287,57 @@ assert.ok(Math.abs(centro6(1.7) - centro6(1.4)) > 40, 'en el corte la capa salta
   console.log('velocidad (2× y 0,25×) y pistas ocultas en el MP4 ✓')
 }
 
+// Efectos de clip: la sepia, el tono y el negativo salen en el MP4 con el mismo color que calcula el monitor (la matriz
+// de CSS), y el desenfoque borra un borde nítido.
+{
+  const { ajustarClip, aplicarLook, matrizColor, ajustesDe, LOOKS } = await import('../src/shared/timeline.ts')
+  const { aplicarOperaciones, validarOperaciones } = await import('../src/shared/chat.ts')
+  const rojo = join(dir, 'rojo.mp4')
+  // Mitad izquierda roja, mitad derecha azul: un color conocido y un borde nítido.
+  ff(['-f', 'lavfi', '-i', 'color=c=0xC83232:s=320x360:d=1:r=30', '-f', 'lavfi', '-i', 'color=c=0x3232C8:s=320x360:d=1:r=30', '-filter_complex', 'hstack', '-c:v', 'libx264', '-pix_fmt', 'yuv444p', rojo])
+  const p10 = { ...proyecto, source: { ...proyecto.source, path: rojo, duration: 1 }, medios: [] }
+  const base = normalizarTimeline({ clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 1 }], textos: [] }, 1, {})
+  const mp4 = (carpeta) => join(dir, carpeta, 'timeline-prueba-original.mp4')
+  const color = (ruta, x) => {
+    const r = spawnSync('ffmpeg', ['-v', 'error', '-ss', '0.5', '-i', ruta, '-frames:v', '1', '-vf', `crop=40:40:${x}:160,scale=1:1:flags=area`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { encoding: 'buffer' })
+    return [...r.stdout.subarray(0, 3)]
+  }
+  const esperado = (rgb, a) => {
+    const M = matrizColor(a) ?? [1, 0, 0, 0, 1, 0, 0, 0, 1]
+    let v = [0, 1, 2].map((i) => Math.min(255, Math.max(0, M[i * 3] * rgb[0] + M[i * 3 + 1] * rgb[1] + M[i * 3 + 2] * rgb[2])))
+    if (a.invertir >= 0.5) v = v.map((x) => 255 - x)
+    return v
+  }
+  // El color de partida, tal como sale sin efectos (la conversión de color del MP4 ya lo mueve un poco).
+  const r0 = await exportarTimeline(p10, base, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-base'))
+  assert.ok(r0.ok, r0.error)
+  const partida = color(mp4('salidas-base'), 60)
+  assert.ok(Math.abs(partida[0] - 200) < 6 && Math.abs(partida[1] - 50) < 6, `sin efectos, el color sale como entró (un rojo 200,50,50 da ${partida})`)
+  let n = 10
+  for (const [nombre, cambio] of [['sepia', { sepia: 1 }], ['tono', { tono: 90 }], ['sepia + tono', { sepia: 0.5, tono: -120 }], ['negativo', { invertir: 1 }]]) {
+    const tl = ajustarClip(base, 'c1', cambio)
+    const carpeta = `salidas${n++}`
+    const r = await exportarTimeline(p10, tl, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, carpeta))
+    assert.ok(r.ok, r.error)
+    const visto = color(mp4(carpeta), 60)
+    const quiero = esperado(partida, ajustesDe(tl.clips[0]))
+    assert.ok(visto.every((v, i) => Math.abs(v - quiero[i]) < 8), `${nombre}: el MP4 da ${visto} y el monitor ${quiero.map(Math.round)}`)
+  }
+  // Desenfoque: en el borde entre el rojo y el azul, el color pasa a ser una mezcla.
+  const borrosa = ajustarClip(base, 'c1', { desenfoque: 1 })
+  const rb = await exportarTimeline(p10, borrosa, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-borrosa'))
+  assert.ok(rb.ok, rb.error)
+  const junto = color(mp4('salidas-borrosa'), 285)
+  assert.ok(junto[2] > 70 && junto[0] > 70, `con desenfoque, junto al borde hay mezcla de rojo y azul (hay ${junto})`)
+  // Un look sustituye al anterior, y el agente los pone con la op «color».
+  const conLook = aplicarLook(aplicarLook(base, 'c1', LOOKS.find((l) => l.id === 'sepia').ajustes), 'c1', LOOKS.find((l) => l.id === 'bn').ajustes)
+  assert.equal(conLook.clips[0].ajustes.sepia, undefined, 'un look nuevo quita el anterior')
+  assert.equal(conLook.clips[0].ajustes.saturacion, 0)
+  const ops = validarOperaciones([{ op: 'color', clip: 1, look: 'vintage' }, { op: 'color', clip: 1, desenfoque: 0.4 }, { op: 'pista', pista: 'musica', oculta: true }])
+  const hecho = aplicarOperaciones(base, ops, { duracionFuente: 1, medios: {} })
+  assert.ok(hecho.timeline.clips[0].ajustes.sepia > 0.5 && hecho.timeline.clips[0].ajustes.desenfoque === 0.4 && hecho.timeline.pistas.musica.oculta, `las ops del agente no se aplicaron: ${JSON.stringify(hecho)}`)
+  console.log('efectos de clip (sepia, tono, negativo, desenfoque) iguales en el MP4; looks y ops del agente ✓')
+}
+
 rmSync(dir, { recursive: true, force: true })
 console.log('exportar: ok')

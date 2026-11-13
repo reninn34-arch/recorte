@@ -100,6 +100,14 @@ export interface AjustesClip {
   campo?: number
   /** La distancia enfocada, 0 (el fondo) a 1 (lo más cercano). */
   foco?: number
+  /** Efecto: desenfoque de todo el clip, 0 a 1. */
+  desenfoque?: number
+  /** Efecto: sepia (foto antigua), 0 a 1. */
+  sepia?: number
+  /** Efecto: giro del tono de los colores, -180 a 180 grados. */
+  tono?: number
+  /** Efecto: negativo (1 = colores invertidos). */
+  invertir?: number
 }
 
 export const LIMITES_AJUSTES = {
@@ -114,7 +122,11 @@ export const LIMITES_AJUSTES = {
   pany: [-0.5, 0.5, 0],
   temblor: [0, 1, 0],
   campo: [0, 1, 0],
-  foco: [0, 1, 0.5]
+  foco: [0, 1, 0.5],
+  desenfoque: [0, 1, 0],
+  sepia: [0, 1, 0],
+  tono: [-180, 180, 0],
+  invertir: [0, 1, 0]
 } as const satisfies Record<keyof AjustesClip, readonly [number, number, number]>
 
 /** Una pista de música bajo toda la edición (se repite si es corta y se funde al final). */
@@ -763,9 +775,104 @@ export function ajustesDe(clip: ClipTL | undefined): Required<AjustesClip> {
     pany: clip?.ajustes?.pany ?? 0,
     temblor: clip?.ajustes?.temblor ?? 0,
     campo: clip?.ajustes?.campo ?? 0,
-    foco: clip?.ajustes?.foco ?? 0.5
+    foco: clip?.ajustes?.foco ?? 0.5,
+    desenfoque: clip?.ajustes?.desenfoque ?? 0,
+    sepia: clip?.ajustes?.sepia ?? 0,
+    tono: clip?.ajustes?.tono ?? 0,
+    invertir: clip?.ajustes?.invertir ?? 0
   }
 }
+
+// ===== Efectos de clip: color, sepia, tono, negativo y desenfoque (iguales en el monitor y en el MP4) =====
+
+/** Con desenfoque 1, cuánto se desenfoca el clip (fracción del ancho del cuadro). */
+export const DESENFOQUE_CLIP = 0.03
+
+/** El color y los efectos de un clip en neutro: lo que pone un look antes de aplicar lo suyo. */
+export const COLOR_NEUTRO: AjustesClip = { brillo: 0, contraste: 1, saturacion: 1, desenfoque: 0, sepia: 0, tono: 0, invertir: 0 }
+
+/**
+ * La matriz de color (3×3, por filas) de la sepia y el giro de tono de un clip, en ese orden; null si no hay ninguno.
+ * Son las mismas matrices de `sepia()` y `hue-rotate()` de CSS: el MP4 (colorchannelmixer) sale igual que el monitor.
+ */
+export function matrizColor(a: Pick<Required<AjustesClip>, 'sepia' | 'tono'>): number[] | null {
+  if (a.sepia < 0.005 && Math.abs(a.tono) < 0.5) return null
+  const k = 1 - Math.min(1, Math.max(0, a.sepia))
+  const S = [0.393 + 0.607 * k, 0.769 - 0.769 * k, 0.189 - 0.189 * k, 0.349 - 0.349 * k, 0.686 + 0.314 * k, 0.168 - 0.168 * k, 0.272 - 0.272 * k, 0.534 - 0.534 * k, 0.131 + 0.869 * k]
+  const r = (a.tono * Math.PI) / 180
+  const c = Math.cos(r)
+  const n = Math.sin(r)
+  const H = [
+    0.213 + c * 0.787 - n * 0.213, 0.715 - c * 0.715 - n * 0.715, 0.072 - c * 0.072 + n * 0.928,
+    0.213 - c * 0.213 + n * 0.143, 0.715 + c * 0.285 + n * 0.14, 0.072 - c * 0.072 - n * 0.283,
+    0.213 - c * 0.213 - n * 0.787, 0.715 - c * 0.715 + n * 0.715, 0.072 + c * 0.928 + n * 0.072
+  ]
+  // Primero la sepia, luego el tono: H · S.
+  const M: number[] = []
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) M.push(H[i * 3] * S[j] + H[i * 3 + 1] * S[3 + j] + H[i * 3 + 2] * S[6 + j])
+  return M
+}
+
+/** El color y los efectos de un clip como filtro de CSS (sin el desenfoque, que depende del ancho). */
+export function filtroColorCss(a: Required<AjustesClip>): string {
+  const partes: string[] = []
+  if (a.brillo !== 0 || a.contraste !== 1 || a.saturacion !== 1) partes.push(`brightness(${(1 + a.brillo * 1.5).toFixed(3)}) contrast(${a.contraste}) saturate(${a.saturacion})`)
+  if (a.sepia >= 0.005) partes.push(`sepia(${a.sepia})`)
+  if (Math.abs(a.tono) >= 0.5) partes.push(`hue-rotate(${a.tono}deg)`)
+  if (a.invertir >= 0.5) partes.push('invert(1)')
+  return partes.join(' ')
+}
+
+/** Un efecto listo para aplicar a un clip: un look de color o un efecto de video. */
+export interface EfectoClip {
+  id: string
+  nombre: string
+  para: string
+  ajustes: AjustesClip
+}
+
+/** Looks de color: cambian el color del clip entero (sustituyen al look anterior). */
+export const LOOKS: EfectoClip[] = [
+  { id: 'natural', nombre: 'Natural', para: 'quitar el look: el color tal como viene', ajustes: {} },
+  { id: 'cine', nombre: 'Cine', para: 'más contraste y menos color, como una película', ajustes: { contraste: 1.22, saturacion: 0.82, brillo: -0.03 } },
+  { id: 'vivo', nombre: 'Vivo', para: 'colores fuertes para redes', ajustes: { saturacion: 1.5, contraste: 1.1 } },
+  { id: 'apagado', nombre: 'Apagado', para: 'colores suaves, tono sobrio', ajustes: { saturacion: 0.55, contraste: 0.92, brillo: 0.02 } },
+  { id: 'bn', nombre: 'Blanco y negro', para: 'archivo, recuerdo, dramatismo', ajustes: { saturacion: 0, contraste: 1.15 } },
+  { id: 'bn-duro', nombre: 'B/N duro', para: 'blanco y negro de mucho contraste', ajustes: { saturacion: 0, contraste: 1.6, brillo: -0.04 } },
+  { id: 'calido', nombre: 'Cálido', para: 'luz de atardecer, cercanía', ajustes: { sepia: 0.28, saturacion: 1.2 } },
+  { id: 'frio', nombre: 'Frío', para: 'tecnología, noche, distancia', ajustes: { sepia: 0.3, tono: 170, saturacion: 0.9, contraste: 1.08 } },
+  { id: 'vintage', nombre: 'Vintage', para: 'foto vieja desteñida', ajustes: { sepia: 0.55, contraste: 0.9, brillo: 0.04, saturacion: 0.9 } },
+  { id: 'sepia', nombre: 'Sepia', para: 'documento antiguo', ajustes: { sepia: 1 } },
+  { id: 'noche', nombre: 'Noche', para: 'oscuro y azulado', ajustes: { brillo: -0.16, contraste: 1.2, saturacion: 0.7, sepia: 0.35, tono: 175 } },
+  { id: 'sueno', nombre: 'Sueño', para: 'un recuerdo, algo imaginado', ajustes: { desenfoque: 0.12, brillo: 0.08, saturacion: 1.25, contraste: 0.92 } }
+]
+
+/** Efectos de video: se suman a lo que el clip ya tiene. */
+export const EFECTOS_VIDEO: EfectoClip[] = [
+  { id: 'desenfoque', nombre: 'Desenfoque', para: 'un fondo para un texto, algo que no se debe ver nítido', ajustes: { desenfoque: 0.35 } },
+  { id: 'desenfoque-fuerte', nombre: 'Desenfoque fuerte', para: 'tapar del todo lo que hay detrás', ajustes: { desenfoque: 0.9 } },
+  { id: 'negativo', nombre: 'Negativo', para: 'un golpe visual, un flash en negativo', ajustes: { invertir: 1 } },
+  { id: 'tono-90', nombre: 'Tono girado', para: 'colores cambiados, aire irreal', ajustes: { tono: 90 } },
+  { id: 'tono-180', nombre: 'Tono opuesto', para: 'los colores contrarios', ajustes: { tono: 180 } },
+  { id: 'oscurecer', nombre: 'Oscurecer', para: 'que un texto encima se lea mejor', ajustes: { brillo: -0.2 } },
+  { id: 'aclarar', nombre: 'Aclarar', para: 'una imagen muy oscura', ajustes: { brillo: 0.15 } },
+  { id: 'contraste', nombre: 'Más contraste', para: 'una imagen plana', ajustes: { contraste: 1.4 } }
+]
+
+/** Aplica un look a un clip (o a todos con `id` null): su color vuelve a neutro y toma el del look. */
+export function aplicarLook(tl: Timeline, id: string | null, look: AjustesClip): Timeline {
+  return ajustarClip(tl, id, { ...COLOR_NEUTRO, ...look })
+}
+
+/** Aspectos de película para todo el video: combinaciones de los filtros (grano, polvo, trama, viñeta, parpadeo). */
+export const PELICULAS: { id: string; nombre: string; para: string; filtros: Required<FiltrosTL> }[] = [
+  { id: 'limpio', nombre: 'Limpio', para: 'sin filtros', filtros: { grano: 0, polvo: 0, trama: 0, vineta: 0, parpadeo: 0 } },
+  { id: 'documental', nombre: 'Documental', para: 'grano fino y bordes oscuros', filtros: { grano: 0.3, polvo: 0.15, trama: 0, vineta: 0.5, parpadeo: 0 } },
+  { id: 'archivo', nombre: 'Archivo', para: 'película vieja con polvo y parpadeo', filtros: { grano: 0.5, polvo: 0.5, trama: 0, vineta: 0.6, parpadeo: 0.3 } },
+  { id: 'revista', nombre: 'Revista', para: 'trama de puntos de imprenta', filtros: { grano: 0.1, polvo: 0, trama: 0.45, vineta: 0.2, parpadeo: 0 } },
+  { id: 'proyector', nombre: 'Proyector', para: 'la luz que tiembla de un proyector', filtros: { grano: 0.35, polvo: 0.25, trama: 0, vineta: 0.45, parpadeo: 0.45 } },
+  { id: 'vineta', nombre: 'Viñeta', para: 'solo los bordes oscuros', filtros: { grano: 0, polvo: 0, trama: 0, vineta: 0.6, parpadeo: 0 } }
+]
 
 /** Cámara en mano: cuánto se mueve (fracción del cuadro con temblor 1) y cuánto zoom de más le deja sitio. */
 export const TEMBLOR_AMPLITUD = 0.007

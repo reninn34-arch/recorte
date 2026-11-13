@@ -45,6 +45,10 @@ export function codificadorH264(): Promise<string> {
 }
 
 /** Los argumentos de cada codificador, con una calidad parecida a libx264 con ese `crf` (preset veryfast). */
+/** El filtro que deja el video en BT.709 (rango de TV) y las etiquetas que lo dicen en el archivo. */
+export const A_BT709 = 'scale=out_color_matrix=bt709:out_range=tv'
+export const ETIQUETAS_BT709 = ['-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv']
+
 export function argsH264(nombre: string, crf: number): string[] {
   if (nombre === 'h264_nvenc') return ['-c:v', 'h264_nvenc', '-preset', 'p5', '-rc', 'vbr', '-cq', String(crf + 2), '-b:v', '0']
   if (nombre === 'h264_amf') return ['-c:v', 'h264_amf', '-quality', 'quality', '-rc', 'cqp', '-qp_i', String(crf), '-qp_p', String(crf + 2), '-qp_b', String(crf + 4)]

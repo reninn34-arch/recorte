@@ -31,14 +31,16 @@ import {
   type PosicionTexto,
   type Timeline,
   timelineActiva,
-  velocidadDe
+  velocidadDe,
+  matrizColor,
+  DESENFOQUE_CLIP
 } from '../shared/timeline'
 import type { OpcionesExport } from '../shared/api'
 import type { ClipSuggestion, Project } from '../shared/types'
 
 /** Igual que en el monitor (`DUCKING_FACTOR` de la interfaz): la música baja a un cuarto con voz. */
 const DUCKING_FACTOR = 0.25
-import { argsH264, codificadorH264, probeVideo, rutaFfmpeg } from './ffmpeg'
+import { A_BT709, argsH264, codificadorH264, ETIQUETAS_BT709, probeVideo, rutaFfmpeg } from './ffmpeg'
 import {
   colorAss,
   construirBloques,
@@ -308,10 +310,16 @@ export async function exportarTimeline(
       a.brillo !== 0 || a.contraste !== 1 || a.saturacion !== 1
         ? `,eq=brightness=${a.brillo.toFixed(3)}:contrast=${a.contraste.toFixed(3)}:saturation=${a.saturacion.toFixed(3)}`
         : ''
+    // Efectos del clip: sepia y tono (la misma matriz que el monitor), negativo y desenfoque.
+    const M = matrizColor(a)
+    const efectos =
+      (M ? `,format=gbrp,colorchannelmixer=${['rr', 'rg', 'rb', 'gr', 'gg', 'gb', 'br', 'bg', 'bb'].map((n, j) => `${n}=${M[j].toFixed(4)}`).join(':')}` : '') +
+      (a.invertir >= 0.5 ? ',format=gbrp,negate' : '') +
+      (a.desenfoque > 0.005 ? `,gblur=sigma=${(a.desenfoque * DESENFOQUE_CLIP * ancho).toFixed(2)}` : '')
     // Profundidad de campo: el fondo (profundidad 0) desenfocado si el foco está más cerca.
     const borroso = desenfoqueDeCampo(a, 0)
     const fondoBorroso = borroso > 0.005 ? `,gblur=sigma=${(borroso * DESENFOQUE_MAX * ancho).toFixed(2)}` : ''
-    partes.push(`[${iv}:v]${ritmo},fps=${fps},${zoom}${encuadre}${lento}${fondoBorroso},setsar=1${color},format=yuv420p,settb=AVTB[v${i}]`)
+    partes.push(`[${iv}:v]${ritmo},fps=${fps},${zoom}${encuadre}${lento}${fondoBorroso},setsar=1${color}${efectos},format=yuv420p,settb=AVTB[v${i}]`)
     if (conAudio) {
       if (f.conAudio && !t.clip.mudo) {
         // apad + atrim: cada tramo de audio dura exactamente lo que su video, o concat se desfasa.
@@ -463,6 +471,7 @@ export async function exportarTimeline(
     ...(salidaAudio ? ['-map', '[aout]', '-c:a', 'aac', '-b:a', '160k'] : ['-an']),
     // Con la tarjeta gráfica si la hay (más rápido y deja el procesador para los filtros).
     ...argsH264(await codificadorH264(), 20),
+    ...ETIQUETAS_BT709,
     '-pix_fmt',
     'yuv420p',
     '-movflags',
@@ -643,7 +652,9 @@ export function filtrosFfmpeg(f: FiltrosTL, entrada: string, salida: string, anc
   if (f.grano) cola.push(`noise=alls=${Math.max(1, Math.round(30 * f.grano))}:allf=t`)
   if (f.vineta) cola.push(`vignette=angle=${(0.2 + 0.6 * f.vineta).toFixed(3)}`)
   if (f.parpadeo) cola.push(`eq=brightness='${(0.045 * f.parpadeo).toFixed(4)}*sin(t*31)*sin(t*7.3)':eval=frame`)
-  partes.push(`${base}${cola.length ? cola.join(',') + ',' : ''}format=yuv420p${salida}`)
+  // El color sale en BT.709 y así se etiqueta: el codificador de la tarjeta AMD siempre lo marca como 709, y sin
+  // convertirlo los colores vivos salían cambiados (un rojo 200 pasaba a 213).
+  partes.push(`${base}${cola.length ? cola.join(',') + ',' : ''}${A_BT709},format=yuv420p${salida}`)
   return partes
 }
 

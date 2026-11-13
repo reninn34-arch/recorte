@@ -2,6 +2,12 @@ import React, { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState,
 import { createPortal } from 'react-dom'
 import {
   ajustarClip,
+  aplicarLook,
+  COLOR_NEUTRO,
+  EFECTOS_VIDEO,
+  filtroColorCss,
+  LOOKS,
+  PELICULAS,
   cambiarPista,
   cambiarVelocidad,
   LIMITES_VELOCIDAD,
@@ -209,6 +215,51 @@ export function TimelineEditor({
   /** Si una fuente es un video (la velocidad no tiene sentido en una foto). */
   const esVideo = (fuente: string) => fuente === 'principal' || medios?.find((m) => m.id === fuente)?.tipo === 'video'
   const clasePista = (id: PistaId) => `${tl.pistas?.[id]?.bloqueada ? 'is-bloqueada' : ''} ${tl.pistas?.[id]?.oculta ? 'is-oculta' : ''}`
+  // ===== Efectos: se aplican al clip elegido con un clic, o a cualquier clip arrastrándolos sobre él =====
+  const [buscarEfecto, setBuscarEfecto] = useState('')
+  const coincide = (x: { nombre: string; para?: string }) => {
+    const q = buscarEfecto.trim().toLowerCase()
+    return !q || x.nombre.toLowerCase().includes(q) || Boolean(x.para?.toLowerCase().includes(q))
+  }
+  type Efecto = { tipo: 'look' | 'ajustes'; ajustes: AjustesClip } | { tipo: 'transicion'; id: TransicionClip }
+  const TIPO_EFECTO = 'application/x-recorte-efecto'
+  function aplicarEfecto(clipId: string | undefined, efecto: Efecto) {
+    if (!clipId) return
+    if (efecto.tipo === 'transicion') {
+      const c = timeline.clips.find((x) => x.id === clipId)
+      if (!c || timeline.clips[0]?.id === clipId) return
+      historial.aplicar(fundirClip(timeline, clipId, Math.max(c.fundido ?? 0, 0.45), efecto.id))
+    } else historial.aplicar(efecto.tipo === 'look' ? aplicarLook(timeline, clipId, efecto.ajustes) : ajustarClip(timeline, clipId, efecto.ajustes))
+    onElegir({ tipo: 'clip', id: clipId })
+  }
+  function arrastrarEfecto(e: React.DragEvent, efecto: Efecto) {
+    e.dataTransfer.setData(TIPO_EFECTO, JSON.stringify(efecto))
+    e.dataTransfer.effectAllowed = 'copy'
+  }
+  const [sobreClip, setSobreClip] = useState<string | null>(null)
+  /** Un clip de la línea de tiempo recibe el efecto que se suelte encima. */
+  const recibeEfecto = (clipId: string) => ({
+    onDragOver: (e: React.DragEvent) => {
+      if (!e.dataTransfer.types.includes(TIPO_EFECTO)) return
+      e.preventDefault()
+      e.stopPropagation()
+      e.dataTransfer.dropEffect = 'copy'
+      if (sobreClip !== clipId) setSobreClip(clipId)
+    },
+    onDragLeave: () => setSobreClip((v) => (v === clipId ? null : v)),
+    onDrop: (e: React.DragEvent) => {
+      const dato = e.dataTransfer.getData(TIPO_EFECTO)
+      if (!dato) return
+      e.preventDefault()
+      e.stopPropagation()
+      setSobreClip(null)
+      try {
+        aplicarEfecto(clipId, JSON.parse(dato) as Efecto)
+      } catch {
+        // Un arrastre que no es un efecto: nada.
+      }
+    }
+  })
   // La pestaña abierta de la biblioteca.
   const [pestana, setPestana] = useState('medios')
   /** La pista sobre la que se está arrastrando un medio de la biblioteca. */
@@ -716,6 +767,8 @@ export function TimelineEditor({
 
   const valorZoom = zoomMax > 1 ? Math.round((Math.log(zoom) / Math.log(zoomMax)) * 100) : 0
 
+  // La imagen con la que se ve cada efecto: la del clip elegido, o la primera de la línea de tiempo.
+  const vistaEfecto = miniaturaDe?.(clipElegido?.clip.fuente ?? tl.clips[0]?.fuente ?? 'principal')
   /** La miniatura de una fuente como tira de fotogramas dentro de su bloque (oscurecida para leer el texto). */
   const fondoMini = (fuente: string): React.CSSProperties => {
     const mini = miniaturaDe?.(fuente)
@@ -830,31 +883,150 @@ export function TimelineEditor({
 
               {pestana === 'efectos' && (
                 <>
-                  <span className="ed-seccion">Filtros de todo el video</span>
-                  {FILTROS.map((f) => (
-                    <label key={f.id} className="tl-ajuste" title={`Para ${f.para}`}>
-                      <span>
-                        {f.nombre} <b>{Math.round((tl.filtros?.[f.id] ?? 0) * 100)} %</b>
-                      </span>
-                      <input
-                        type="range"
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={tl.filtros?.[f.id] ?? 0}
-                        onPointerDown={empezarAjuste}
-                        onFocus={empezarAjuste}
-                        onChange={(e) => deslizar(cambiarFiltros(timeline, { [f.id]: Number(e.target.value) }))}
-                      />
-                    </label>
-                  ))}
-                  {tl.filtros && (
-                    <button className="btn small ghost" onClick={() => historial.aplicar(cambiarFiltros(timeline, { grano: 0, polvo: 0, trama: 0, vineta: 0, parpadeo: 0 }))}>
-                      Quitar todos
-                    </button>
+                  <input
+                    className="ed-buscar"
+                    type="search"
+                    value={buscarEfecto}
+                    onChange={(e) => setBuscarEfecto(e.target.value)}
+                    placeholder="Buscar un efecto"
+                    aria-label="Buscar un efecto"
+                  />
+                  <p className="tl-dim">
+                    {clipElegido ? `Se aplican al clip ${clipElegido.indice + 1}. También puedes arrastrarlos a otro clip.` : 'Elige un clip y toca un efecto, o arrástralo sobre un clip de la línea de tiempo.'}
+                  </p>
+
+                  {(
+                    [
+                      ['Looks de color', LOOKS, 'look'],
+                      ['Efectos de video', EFECTOS_VIDEO, 'ajustes']
+                    ] as const
+                  ).map(([titulo, lista, tipo]) => {
+                    const visibles = lista.filter(coincide)
+                    if (!visibles.length) return null
+                    return (
+                      <details key={titulo} className="ed-carpeta" open>
+                        <summary>
+                          {titulo} <small>{visibles.length}</small>
+                        </summary>
+                        <div className="ed-rejilla ed-efectos">
+                          {visibles.map((x) => (
+                            <button
+                              key={x.id}
+                              className="ed-efecto"
+                              title={`Para ${x.para}`}
+                              draggable
+                              onDragStart={(e) => arrastrarEfecto(e, { tipo, ajustes: x.ajustes })}
+                              onClick={() => aplicarEfecto(clipElegido?.clip.id, { tipo, ajustes: x.ajustes })}
+                            >
+                              <span className="ed-efecto-vista">
+                                {vistaEfecto ? (
+                                  <img
+                                    src={vistaEfecto}
+                                    alt=""
+                                    draggable={false}
+                                    style={{
+                                      filter:
+                                        `${filtroColorCss({ ...ajustesDe(undefined), ...COLOR_NEUTRO, ...x.ajustes } as Required<AjustesClip>)}${x.ajustes.desenfoque ? ` blur(${(x.ajustes.desenfoque * 4).toFixed(1)}px)` : ''}`.trim() ||
+                                        undefined
+                                    }}
+                                  />
+                                ) : (
+                                  <Icon name="image" size={18} />
+                                )}
+                              </span>
+                              <span>{x.nombre}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </details>
+                    )
+                  })}
+
+                  {TRANSICIONES.some(coincide) && (
+                    <details className="ed-carpeta" open>
+                      <summary>
+                        Transiciones <small>{TRANSICIONES.filter(coincide).length}</small>
+                      </summary>
+                      <p className="tl-dim">Cómo entra el clip sobre el anterior.</p>
+                      <div className="ed-rejilla ed-efectos">
+                        {TRANSICIONES.filter(coincide).map((x) => (
+                          <button
+                            key={x.id}
+                            className={`ed-efecto ed-efecto-texto ${clipElegido?.clip.fundido && (clipElegido.clip.transicion ?? 'fundido') === x.id ? 'is-on' : ''}`}
+                            draggable
+                            onDragStart={(e) => arrastrarEfecto(e, { tipo: 'transicion', id: x.id })}
+                            onClick={() => aplicarEfecto(clipElegido?.clip.id, { tipo: 'transicion', id: x.id })}
+                          >
+                            <span className="ed-efecto-vista">
+                              <Icon name="layers" size={18} />
+                            </span>
+                            <span>{x.nombre}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </details>
                   )}
-                  <span className="ed-seccion">Transiciones y cámara</span>
-                  <p className="tl-dim">Van en cada clip: elige un clip en la línea de tiempo y ajústalo en el panel de la derecha.</p>
+
+                  {TOMAS_CAMARA.some(coincide) && (
+                    <details className="ed-carpeta" open>
+                      <summary>
+                        Movimientos de cámara <small>{TOMAS_CAMARA.filter(coincide).length}</small>
+                      </summary>
+                      {TOMAS_CAMARA.filter(coincide).map((x) => (
+                        <button
+                          key={x.id}
+                          className="ed-fila"
+                          title={x.para}
+                          draggable
+                          onDragStart={(e) => arrastrarEfecto(e, { tipo: 'ajustes', ajustes: x.ajustes })}
+                          onClick={() => aplicarEfecto(clipElegido?.clip.id, { tipo: 'ajustes', ajustes: x.ajustes })}
+                        >
+                          <Icon name="film" size={13} />
+                          <span>
+                            {x.nombre} <small>{x.para}</small>
+                          </span>
+                        </button>
+                      ))}
+                    </details>
+                  )}
+
+                  {(PELICULAS.some(coincide) || !buscarEfecto) && (
+                    <details className="ed-carpeta" open>
+                      <summary>
+                        Película (todo el video) <small>{PELICULAS.filter(coincide).length}</small>
+                      </summary>
+                      <div className="ed-rejilla ed-efectos">
+                        {PELICULAS.filter(coincide).map((x) => {
+                          const puesto = FILTROS.every((f) => Math.abs((tl.filtros?.[f.id] ?? 0) - x.filtros[f.id]) < 0.005)
+                          return (
+                            <button key={x.id} className={`ed-efecto ed-efecto-texto ${puesto ? 'is-on' : ''}`} title={`Para ${x.para}`} onClick={() => historial.aplicar(cambiarFiltros(timeline, x.filtros))}>
+                              <span className="ed-efecto-vista">
+                                <Icon name="sliders" size={18} />
+                              </span>
+                              <span>{x.nombre}</span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                      {FILTROS.map((f) => (
+                        <label key={f.id} className="tl-ajuste" title={`Para ${f.para}`}>
+                          <span>
+                            {f.nombre} <b>{Math.round((tl.filtros?.[f.id] ?? 0) * 100)} %</b>
+                          </span>
+                          <input
+                            type="range"
+                            min={0}
+                            max={1}
+                            step={0.01}
+                            value={tl.filtros?.[f.id] ?? 0}
+                            onPointerDown={empezarAjuste}
+                            onFocus={empezarAjuste}
+                            onChange={(e) => deslizar(cambiarFiltros(timeline, { [f.id]: Number(e.target.value) }))}
+                          />
+                        </label>
+                      ))}
+                    </details>
+                  )}
                 </>
               )}
 
@@ -976,6 +1148,8 @@ export function TimelineEditor({
                   <div
                     key={t.clip.id}
                     className={`tl-clip ${t.clip.fuente !== 'principal' ? 'otra-fuente' : ''} ${elegido?.id === t.clip.id || enVarios(t.clip.id) ? 'is-elegido' : ''}`}
+                    {...recibeEfecto(t.clip.id)}
+                    data-efecto={sobreClip === t.clip.id ? 'si' : undefined}
                     style={{ left: t.inicio * pps, width: anchoClip, ...fondoMini(t.clip.fuente) }}
                     onPointerDown={(e) => sumar(e, { tipo: 'clip', id: t.clip.id }) || arrastrarClip(e, t.clip.id)}
                     title={`Clip ${t.indice + 1} · ${nombreDe ? nombreDe(t.clip.fuente) : 'fuente'} ${tc(t.clip.entrada)}–${tc(t.clip.salida)}`}
@@ -1287,6 +1461,15 @@ export function TimelineEditor({
                     ]
                   ],
                   [
+                    'Efectos',
+                    [
+                      ['desenfoque', 'Desenfoque', 0, 1, 0.01, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no')],
+                      ['sepia', 'Sepia', 0, 1, 0.01, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no')],
+                      ['tono', 'Tono', -180, 180, 1, (v: number) => (v ? `${v > 0 ? '+' : ''}${Math.round(v)}°` : 'no')],
+                      ['invertir', 'Negativo', 0, 1, 1, (v: number) => (v >= 0.5 ? 'sí' : 'no')]
+                    ]
+                  ],
+                  [
                     'Cámara',
                     [
                       ['acercar', 'Acercar / alejar', -0.3, 0.3, 0.01, (v: number) => (v ? `${v > 0 ? '+' : '−'}${Math.round(Math.abs(v) * 100)} %` : 'no')],
@@ -1300,7 +1483,18 @@ export function TimelineEditor({
                 ] as const
               ).map(([grupo, filas]) => (
                 <Fragment key={grupo}>
-                  <span className="ed-seccion">{grupo}</span>
+                  <span className="ed-seccion">
+                    {grupo}
+                    {(grupo === 'Color' || grupo === 'Efectos') && filas.some(([clave]) => clipElegido.clip.ajustes?.[clave] !== undefined) && (
+                      <button
+                        className="ed-seccion-quitar"
+                        title={`Quitar ${grupo === 'Color' ? 'el color' : 'los efectos'} de este clip`}
+                        onClick={() => historial.aplicar(ajustarClip(timeline, clipElegido.clip.id, Object.fromEntries(filas.map(([clave]) => [clave, COLOR_NEUTRO[clave as keyof AjustesClip]]))))}
+                      >
+                        Quitar
+                      </button>
+                    )}
+                  </span>
                   {filas.map(([clave, nombre, min, max, paso, formato]) => {
                 const valor = ajustesDe(clipElegido.clip)[clave]
                 return (

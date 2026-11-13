@@ -3021,3 +3021,26 @@ button { cursor: pointer; }
 .tl-clip-vel { margin-left: 4px; padding: 0 4px; border-radius: 3px; background: var(--accent); color: var(--ink); font-style: normal; font-size: 10px; font-weight: 700; }
 .ed-opciones { display: flex; flex-wrap: wrap; gap: 4px; }
 .ed-opciones .chip { padding: 2px 8px; font-size: 11px; }
+
+/* El panel de efectos: buscador, carpetas que se pliegan y efectos con su vista previa. */
+.ed-buscar { width: 100%; padding: 6px 9px; border-radius: 7px; border: 1px solid var(--line-2); background: var(--panel-2); color: var(--text); font-size: 12px; }
+.ed-buscar:focus { outline: none; border-color: var(--accent); }
+.ed-carpeta { display: flex; flex-direction: column; gap: 6px; }
+.ed-carpeta > summary { display: flex; align-items: center; gap: 6px; padding: 5px 2px; cursor: pointer; list-style: none; font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); margin-bottom: 6px; }
+.ed-carpeta > summary::-webkit-details-marker { display: none; }
+.ed-carpeta > summary::before { content: '▸'; font-size: 10px; color: var(--dim); }
+.ed-carpeta[open] > summary::before { content: '▾'; }
+.ed-carpeta > summary small { margin-left: auto; font-weight: 400; color: var(--dim); }
+.ed-carpeta > .ed-fila, .ed-carpeta > .tl-ajuste, .ed-carpeta > p { margin: 0 0 6px; }
+.ed-efectos { grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); margin-bottom: 8px; }
+.ed-efecto { display: flex; flex-direction: column; gap: 4px; padding: 0; border: none; background: none; color: var(--muted); font-size: 10.5px; text-align: center; cursor: grab; }
+.ed-efecto-vista { display: grid; place-items: center; aspect-ratio: 4 / 3; border-radius: 6px; border: 1px solid var(--line); background: var(--panel-2); overflow: hidden; color: var(--dim); }
+.ed-efecto-vista img { width: 100%; height: 100%; object-fit: cover; }
+.ed-efecto:hover .ed-efecto-vista { border-color: var(--accent); }
+.ed-efecto:hover { color: var(--text); }
+.ed-efecto.is-on .ed-efecto-vista { border-color: var(--accent); color: var(--accent); background: var(--panel-3); }
+.ed-efecto.is-on { color: var(--accent); }
+.tl-clip[data-efecto='si'] { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ed-seccion { display: flex; align-items: center; justify-content: space-between; }
+.ed-seccion-quitar { border: none; background: none; padding: 0; color: var(--accent-2); font-size: 10.5px; text-transform: none; letter-spacing: 0; font-weight: 500; }
+.ed-seccion-quitar:hover { text-decoration: underline; }

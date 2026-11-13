@@ -2803,7 +2803,11 @@ def armar(ruta, prueba=None, todo=False):
                         '-map', '0:v', '-map', '[a]', '-c:a', 'aac', '-b:a', '192k', '-shortest']
     orden = [FFMPEG, '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', f'{L.W}x{L.H}', '-r', str(L.fps), '-i', '-',
              *entrada_audio, *filtro_audio,
-             '-vf', 'format=yuv420p', *args_codificador(codificador_video(), r.get('crf', 16), r.get('preset', 'veryfast')),
+             # El color, en BT.709 y etiquetado: la tarjeta AMD siempre lo marca así, y sin convertirlo los colores vivos
+             # salían cambiados (un rojo 200 pasaba a 213).
+             '-vf', 'scale=out_color_matrix=bt709:out_range=tv,format=yuv420p',
+             *args_codificador(codificador_video(), r.get('crf', 16), r.get('preset', 'veryfast')),
+             '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv',
              # La duración exacta: con la tarjeta gráfica el video llega con retraso al final y el silencio de relleno
              # (apad) seguiría creciendo mientras tanto (el MP4 duraba medio segundo de más).
              '-t', f'{round(dur * L.fps) / L.fps:.3f}', '-movflags', '+faststart', salida]
