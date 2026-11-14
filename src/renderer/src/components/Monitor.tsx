@@ -6,6 +6,8 @@ import {
   ajustesDe,
   APARECER_S,
   pasoAnimacion,
+  tiemposPalabras,
+  COLOR_PINTADO,
   vistaTransicion,
   capaNueva,
   estadoCapa,
@@ -628,13 +630,38 @@ function TextoAnimado({ texto, dt }: { texto: TextoTL; dt: number }) {
     return <span style={{ display: 'inline-block', transform: `translateY(${(sube * 0.6).toFixed(3)}em) scale(${e.toFixed(3)})`, opacity: op }}>{texto.texto}</span>
   }
   const paso = pasoAnimacion(texto)
+  const tiempos = tiemposPalabras(texto)
+  if (texto.animacion === 'pintar') {
+    // Karaoke: la frase entera en su color y cada palabra se rellena del color pintado mientras se dice (como el MP4).
+    const pintado = texto.pintado ?? COLOR_PINTADO
+    let k = 0
+    return (
+      <>
+        {texto.texto.split(/(\s+)/).map((x, i) => {
+          if (!x || /^\s+$/.test(x)) return x
+          const w = tiempos[k++]
+          const p = w ? Math.max(0, Math.min(1, (dt - w.inicio) / w.dura)) : 0
+          return (
+            <span key={i} className="texto-pintar">
+              {x}
+              <span className="texto-pintar-color" aria-hidden style={{ color: pintado, clipPath: `inset(-20% ${((1 - p) * 100).toFixed(2)}% -20% -2%)` }}>
+                {x}
+              </span>
+            </span>
+          )
+        })}
+      </>
+    )
+  }
   const piezas = texto.animacion === 'palabras' ? texto.texto.split(/(\s+)/) : Array.from(texto.texto)
   let n = 0
   return (
     <>
       {piezas.map((x, i) => {
         if (!x || /^\s+$/.test(x)) return x
-        const op = Math.max(0, Math.min(1, (dt - n++ * paso) / APARECER_S))
+        const desde = texto.animacion === 'palabras' ? (tiempos[n]?.inicio ?? n * paso) : n * paso
+        n++
+        const op = Math.max(0, Math.min(1, (dt - desde) / APARECER_S))
         return (
           <span key={i} style={{ opacity: op }}>
             {x}

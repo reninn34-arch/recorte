@@ -24,6 +24,23 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.52',
+    fecha: '2026-11-14',
+    resumen: 'Las palabras se pintan cuando se dicen: subtítulos tipo karaoke al ritmo exacto de la voz.',
+    novedades: [
+      {
+        icono: 'type',
+        titulo: 'Pintar palabras',
+        texto: 'Una animación nueva para los textos: la frase entera se ve y cada palabra se rellena de color justo cuando se dice. Eliges el color en el texto. Y el estilo de subtítulos «Pintadas» lo pone en todos de una vez.'
+      },
+      {
+        icono: 'volumen',
+        titulo: 'Al ritmo de tu voz',
+        texto: 'Al crear los subtítulos, Recorte escucha tu voz (también la que pones en la pista de voz) y sabe cuándo dices cada palabra: «Palabra a palabra» y «Pintar palabras» van con lo que dices, no a un ritmo fijo. Las frases se cortan en las comas y no dejan una palabra sola.'
+      }
+    ]
+  },
+  {
     version: '0.1.51',
     fecha: '2026-11-14',
     resumen: 'Revisar el audio encuentra y arregla lo que suena mal, separar el audio de un video está completo y los tiempos de la voz son más exactos.',

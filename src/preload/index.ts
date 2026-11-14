@@ -147,6 +147,7 @@ const api: RecorteApi = {
   actualizacionBuscar: () => ipcRenderer.invoke('actualizacion:buscar'),
   actualizacionInstalar: () => ipcRenderer.invoke('actualizacion:instalar'),
   revisarAudio: (id, timeline) => ipcRenderer.invoke('audio:revisar', id, timeline),
+  palabrasDeVoces: (id, archivos) => ipcRenderer.invoke('voz:palabras', id, archivos),
   arreglarVoz: (id, archivo, accion, ventanas) => ipcRenderer.invoke('audio:arreglar-voz', id, archivo, accion, ventanas),
   interfazEstado: () => ipcRenderer.invoke('interfaz:estado'),
   interfazEscala: (valor) => ipcRenderer.invoke('interfaz:escala', valor),

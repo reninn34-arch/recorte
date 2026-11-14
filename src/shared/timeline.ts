@@ -354,15 +354,23 @@ export interface TextoTL {
   y?: number
   /** La letra (una clave de FUENTES_TEXTO); sin ella, la normal. */
   fuente?: string
-  /** Cómo aparece: palabra a palabra, letra a letra (máquina), con rebote (pop) o subiendo. Sin ella, de golpe. */
+  /** Cómo aparece: palabra a palabra, letra a letra (máquina), con rebote (pop), subiendo o pintando cada palabra. Sin ella, de golpe. */
   animacion?: AnimacionTexto
+  /** El color con que se pintan las palabras en «pintar» (`#rrggbb`); sin él, amarillo. */
+  pintado?: string
+  /**
+   * Cuándo se dice cada palabra: segundos desde que empieza el rótulo (uno por palabra). Con ellos, «palabra a
+   * palabra» y «pintar» van al ritmo de la voz; sin ellos (o si se cambió el texto), las palabras se reparten.
+   */
+  tiempos?: number[]
   /** Un subtítulo hecho desde la voz (se rehacen todos juntos con otro estilo). */
   subtitulo?: boolean
 }
 
-export type AnimacionTexto = 'palabras' | 'maquina' | 'pop' | 'subir'
+export type AnimacionTexto = 'palabras' | 'maquina' | 'pop' | 'subir' | 'pintar'
 export const ANIMACIONES_TEXTO: { id: AnimacionTexto; nombre: string }[] = [
   { id: 'palabras', nombre: 'Palabra a palabra' },
+  { id: 'pintar', nombre: 'Pintar palabras' },
   { id: 'maquina', nombre: 'Letra a letra' },
   { id: 'pop', nombre: 'Con rebote' },
   { id: 'subir', nombre: 'Subiendo' }
@@ -377,6 +385,43 @@ export function pasoAnimacion(t: Pick<TextoTL, 'texto' | 'animacion'>): number {
 
 /** Lo que dura una palabra (o una letra) en aparecer. */
 export const APARECER_S = 0.15
+
+export const COLOR_PINTADO = '#ffe14d'
+
+/** Las palabras de un rótulo (como se trocean para animarlo). */
+export const palabrasDe = (texto: string): string[] => texto.split(/\s+/).filter(Boolean)
+
+/**
+ * Cuándo empieza cada palabra (segundos desde el inicio del rótulo) y cuánto dura. Con `tiempos` (de la voz), los de
+ * verdad; sin ellos, «palabra a palabra» con su paso de siempre y «pintar» repartiendo las palabras en lo que dura.
+ */
+export function tiemposPalabras(t: Pick<TextoTL, 'texto' | 'animacion' | 'tiempos' | 'duracion'>): { inicio: number; dura: number }[] {
+  const n = palabrasDe(t.texto).length
+  if (!n) return []
+  let inicios: number[]
+  if (t.tiempos && t.tiempos.length === n) inicios = t.tiempos.map((x) => Math.max(0, Math.min(x, t.duracion)))
+  else if (t.animacion === 'palabras') {
+    const paso = pasoAnimacion(t)
+    inicios = Array.from({ length: n }, (_, k) => k * paso)
+  } else {
+    // Repartidas en el 85 % de lo que dura (la última se queda pintada un momento), a lo más 0,5 s cada una.
+    const paso = Math.min(0.5, (t.duracion * 0.85) / n)
+    inicios = Array.from({ length: n }, (_, k) => k * paso)
+  }
+  return inicios.map((a, k) => {
+    const siguiente = k + 1 < n ? inicios[k + 1] : Math.min(t.duracion, a + Math.max(0.25, t.duracion * 0.85 - a))
+    return { inicio: a, dura: Math.max(0.05, Math.min(siguiente, t.duracion) - a) }
+  })
+}
+
+/** Normaliza los tiempos de las palabras: uno por palabra, en orden y dentro del rótulo. Si no cuadran, ninguno. */
+function normalizarTiempos(tiempos: unknown, texto: string, duracion: number): number[] | undefined {
+  if (!Array.isArray(tiempos)) return undefined
+  const n = palabrasDe(texto).length
+  if (!n || tiempos.length !== n || !tiempos.every((x) => typeof x === 'number' && Number.isFinite(x))) return undefined
+  let previo = 0
+  return (tiempos as number[]).map((x) => (previo = Math.round(Math.max(previo, Math.min(duracion, Math.max(0, x))) * 1000) / 1000))
+}
 
 /**
  * Las letras de los rótulos. Son fuentes que trae Windows: el monitor (CSS) y el render
@@ -397,7 +442,7 @@ export const LIMITES_TAMANO = [0.5, 6] as const
 const COLOR_HEX = /^#[0-9a-f]{6}$/i
 
 /** El estilo de un rótulo, limpio: lo neutro no se guarda. */
-function estiloTexto(t: Partial<TextoTL>): Pick<TextoTL, 'tamano' | 'color' | 'sinCaja' | 'fuente' | 'caja' | 'animacion'> {
+function estiloTexto(t: Partial<TextoTL>): Pick<TextoTL, 'tamano' | 'color' | 'sinCaja' | 'fuente' | 'caja' | 'animacion' | 'pintado'> {
   const tamano = typeof t.tamano === 'number' && Number.isFinite(t.tamano) ? Math.round(pinza(t.tamano, LIMITES_TAMANO[0], LIMITES_TAMANO[1]) * 100) / 100 : 1
   const color = typeof t.color === 'string' && COLOR_HEX.test(t.color) ? t.color.toLowerCase() : '#ffffff'
   return {
@@ -406,7 +451,8 @@ function estiloTexto(t: Partial<TextoTL>): Pick<TextoTL, 'tamano' | 'color' | 's
     ...(t.sinCaja === true ? { sinCaja: true } : {}),
     ...(typeof t.caja === 'string' && COLOR_HEX.test(t.caja) ? { caja: t.caja.toLowerCase() } : {}),
     ...(typeof t.fuente === 'string' && t.fuente !== 'normal' && t.fuente in FUENTES_TEXTO ? { fuente: t.fuente } : {}),
-    ...(t.animacion && ANIMACIONES_TEXTO.some((a) => a.id === t.animacion) ? { animacion: t.animacion } : {})
+    ...(t.animacion && ANIMACIONES_TEXTO.some((a) => a.id === t.animacion) ? { animacion: t.animacion } : {}),
+    ...(typeof t.pintado === 'string' && COLOR_HEX.test(t.pintado) && t.pintado.toLowerCase() !== COLOR_PINTADO ? { pintado: t.pintado.toLowerCase() } : {})
   }
 }
 
@@ -1175,7 +1221,11 @@ export function normalizarTimeline(entrada: unknown, duracionFuente: number, otr
       posicion: t.posicion === 'arriba' || t.posicion === 'centro' ? t.posicion : 'abajo',
       ...(t.subtitulo === true ? { subtitulo: true } : {}),
       ...estiloTexto(t),
-      ...posicionLibre(t)
+      ...posicionLibre(t),
+      ...(() => {
+        const tiempos = normalizarTiempos(t.tiempos, typeof t.texto === 'string' ? t.texto : '', duracion)
+        return tiempos ? { tiempos } : {}
+      })()
     })
   }
   const musica = normalizarMusica(crudo.musica)
@@ -1903,6 +1953,7 @@ export function vozEnTimeline(
 export const ESTILOS_SUBTITULO: { id: string; nombre: string; para: string; estilo: Partial<TextoTL> }[] = [
   { id: 'clasico', nombre: 'Clásico', para: 'letra blanca sobre caja negra, abajo', estilo: { posicion: 'abajo', caja: '#000000' } },
   { id: 'redes', nombre: 'Redes', para: 'grandes, amarillos y palabra a palabra, como en TikTok', estilo: { posicion: 'abajo', x: 0.5, y: 0.72, fuente: 'gruesa', tamano: 1.5, color: '#ffe14d', sinCaja: true, animacion: 'palabras' } },
+  { id: 'pintadas', nombre: 'Pintadas', para: 'la frase entera y cada palabra se pinta de color cuando se dice', estilo: { posicion: 'abajo', x: 0.5, y: 0.74, fuente: 'gruesa', tamano: 1.5, sinCaja: true, animacion: 'pintar' } },
   { id: 'limpio', nombre: 'Limpio', para: 'solo la letra con su borde, sin caja', estilo: { posicion: 'abajo', sinCaja: true, tamano: 1.1 } },
   { id: 'titular', nombre: 'Titular', para: 'condensados y grandes, al centro', estilo: { posicion: 'centro', fuente: 'titular', tamano: 2, sinCaja: true, animacion: 'pop' } }
 ]
@@ -1911,8 +1962,22 @@ export const ESTILOS_SUBTITULO: { id: string; nombre: string; para: string; esti
  * Hace subtítulos editables desde lo que se dice (la transcripción de los clips y las frases de narración): un texto
  * por frase corta (hasta `maxPalabras`), en su segundo, con el estilo elegido. Los subtítulos de antes se reemplazan.
  */
-export function subtitulosDesdeVoz(tl: Timeline, transcript: TranscriptSegment[] | undefined, estilo: Partial<TextoTL>, maxPalabras = 6): Timeline {
-  type Palabra = { texto: string; inicio: number; fin: number }
+/** Una palabra de una frase de voz, con sus segundos dentro de su audio (de la transcripción de ese audio). */
+export interface PalabraVoz {
+  texto: string
+  inicio: number
+  fin: number
+}
+
+export function subtitulosDesdeVoz(
+  tl: Timeline,
+  transcript: TranscriptSegment[] | undefined,
+  estilo: Partial<TextoTL>,
+  maxPalabras = 6,
+  /** Las palabras de cada audio de voz (por su archivo), para que los subtítulos vayan con lo que se dice. */
+  palabrasVoces?: Record<string, PalabraVoz[]>
+): Timeline {
+  type Palabra = { texto: string; inicio: number; fin: number; palabras?: Palabra[] }
   const palabras: Palabra[] = []
   for (const tr of tramos(tl)) {
     if (tr.clip.fuente !== FUENTE_PRINCIPAL || tr.clip.mudo || !transcript?.length) continue
@@ -1927,9 +1992,23 @@ export function subtitulosDesdeVoz(tl: Timeline, transcript: TranscriptSegment[]
       }
     }
   }
-  // La narración puesta frase a frase: sus palabras repartidas en lo que dura su audio.
+  // La narración puesta frase a frase: con la transcripción de su audio, cada palabra en su segundo (su texto manda:
+  // está bien escrito); sin ella, repartidas en lo que dura.
   for (const v of tl.voces ?? []) {
     const lista = v.texto.split(/\s+/).filter(Boolean)
+    const oidas = (palabrasVoces?.[v.archivo] ?? []).filter((w) => w.inicio < v.duracion)
+    if (oidas.length) {
+      const texto = lista.length ? lista : oidas.map((w) => w.texto)
+      texto.forEach((t, k) => {
+        // Cada palabra escrita toma el tiempo de la palabra oída que le toca (en proporción si no cuentan igual).
+        const w = oidas[Math.min(oidas.length - 1, Math.floor((k * oidas.length) / texto.length))]
+        const siguiente = k + 1 < texto.length ? oidas[Math.min(oidas.length - 1, Math.floor(((k + 1) * oidas.length) / texto.length))] : null
+        const inicio = v.inicio + w.inicio
+        const fin = v.inicio + Math.min(v.duracion, siguiente && siguiente !== w ? siguiente.inicio : w.fin)
+        palabras.push({ texto: t, inicio, fin: Math.max(inicio + 0.05, fin) })
+      })
+      continue
+    }
     lista.forEach((texto, k) => palabras.push({ texto, inicio: v.inicio + (v.duracion * k) / lista.length, fin: v.inicio + (v.duracion * (k + 1)) / lista.length }))
   }
   palabras.sort((a, b) => a.inicio - b.inicio)
@@ -1937,21 +2016,35 @@ export function subtitulosDesdeVoz(tl: Timeline, transcript: TranscriptSegment[]
   let actual: Palabra[] = []
   const cerrar = () => {
     if (!actual.length) return
-    bloques.push({ texto: actual.map((p) => p.texto).join(' '), inicio: actual[0].inicio, fin: actual[actual.length - 1].fin })
+    bloques.push({ texto: actual.map((p) => p.texto).join(' '), inicio: actual[0].inicio, fin: actual[actual.length - 1].fin, palabras: [...actual] })
     actual = []
   }
-  for (const p of palabras) {
+  palabras.forEach((p, i) => {
     const previa = actual[actual.length - 1]
-    if (previa && (p.inicio - previa.fin > 0.6 || actual.length >= maxPalabras)) cerrar()
+    // Lleno: se corta, salvo que la frase acabe en una o dos palabras más (no se deja «más.» solo).
+    const acabaPronto = palabras.slice(i, i + 2).some((x) => /[.?!…]$/.test(x.texto))
+    if (previa && (p.inicio - previa.fin > 0.6 || (actual.length >= maxPalabras && !acabaPronto) || actual.length >= maxPalabras + 2)) cerrar()
     actual.push(p)
-    if (/[.?!…]$/.test(p.texto)) cerrar()
-  }
+    // En el punto siempre; en la coma, si ya hay una frase con sentido (tres palabras o más).
+    if (/[.?!…]$/.test(p.texto) || (/[,;:]$/.test(p.texto) && actual.length >= 3)) cerrar()
+  })
   cerrar()
   const total = duracionTimeline(tl)
   const subs: TextoTL[] = bloques.map((b, k) => {
     const siguiente = bloques[k + 1]?.inicio ?? total
     const fin = Math.min(siguiente, Math.max(b.fin, b.inicio + 0.6), total)
-    return { ...estilo, id: nuevoId('texto'), inicio: b.inicio, duracion: Math.max(DURACION_MINIMA, fin - b.inicio), texto: b.texto, posicion: estilo.posicion ?? 'abajo', subtitulo: true }
+    // Cuándo se dice cada palabra: así «palabra a palabra» y «pintar» van con la voz.
+    const tiempos = (b.palabras ?? []).flatMap((p) => palabrasDe(p.texto).map(() => Math.round((p.inicio - b.inicio) * 1000) / 1000))
+    return {
+      ...estilo,
+      id: nuevoId('texto'),
+      inicio: b.inicio,
+      duracion: Math.max(DURACION_MINIMA, fin - b.inicio),
+      texto: b.texto,
+      posicion: estilo.posicion ?? 'abajo',
+      subtitulo: true,
+      ...(tiempos.length === palabrasDe(b.texto).length ? { tiempos } : {})
+    }
   })
   return { ...tl, textos: ajustarTextos([...tl.textos.filter((x) => !x.subtitulo), ...subs], total) }
 }
@@ -2333,12 +2426,15 @@ export function cambiarTexto(tl: Timeline, id: string, cambio: Partial<Omit<Text
     ...tl,
     textos: tl.textos.map((x) => {
       if (x.id !== id) return x
-      const { tamano: _t, color: _c, sinCaja: _s, fuente: _f, caja: _k, x: _x, y: _y, animacion: _a, ...base } = { ...x, ...cambio }
+      const { tamano: _t, color: _c, sinCaja: _s, fuente: _f, caja: _k, x: _x, y: _y, animacion: _a, pintado: _p, tiempos: _ti, ...base } = { ...x, ...cambio }
       // Elegir arriba, centro o abajo suelta la posición libre; mover el rótulo la fija.
       const libre = cambio.posicion !== undefined && cambio.x === undefined ? {} : posicionLibre({ ...x, ...cambio })
       const nuevo: TextoTL = { ...base, ...estiloTexto({ ...x, ...cambio }), ...libre }
       nuevo.inicio = pinza(nuevo.inicio, 0, Math.max(0, total - DURACION_MINIMA))
       nuevo.duracion = pinza(nuevo.duracion, DURACION_MINIMA, Math.max(DURACION_MINIMA, total - nuevo.inicio))
+      // Los tiempos de cada palabra siguen si el texto tiene las mismas palabras (se corrige una letra, no se reescribe).
+      const tiempos = normalizarTiempos(cambio.tiempos ?? x.tiempos, nuevo.texto, nuevo.duracion)
+      if (tiempos) nuevo.tiempos = tiempos
       return nuevo
     })
   }

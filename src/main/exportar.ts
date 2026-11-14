@@ -29,6 +29,8 @@ import {
   TRANSICIONES,
   APARECER_S,
   pasoAnimacion,
+  tiemposPalabras,
+  COLOR_PINTADO,
   type CapaTL,
   type TextoTL,
   type FiltrosTL,
@@ -919,11 +921,34 @@ export function animarAss(t: TextoTL, lineas: string, libre: { x: number; y: num
   if (t.animacion === 'subir') {
     return { inicio: libre ? `\\move(${libre.x},${libre.y + libre.baja},${libre.x},${libre.y},0,350)\\fad(250,0)` : '\\fad(300,0)', cuerpo: lineas }
   }
+  if (t.animacion === 'pintar') {
+    // Karaoke: la frase entera se ve en su color (\2c) y cada palabra se rellena del color pintado (\1c) de izquierda a
+    // derecha mientras se dice (\kf, en centésimas), al ritmo de sus tiempos: lo mismo que el monitor.
+    const cs = (s: number) => Math.max(1, Math.round(s * 100))
+    const tiempos = tiemposPalabras(t)
+    const base = colorAss(t.color ?? '#ffffff').replace('&H00', '&H')
+    const pintado = colorAss(t.pintado ?? COLOR_PINTADO).replace('&H00', '&H')
+    let k = 0
+    let reloj = 0
+    const cuerpo = lineas
+      .split(/(\\N|\s+)/)
+      .filter((x) => x !== undefined && x !== '')
+      .map((x) => {
+        if (x === '\\N' || /^\s+$/.test(x)) return x
+        const w = tiempos[k++] ?? { inicio: reloj, dura: 0.3 }
+        const espera = Math.max(0, w.inicio - reloj)
+        reloj = w.inicio + w.dura
+        return `{${espera > 0.005 ? `\\k${cs(espera)}` : ''}\\kf${cs(w.dura)}}${x}`
+      })
+      .join('')
+    return { inicio: `\\2c${base}&\\1c${pintado}&`, cuerpo }
+  }
   if (t.animacion !== 'palabras' && t.animacion !== 'maquina') return { inicio: '', cuerpo: lineas }
   // El borde y la caja siguen a la letra: con caja, su transparencia es la del estilo (o opaca si es de color).
   const borde = t.sinCaja ? '00' : t.caja ? '00' : '4D'
   const sombra = t.sinCaja ? '80' : '4D'
   const paso = pasoAnimacion(t)
+  const palabras = tiemposPalabras(t)
   const oculta = '\\1a&HFF&\\3a&HFF&\\4a&HFF&'
   const visible = `\\1a&H00&\\3a&H${borde}&\\4a&H${sombra}&`
   // Se trocea sin romper los saltos de línea (\N) ni los espacios.
@@ -933,7 +958,7 @@ export function animarAss(t: TextoTL, lineas: string, libre: { x: number; y: num
     .filter((x) => x !== undefined && x !== '')
     .map((x) => {
       if (x === '\\N' || /^\s+$/.test(x)) return x
-      const a = ms(n * paso)
+      const a = t.animacion === 'palabras' ? ms(palabras[n]?.inicio ?? n * paso) : ms(n * paso)
       n++
       return `{${oculta}\\t(${a},${a + ms(APARECER_S)},${visible})}${x}`
     })

@@ -97,6 +97,10 @@ export type OperacionTL =
       caja?: string
       fuente?: string
       animacion?: AnimacionTexto | 'golpe'
+      /** El color con que se pintan las palabras («pintar»). */
+      pintado?: string
+      /** Cuándo se dice cada palabra (segundos desde que empieza el rótulo). */
+      tiempos?: number[]
       /** Posición libre: el centro del rótulo, en fracción del cuadro (0–1). */
       x?: number
       y?: number
@@ -313,6 +317,8 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
             caja: typeof x.caja === 'string' && /^#[0-9a-f]{6}$/i.test(x.caja) ? x.caja : undefined,
             fuente: typeof x.fuente === 'string' && x.fuente in FUENTES_TEXTO ? x.fuente : undefined,
             animacion: x.animacion === 'golpe' || ANIMACIONES_TEXTO.some((a) => a.id === x.animacion) ? (x.animacion as AnimacionTexto | 'golpe') : undefined,
+            pintado: typeof x.pintado === 'string' && /^#[0-9a-f]{6}$/i.test(x.pintado) ? x.pintado : undefined,
+            tiempos: Array.isArray(x.tiempos) && x.tiempos.every((y) => typeof y === 'number' && Number.isFinite(y)) ? (x.tiempos as number[]).slice(0, 200) : undefined,
             ...(num(x.x) !== null && num(x.y) !== null ? { x: num(x.x)!, y: num(x.y)! } : {})
           })
         }
@@ -587,6 +593,8 @@ export function aplicarOperaciones(
         if (o.caja !== undefined) cambio.caja = o.caja
         if (o.fuente !== undefined) cambio.fuente = o.fuente
         if (o.animacion !== undefined) cambio.animacion = o.animacion === 'golpe' ? undefined : o.animacion
+        if (o.pintado !== undefined) cambio.pintado = o.pintado
+        if (o.tiempos !== undefined) cambio.tiempos = o.tiempos
         if (o.x !== undefined && o.y !== undefined && o.posicion === undefined) {
           cambio.x = o.x
           cambio.y = o.y
@@ -1034,7 +1042,7 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
 - {"op":"musica","volumen":V,"ducking":true|false}  volumen 0 a 1 de la música ya puesta (bajo la voz suele ir bien 0.2–0.4); ducking hace que baje sola cuando hay voz.
 - {"op":"quitar_musica"}
 - {"op":"sonido_clip","clip":N,"sonido":true|false}  quita o devuelve el sonido propio del clip N.
-- {"op":"cambiar_texto","texto_n":N,"tamano":1.5,"color":"#ffcc00","sin_caja":true,"caja":"#0a2540","fuente":"gruesa"}  también cambia el estilo del rótulo: tamano 0.5–6 (1 normal; 4–6 para una palabra que llena la pantalla), color #rrggbb, sin_caja (solo la letra con borde), caja (el color de la caja, #rrggbb), fuente: normal, gruesa, titular (condensada muy gruesa, para palabras enormes), impacto, elegante (serif de revista), cursiva (serif cursiva de revista), maquina. Para varias líneas usa \\n en "texto". "animacion": cómo aparece: "palabras" (palabra a palabra), "maquina" (letra a letra), "pop" (rebota), "subir" o "golpe" (de golpe).
+- {"op":"cambiar_texto","texto_n":N,"tamano":1.5,"color":"#ffcc00","sin_caja":true,"caja":"#0a2540","fuente":"gruesa"}  también cambia el estilo del rótulo: tamano 0.5–6 (1 normal; 4–6 para una palabra que llena la pantalla), color #rrggbb, sin_caja (solo la letra con borde), caja (el color de la caja, #rrggbb), fuente: normal, gruesa, titular (condensada muy gruesa, para palabras enormes), impacto, elegante (serif de revista), cursiva (serif cursiva de revista), maquina. Para varias líneas usa \\n en "texto". "animacion": cómo aparece: "palabras" (palabra a palabra), "pintar" (la frase entera y cada palabra se pinta de color cuando se dice, como un karaoke; "pintado":"#rrggbb" es ese color, amarillo si no), "maquina" (letra a letra), "pop" (rebota), "subir" o "golpe" (de golpe). "tiempos": [s, s, …] dice cuándo se dice cada palabra (segundos desde que empieza el rótulo, uno por palabra): con ellos «palabras» y «pintar» van al ritmo exacto de la voz.
 - {"op":"cambiar_voz","voz_n":N,"texto":"…","voz":"Kore","inicio":T,"volumen":V}  cambia la frase de narración N. Con "texto" o "voz", Recorte vuelve a generar SOLO esa frase (con la voz que ya tenía si no das otra). "inicio" la mueve, "volumen" 0–1.5.
 - {"op":"anadir_voz","inicio":T,"texto":"…","voz":"Kore"}  añade una frase de narración nueva en el segundo T (sin "voz", la de las demás frases).
 - {"op":"borrar_voz","voz_n":N}

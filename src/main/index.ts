@@ -65,7 +65,7 @@ import { turnoAgente } from './chat'
 import { buscarActualizacion, estadoActualizacion, instalarActualizacion, prepararActualizaciones } from './actualizar'
 import { activarGustos, agregarGustos, bloqueGustos, cargarGustos, olvidarGustos, quitarGusto, senalGusto, usoCreacion } from './gustos'
 import type { MensajeChat, OperacionTL } from '../shared/chat'
-import { buscarPython, rutaScriptPython, transcribir } from './transcribir'
+import { buscarPython, rutaScriptPython, transcribir, transcribirArchivo } from './transcribir'
 
 // El esquema tiene que declararse antes de que Electron esté listo.
 protocol.registerSchemesAsPrivileged([
@@ -2008,6 +2008,38 @@ app.whenReady().then(() => {
   }
   setTimeout(() => void revisarModelos(), 20_000)
   setInterval(() => void revisarModelos(), 60 * 60_000)
+  // Las palabras de cada audio de voz con su segundo (para subtítulos que van con lo que se dice). Se guardan junto al
+  // audio: si no cambió, no se vuelve a transcribir.
+  ipcMain.handle('voz:palabras', async (_evento, id: unknown, archivos: unknown) => {
+    const p = typeof id === 'string' ? proyectos.get(id) : null
+    if (!p || !Array.isArray(archivos)) throw new Error('Datos inválidos.')
+    const carpeta = proyectos.carpeta(p.id)
+    const salida: Record<string, { texto: string; inicio: number; fin: number }[]> = {}
+    for (const archivo of archivos.filter((a): a is string => typeof a === 'string' && /^media\/[\w.-]+$/.test(a)).slice(0, 200)) {
+      const ruta = join(carpeta, archivo)
+      if (!existsSync(ruta)) continue
+      const guardado = `${ruta}.palabras.json`
+      try {
+        if (existsSync(guardado) && statSync(guardado).mtimeMs >= statSync(ruta).mtimeMs) {
+          salida[archivo] = JSON.parse(readFileSync(guardado, 'utf8'))
+          continue
+        }
+      } catch {
+        // Se vuelve a transcribir.
+      }
+      const r = await transcribirArchivo(ruta, `${ruta}.transcripcion.json`, () => {})
+      if (!r.ok || !r.transcript) continue
+      const palabras = r.transcript.flatMap((s) => s.words.map((w) => ({ texto: w.text.trim(), inicio: Math.round(w.start * 1000) / 1000, fin: Math.round(w.end * 1000) / 1000 }))).filter((w) => w.texto)
+      salida[archivo] = palabras
+      try {
+        writeFileSync(guardado, JSON.stringify(palabras))
+        rmSync(`${ruta}.transcripcion.json`, { force: true })
+      } catch {
+        // Solo es un recuerdo.
+      }
+    }
+    return salida
+  })
   // Revisar el audio de la edición (palabras cortadas, cortes secos, respiraciones, ruido…) y arreglar una frase de voz.
   ipcMain.handle('audio:revisar', async (_evento, id: unknown, timeline: unknown) => {
     const p = typeof id === 'string' ? proyectos.get(id) : null

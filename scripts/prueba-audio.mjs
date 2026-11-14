@@ -86,6 +86,17 @@ try {
   const v = ventanaTimeline(base, 2, 2.4)
   assert.ok(Math.abs(valorClave(v.capas[0].claves.ancho, 0) - 0.6) < 0.01, JSON.stringify(v.capas[0]))
   console.log('cuadro suelto con capas animadas: la capa va donde debe ✓')
+  // «Pintar palabras»: en el MP4 cada palabra se rellena (\kf) al ritmo de sus tiempos, y sin tiempos se reparten.
+  const { animarAss } = await import('../src/main/exportar.ts')
+  const { tiemposPalabras } = await import('../src/shared/timeline.ts')
+  const rot = { id: 't', inicio: 0, duracion: 2, texto: 'Hola a todos', posicion: 'abajo', animacion: 'pintar', tiempos: [0.2, 0.8, 1.0] }
+  const ass = animarAss(rot, 'Hola a todos', null)
+  assert.equal(ass.inicio, String.raw`\2c&HFFFFFF&\1c&H4DE1FF&`)
+  assert.equal(ass.cuerpo, String.raw`{\k20\kf60}Hola {\kf20}a {\kf70}todos`)
+  const repartidas = tiemposPalabras({ ...rot, tiempos: undefined })
+  assert.equal(repartidas.length, 3)
+  assert.ok(repartidas[2].inicio > 0.9 && repartidas[2].inicio < 1.2, JSON.stringify(repartidas))
+  console.log('pintar palabras: karaoke al ritmo de la voz en el MP4 ✓')
   console.log('prueba audio: ok')
 } finally {
   rmSync(dir, { recursive: true, force: true })

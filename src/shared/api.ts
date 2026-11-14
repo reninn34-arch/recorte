@@ -458,6 +458,8 @@ export interface RecorteApi {
   onHerramienta: (cb: (p: { id: string; pct: number; texto: string }) => void) => () => void
   /** La sesión de un agente se cayó mientras trabajaba: hay que volver a conectarlo. */
   onSesionCaida: (cb: (id: EstadoAgente['id']) => void) => () => void
+  /** Las palabras de cada audio de voz con sus segundos (lo transcribe la primera vez). */
+  palabrasDeVoces: (id: string, archivos: string[]) => Promise<Record<string, { texto: string; inicio: number; fin: number }[]>>
   /** Revisa el audio de la edición: lo que suena mal y cómo arreglarlo. */
   revisarAudio: (id: string, timeline: Timeline) => Promise<ProblemaAudio[]>
   /** Procesa el audio de una frase de voz (bajar respiraciones o limpiarla) y da el archivo nuevo. */

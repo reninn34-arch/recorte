@@ -74,6 +74,7 @@ import {
   FILTROS,
   TRANSICIONES,
   ANIMACIONES_TEXTO,
+  COLOR_PINTADO,
   ANIMAR_CAPA,
   TOMAS_CAMARA,
   type TipoAnimar,
@@ -92,6 +93,7 @@ import {
   ESTILOS_SUBTITULO,
   PLANTILLAS_TEXTO,
   subtitulosDesdeVoz,
+  type PalabraVoz,
   quitarSubtitulos,
   anadirAjusteCapa,
   cambiarAjusteCapa,
@@ -236,6 +238,7 @@ export function TimelineEditor({
   onAnidar,
   anidando,
   onSepararAudio,
+  onPalabrasDeVoces,
   separando,
   seguirZona,
   fps = 30
@@ -248,6 +251,8 @@ export function TimelineEditor({
   /** Separa el sonido del clip (lo pasa a la pista de sonidos). */
   /** Separa el sonido de uno o varios clips en la pista de sonidos. */
   onSepararAudio?: (ids: string | string[]) => void
+  /** Las palabras de los audios de voz con sus segundos (para subtítulos al ritmo de la voz). */
+  onPalabrasDeVoces?: (archivos: string[]) => Promise<Record<string, PalabraVoz[]>>
   separando?: boolean
   /** Anida varios clips seguidos en uno. */
   onAnidar?: (ids: string[]) => void
@@ -1065,6 +1070,7 @@ export function TimelineEditor({
   // ===== Menú de clic derecho =====
 
   const [menuCtx, abrirMenu] = useMenuContextual()
+  const [escuchandoVoz, setEscuchandoVoz] = useState(false)
   /** Las acciones de este momento: el menú las llama al hacer clic, cuando lo elegido ya cambió. */
   const acciones = useRef({ accionCopiar, accionPegar, accionBorrar, accionDuplicar })
   acciones.current = { accionCopiar, accionPegar, accionBorrar, accionDuplicar }
@@ -1454,14 +1460,32 @@ export function TimelineEditor({
                     className="ed-fila"
                     disabled={total <= 0 || (!transcript?.length && !tl.voces?.length)}
                     title={!transcript?.length && !tl.voces?.length ? 'Transcribe el video (o pon narración) para hacer subtítulos' : undefined}
-                    onClick={() => {
+                    onClick={async () => {
                       const estilo = ESTILOS_SUBTITULO.find((x) => x.id === estiloSubs)?.estilo ?? {}
-                      const r = subtitulosDesdeVoz(timeline, transcript, estilo)
+                      // La narración se escucha para saber cuándo se dice cada palabra (la primera vez tarda un poco).
+                      let palabras: Record<string, PalabraVoz[]> | undefined
+                      if (tl.voces?.length && onPalabrasDeVoces) {
+                        setEscuchandoVoz(true)
+                        try {
+                          palabras = await onPalabrasDeVoces([...new Set(tl.voces.map((v) => v.archivo))])
+                        } catch {
+                          palabras = undefined
+                        } finally {
+                          setEscuchandoVoz(false)
+                        }
+                      }
+                      const r = subtitulosDesdeVoz(timeline, transcript, estilo, 6, palabras)
                       if (r.textos.filter((x) => x.subtitulo).length) historial.aplicar(r)
                     }}
                   >
                     <Icon name="type" size={14} />
-                    <span>{tl.textos.some((x) => x.subtitulo) ? 'Rehacer los subtítulos con este estilo' : 'Crear los subtítulos de la voz'}</span>
+                    <span>
+                      {escuchandoVoz
+                        ? 'Escuchando la voz para que cada palabra vaya a tiempo…'
+                        : tl.textos.some((x) => x.subtitulo)
+                          ? 'Rehacer los subtítulos con este estilo'
+                          : 'Crear los subtítulos de la voz'}
+                    </span>
                   </button>
                   {tl.textos.some((x) => x.subtitulo) && (
                     <button className="ed-fila" onClick={() => historial.aplicar(quitarSubtitulos(timeline))}>
@@ -3287,6 +3311,23 @@ export function TimelineEditor({
               onPointerDown={empezarAjuste}
               onChange={(e) => deslizar(cambiarTexto(timeline, textoElegido.id, { color: e.target.value }))}
             />
+            {textoElegido.animacion === 'pintar' && (
+              <label className="ed-campo" title="El color con que se pinta cada palabra cuando se dice">
+                <span>Se pinta de</span>
+                <input
+                  type="color"
+                  className="tl-color"
+                  value={textoElegido.pintado ?? COLOR_PINTADO}
+                  onPointerDown={empezarAjuste}
+                  onChange={(e) => deslizar(cambiarTexto(timeline, textoElegido.id, { pintado: e.target.value }))}
+                />
+              </label>
+            )}
+            {(textoElegido.animacion === 'pintar' || textoElegido.animacion === 'palabras') && (
+              <span className="tl-dim" title="Los subtítulos hechos desde la voz saben cuándo se dice cada palabra">
+                {textoElegido.tiempos ? 'Al ritmo de la voz' : 'Repartidas en lo que dura (hazlo desde la voz para que vaya con ella)'}
+              </span>
+            )}
             <label className="tl-check" title="Sin la caja oscura: solo la letra con su borde">
               <input
                 type="checkbox"

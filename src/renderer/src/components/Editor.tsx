@@ -749,6 +749,7 @@ export function Editor({
         onQuitarFondo={proyecto.demo ? undefined : (capaId) => void quitarFondo(capaId)}
         onCongelar={proyecto.demo ? undefined : () => void congelar()}
         onSepararAudio={proyecto.demo ? undefined : (clipId) => void separarAudioDe(clipId)}
+        onPalabrasDeVoces={proyecto.demo ? undefined : (archivos) => window.recorte.palabrasDeVoces(proyecto.id, archivos)}
         separando={separando}
         onAnidar={proyecto.demo ? undefined : (ids) => void anidar(ids)}
         anidando={anidando}
