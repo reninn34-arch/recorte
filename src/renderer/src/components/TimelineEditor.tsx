@@ -3323,6 +3323,20 @@ export function TimelineEditor({
                 />
               </label>
             )}
+            {textoElegido.texto.includes('*') ? (
+              <label className="ed-campo" title="El color de las palabras que van entre asteriscos">
+                <span>Palabras resaltadas</span>
+                <input
+                  type="color"
+                  className="tl-color"
+                  value={textoElegido.colorClave ?? COLOR_PINTADO}
+                  onPointerDown={empezarAjuste}
+                  onChange={(e) => deslizar(cambiarTexto(timeline, textoElegido.id, { colorClave: e.target.value }))}
+                />
+              </label>
+            ) : (
+              <span className="tl-dim">Para resaltar una palabra en color, escríbela entre *asteriscos*.</span>
+            )}
             {(textoElegido.animacion === 'pintar' || textoElegido.animacion === 'palabras') && (
               <span className="tl-dim" title="Los subtítulos hechos desde la voz saben cuándo se dice cada palabra">
                 {textoElegido.tiempos ? 'Al ritmo de la voz' : 'Repartidas en lo que dura (hazlo desde la voz para que vaya con ella)'}

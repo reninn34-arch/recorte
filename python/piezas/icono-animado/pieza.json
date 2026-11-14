@@ -1,0 +1,32 @@
+{
+  "nombre": "Ícono animado",
+  "para": "Para ilustrar lo que se dice: un ícono (regalo, anillo, globos, oso, bolsa, corazón, estrella o fiesta) entra con un rebote, flota con brillitos y sale. Lo pones donde no tape a nadie.",
+  "categoria": "Adornos",
+  "duracion": { "defecto": 2.2, "min": 1.2, "max": 8 },
+  "capa": { "x": 0.5, "y": 0.5, "ancho": 1 },
+  "vars": [
+    {
+      "id": "icono",
+      "tipo": "opcion",
+      "nombre": "Ícono",
+      "defecto": "regalo",
+      "opciones": [
+        { "valor": "regalo", "nombre": "Regalo" },
+        { "valor": "anillo", "nombre": "Anillo" },
+        { "valor": "globos", "nombre": "Globos" },
+        { "valor": "oso", "nombre": "Oso de peluche" },
+        { "valor": "bolsa", "nombre": "Bolsa de compras" },
+        { "valor": "corazon", "nombre": "Corazón" },
+        { "valor": "estrella", "nombre": "Estrella" },
+        { "valor": "fiesta", "nombre": "Lazo de fiesta" }
+      ]
+    },
+    { "id": "texto", "tipo": "texto", "nombre": "Etiqueta debajo (opcional)", "defecto": "" },
+    { "id": "color", "tipo": "color", "nombre": "Color principal", "defecto": "marca" },
+    { "id": "color2", "tipo": "color", "nombre": "Segundo color", "defecto": "marca2" },
+    { "id": "conDisco", "tipo": "si", "nombre": "Sobre un disco blanco (sticker)", "defecto": true },
+    { "id": "x", "tipo": "numero", "nombre": "Dónde, a lo ancho (%)", "defecto": 75 },
+    { "id": "y", "tipo": "numero", "nombre": "Dónde, a lo alto (%)", "defecto": 30 },
+    { "id": "tamano", "tipo": "numero", "nombre": "Tamaño (10 a 60)", "defecto": 26 }
+  ]
+}

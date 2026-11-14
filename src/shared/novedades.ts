@@ -24,6 +24,23 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.56',
+    fecha: '2026-11-14',
+    resumen: 'Subtítulos tipo rótulo con palabras clave en color, y una animación nueva de íconos para ilustrar lo que dices.',
+    novedades: [
+      {
+        icono: 'type',
+        titulo: 'Subtítulos «Rótulo» y palabras resaltadas',
+        texto: 'Un estilo de subtítulos limpio y profesional: letra negra blanca en una caja oscura, que aparece y crece un poco. Escribe una palabra entre *asteriscos* y sale en el color que elijas. Y una letra nueva: «Negra».'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Ícono animado',
+        texto: 'En «Animadas»: un regalo, un anillo, globos, un osito, una bolsa, un corazón, una estrella o un lazo de fiesta que entra con un rebote, flota con brillitos y sale. Con tus colores, donde no tape a nadie.'
+      }
+    ]
+  },
+  {
     version: '0.1.55',
     fecha: '2026-11-14',
     resumen: 'Tu agente crea animaciones nuevas a tu medida: las diseña, las mira, las corrige y quedan en «Mis animaciones».',

@@ -103,6 +103,13 @@ try {
   const t2 = tiemposPalabras(w2)
   assert.ok(t2[0].inicio < 0 && t2[0].inicio + t2[0].dura <= 0.001, JSON.stringify(t2))
   console.log('pintar palabras: karaoke al ritmo de la voz en el MP4 ✓')
+  // Rótulo: entra fundiéndose y creciendo; las palabras entre *asteriscos* en su color (y no cuentan como palabra aparte).
+  const { palabrasDe, partesClave } = await import('../src/shared/timeline.ts')
+  const rot2 = { id: 'r', inicio: 0, duracion: 2, texto: 'No es *timidez*,', posicion: 'abajo', animacion: 'rotulo', colorClave: '#5fb4f0' }
+  assert.match(animarAss(rot2, 'x', null).inicio, /fad\(150,80\).*fscx86/)
+  assert.deepEqual(palabrasDe(rot2.texto), ['No', 'es', 'timidez,'])
+  assert.deepEqual(partesClave(rot2.texto), [{ texto: 'No es ', clave: false }, { texto: 'timidez', clave: true }, { texto: ',', clave: false }])
+  console.log('rótulo y palabras resaltadas ✓')
   console.log('prueba audio: ok')
 } finally {
   rmSync(dir, { recursive: true, force: true })

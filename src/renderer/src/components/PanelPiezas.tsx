@@ -189,6 +189,15 @@ export function PanelPiezas({
                 </button>
               </span>
             )}
+            {x.tipo === 'opcion' && (
+              <select value={String(valores[x.id] ?? x.defecto)} onChange={(e) => setValores({ ...valores, [x.id]: e.target.value })}>
+                {(x.opciones ?? []).map((o) => (
+                  <option key={o.valor} value={o.valor}>
+                    {o.nombre}
+                  </option>
+                ))}
+              </select>
+            )}
             {x.tipo === 'si' && (
               <input type="checkbox" checked={(valores[x.id] ?? x.defecto) === true} onChange={(e) => setValores({ ...valores, [x.id]: e.target.checked })} />
             )}

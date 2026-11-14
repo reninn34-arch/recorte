@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { Project } from '../../../shared/types'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
@@ -8,6 +8,8 @@ import {
   pasoAnimacion,
   tiemposPalabras,
   COLOR_PINTADO,
+  partesClave,
+  sinMarcas,
   vistaTransicion,
   capaNueva,
   estadoCapa,
@@ -520,7 +522,7 @@ export function Monitor({
                   arrastrar(e, 'texto', r.id, inicio)
                 }}
               >
-                {reproductor.reproduciendo && r.animacion ? <TextoAnimado texto={r} dt={reproductor.tiempo - r.inicio} /> : r.texto}
+                {reproductor.reproduciendo && r.animacion ? <TextoAnimado texto={r} dt={reproductor.tiempo - r.inicio} /> : <ConClave texto={r} />}
               </span>
             )
           })}
@@ -622,12 +624,44 @@ function FiltrosVista({ filtros, tiempo, reproduciendo, ancho, alto }: { filtros
 }
 
 /** Un rótulo que aparece palabra a palabra, letra a letra, con rebote o subiendo (como en el MP4). */
+/** El texto con sus palabras resaltadas (las de entre *asteriscos*) en su color. */
+function ConClave({ texto }: { texto: TextoTL }) {
+  const partes = partesClave(texto.texto)
+  if (partes.length <= 1 && !partes[0]?.clave) return <>{sinMarcas(texto.texto)}</>
+  return (
+    <>
+      {partes.map((p, i) =>
+        p.clave ? (
+          <span key={i} style={{ color: texto.colorClave ?? COLOR_PINTADO }}>
+            {p.texto}
+          </span>
+        ) : (
+          <Fragment key={i}>{p.texto}</Fragment>
+        )
+      )}
+    </>
+  )
+}
+
 function TextoAnimado({ texto, dt }: { texto: TextoTL; dt: number }) {
-  if (texto.animacion === 'pop' || texto.animacion === 'subir') {
-    const e = texto.animacion === 'pop' ? (dt < 0.13 ? 0.45 + (dt / 0.13) * 0.72 : dt < 0.24 ? 1.17 - ((dt - 0.13) / 0.11) * 0.17 : 1) : 1
+  if (texto.animacion === 'pop' || texto.animacion === 'subir' || texto.animacion === 'rotulo') {
+    const e =
+      texto.animacion === 'pop'
+        ? dt < 0.13
+          ? 0.45 + (dt / 0.13) * 0.72
+          : dt < 0.24
+            ? 1.17 - ((dt - 0.13) / 0.11) * 0.17
+            : 1
+        : texto.animacion === 'rotulo'
+          ? 0.86 + 0.14 * Math.min(1, dt / 0.2)
+          : 1
     const sube = texto.animacion === 'subir' ? Math.max(0, 1 - dt / 0.35) : 0
-    const op = Math.min(1, dt / (texto.animacion === 'pop' ? 0.08 : 0.25))
-    return <span style={{ display: 'inline-block', transform: `translateY(${(sube * 0.6).toFixed(3)}em) scale(${e.toFixed(3)})`, opacity: op }}>{texto.texto}</span>
+    const op = Math.min(1, dt / (texto.animacion === 'pop' ? 0.08 : texto.animacion === 'rotulo' ? 0.15 : 0.25))
+    return (
+      <span style={{ display: 'inline-block', transform: `translateY(${(sube * 0.6).toFixed(3)}em) scale(${e.toFixed(3)})`, opacity: op }}>
+        <ConClave texto={texto} />
+      </span>
+    )
   }
   const paso = pasoAnimacion(texto)
   const tiempos = tiemposPalabras(texto)
@@ -637,7 +671,7 @@ function TextoAnimado({ texto, dt }: { texto: TextoTL; dt: number }) {
     let k = 0
     return (
       <>
-        {texto.texto.split(/(\s+)/).map((x, i) => {
+        {sinMarcas(texto.texto).split(/(\s+)/).map((x, i) => {
           if (!x || /^\s+$/.test(x)) return x
           const w = tiempos[k++]
           const p = w ? Math.max(0, Math.min(1, (dt - w.inicio) / w.dura)) : 0
@@ -653,17 +687,21 @@ function TextoAnimado({ texto, dt }: { texto: TextoTL; dt: number }) {
       </>
     )
   }
-  const piezas = texto.animacion === 'palabras' ? texto.texto.split(/(\s+)/) : Array.from(texto.texto)
+  // Palabra a palabra (con su color si está entre *asteriscos*) o letra a letra.
+  const piezas =
+    texto.animacion === 'palabras'
+      ? partesClave(texto.texto).flatMap((p) => p.texto.split(/(\s+)/).map((x) => ({ x, clave: p.clave })))
+      : Array.from(sinMarcas(texto.texto)).map((x) => ({ x, clave: false }))
   let n = 0
   return (
     <>
-      {piezas.map((x, i) => {
+      {piezas.map(({ x, clave }, i) => {
         if (!x || /^\s+$/.test(x)) return x
         const desde = texto.animacion === 'palabras' ? (tiempos[n]?.inicio ?? n * paso) : n * paso
         n++
         const op = Math.max(0, Math.min(1, (dt - desde) / APARECER_S))
         return (
-          <span key={i} style={{ opacity: op }}>
+          <span key={i} style={{ opacity: op, ...(clave ? { color: texto.colorClave ?? COLOR_PINTADO } : {}) }}>
             {x}
           </span>
         )

@@ -185,9 +185,14 @@ function escribirAss(
           : [])
       ].join('')
       // Cada línea del rótulo es una línea en el video.
+      // Las palabras entre *asteriscos* van en su color (no en «letra a letra» ni «pintar», que trocean la letra).
+      const conClave = t.animacion !== 'maquina' && t.animacion !== 'pintar'
+      const base = colorAss(t.color ?? '#ffffff').replace('&H00', '&H')
+      const clave = colorAss(t.colorClave ?? COLOR_PINTADO).replace('&H00', '&H')
       const lineas = t.texto
         .split(/\r?\n/)
         .map((l) => escapar(l))
+        .map((l) => (conClave ? l.replace(/\*([^*]+)\*/g, (_m, x: string) => `{\\1c${clave}&}${x}{\\1c${base}&}`) : l).replace(/\*/g, ''))
         .filter(Boolean)
         .join('\\N')
       const { inicio: entrada, cuerpo } = animarAss(t, lineas, libre ? { x: Math.round(t.x! * ancho), y: Math.round(t.y! * alto), baja: Math.round(alto * 0.03) } : null)
@@ -917,6 +922,10 @@ export function animarAss(t: TextoTL, lineas: string, libre: { x: number; y: num
   const ms = (s: number) => Math.round(s * 1000)
   if (t.animacion === 'pop') {
     return { inicio: '\\fscx45\\fscy45\\fad(80,0)\\t(0,130,\\fscx117\\fscy117)\\t(130,240,\\fscx100\\fscy100)', cuerpo: lineas }
+  }
+  if (t.animacion === 'rotulo') {
+    // Rótulo: aparece fundiéndose y crece un poco hasta su tamaño (como las etiquetas de un buen video explicativo).
+    return { inicio: '\\fad(150,80)\\fscx86\\fscy86\\t(0,200,\\fscx100\\fscy100)', cuerpo: lineas }
   }
   if (t.animacion === 'subir') {
     return { inicio: libre ? `\\move(${libre.x},${libre.y + libre.baja},${libre.x},${libre.y},0,350)\\fad(250,0)` : '\\fad(300,0)', cuerpo: lineas }

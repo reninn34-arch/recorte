@@ -1,0 +1,82 @@
+<style>
+  #p-sticker { position: absolute; left: var(--px); top: var(--py); width: 0; height: 0; }
+  #p-cuerpo { position: absolute; left: 0; top: 0; }
+  #p-disco { position: absolute; border-radius: 50%; background: #ffffff; box-shadow: 0 1.4vmin 3vmin rgba(0,0,0,.22); }
+  #p-aro { position: absolute; border-radius: 50%; border: .9vmin solid var(--color); }
+  #p-icono { position: absolute; }
+  #p-icono svg { width: 100%; height: 100%; display: block; overflow: visible; }
+  #p-etiqueta { position: absolute; white-space: nowrap; font-family: 'Montserrat', sans-serif; font-weight: 900; text-transform: uppercase;
+    letter-spacing: .3vmin; color: #ffffff; background: var(--color); border-radius: 99vmin; padding: .9vmin 2.4vmin; opacity: 0;
+    box-shadow: 0 .8vmin 1.8vmin rgba(0,0,0,.2); }
+  .p-brillo { position: absolute; opacity: 0; }
+  .p-brillo svg { width: 100%; height: 100%; display: block; }
+</style>
+<div id="p-sticker">
+  <div id="p-cuerpo">
+    <div id="p-disco"></div>
+    <div id="p-aro"></div>
+    <div id="p-icono"></div>
+  </div>
+  <div id="p-etiqueta" data-var-text="texto"></div>
+</div>
+<script>
+  // Ícono animado: un «sticker» (el dibujo sobre un disco blanco con un aro de color) entra con un rebote y un giro,
+  // flota suave mientras destellan brillitos alrededor, y sale encogiéndose. Para ilustrar lo que se dice.
+  const vmin = Math.min(W, H) / 100
+  const t = Math.max(10, Math.min(60, Number(v.tamano) || 26)) * vmin
+  const st = document.getElementById('p-sticker')
+  st.style.setProperty('--px', Math.max(0, Math.min(100, Number(v.x) || 75)) + '%')
+  st.style.setProperty('--py', Math.max(0, Math.min(100, Number(v.y) || 30)) + '%')
+  const pon = (id, lado, extra = '') => (document.getElementById(id).style.cssText = `left:${-lado / 2}px;top:${-lado / 2}px;width:${lado}px;height:${lado}px;${extra}`)
+  pon('p-disco', t)
+  pon('p-aro', t * 1.12)
+  pon('p-icono', t * 0.66)
+  if (!v.conDisco) {
+    document.getElementById('p-disco').style.display = 'none'
+    document.getElementById('p-aro').style.display = 'none'
+    pon('p-icono', t)
+  }
+  const c1 = v.color, c2 = v.color2, osc = '#2b2340'
+  const ICONOS = {
+    regalo: `<rect x="16" y="44" width="68" height="44" rx="5" fill="${c1}"/><rect x="11" y="32" width="78" height="16" rx="4" fill="${c2}"/><rect x="45" y="32" width="10" height="56" fill="#fff" opacity=".9"/><path d="M50 32 C38 14 22 20 30 30 C34 34 44 33 50 32 Z M50 32 C62 14 78 20 70 30 C66 34 56 33 50 32 Z" fill="${c2}" stroke="#fff" stroke-width="2.5"/>`,
+    anillo: `<circle cx="50" cy="62" r="24" fill="none" stroke="#f2c84b" stroke-width="8"/><circle cx="50" cy="62" r="24" fill="none" stroke="#fff3b8" stroke-width="2" opacity=".7"/><path d="M36 30 L44 18 L56 18 L64 30 L50 44 Z" fill="${c2}" stroke="#fff" stroke-width="2.5" stroke-linejoin="round"/><path d="M36 30 L64 30 M44 18 L50 30 L56 18 M50 30 L50 44" stroke="#fff" stroke-width="1.6" opacity=".8" fill="none"/>`,
+    globos: `<path d="M38 56 C40 70 34 80 40 94" stroke="${osc}" stroke-width="1.8" fill="none"/><path d="M64 52 C62 68 70 78 62 94" stroke="${osc}" stroke-width="1.8" fill="none"/><ellipse cx="36" cy="36" rx="18" ry="22" fill="${c1}"/><ellipse cx="66" cy="32" rx="18" ry="22" fill="${c2}"/><ellipse cx="30" cy="28" rx="4" ry="7" fill="#fff" opacity=".6"/><ellipse cx="60" cy="24" rx="4" ry="7" fill="#fff" opacity=".6"/><path d="M34 57 l4 5 l4 -5 z" fill="${c1}"/><path d="M62 53 l4 5 l4 -5 z" fill="${c2}"/>`,
+    oso: `<circle cx="27" cy="28" r="12" fill="#c98b5b"/><circle cx="73" cy="28" r="12" fill="#c98b5b"/><circle cx="27" cy="28" r="6" fill="${c1}"/><circle cx="73" cy="28" r="6" fill="${c1}"/><circle cx="50" cy="55" r="34" fill="#d9a06e"/><ellipse cx="50" cy="66" rx="16" ry="12" fill="#f3d3b0"/><circle cx="38" cy="50" r="4.5" fill="${osc}"/><circle cx="62" cy="50" r="4.5" fill="${osc}"/><ellipse cx="50" cy="61" rx="6" ry="4.5" fill="${osc}"/><path d="M44 70 Q50 75 56 70" stroke="${osc}" stroke-width="2.5" fill="none" stroke-linecap="round"/><circle cx="30" cy="62" r="5" fill="${c1}" opacity=".45"/><circle cx="70" cy="62" r="5" fill="${c1}" opacity=".45"/>`,
+    bolsa: `<path d="M36 34 C36 16 64 16 64 34" stroke="${osc}" stroke-width="5" fill="none" stroke-linecap="round"/><path d="M18 32 H82 L76 90 H24 Z" fill="${c1}" stroke="#fff" stroke-width="2.5" stroke-linejoin="round"/><rect x="18" y="32" width="64" height="12" fill="${c2}"/><path d="M50 58 l4 8 l9 1 l-7 6 l2 9 l-8 -5 l-8 5 l2 -9 l-7 -6 l9 -1 z" fill="#fff"/>`,
+    corazon: `<path d="M50 88 C20 66 10 50 14 34 C18 18 40 14 50 30 C60 14 82 18 86 34 C90 50 80 66 50 88 Z" fill="${c1}" stroke="#fff" stroke-width="3"/><ellipse cx="32" cy="34" rx="6" ry="9" fill="#fff" opacity=".55" transform="rotate(-25 32 34)"/>`,
+    estrella: `<path d="M50 8 L61 36 L91 38 L68 57 L76 88 L50 71 L24 88 L32 57 L9 38 L39 36 Z" fill="#ffd84d" stroke="${c1}" stroke-width="4" stroke-linejoin="round"/><circle cx="41" cy="52" r="3.5" fill="${osc}"/><circle cx="59" cy="52" r="3.5" fill="${osc}"/><path d="M44 61 Q50 66 56 61" stroke="${osc}" stroke-width="2.5" fill="none" stroke-linecap="round"/>`,
+    fiesta: `<path d="M18 90 L40 30 L70 60 Z" fill="${c1}" stroke="#fff" stroke-width="2.5" stroke-linejoin="round"/><path d="M27 66 L50 42 M22 80 L58 52" stroke="${c2}" stroke-width="5"/><circle cx="66" cy="22" r="5" fill="${c2}"/><rect x="78" y="34" width="8" height="8" rx="1" fill="#ffd84d" transform="rotate(20 82 38)"/><circle cx="84" cy="58" r="4" fill="${c1}"/><path d="M52 14 l3 7 M74 10 l-2 8 M90 22 l-7 4" stroke="${c1}" stroke-width="3.5" stroke-linecap="round"/>`
+  }
+  document.getElementById('p-icono').innerHTML = `<svg viewBox="0 0 100 100">${ICONOS[v.icono] || ICONOS.regalo}</svg>`
+  const et = document.getElementById('p-etiqueta')
+  if (!v.texto) et.style.display = 'none'
+  else {
+    et.style.fontSize = Math.max(3.2, t / vmin / 7.5) + 'vmin'
+    et.style.top = t * 0.62 + 'px'
+  }
+  tl.set('#p-etiqueta', { xPercent: -50 }, 0)
+  // Brillitos alrededor.
+  const brillos = []
+  for (let i = 0; i < 4; i++) {
+    const b = document.createElement('div')
+    b.className = 'p-brillo'
+    const lado = t * (0.16 + 0.06 * (i % 2))
+    const a = (-60 + i * 85) * (Math.PI / 180)
+    b.style.cssText = `left:${Math.cos(a) * t * 0.68 - lado / 2}px;top:${Math.sin(a) * t * 0.68 - lado / 2}px;width:${lado}px;height:${lado}px`
+    b.innerHTML = `<svg viewBox="0 0 100 100"><path d="M50 0 C55 38 62 45 100 50 C62 55 55 62 50 100 C45 62 38 55 0 50 C38 45 45 38 50 0Z" fill="${i % 2 ? '#ffd84d' : '#ffffff'}"/></svg>`
+    st.appendChild(b)
+    brillos.push(b)
+  }
+  tl.fromTo('#p-cuerpo', { scale: 0, rotation: -25 }, { scale: 1, rotation: 0, duration: 0.5, ease: 'back.out(2.6)' }, 0.02)
+  if (v.conDisco) tl.fromTo('#p-aro', { scale: 0.7, opacity: 0 }, { immediateRender: false, scale: 1, opacity: 1, duration: 0.4, ease: 'power3.out' }, 0.12)
+  tl.fromTo('#p-icono', { scale: 0.6, rotation: 15 }, { scale: 1, rotation: 0, duration: 0.55, ease: 'elastic.out(1, 0.5)' }, 0.12)
+  if (v.texto) tl.fromTo(et, { opacity: 0, y: 1.5 * vmin, scale: 0.8 }, { immediateRender: false, opacity: 1, y: 0, scale: 1, duration: 0.35, ease: 'back.out(2.4)' }, 0.32)
+  brillos.forEach((b, i) => {
+    tl.fromTo(b, { scale: 0, opacity: 0, rotation: -45 }, { immediateRender: false, scale: 1, opacity: 1, rotation: 0, duration: 0.3, ease: 'back.out(3)' }, 0.35 + i * 0.08)
+    tl.to(b, { keyframes: { scale: [1, 0.5, 1.1, 0.6, 1] }, duration: Math.max(0.6, DUR - 1.2), ease: 'sine.inOut' }, 0.7 + i * 0.08)
+  })
+  // Flota (sube y baja un poco, con un leve balanceo) hasta que sale.
+  const vida = Math.max(0.4, DUR - 0.85)
+  tl.to('#p-cuerpo', { keyframes: { y: [0, -1.4 * vmin, 0, -1.0 * vmin, 0], rotation: [0, 3, -2, 2, 0] }, duration: vida, ease: 'sine.inOut' }, 0.55)
+  tl.to(['#p-cuerpo', '#p-etiqueta', ...brillos], { scale: 0, opacity: 0, duration: 0.28, ease: 'back.in(2)' }, DUR - 0.3)
+</script>

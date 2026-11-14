@@ -358,6 +358,8 @@ export interface TextoTL {
   animacion?: AnimacionTexto
   /** El color con que se pintan las palabras en «pintar» (`#rrggbb`); sin él, amarillo. */
   pintado?: string
+  /** El color de las palabras resaltadas (las que van entre asteriscos: «No es *timidez*»); sin él, amarillo. */
+  colorClave?: string
   /**
    * Cuándo se dice cada palabra: segundos desde que empieza el rótulo (uno por palabra). Con ellos, «palabra a
    * palabra» y «pintar» van al ritmo de la voz; sin ellos (o si se cambió el texto), las palabras se reparten.
@@ -367,8 +369,9 @@ export interface TextoTL {
   subtitulo?: boolean
 }
 
-export type AnimacionTexto = 'palabras' | 'maquina' | 'pop' | 'subir' | 'pintar'
+export type AnimacionTexto = 'palabras' | 'maquina' | 'pop' | 'subir' | 'pintar' | 'rotulo'
 export const ANIMACIONES_TEXTO: { id: AnimacionTexto; nombre: string }[] = [
+  { id: 'rotulo', nombre: 'Rótulo (aparece y crece un poco)' },
   { id: 'palabras', nombre: 'Palabra a palabra' },
   { id: 'pintar', nombre: 'Pintar palabras' },
   { id: 'maquina', nombre: 'Letra a letra' },
@@ -388,8 +391,22 @@ export const APARECER_S = 0.15
 
 export const COLOR_PINTADO = '#ffe14d'
 
+/** El texto sin las marcas de resaltado (los asteriscos de «No es *timidez*»). */
+export const sinMarcas = (texto: string): string => texto.replace(/\*/g, '')
+
+/** Los trozos de un texto: los que van entre asteriscos son palabras resaltadas (en su color). */
+export function partesClave(texto: string): { texto: string; clave: boolean }[] {
+  const partes: { texto: string; clave: boolean }[] = []
+  let clave = false
+  for (const trozo of texto.split('*')) {
+    if (trozo) partes.push({ texto: trozo, clave })
+    clave = !clave
+  }
+  return partes
+}
+
 /** Las palabras de un rótulo (como se trocean para animarlo). */
-export const palabrasDe = (texto: string): string[] => texto.split(/\s+/).filter(Boolean)
+export const palabrasDe = (texto: string): string[] => sinMarcas(texto).split(/\s+/).filter(Boolean)
 
 /**
  * Cuándo empieza cada palabra (segundos desde el inicio del rótulo) y cuánto dura. Con `tiempos` (de la voz), los de
@@ -432,6 +449,7 @@ export const FUENTES_TEXTO: Record<string, { nombre: string; familia: string; ne
   normal: { nombre: 'Normal', familia: 'Arial', negrita: true },
   fina: { nombre: 'Fina', familia: 'Segoe UI', negrita: false },
   gruesa: { nombre: 'Gruesa', familia: 'Arial Black', negrita: false },
+  negra: { nombre: 'Negra', familia: 'Segoe UI Black', negrita: false },
   impacto: { nombre: 'Impacto', familia: 'Impact', negrita: false },
   elegante: { nombre: 'Elegante', familia: 'Playfair Display', negrita: true },
   cursiva: { nombre: 'Cursiva', familia: 'Playfair Display', negrita: true, cursiva: true },
@@ -443,7 +461,7 @@ export const LIMITES_TAMANO = [0.5, 6] as const
 const COLOR_HEX = /^#[0-9a-f]{6}$/i
 
 /** El estilo de un rótulo, limpio: lo neutro no se guarda. */
-function estiloTexto(t: Partial<TextoTL>): Pick<TextoTL, 'tamano' | 'color' | 'sinCaja' | 'fuente' | 'caja' | 'animacion' | 'pintado'> {
+function estiloTexto(t: Partial<TextoTL>): Pick<TextoTL, 'tamano' | 'color' | 'sinCaja' | 'fuente' | 'caja' | 'animacion' | 'pintado' | 'colorClave'> {
   const tamano = typeof t.tamano === 'number' && Number.isFinite(t.tamano) ? Math.round(pinza(t.tamano, LIMITES_TAMANO[0], LIMITES_TAMANO[1]) * 100) / 100 : 1
   const color = typeof t.color === 'string' && COLOR_HEX.test(t.color) ? t.color.toLowerCase() : '#ffffff'
   return {
@@ -453,7 +471,8 @@ function estiloTexto(t: Partial<TextoTL>): Pick<TextoTL, 'tamano' | 'color' | 's
     ...(typeof t.caja === 'string' && COLOR_HEX.test(t.caja) ? { caja: t.caja.toLowerCase() } : {}),
     ...(typeof t.fuente === 'string' && t.fuente !== 'normal' && t.fuente in FUENTES_TEXTO ? { fuente: t.fuente } : {}),
     ...(t.animacion && ANIMACIONES_TEXTO.some((a) => a.id === t.animacion) ? { animacion: t.animacion } : {}),
-    ...(typeof t.pintado === 'string' && COLOR_HEX.test(t.pintado) && t.pintado.toLowerCase() !== COLOR_PINTADO ? { pintado: t.pintado.toLowerCase() } : {})
+    ...(typeof t.pintado === 'string' && COLOR_HEX.test(t.pintado) && t.pintado.toLowerCase() !== COLOR_PINTADO ? { pintado: t.pintado.toLowerCase() } : {}),
+    ...(typeof t.colorClave === 'string' && COLOR_HEX.test(t.colorClave) ? { colorClave: t.colorClave.toLowerCase() } : {})
   }
 }
 
@@ -1968,6 +1987,7 @@ export function vozEnTimeline(
 export const ESTILOS_SUBTITULO: { id: string; nombre: string; para: string; estilo: Partial<TextoTL> }[] = [
   { id: 'clasico', nombre: 'Clásico', para: 'letra blanca sobre caja negra, abajo', estilo: { posicion: 'abajo', caja: '#000000' } },
   { id: 'redes', nombre: 'Redes', para: 'grandes, amarillos y palabra a palabra, como en TikTok', estilo: { posicion: 'abajo', x: 0.5, y: 0.72, fuente: 'gruesa', tamano: 1.5, color: '#ffe14d', sinCaja: true, animacion: 'palabras' } },
+  { id: 'rotulo', nombre: 'Rótulo', para: 'letra negra blanca en una caja oscura, frases cortas y las palabras entre *asteriscos* en color', estilo: { posicion: 'abajo', x: 0.5, y: 0.76, fuente: 'negra', tamano: 1.45, caja: '#0a2540', animacion: 'rotulo', colorClave: '#5fb4f0' } },
   { id: 'pintadas', nombre: 'Pintadas', para: 'la frase entera y cada palabra se pinta de color cuando se dice', estilo: { posicion: 'abajo', x: 0.5, y: 0.74, fuente: 'gruesa', tamano: 1.5, sinCaja: true, animacion: 'pintar' } },
   { id: 'limpio', nombre: 'Limpio', para: 'solo la letra con su borde, sin caja', estilo: { posicion: 'abajo', sinCaja: true, tamano: 1.1 } },
   { id: 'titular', nombre: 'Titular', para: 'condensados y grandes, al centro', estilo: { posicion: 'centro', fuente: 'titular', tamano: 2, sinCaja: true, animacion: 'pop' } }
@@ -2441,7 +2461,7 @@ export function cambiarTexto(tl: Timeline, id: string, cambio: Partial<Omit<Text
     ...tl,
     textos: tl.textos.map((x) => {
       if (x.id !== id) return x
-      const { tamano: _t, color: _c, sinCaja: _s, fuente: _f, caja: _k, x: _x, y: _y, animacion: _a, pintado: _p, tiempos: _ti, ...base } = { ...x, ...cambio }
+      const { tamano: _t, color: _c, sinCaja: _s, fuente: _f, caja: _k, x: _x, y: _y, animacion: _a, pintado: _p, tiempos: _ti, colorClave: _cc, ...base } = { ...x, ...cambio }
       // Elegir arriba, centro o abajo suelta la posición libre; mover el rótulo la fija.
       const libre = cambio.posicion !== undefined && cambio.x === undefined ? {} : posicionLibre({ ...x, ...cambio })
       const nuevo: TextoTL = { ...base, ...estiloTexto({ ...x, ...cambio }), ...libre }
