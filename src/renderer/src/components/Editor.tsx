@@ -13,6 +13,7 @@ import { useMenuContextual } from './MenuContextual'
 import { PanelHistorial } from './PanelHistorial'
 import { PanelLimpieza } from './PanelLimpieza'
 import { PanelAudio } from './PanelAudio'
+import { PanelPiezas } from './PanelPiezas'
 
 const CLAVE_ALTO_TL = 'recorte.altoLineaDeTiempo'
 import { mediaUrl } from '../media'
@@ -672,6 +673,27 @@ export function Editor({
                         const r = await window.recorte.extraerAudio(proyecto.id, a.fuente, Math.max(0, inicio + a.desfase), inicio + a.desfase + dura)
                         historial.aplicar(sonidoUnicoMulticam(timeline, r.archivo, r.nombre, r.duracion))
                       }}
+                    />
+                  )
+                }
+              ]),
+          ...(proyecto.demo
+            ? []
+            : [
+                {
+                  id: 'animadas',
+                  nombre: 'Animadas',
+                  icono: 'sparkles' as const,
+                  contenido: (
+                    <PanelPiezas
+                      proyecto={proyecto}
+                      timeline={timeline}
+                      historial={historial}
+                      tiempo={reproductor.tiempo}
+                      capaElegida={elegido?.tipo === 'capa' ? timeline.capas?.find((c) => c.id === elegido.id) : undefined}
+                      onMedios={onMedios}
+                      onElegirCapa={(id) => elegir({ tipo: 'capa', id })}
+                      onAviso={onAviso}
                     />
                   )
                 }

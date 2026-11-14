@@ -1,0 +1,65 @@
+{
+  "nombre": "Dato que cuenta",
+  "para": "Un número que importa: sube de 0 a su valor mientras un anillo de tu color se llena.",
+  "categoria": "Datos",
+  "duracion": {
+    "defecto": 3,
+    "min": 2.2,
+    "max": 8
+  },
+  "capa": {
+    "x": 0.5,
+    "y": 0.5,
+    "ancho": 1
+  },
+  "vars": [
+    {
+      "id": "numero",
+      "tipo": "numero",
+      "nombre": "Número",
+      "defecto": 500
+    },
+    {
+      "id": "prefijo",
+      "tipo": "texto",
+      "nombre": "Antes del número",
+      "defecto": "+"
+    },
+    {
+      "id": "sufijo",
+      "tipo": "texto",
+      "nombre": "Después del número",
+      "defecto": ""
+    },
+    {
+      "id": "texto",
+      "tipo": "texto",
+      "nombre": "Qué es",
+      "defecto": "clientes felices"
+    },
+    {
+      "id": "porcentaje",
+      "tipo": "numero",
+      "nombre": "Cuánto se llena el anillo (%)",
+      "defecto": 100
+    },
+    {
+      "id": "color",
+      "tipo": "color",
+      "nombre": "Color del anillo",
+      "defecto": "marca"
+    },
+    {
+      "id": "fondo",
+      "tipo": "color",
+      "nombre": "Color del disco",
+      "defecto": "#1d1d24"
+    },
+    {
+      "id": "colorTexto",
+      "tipo": "color",
+      "nombre": "Color de la letra",
+      "defecto": "#ffffff"
+    }
+  ]
+}

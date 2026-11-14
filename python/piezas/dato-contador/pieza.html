@@ -1,0 +1,34 @@
+<style>
+  #p-dato { position: absolute; left: 50%; top: 45%; width: 62vmin; height: 62vmin; margin: -31vmin 0 0 -31vmin; }
+  #p-disco { position: absolute; inset: 0; border-radius: 50%; background: var(--fondo); box-shadow: 0 2vmin 5vmin rgba(0,0,0,.3); }
+  #p-anillo { position: absolute; inset: 0; transform: rotate(-90deg); }
+  #p-anillo circle { fill: none; stroke-width: 6; stroke-linecap: round; }
+  #p-centro { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 0 7vmin; }
+  #p-numero { font-family: 'Archivo Black', 'Montserrat', sans-serif; font-weight: 900; font-size: 15vmin; line-height: 1; color: var(--colorTexto); white-space: nowrap; }
+  #p-texto { font-family: 'Poppins', sans-serif; font-weight: 700; font-size: 3.8vmin; line-height: 1.15; color: var(--colorTexto); opacity: .9; margin-top: 1.6vmin; }
+</style>
+<div id="p-dato">
+  <div id="p-disco"></div>
+  <svg id="p-anillo" viewBox="0 0 100 100"><circle cx="50" cy="50" r="45" stroke="rgba(255,255,255,.18)" /><circle id="p-arco" cx="50" cy="50" r="45" stroke="var(--color)" stroke-dasharray="282.7" stroke-dashoffset="282.7" /></svg>
+  <div id="p-centro"><div id="p-numero"></div><div id="p-texto" data-var-text="texto"></div></div>
+</div>
+<script>
+  // Dato que cuenta: el disco aparece con rebote, el número sube de 0 a su valor mientras el anillo se llena hasta el
+  // porcentaje pedido, el número da un saltito al llegar y al final todo se encoge.
+  if (!v.texto) document.getElementById('p-texto').style.display = 'none'
+  const num = document.getElementById('p-numero')
+  const meta = Number(v.numero) || 0
+  const decimales = Number.isInteger(meta) ? 0 : 1
+  const pinta = (x) => (num.textContent = `${v.prefijo || ''}${x.toLocaleString('es', { minimumFractionDigits: decimales, maximumFractionDigits: decimales })}${v.sufijo || ''}`)
+  pinta(0)
+  const largo = String(num.textContent).length + 1
+  num.style.fontSize = Math.min(15, 70 / largo) + 'vmin'
+  const contador = { x: 0 }
+  tl.fromTo('#p-dato', { scale: 0, rotation: -20 }, { scale: 1, rotation: 0, duration: 0.55, ease: 'back.out(1.8)' }, 0.05)
+  tl.to(contador, { x: meta, duration: 1.3, ease: 'power3.out', onUpdate: () => pinta(decimales ? Math.round(contador.x * 10) / 10 : Math.round(contador.x)) }, 0.35)
+  const lleno = Math.max(0, Math.min(100, Number(v.porcentaje) || 100))
+  tl.to('#p-arco', { attr: { 'stroke-dashoffset': 282.7 * (1 - lleno / 100) }, duration: 1.3, ease: 'power3.out' }, 0.35)
+  tl.fromTo('#p-numero', { scale: 1 }, { immediateRender: false, keyframes: { scale: [1, 1.18, 1] }, duration: 0.35, ease: 'power2.out' }, 1.65)
+  tl.fromTo('#p-texto', { y: 2 * (Math.min(W, H) / 100), opacity: 0 }, { immediateRender: false, y: 0, opacity: 0.9, duration: 0.4, ease: 'power2.out' }, 0.7)
+  tl.to('#p-dato', { scale: 0, opacity: 0, duration: 0.35, ease: 'back.in(1.6)' }, DUR - 0.35)
+</script>

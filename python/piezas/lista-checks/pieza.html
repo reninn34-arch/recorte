@@ -1,0 +1,35 @@
+<style>
+  #p-lista { position: absolute; left: 8%; right: 8%; top: 50%; }
+  #p-titulo { font-family: 'Montserrat', sans-serif; font-weight: 900; font-size: 6.4vmin; line-height: 1.05; color: var(--colorTexto); margin-bottom: 3.4vmin;
+    text-shadow: 0 .6vmin 1.6vmin rgba(0,0,0,.4); opacity: 0; }
+  .p-item { display: flex; align-items: center; gap: 2.4vmin; margin: 2vmin 0; padding: 1.8vmin 2.6vmin; border-radius: 2vmin; background: var(--fondo);
+    box-shadow: 0 1vmin 2.4vmin rgba(0,0,0,.25); opacity: 0; }
+  .p-check { flex: 0 0 auto; width: 7vmin; height: 7vmin; border-radius: 50%; background: var(--color); display: flex; align-items: center; justify-content: center; transform: scale(0); }
+  .p-check svg { width: 64%; height: 64%; }
+  .p-check path { fill: none; stroke: #ffffff; stroke-width: 14; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 120; stroke-dashoffset: 120; }
+  .p-texto { font-family: 'Poppins', sans-serif; font-weight: 700; font-size: 4.6vmin; line-height: 1.15; color: var(--colorItems); }
+</style>
+<div id="p-lista"><div id="p-titulo" data-var-text="titulo"></div></div>
+<script>
+  // Lista con checks: el título entra, cada punto se desliza en su tarjeta y su check se dibuja con un pequeño salto,
+  // uno tras otro repartidos en lo que dura. Al final la lista se recoge.
+  if (!v.titulo) document.getElementById('p-titulo').style.display = 'none'
+  const vmin = Math.min(W, H) / 100
+  tl.set('#p-lista', { yPercent: -50 }, 0)
+  const lista = document.getElementById('p-lista')
+  const items = [v.item1, v.item2, v.item3, v.item4].map((x) => String(x || '').trim()).filter(Boolean)
+  if (v.titulo) tl.fromTo('#p-titulo', { opacity: 0, y: 3 * vmin }, { immediateRender: false, opacity: 1, y: 0, duration: 0.4, ease: 'back.out(2)' }, 0.05)
+  const paso = Math.min(0.7, (DUR - 1.2) / Math.max(1, items.length))
+  items.forEach((t, i) => {
+    const el = document.createElement('div')
+    el.className = 'p-item'
+    el.innerHTML = `<div class="p-check"><svg viewBox="0 0 100 100"><path d="M22 54 L42 72 L78 32"/></svg></div><div class="p-texto"></div>`
+    el.lastChild.textContent = t
+    lista.appendChild(el)
+    const t0 = 0.35 + i * paso
+    tl.fromTo(el, { opacity: 0, x: -12 * vmin }, { immediateRender: false, opacity: 1, x: 0, duration: 0.4, ease: 'power3.out' }, t0)
+    tl.to(el.querySelector('.p-check'), { scale: 1, duration: 0.35, ease: 'back.out(3)' }, t0 + 0.2)
+    tl.to(el.querySelector('path'), { strokeDashoffset: 0, duration: 0.3, ease: 'power2.out' }, t0 + 0.3)
+  })
+  tl.to('#p-lista', { opacity: 0, x: 8 * vmin, duration: 0.35, ease: 'power2.in' }, DUR - 0.35)
+</script>

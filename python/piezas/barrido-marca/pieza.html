@@ -1,0 +1,29 @@
+<style>
+  .p-franja { position: absolute; left: -60%; width: 220%; height: 46%; }
+  #p-f1 { top: -18%; background: var(--color1); }
+  #p-f2 { top: 22%; background: var(--color2); }
+  #p-f3 { top: 62%; background: var(--color3); }
+  #p-logo { position: absolute; left: 50%; top: 50%; width: 40vmin; height: 40vmin; margin: -20vmin 0 0 -20vmin; display: flex; align-items: center; justify-content: center; opacity: 0; }
+  #p-logo img { max-width: 100%; max-height: 100%; object-fit: contain; filter: drop-shadow(0 1vmin 2vmin rgba(0,0,0,.25)); }
+</style>
+<div id="p-f1" class="p-franja"></div>
+<div id="p-f2" class="p-franja"></div>
+<div id="p-f3" class="p-franja"></div>
+<div id="p-logo"><img data-var-src="logo" src="assets/logo.png" alt="" /></div>
+<script>
+  // Barrido de marca: tres franjas de tus colores cruzan la pantalla en diagonal hasta taparla, el logo asoma un
+  // instante en el centro y las franjas siguen de largo destapando la escena siguiente. Ponlo sobre un corte.
+  if (!v.logo) document.getElementById('p-logo').style.display = 'none'
+  const mitad = DUR / 2
+  const entra = Math.min(0.35, mitad * 0.7)
+  // El giro lo lleva GSAP (una rotación en CSS se perdería al moverlas).
+  tl.set('.p-franja', { rotation: -12 }, 0)
+  ;['#p-f1', '#p-f2', '#p-f3'].forEach((f, i) => {
+    tl.fromTo(f, { xPercent: i % 2 ? 100 : -100 }, { xPercent: 0, duration: entra, ease: 'power3.out' }, i * 0.05)
+    tl.to(f, { xPercent: i % 2 ? -100 : 100, duration: entra, ease: 'power3.in' }, DUR - entra - (2 - i) * 0.05)
+  })
+  if (v.logo) {
+    tl.fromTo('#p-logo', { scale: 0.4, opacity: 0, rotation: -10 }, { scale: 1, opacity: 1, rotation: 0, duration: 0.25, ease: 'back.out(2.5)' }, entra)
+    tl.to('#p-logo', { scale: 1.3, opacity: 0, duration: 0.2, ease: 'power2.in' }, DUR - entra - 0.1)
+  }
+</script>

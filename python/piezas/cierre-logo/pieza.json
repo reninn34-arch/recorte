@@ -1,0 +1,16 @@
+{
+  "nombre": "Cierre con logo",
+  "para": "El final del video: tu logo cae, rebota y suelta confeti con tus colores. Con o sin fondo.",
+  "categoria": "Cierres",
+  "duracion": { "defecto": 2.4, "min": 1.8, "max": 6 },
+  "capa": { "x": 0.5, "y": 0.5, "ancho": 1 },
+  "vars": [
+    { "id": "logo", "tipo": "imagen", "nombre": "Logo", "defecto": "marca" },
+    { "id": "conFondo", "tipo": "si", "nombre": "Con fondo", "defecto": true },
+    { "id": "fondo", "tipo": "color", "nombre": "Fondo", "defecto": "marca2" },
+    { "id": "acento", "tipo": "color", "nombre": "Color de los anillos", "defecto": "marca" },
+    { "id": "acento2", "tipo": "color", "nombre": "Otro color del confeti", "defecto": "#5b6cf0" },
+    { "id": "texto", "tipo": "texto", "nombre": "Frase debajo (opcional)", "defecto": "" },
+    { "id": "colorTexto", "tipo": "color", "nombre": "Color de la frase", "defecto": "marca" }
+  ]
+}

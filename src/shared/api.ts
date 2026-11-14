@@ -2,6 +2,7 @@ import type { MensajeChat, OperacionTL } from './chat'
 import type { Gustos, SenalGusto } from './gustos'
 import type { MusicaTL, Timeline } from './timeline'
 import type { ProblemaAudio } from './audio'
+import type { PiezaAnimada, ValoresPieza } from './piezas'
 import type { AjustesCreacion, Creacion, EstiloPropio, MensajeCreacion, ModeloAgente, PeticionCreacion } from './creacion'
 import type { EstadoFlow, PedidoFlow, ResultadoFlow } from './flow'
 import type { AjustesIA, Project, TranscriptSegment } from './types'
@@ -460,6 +461,10 @@ export interface RecorteApi {
   onSesionCaida: (cb: (id: EstadoAgente['id']) => void) => () => void
   /** Las palabras de cada audio de voz con sus segundos (lo transcribe la primera vez). */
   palabrasDeVoces: (id: string, archivos: string[]) => Promise<Record<string, { texto: string; inicio: number; fin: number }[]>>
+  /** Las piezas animadas (títulos, rótulos, cierres…) que se pueden poner. */
+  listarPiezas: () => Promise<PiezaAnimada[]>
+  /** Anima una pieza con sus datos y la agrega a la biblioteca: devuelve su medio para ponerlo como capa. */
+  animarPieza: (id: string, pieza: string, valores: ValoresPieza, duracion: number) => Promise<{ project: Project; medio: string; duracion: number }>
   /** Revisa el audio de la edición: lo que suena mal y cómo arreglarlo. */
   revisarAudio: (id: string, timeline: Timeline) => Promise<ProblemaAudio[]>
   /** Procesa el audio de una frase de voz (bajar respiraciones o limpiarla) y da el archivo nuevo. */

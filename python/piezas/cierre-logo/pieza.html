@@ -1,0 +1,82 @@
+<style>
+  #p-fondo { position: absolute; inset: 0; background: var(--fondo); }
+  #p-rayas { position: absolute; left: -50%; top: -50%; width: 200%; height: 200%;
+    background: repeating-linear-gradient(135deg, rgba(255,255,255,.14) 0 5vmin, rgba(255,255,255,0) 5vmin 12vmin); }
+  #p-brillo { position: absolute; left: 50%; top: 42%; width: 90vmin; height: 90vmin; margin: -45vmin 0 0 -45vmin; border-radius: 50%;
+    background: radial-gradient(closest-side, rgba(255,255,255,.8), rgba(255,255,255,.3) 55%, rgba(255,255,255,0)); }
+  .p-anillo { position: absolute; left: 50%; top: 42%; width: 64vmin; height: 64vmin; margin: -32vmin 0 0 -32vmin; border-radius: 50%; opacity: 0; }
+  #p-anillo1 { border: 1.4vmin solid var(--acento); }
+  #p-anillo2 { border: .9vmin solid #ffffff; }
+  #p-confeti { position: absolute; left: 50%; top: 42%; width: 0; height: 0; }
+  #p-confeti i { position: absolute; left: 0; top: 0; display: block; opacity: 0; }
+  #p-estrellas b { position: absolute; display: block; opacity: 0; }
+  #p-estrellas svg { width: 100%; height: 100%; display: block; }
+  #p-logo { position: absolute; left: 50%; top: 42%; width: 56vmin; height: 56vmin; margin: -28vmin 0 0 -28vmin; transform-origin: 50% 100%;
+    display: flex; align-items: center; justify-content: center; }
+  #p-logo img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; filter: drop-shadow(0 1.6vmin 2vmin rgba(0,0,0,.22)); }
+  #p-sombra { position: absolute; left: 50%; top: calc(42% + 30vmin); width: 34vmin; height: 3.6vmin; margin-left: -17vmin; border-radius: 50%; background: rgba(0,0,0,.16); opacity: 0; }
+  #p-texto { position: absolute; left: 6%; right: 6%; top: calc(42% + 36vmin); text-align: center; font-family: 'Poppins', sans-serif; font-weight: 800;
+    font-size: 6.4vmin; line-height: 1.15; color: var(--colorTexto); opacity: 0; }
+</style>
+<div id="p-fondo"></div>
+<div id="p-rayas"></div>
+<div id="p-brillo"></div>
+<div id="p-anillo1" class="p-anillo"></div>
+<div id="p-anillo2" class="p-anillo"></div>
+<div id="p-sombra"></div>
+<div id="p-confeti"></div>
+<div id="p-logo"><img id="p-img" data-var-src="logo" src="assets/logo.png" alt="" /></div>
+<div id="p-estrellas"></div>
+<div id="p-texto" data-var-text="texto"></div>
+<script>
+  // Cierre con logo: el fondo de la marca, el logo cae girando, aplasta al tocar, rebota y se asienta; al tocar se
+  // abren dos anillos, salta confeti con los colores de la marca y destellan estrellas; después flota.
+  if (!v.conFondo) {
+    document.getElementById('p-fondo').style.display = 'none'
+    document.getElementById('p-rayas').style.display = 'none'
+    document.getElementById('p-brillo').style.display = 'none'
+  }
+  if (!v.texto) document.getElementById('p-texto').style.display = 'none'
+  const colores = [v.acento, v.acento2, '#ffffff', '#ffd84d', v.acento, '#5b6cf0']
+  let s = 7
+  const azar = () => (s = (s * 16807) % 2147483647) / 2147483647
+  const vmin = Math.min(W, H) / 100
+  const confeti = document.getElementById('p-confeti')
+  for (let i = 0; i < 40; i++) {
+    const el = document.createElement('i')
+    const w = (1.6 + azar() * 1.8) * vmin
+    const h = azar() < 0.4 ? w : w * 0.45
+    el.style.cssText = `width:${w}px;height:${h}px;margin:${-h / 2}px 0 0 ${-w / 2}px;background:${colores[i % colores.length]};border-radius:${azar() < 0.35 ? '50%' : '0.3vmin'}`
+    confeti.appendChild(el)
+    const ang = -Math.PI / 2 + (azar() - 0.5) * Math.PI * 1.9
+    const vel = (42 + azar() * 52) * vmin
+    const t0 = 0.5 + azar() * 0.08
+    tl.fromTo(el, { x: 0, y: 0, rotation: 0, scale: 0.6, opacity: 1 }, { immediateRender: false, x: Math.cos(ang) * vel, rotation: (azar() - 0.5) * 900, scale: 1, duration: 1.5, ease: 'power3.out' }, t0)
+    const dy = Math.sin(ang) * vel * 0.85
+    tl.to(el, { keyframes: { y: [0, dy, dy + 34 * vmin], easeEach: 'power2.out' }, duration: 1.6, ease: 'none' }, t0)
+    tl.to(el, { opacity: 0, duration: 0.35 }, t0 + 1.1 + azar() * 0.3)
+  }
+  const estrellas = [[18, 22, 10], [82, 26, 8], [14, 60, 7], [86, 57, 9], [50, 11, 6]]
+  const capa = document.getElementById('p-estrellas')
+  estrellas.forEach(([x, y, t], i) => {
+    const b = document.createElement('b')
+    b.style.cssText = `left:${x}%;top:${y}%;width:${t}vmin;height:${t}vmin;margin:${-t / 2}vmin 0 0 ${-t / 2}vmin`
+    b.innerHTML = `<svg viewBox="0 0 100 100"><path d="M50 0 C55 38 62 45 100 50 C62 55 55 62 50 100 C45 62 38 55 0 50 C38 45 45 38 50 0Z" fill="${i % 2 ? '#ffd84d' : '#ffffff'}"/></svg>`
+    capa.appendChild(b)
+    tl.fromTo(b, { scale: 0, rotation: -90, opacity: 0 }, { immediateRender: false, scale: 1, rotation: 0, opacity: 1, duration: 0.45, ease: 'back.out(3)' }, 0.62 + i * 0.09)
+    tl.to(b, { keyframes: { scale: [1, 0.55, 1.15, 0.8] }, duration: 1.1, ease: 'sine.inOut' }, 1.07 + i * 0.09)
+  })
+  if (v.conFondo) {
+    tl.fromTo('#p-rayas', { x: 0, y: 0 }, { x: 14 * vmin, y: 14 * vmin, duration: DUR, ease: 'none' }, 0)
+    tl.fromTo('#p-brillo', { scale: 0.6, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.6, ease: 'power2.out' }, 0.05)
+  }
+  tl.fromTo('#p-logo', { y: -H * 0.75, rotation: -18, scaleX: 0.9, scaleY: 1.12 }, { y: 0, rotation: 4, scaleX: 1, scaleY: 1, duration: 0.42, ease: 'power3.in' }, 0.06)
+  tl.to('#p-logo', { scaleX: 1.14, scaleY: 0.84, rotation: -2, duration: 0.09, ease: 'power2.out' }, 0.48)
+  tl.to('#p-logo', { scaleX: 0.95, scaleY: 1.07, y: -6 * vmin, rotation: 1, duration: 0.2, ease: 'power2.out' }, 0.57)
+  tl.to('#p-logo', { scaleX: 1, scaleY: 1, y: 0, rotation: 0, duration: 0.5, ease: 'elastic.out(1, 0.45)' }, 0.77)
+  tl.to('#p-logo', { y: -1.6 * vmin, duration: Math.max(0.4, DUR - 1.27), ease: 'sine.inOut' }, 1.27)
+  tl.fromTo('#p-sombra', { scale: 0.2, opacity: 0 }, { immediateRender: false, scale: 1, opacity: 1, duration: 0.3, ease: 'power2.out' }, 0.3)
+  tl.fromTo('#p-anillo1', { scale: 0.5, opacity: 1 }, { immediateRender: false, scale: 1.6, opacity: 0, duration: 0.75, ease: 'power2.out' }, 0.5)
+  tl.fromTo('#p-anillo2', { scale: 0.5, opacity: 0.9 }, { immediateRender: false, scale: 1.9, opacity: 0, duration: 0.9, ease: 'power2.out' }, 0.56)
+  if (v.texto) tl.fromTo('#p-texto', { y: 3 * vmin, opacity: 0 }, { immediateRender: false, y: 0, opacity: 1, duration: 0.5, ease: 'back.out(2)' }, 0.9)
+</script>

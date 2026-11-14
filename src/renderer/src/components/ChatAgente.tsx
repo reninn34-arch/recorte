@@ -26,6 +26,7 @@ export interface PuenteEditor {
 }
 
 const SUGERENCIAS = [
+  'Dale un acabado profesional: títulos, rótulos, un llamado a la acción y el cierre con mi logo, con animaciones de mi marca',
   'Quita las pausas y silencios',
   'Hazme una versión de 30 segundos con lo mejor',
   'Pon un título al inicio',

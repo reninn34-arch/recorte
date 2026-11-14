@@ -7,7 +7,7 @@ import { aplicarOperaciones, describirTimelineParaAgente, OPERACIONES_DOC, valid
 import type { RenderResultado, TranscripcionResultado } from '../shared/api'
 import { COSTO_CLIP, ID_SEGURO, MAX_CLIPS_VEO, textoMuestra, VOCES_GEMINI, type Creacion, type PeticionCreacion } from '../shared/creacion'
 import { MODELOS_IMAGEN, modelosVideoVigentes, type PedidoFlow, type ResultadoFlow } from '../shared/flow'
-import { anadirVoz, ANIMAR_CAPA, cambiarCapa, duracionesDeMedios, duracionTimeline, escalaAnimada, normalizarTimeline, ponerMusica, timelineInicial, ventanaTimeline, type Timeline, type TipoAnimar } from '../shared/timeline'
+import { anadirCapa, anadirVoz, ANIMAR_CAPA, cambiarCapa, duracionesDeMedios, duracionTimeline, escalaAnimada, normalizarTimeline, ponerMusica, timelineInicial, ventanaTimeline, type Timeline, type TipoAnimar } from '../shared/timeline'
 import type { Project } from '../shared/types'
 
 /** Lo que se añade a un pedido de imagen «para recortar» (lo mismo que PARA_RECORTAR del kit). */
@@ -18,6 +18,7 @@ import { duracionMedio, rutaFfmpeg } from './ffmpeg'
 import { rutaScriptPython } from './transcribir'
 import { arreglarVoz, revisarAudio } from './revisaraudio'
 import { NOMBRE_PROBLEMA } from '../shared/audio'
+import type { PiezaAnimada, ValoresPieza } from '../shared/piezas'
 import type { HerramientaMcp, ResultadoHerramienta } from './mcp'
 import type { Proyectos } from './proyectos'
 
@@ -42,6 +43,11 @@ export interface ContextoMcp {
   abrirEnApp: (id: string) => void
   /** Quita el fondo liso de una imagen de la biblioteca y la agrega como medio nuevo. */
   quitarFondo: (id: string, medio: string) => Promise<{ project: Project; medio: string }>
+  /** Las piezas animadas (HyperFrames) y animar una con sus datos: devuelve su medio para ponerla como capa. */
+  piezas?: {
+    listar: () => PiezaAnimada[]
+    animar: (id: string, pieza: string, valores: ValoresPieza, duracion: number) => Promise<{ project: Project; medio: string; duracion: number }>
+  }
   /** Anima una imagen de la biblioteca (respirar, balanceo, ondear, flotar, humo): la animación como medio nuevo. */
   animarImagen: (id: string, medio: string, tipo: string) => Promise<{ project: Project; medio: string; escala: number; avisos?: string[] }>
   // ===== Crear por MCP (6.3) =====
@@ -317,6 +323,18 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
           const s = await ctx.copiarSonido(p.id, o.sonido)
           if (s) o.audio = s
         }
+        // Las piezas animadas se animan antes de aplicar (quedan en la biblioteca).
+        for (const o of ops as OperacionTL[]) {
+          if (o.op !== 'anadir_pieza' || !ctx.piezas) continue
+          try {
+            const pz = ctx.piezas.listar().find((x) => x.id === o.pieza)
+            const r = await ctx.piezas.animar(p.id, o.pieza, o.valores ?? {}, o.duracion ?? pz?.duracion.defecto ?? 3)
+            o.medio = r.medio
+            o.duracionReal = r.duracion
+          } catch {
+            // Sin medio, la operación avisa que no se pudo.
+          }
+        }
         const antes = timelineDe(p)
         const r = aplicarOperaciones(antes, ops, { duracionFuente: p.source.duration, transcript: p.transcript, medios: duracionesDeMedios(p.medios) })
         if (r.timeline !== antes && r.cambios.length) {
@@ -468,6 +486,66 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
         ctx.proyectos.save(actual)
         ctx.avisarCambio(actual, sesion.cliente, true)
         return ok(`${hecho}\nLa timeline dura ${duracionTimeline(tl).toFixed(1)} s.`)
+      }
+    },
+    {
+      nombre: 'anadir_pieza',
+      descripcion:
+        'Pone una PIEZA ANIMADA (diseño en movimiento hecho con HyperFrames, con los colores y el logo de la marca del proyecto) ' +
+        'como capa en el segundo "inicio": títulos que golpean, rótulos inferiores, llamados a la acción con botón, datos que cuentan, ' +
+        'frases con píldora, barridos de marca entre escenas, destellos, sellos de oferta, listas con checks y cierres con logo. ' +
+        'Sin "pieza", lista las que hay con sus datos. "valores" cambia sus datos (textos, colores #rrggbb o "marca"/"marca2", ' +
+        '"si" true/false, imágenes por id de la biblioteca o "marca" para el logo). Tarda unos segundos (la primera vez, más). ' +
+        'Úsalas con criterio: un título al empezar o al cambiar de tema, un rótulo al presentar a alguien, el llamado a la acción ' +
+        'antes del final, el cierre con logo al final, un barrido justo sobre un corte (centrado en el corte).',
+      esquema: {
+        type: 'object',
+        properties: {
+          proyecto: proyectoArg,
+          pieza: { type: 'string', description: 'El id de la pieza (sin él, la lista).' },
+          inicio: { type: 'number', description: 'Segundo de la timeline donde empieza.' },
+          duracion: { type: 'number', description: 'Lo que dura (cada pieza tiene su mínimo y máximo).' },
+          valores: { type: 'object', description: 'Sus datos: {"texto":"…","color":"marca",…}.' }
+        },
+        required: ['proyecto']
+      },
+      correr: async (args, sesion) => {
+        if (!ctx.piezas) return fallo('Las piezas animadas no están disponibles aquí.')
+        const p = buscar(args.proyecto)
+        const lista = ctx.piezas.listar()
+        const id = texto(args.pieza)
+        if (!id) {
+          return ok(
+            `Piezas animadas (usa "pieza" con el id):\n` +
+              lista
+                .map((x) => `- ${x.id} · ${x.nombre} (${x.categoria}, ${x.duracion.defecto} s; ${x.duracion.min}–${x.duracion.max}): ${x.para}\n  datos: ${x.vars.map((y) => `${y.id} (${y.tipo}, «${y.nombre}», por defecto ${JSON.stringify(y.defecto)})`).join('; ')}`)
+                .join('\n')
+          )
+        }
+        const pieza = lista.find((x) => x.id === id)
+        if (!pieza) return fallo(`No existe la pieza «${id}». Llama sin "pieza" para ver la lista.`)
+        const valores: ValoresPieza = {}
+        if (args.valores && typeof args.valores === 'object') {
+          for (const [k, v] of Object.entries(args.valores as Record<string, unknown>)) {
+            if (pieza.vars.some((x) => x.id === k) && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')) valores[k] = typeof v === 'string' ? v.slice(0, 500) : v
+          }
+        }
+        const tl0 = timelineDe(p)
+        const total = duracionTimeline(tl0)
+        const inicio = typeof args.inicio === 'number' ? Math.max(0, Math.min(args.inicio, Math.max(0, total - 0.2))) : 0
+        const duracion = typeof args.duracion === 'number' ? args.duracion : pieza.duracion.defecto
+        const r = await ctx.piezas.animar(p.id, pieza.id, valores, duracion)
+        const actual = ctx.proyectos.get(p.id)!
+        const tl = timelineDe(actual)
+        const medios = { principal: actual.source.duration, ...duracionesDeMedios(actual.medios) }
+        const hecho = anadirCapa(tl, { fuente: r.medio, inicio, duracion: r.duracion, x: pieza.capa.x, y: pieza.capa.y, ancho: pieza.capa.ancho, pista: 3, pieza: { id: pieza.id, valores } }, medios)
+        if (hecho.timeline === tl) return fallo('No cupo ahí: ese segundo está después del final del video.')
+        actual.timeline = hecho.timeline
+        delete actual.timelinePendiente
+        actual.updatedAt = Date.now()
+        ctx.proyectos.save(actual)
+        ctx.avisarCambio(actual, sesion.cliente, true)
+        return ok(`Puse «${pieza.nombre}» en ${inicio.toFixed(2)}–${(inicio + r.duracion).toFixed(2)} s como capa (pista 3 de Encima). Mírala con ver_cuadro.`)
       }
     },
     {

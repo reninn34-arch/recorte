@@ -518,6 +518,8 @@ export interface CapaTL {
    * bucle (un WebM con transparencia) y `base` la imagen de la que sale, para cambiarla o volver a ella.
    */
   animada?: { tipo: TipoAnimar; base: FuenteId; escala?: number }
+  /** Si es una pieza animada (HyperFrames): cuál y con qué datos, para cambiarlos y volver a animarla. */
+  pieza?: { id: string; valores: Record<string, string | number | boolean> }
   /**
    * Escena 2.5D: a qué distancia está la capa, 0 (pegada al fondo: se mueve con él) a 1 (muy cerca de la
    * cámara: se mueve y crece 2,5 veces más que el fondo). Sin ella, la capa no sigue a la cámara.
@@ -1314,6 +1316,18 @@ export function normalizarCapas(entrada: unknown, total: number, medios: Record<
               tipo: c.animada.tipo,
               base: c.animada.base,
               ...(typeof c.animada.escala === 'number' && c.animada.escala >= 1 && c.animada.escala <= 4 ? { escala: c.animada.escala } : {})
+            }
+          }
+        : {}),
+      ...(c.pieza && typeof c.pieza.id === 'string' && /^[\w-]{1,60}$/.test(c.pieza.id) && c.pieza.valores && typeof c.pieza.valores === 'object'
+        ? {
+            pieza: {
+              id: c.pieza.id,
+              valores: Object.fromEntries(
+                Object.entries(c.pieza.valores)
+                  .filter(([k, v]) => /^[\w-]{1,40}$/.test(k) && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'))
+                  .map(([k, v]) => [k, typeof v === 'string' ? v.slice(0, 500) : v])
+              )
             }
           }
         : {}),

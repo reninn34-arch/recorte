@@ -1,0 +1,13 @@
+{
+  "nombre": "Sello de oferta",
+  "para": "Para un precio, un descuento o algo nuevo: un sello de tu color cae, golpea y queda girando.",
+  "categoria": "Datos",
+  "duracion": { "defecto": 2.6, "min": 1.5, "max": 8 },
+  "capa": { "x": 0.5, "y": 0.5, "ancho": 1 },
+  "vars": [
+    { "id": "texto", "tipo": "texto", "nombre": "Grande", "defecto": "-20%" },
+    { "id": "subtexto", "tipo": "texto", "nombre": "Debajo (opcional)", "defecto": "solo hoy" },
+    { "id": "color", "tipo": "color", "nombre": "Color del sello", "defecto": "marca" },
+    { "id": "colorTexto", "tipo": "color", "nombre": "Color de la letra", "defecto": "#ffffff" }
+  ]
+}

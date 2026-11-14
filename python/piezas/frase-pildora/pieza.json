@@ -1,0 +1,14 @@
+{
+  "nombre": "Frase con píldora",
+  "para": "Una frase que importa: las palabras aparecen y la que se dice se marca con una píldora de tu color que salta de palabra en palabra.",
+  "categoria": "Textos",
+  "duracion": { "defecto": 3, "min": 1.5, "max": 10 },
+  "capa": { "x": 0.5, "y": 0.5, "ancho": 1 },
+  "vars": [
+    { "id": "texto", "tipo": "texto", "nombre": "Frase", "defecto": "Todo en un solo lugar" },
+    { "id": "color", "tipo": "color", "nombre": "Color de la píldora", "defecto": "marca" },
+    { "id": "colorTexto", "tipo": "color", "nombre": "Color de la letra", "defecto": "#ffffff" },
+    { "id": "colorActivo", "tipo": "color", "nombre": "Letra dentro de la píldora", "defecto": "#ffffff" },
+    { "id": "tiempos", "tipo": "texto", "nombre": "Cuándo se dice cada palabra (s, con comas; opcional)", "defecto": "" }
+  ]
+}

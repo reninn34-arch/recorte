@@ -58,6 +58,17 @@ const herramientas = herramientasRecorte({
     proyectos.save(p)
     return { project: p, medio: 'm-recorte' }
   },
+  // Piezas animadas de mentira: «animar» agrega un video a la biblioteca.
+  piezas: {
+    listar: () => [{ id: 'titulo-impacto', nombre: 'Título que golpea', para: 'abrir', categoria: 'Títulos', duracion: { defecto: 2.6, min: 1.6, max: 8 }, capa: { x: 0.5, y: 0.5, ancho: 1 }, vars: [{ id: 'texto', tipo: 'texto', nombre: 'Título', defecto: 'Hola' }] }],
+    animar: async (pid, pieza, valores, duracion) => {
+      const p = proyectos.abrir(pid)
+      const mid = `m-pieza-${(p.medios ?? []).length}`
+      p.medios = [...(p.medios ?? []), { id: mid, ruta: video, nombre: `${pieza}.webm`, tipo: 'video', duracion: Math.min(duracion, 3.5) }]
+      proyectos.save(p)
+      return { project: p, medio: mid, duracion: Math.min(duracion, 3.5) }
+    }
+  },
   // Crear por MCP (6.3), con una creación y una voz de mentira.
   creaciones: {
     nueva: async (pet) => {
@@ -232,6 +243,16 @@ try {
   assert.ok(nuevaVoz && nuevaVoz.duracion < 1.4, `sin los silencios de los extremos: ${nuevaVoz?.duracion}`)
   const rev = await llamar('revisar_audio', { proyecto: id })
   assert.ok(!rev.isError, rev.content[0].text)
+  // Piezas animadas: la lista, ponerla con anadir_pieza y desde editar_timeline.
+  assert.match((await llamar('anadir_pieza', { proyecto: id })).content[0].text, /titulo-impacto · Título que golpea/)
+  const capasAntes = proyectos.get(id).timeline.capas?.length ?? 0
+  const pz = await llamar('anadir_pieza', { proyecto: id, pieza: 'titulo-impacto', inicio: 0.5, valores: { texto: 'Bienvenidos', inventado: 'x' } })
+  assert.ok(!pz.isError, pz.content[0].text)
+  const capaPz = proyectos.get(id).timeline.capas.find((c) => c.pieza)
+  assert.deepEqual([proyectos.get(id).timeline.capas.length, capaPz.pieza], [capasAntes + 1, { id: 'titulo-impacto', valores: { texto: 'Bienvenidos' } }])
+  const porOp = await llamar('editar_timeline', { proyecto: id, operaciones: [{ op: 'anadir_pieza', pieza: 'titulo-impacto', inicio: 1, valores: { texto: 'Otra' } }] })
+  assert.match(porOp.content[0].text, /Puse la animación «titulo-impacto»/)
+  assert.equal(proyectos.get(id).timeline.capas.filter((c) => c.pieza).length, 2)
   console.log('prueba mcp: ok')
 } finally {
   servidor.detener()

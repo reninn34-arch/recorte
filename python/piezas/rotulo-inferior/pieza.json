@@ -1,0 +1,47 @@
+{
+  "nombre": "Rótulo inferior",
+  "para": "Presentar a alguien o un lugar: nombre y cargo en un bloque de tu color que entra deslizándose.",
+  "categoria": "Rótulos",
+  "duracion": {
+    "defecto": 4,
+    "min": 2,
+    "max": 10
+  },
+  "capa": {
+    "x": 0.5,
+    "y": 0.5,
+    "ancho": 1
+  },
+  "vars": [
+    {
+      "id": "nombre",
+      "tipo": "texto",
+      "nombre": "Nombre",
+      "defecto": "Tu nombre"
+    },
+    {
+      "id": "cargo",
+      "tipo": "texto",
+      "nombre": "Debajo (cargo, lugar…)",
+      "defecto": "Lo que haces"
+    },
+    {
+      "id": "color",
+      "tipo": "color",
+      "nombre": "Color del bloque",
+      "defecto": "marca"
+    },
+    {
+      "id": "acento",
+      "tipo": "color",
+      "nombre": "Color de la línea",
+      "defecto": "marca2"
+    },
+    {
+      "id": "colorTexto",
+      "tipo": "color",
+      "nombre": "Color de la letra",
+      "defecto": "#ffffff"
+    }
+  ]
+}

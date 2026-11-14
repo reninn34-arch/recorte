@@ -1,0 +1,71 @@
+{
+  "nombre": "Lista con checks",
+  "para": "Para enumerar lo que ofreces: cada punto entra en su tarjeta y se marca con un check de tu color.",
+  "categoria": "Textos",
+  "duracion": {
+    "defecto": 4,
+    "min": 2.5,
+    "max": 10
+  },
+  "capa": {
+    "x": 0.5,
+    "y": 0.5,
+    "ancho": 1
+  },
+  "vars": [
+    {
+      "id": "titulo",
+      "tipo": "texto",
+      "nombre": "Título (opcional)",
+      "defecto": "Lo que encuentras"
+    },
+    {
+      "id": "item1",
+      "tipo": "texto",
+      "nombre": "Punto 1",
+      "defecto": "Envíos a todo el país"
+    },
+    {
+      "id": "item2",
+      "tipo": "texto",
+      "nombre": "Punto 2",
+      "defecto": "Pagos seguros"
+    },
+    {
+      "id": "item3",
+      "tipo": "texto",
+      "nombre": "Punto 3",
+      "defecto": "Atención personalizada"
+    },
+    {
+      "id": "item4",
+      "tipo": "texto",
+      "nombre": "Punto 4 (opcional)",
+      "defecto": ""
+    },
+    {
+      "id": "color",
+      "tipo": "color",
+      "nombre": "Color del check",
+      "defecto": "marca"
+    },
+    {
+      "id": "fondo",
+      "tipo": "color",
+      "nombre": "Color de las tarjetas",
+      "defecto": "#ffffff"
+    },
+    {
+      "id": "colorItems",
+      "tipo": "color",
+      "nombre": "Letra de los puntos",
+      "defecto": "#1d1d24"
+    },
+    {
+      "id": "colorTexto",
+      "tipo": "color",
+      "nombre": "Letra del título",
+      "defecto": "#ffffff"
+    }
+  ]
+}

@@ -24,6 +24,23 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.54',
+    fecha: '2026-11-14',
+    resumen: 'Animaciones de diseño en movimiento con tu marca: títulos, rótulos, llamados a la acción, datos, transiciones y cierres con logo.',
+    novedades: [
+      {
+        icono: 'sparkles',
+        titulo: 'Pestaña «Animadas»',
+        texto: 'Diez animaciones listas con tus colores y tu logo: título que golpea, rótulo inferior, frase con píldora, lista con checks, dato que cuenta, sello de oferta, llamado a la acción, barrido de marca, destellos y cierre con logo. Escribes tu texto, le das «Poner en el cabezal» y entra como una capa transparente. Para cambiarla, elígela y «Volver a animar».'
+      },
+      {
+        icono: 'wand',
+        titulo: 'Acabado profesional con el agente',
+        texto: 'En el chat del editor: «Dale un acabado profesional» y el agente pone el título, los rótulos, la frase clave, el llamado a la acción y el cierre con tu logo, con criterio y efectos de sonido suaves. También lo puede hacer un agente conectado por MCP.'
+      }
+    ]
+  },
+  {
     version: '0.1.53',
     fecha: '2026-11-14',
     resumen: 'Las palabras pintadas se ven bien en cualquier cuadro.',

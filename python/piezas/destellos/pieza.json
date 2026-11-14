@@ -1,0 +1,14 @@
+{
+  "nombre": "Destellos",
+  "para": "Para celebrar un momento: un fogonazo y confeti con estrellas de tus colores que salta y cae.",
+  "categoria": "Adornos",
+  "duracion": { "defecto": 2, "min": 1.2, "max": 4 },
+  "capa": { "x": 0.5, "y": 0.5, "ancho": 1 },
+  "vars": [
+    { "id": "color1", "tipo": "color", "nombre": "Color 1", "defecto": "marca" },
+    { "id": "color2", "tipo": "color", "nombre": "Color 2", "defecto": "marca2" },
+    { "id": "x", "tipo": "numero", "nombre": "Desde dónde, a lo ancho (%)", "defecto": 50 },
+    { "id": "y", "tipo": "numero", "nombre": "Desde dónde, a lo alto (%)", "defecto": 45 },
+    { "id": "cantidad", "tipo": "numero", "nombre": "Cuánto (0 a 100)", "defecto": 60 }
+  ]
+}

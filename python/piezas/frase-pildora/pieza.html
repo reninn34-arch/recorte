@@ -1,0 +1,37 @@
+<style>
+  #p-frase { position: absolute; left: 6%; right: 6%; top: 74%; display: flex; flex-wrap: wrap; justify-content: center; align-items: center;
+    gap: 1.2vmin .6vmin; }
+  .p-pal { position: relative; font-family: 'Montserrat', sans-serif; font-weight: 900; font-size: 8.2vmin; line-height: 1.1; color: var(--colorTexto);
+    padding: .7vmin 1.6vmin; opacity: 0; text-shadow: 0 .5vmin 1.4vmin rgba(0,0,0,.45); }
+  .p-pal span { position: relative; z-index: 1; }
+  .p-pildora { position: absolute; inset: 0; border-radius: 99vmin; background: var(--color); transform: scale(0); z-index: 0;
+    box-shadow: 0 .8vmin 2vmin rgba(0,0,0,.3); }
+</style>
+<div id="p-frase"></div>
+<script>
+  // Frase con píldora: las palabras aparecen y la que se dice se marca con una píldora de color que salta de palabra en
+  // palabra (la letra de esa palabra cambia de color). Con «tiempos» (segundos, separados por comas) va con la voz.
+  const vmin = Math.min(W, H) / 100
+  tl.set('#p-frase', { yPercent: -50 }, 0)
+  const caja = document.getElementById('p-frase')
+  const palabras = String(v.texto || '').trim().split(/\s+/).filter(Boolean)
+  const dados = String(v.tiempos || '').split(',').map((x) => Number(x.trim())).filter((x) => Number.isFinite(x))
+  const paso = Math.min(0.55, (DUR * 0.85) / Math.max(1, palabras.length))
+  const tiempos = dados.length === palabras.length ? dados : palabras.map((_, i) => 0.15 + i * paso)
+  palabras.forEach((p, i) => {
+    const el = document.createElement('div')
+    el.className = 'p-pal'
+    el.innerHTML = `<div class="p-pildora"></div><span>${p.replace(/</g, '&lt;')}</span>`
+    caja.appendChild(el)
+    const pildora = el.firstChild
+    const letra = el.lastChild
+    const t = tiempos[i]
+    const sale = i + 1 < palabras.length ? tiempos[i + 1] : DUR - 0.35
+    tl.fromTo(el, { opacity: 0, y: 2.2 * vmin, scale: 0.8 }, { immediateRender: false, opacity: 1, y: 0, scale: 1, duration: 0.22, ease: 'back.out(2.5)' }, Math.max(0, t - 0.08))
+    tl.fromTo(pildora, { scale: 0 }, { immediateRender: false, scale: 1, duration: 0.18, ease: 'back.out(2.2)' }, t)
+    tl.to(letra, { color: v.colorActivo, duration: 0.1 }, t)
+    tl.to(pildora, { scale: 0, duration: 0.15, ease: 'power2.in' }, Math.max(t + 0.18, sale - 0.02))
+    tl.to(letra, { color: v.colorTexto, duration: 0.1 }, Math.max(t + 0.18, sale - 0.02))
+  })
+  tl.to('#p-frase', { opacity: 0, y: 2 * vmin, duration: 0.3, ease: 'power2.in' }, DUR - 0.3)
+</script>

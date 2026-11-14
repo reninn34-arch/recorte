@@ -1,3 +1,4 @@
+import { rutaScriptPython } from './transcribir'
 import { protocol } from 'electron'
 import { createReadStream, statSync } from 'node:fs'
 import { extname, join, resolve, sep } from 'node:path'
@@ -43,6 +44,12 @@ export function registrarMedia(proyectos: Proyectos, creaciones: Creaciones, car
       const medio = proyecto?.medios?.find((m) => m.id === relativo.slice(6))
       if (!medio) return new Response('No encontrado', { status: 404 })
       return servirArchivo(medio.ruta, request)
+    }
+
+    // `piezas/<id>.mp4`: la muestra de una pieza animada, para verla antes de ponerla.
+    if (id === 'piezas') {
+      if (!/^[\w-]{1,60}\.mp4$/.test(relativo)) return new Response('Prohibido', { status: 403 })
+      return servirArchivo(join(rutaScriptPython('piezas'), relativo.replace(/\.mp4$/, ''), 'muestra.mp4'), request)
     }
 
     // `muestras/<voz>.wav`: la muestra de una voz de Gemini, para oírla antes de elegirla.

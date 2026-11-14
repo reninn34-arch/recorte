@@ -1,0 +1,41 @@
+{
+  "nombre": "Llamado a la acción",
+  "para": "Para que hagan algo: un botón aparece, una mano lo toca y late. Abajo, tu dirección, usuario o teléfono.",
+  "categoria": "Llamados",
+  "duracion": {
+    "defecto": 3.2,
+    "min": 2,
+    "max": 10
+  },
+  "capa": {
+    "x": 0.5,
+    "y": 0.5,
+    "ancho": 1
+  },
+  "vars": [
+    {
+      "id": "texto",
+      "tipo": "texto",
+      "nombre": "El botón",
+      "defecto": "¡Visítanos!"
+    },
+    {
+      "id": "subtexto",
+      "tipo": "texto",
+      "nombre": "Debajo (opcional)",
+      "defecto": "@tumarca"
+    },
+    {
+      "id": "color",
+      "tipo": "color",
+      "nombre": "Color del botón",
+      "defecto": "marca"
+    },
+    {
+      "id": "colorTexto",
+      "tipo": "color",
+      "nombre": "Letra del botón",
+      "defecto": "#ffffff"
+    }
+  ]
+}

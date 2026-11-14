@@ -1,0 +1,16 @@
+{
+  "nombre": "Título que golpea",
+  "para": "Para abrir o cambiar de tema: las palabras entran grandes una a una y una barra de tu color las subraya.",
+  "categoria": "Títulos",
+  "duracion": { "defecto": 2.6, "min": 1.6, "max": 8 },
+  "capa": { "x": 0.5, "y": 0.5, "ancho": 1 },
+  "vars": [
+    { "id": "texto", "tipo": "texto", "nombre": "Título", "defecto": "Todo en un solo lugar" },
+    { "id": "etiqueta", "tipo": "texto", "nombre": "Etiqueta arriba (opcional)", "defecto": "" },
+    { "id": "colorTexto", "tipo": "color", "nombre": "Color del título", "defecto": "#ffffff" },
+    { "id": "acento", "tipo": "color", "nombre": "Color de la barra", "defecto": "marca" },
+    { "id": "fondoEtiqueta", "tipo": "color", "nombre": "Letra de la etiqueta", "defecto": "#ffffff" },
+    { "id": "conFondo", "tipo": "si", "nombre": "Con fondo de color", "defecto": false },
+    { "id": "fondo", "tipo": "color", "nombre": "Fondo", "defecto": "marca2" }
+  ]
+}

@@ -59,8 +59,7 @@ import {
   PARAMETROS_CLAVE_CAPA,
   ponerClaveCapa,
   quitarClaveCapa,
-  type ParametroClaveCapa
-} from './timeline'
+  type ParametroClaveCapa, anadirCapa } from './timeline'
 import { INSTRUCCIONES_CRITERIO } from './gustos'
 import type { TranscriptSegment } from './types'
 
@@ -108,6 +107,11 @@ export type OperacionTL =
   | { op: 'borrar_texto'; texto_n: number }
   /** Lo que va encima del video: un medio de la biblioteca (por su id), en su sitio y su tamaño. */
   | ({ op: 'anadir_capa'; medio: string; inicio: number } & CamposCapa)
+  /**
+   * Una pieza animada (HyperFrames) con la marca. El proceso principal la anima antes de aplicar y deja aquí su medio
+   * y lo que dura de verdad; sin medio, no se pudo animar.
+   */
+  | { op: 'anadir_pieza'; pieza: string; inicio: number; duracion?: number; valores?: Record<string, string | number | boolean>; medio?: string; duracionReal?: number }
   | ({ op: 'cambiar_capa'; capa_n: number; inicio?: number } & CamposCapa)
   | { op: 'filtros'; grano?: number; polvo?: number; trama?: number; vineta?: number; parpadeo?: number }
   | { op: 'transicion'; clip?: number; tipo: TransicionClip | 'corte'; duracion?: number }
@@ -340,6 +344,18 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
         const i = num(x.inicio)
         if (i === null || typeof x.medio !== 'string' || !x.medio) break
         ops.push({ op: 'anadir_capa', medio: x.medio, inicio: i, ...camposCapa(x) })
+        break
+      }
+      case 'anadir_pieza': {
+        const i = num(x.inicio)
+        if (i === null || typeof x.pieza !== 'string' || !/^[\w-]{1,60}$/.test(x.pieza)) break
+        const valores: Record<string, string | number | boolean> = {}
+        if (x.valores && typeof x.valores === 'object') {
+          for (const [k, v] of Object.entries(x.valores as Record<string, unknown>)) {
+            if (/^[\w-]{1,40}$/.test(k) && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')) valores[k] = typeof v === 'string' ? v.slice(0, 500) : v
+          }
+        }
+        ops.push({ op: 'anadir_pieza', pieza: x.pieza, inicio: i, ...(num(x.duracion) !== null ? { duracion: num(x.duracion)! } : {}), valores })
         break
       }
       case 'cambiar_capa': {
@@ -627,6 +643,21 @@ export function aplicarOperaciones(
         const nueva = r.timeline.capas?.find((c) => c.id === r.id)
         tl = cambiarCapa(r.timeline, r.id, cambioDeCapa(resto, nueva), medios)
         cambios.push(`Puse encima «${o.medio}» en ${mmss(o.inicio)}`)
+        break
+      }
+      case 'anadir_pieza': {
+        if (!o.medio || !o.duracionReal) {
+          fallos.push(`No pude animar «${o.pieza}».`)
+          break
+        }
+        const conPieza = { ...medios, [o.medio]: o.duracionReal }
+        const r = anadirCapa(tl, { fuente: o.medio, inicio: o.inicio, duracion: o.duracionReal, x: 0.5, y: 0.5, ancho: 1, pista: 3, pieza: { id: o.pieza, valores: o.valores ?? {} } }, conPieza)
+        if (r.timeline === tl) {
+          fallos.push(`«${o.pieza}» cae fuera del video.`)
+          break
+        }
+        tl = r.timeline
+        cambios.push(`Puse la animación «${o.pieza}» en ${mmss(o.inicio)}`)
         break
       }
       case 'cambiar_capa': {
@@ -1051,6 +1082,17 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
   Para que SE MUEVA mientras está, di dónde termina: "fin_x","fin_y","fin_ancho","fin_giro" (lo que no pongas, igual que al empezar; se puede terminar fuera del cuadro, de -0.5 a 1.5). Va suave de un sitio al otro durante toda su duración. Ejemplos: un avión que cruza ("x":-0.2 → "fin_x":1.2), paralaje (un fondo que se desliza 0.04 y crece 1.05), una foto que se acerca ("fin_ancho" 1.3 veces el ancho), algo que gira ("fin_giro":15). Con "quieta":true deja de moverse.
   ESCENA 2.5D: "profundidad" de 0 a 1 hace que la capa siga a la cámara del clip de debajo (su zoom, acercamiento y paneo): 0 se mueve pegada al fondo, 1 (muy cerca) se mueve y crece 2,5 veces más. Así un paisaje armado con recortes (montañas 0.2, una casa 0.5, una bandera 0.6, la persona 0.4) se siente con distancia cuando la cámara se mueve. "profundidad":"fija" la vuelve a pegar a la pantalla (para logos y textos). "desenfoque" de 0 a 1: fuera de foco, para lo que está muy cerca (un primer plano) o muy lejos.
   PISTAS: "pista" 1 a 3 es en qué pista de video de «Encima» va la capa (sin ella, la 1): las de una pista más alta tapan a las de abajo. Úsalo para apilar varias cosas a la vez (una toma de apoyo en la 1, un marco en la 2 y el logo en la 3).
+- {"op":"anadir_pieza","pieza":"ID","inicio":T,"duracion":S,"valores":{…}}  pone una PIEZA ANIMADA de diseño en movimiento (con los colores y el logo de la marca; se anima sola en unos segundos). Es lo que hace que un video se vea hecho por un editor de motion: úsalas con criterio, una por momento importante. "valores" cambia sus datos (colores #rrggbb, "marca" o "marca2"; sin ellos, los de la marca). Las piezas:
+  titulo-impacto (2.6 s: abrir o cambiar de tema; "texto", "etiqueta" arriba opcional, "conFondo" true/false)
+  rotulo-inferior (4 s: presentar a alguien o un lugar; "nombre", "cargo")
+  frase-pildora (3 s: una frase clave, cada palabra marcada en una píldora; "texto", "tiempos" "0,0.4,0.9" con cuándo se dice cada palabra)
+  lista-checks (4 s: lo que se ofrece; "titulo", "item1".."item4")
+  dato-contador (3 s: un número que sube; "numero", "prefijo", "sufijo", "texto")
+  sello-oferta (2.6 s: precio, descuento o «¡Nuevo!»; "texto", "subtexto")
+  llamado-accion (3.2 s: que hagan algo, antes del final; "texto" del botón, "subtexto" con @usuario o dirección)
+  barrido-marca (1.1 s: transición; ponla con su centro justo en un corte, inicio = corte − 0.55)
+  destellos (2 s: celebrar un momento; "x","y" en % desde dónde salen)
+  cierre-logo (2.4 s: el final, con el logo; "texto" eslogan opcional, "conFondo" true para tapar el video)
 - {"op":"cambiar_capa","capa_n":N, …los mismos campos…}  y {"op":"borrar_capa","capa_n":N}
 - {"op":"transicion","clip":N,"tipo":"fundido|barrido-izquierda|barrido-derecha|barrido-arriba|barrido-abajo|zoom|desenfoque|destello|circulo|corte","duracion":0.45}  cómo entra el clip N sobre el anterior (sin "clip": en todos los cortes). Los barridos empujan la imagen hacia ese lado (como un paneo rápido); destello pasa por blanco; corte = sin transición. Con medida: un documental rápido usa cortes secos y alguna transición en los cambios de tema.
 - {"op":"filtros","grano":0.3,"polvo":0.2,"trama":0.4,"vineta":0.5,"parpadeo":0.1}  filtros para TODO el video, de 0 (nada) a 1 (fuerte): grano de película, polvo y rayas, trama de puntos de imprenta, viñeta (bordes oscuros) y parpadeo de proyector. Un 0 quita ese filtro. Para un aire de documental o de archivo: grano 0.3, polvo 0.2, viñeta 0.5; trama 0.4 para un aire de revista.
@@ -1070,6 +1112,19 @@ Las operaciones se aplican en orden y cada una ve la timeline que dejó la anter
 Corta siempre en fronteras de frase: usa los tiempos de la voz. No inventes contenido que no está en la transcripción.
 Si el usuario solo pregunta algo, responde con "operaciones": [].
 No puedes elegir ni crear archivos de música: si no hay música y la piden, dile que la añada con el botón «Música» y que luego tú la ajustas.
-Si algo no se puede hacer con estas operaciones (transiciones, velocidad, efectos de imagen), dilo en el mensaje y no lo simules.
+Si algo no se puede hacer con estas operaciones, dilo en el mensaje y no lo simules.
+
+Acabado profesional (cuando pidan «dale estilo», «que se vea pro», animaciones, títulos o un cierre): piensa como un editor
+de motion, no como una plantilla. Con las piezas animadas (anadir_pieza):
+- Un título al empezar (titulo-impacto) con la idea del video en 2 a 5 palabras sacadas de lo que se dice, en el primer segundo.
+- Un rótulo (rotulo-inferior) cuando se presenta a alguien o un lugar, no tapando caras.
+- La frase más importante con frase-pildora y sus "tiempos" sacados de la transcripción (cuándo se dice cada palabra).
+- Si hay una lista de cosas, lista-checks; si hay una cifra, dato-contador; si hay un precio o descuento, sello-oferta.
+- El llamado a la acción (llamado-accion) antes del final, con lo que de verdad pide el video (visitar, escribir, seguir).
+- El cierre con el logo (cierre-logo, "conFondo": true) en los últimos 2–3 segundos.
+- Como mucho una pieza a la vez y nunca encima de otra; deja aire entre ellas. Un barrido-marca solo en un cambio de tema.
+- Acompáñalas con efectos de sonido suaves (whoosh al entrar, pop al aparecer un logo, ding en un dato), volumen 0.3–0.5.
+Usa los textos reales del video (sin inventar datos, precios ni usuarios). Si falta algo (el @usuario, una dirección), pon
+la pieza sin ese dato y dile al usuario en el mensaje qué poner.
 
 ${INSTRUCCIONES_CRITERIO}`

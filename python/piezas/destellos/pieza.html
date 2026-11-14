@@ -1,0 +1,42 @@
+<style>
+  #p-centro { position: absolute; left: var(--px); top: var(--py); width: 0; height: 0; }
+  #p-centro i, #p-centro b { position: absolute; left: 0; top: 0; display: block; opacity: 0; }
+  #p-centro svg { width: 100%; height: 100%; display: block; }
+  #p-flash { position: absolute; left: 0; top: 0; width: 40vmin; height: 40vmin; margin: -20vmin 0 0 -20vmin; border-radius: 50%;
+    background: radial-gradient(closest-side, rgba(255,255,255,.9), rgba(255,255,255,0)); opacity: 0; }
+</style>
+<div id="p-centro"><div id="p-flash"></div></div>
+<script>
+  // Destellos: un fogonazo suave y una explosión de confeti y estrellas con tus colores desde el punto elegido (por
+  // defecto, el centro), que cae con gravedad. Para celebrar un momento, un precio o una sorpresa.
+  const c = document.getElementById('p-centro')
+  c.style.setProperty('--px', (Number(v.x) || 50) + '%')
+  c.style.setProperty('--py', (Number(v.y) || 50) + '%')
+  const vmin = Math.min(W, H) / 100
+  const colores = [v.color1, v.color2, '#ffffff', '#ffd84d']
+  let s = 11
+  const azar = () => (s = (s * 16807) % 2147483647) / 2147483647
+  tl.fromTo('#p-flash', { scale: 0.2, opacity: 0.9 }, { immediateRender: false, scale: 1.6, opacity: 0, duration: 0.5, ease: 'power2.out' }, 0)
+  const n = Math.round(45 + 60 * Math.min(1, Number(v.cantidad) / 100 || 0.6))
+  for (let i = 0; i < n; i++) {
+    const estrella = i % 5 === 0
+    const el = document.createElement(estrella ? 'b' : 'i')
+    const t = (estrella ? 5.6 : 2.4 + azar() * 2.6) * vmin
+    if (estrella) {
+      el.style.cssText = `width:${t}px;height:${t}px;margin:${-t / 2}px 0 0 ${-t / 2}px`
+      el.innerHTML = `<svg viewBox="0 0 100 100"><path d="M50 0 C55 38 62 45 100 50 C62 55 55 62 50 100 C45 62 38 55 0 50 C38 45 45 38 50 0Z" fill="${colores[i % colores.length]}"/></svg>`
+    } else {
+      const h = azar() < 0.4 ? t : t * 0.45
+      el.style.cssText = `width:${t}px;height:${h}px;margin:${-h / 2}px 0 0 ${-t / 2}px;background:${colores[i % colores.length]};border-radius:${azar() < 0.4 ? '50%' : '0.3vmin'}`
+    }
+    c.appendChild(el)
+    const ang = azar() * Math.PI * 2
+    const vel = (30 + azar() * 60) * vmin
+    const t0 = azar() * 0.08
+    const vida = Math.min(DUR - t0, 1.2 + azar() * 0.8)
+    tl.fromTo(el, { x: 0, opacity: 1, rotation: 0, scale: 0.4 }, { immediateRender: false, x: Math.cos(ang) * vel, rotation: (azar() - 0.5) * 720, scale: 1, duration: vida, ease: 'power3.out' }, t0)
+    const dy = Math.sin(ang) * vel
+    tl.to(el, { keyframes: { y: [0, dy * 0.8, dy * 0.8 + 30 * vmin], easeEach: 'power2.out' }, duration: vida, ease: 'none' }, t0)
+    tl.to(el, { opacity: 0, duration: 0.3 }, t0 + vida - 0.3)
+  }
+</script>

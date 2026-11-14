@@ -1,0 +1,45 @@
+<style>
+  #p-rotulo { position: absolute; left: 6%; bottom: 17%; max-width: 88%; }
+  #p-linea { position: absolute; left: 0; top: 0; bottom: 0; width: 1.4vmin; background: var(--acento); border-radius: 1vmin; transform-origin: 50% 0; }
+  #p-bloque { position: relative; margin-left: 2.6vmin; padding: 2vmin 3.4vmin 2.2vmin; background: var(--color); border-radius: 1.6vmin;
+    box-shadow: 0 1.4vmin 3.4vmin rgba(0,0,0,.28); overflow: hidden; }
+  #p-nombre { font-family: 'Montserrat', sans-serif; font-weight: 900; font-size: 8vmin; line-height: 1.05; color: var(--colorTexto); white-space: nowrap; }
+  #p-cargo { font-family: 'Poppins', sans-serif; font-weight: 400; font-size: 4.8vmin; color: var(--colorTexto); opacity: .85; margin-top: .6vmin; white-space: nowrap; }
+  #p-brillo { position: absolute; top: 0; bottom: 0; width: 30%; left: -40%;
+    background: linear-gradient(100deg, rgba(255,255,255,0), rgba(255,255,255,.35), rgba(255,255,255,0)); }
+</style>
+<div id="p-rotulo">
+  <div id="p-linea"></div>
+  <div id="p-bloque">
+    <div id="p-nombre" data-var-text="nombre"></div>
+    <div id="p-cargo" data-var-text="cargo"></div>
+    <div id="p-brillo"></div>
+  </div>
+</div>
+<script>
+  // Rótulo inferior: la línea de color crece, el bloque entra deslizándose desde la izquierda, el nombre y el cargo
+  // suben letra a letra y un brillo cruza el bloque. Al final se va por donde vino.
+  if (!v.cargo) document.getElementById('p-cargo').style.display = 'none'
+  const vmin = Math.min(W, H) / 100
+  const letras = (id) => {
+    const el = document.getElementById(id)
+    const t = el.textContent
+    el.textContent = ''
+    return [...t].map((c) => {
+      const s = document.createElement('span')
+      s.textContent = c === ' ' ? ' ' : c
+      s.style.display = 'inline-block'
+      el.appendChild(s)
+      return s
+    })
+  }
+  const n = letras('p-nombre')
+  const c = letras('p-cargo')
+  tl.fromTo('#p-linea', { scaleY: 0 }, { scaleY: 1, duration: 0.3, ease: 'power3.out' }, 0)
+  tl.fromTo('#p-bloque', { xPercent: -110, opacity: 0 }, { xPercent: 0, opacity: 1, duration: 0.5, ease: 'power4.out' }, 0.12)
+  tl.fromTo(n, { y: 3 * vmin, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35, ease: 'back.out(2.2)', stagger: 0.025 }, 0.3)
+  tl.fromTo(c, { y: 2 * vmin, opacity: 0 }, { y: 0, opacity: 1, duration: 0.3, ease: 'power2.out', stagger: 0.015 }, 0.5)
+  tl.to('#p-brillo', { left: '120%', duration: 0.8, ease: 'power2.inOut' }, 0.75)
+  tl.to('#p-bloque', { xPercent: -110, opacity: 0, duration: 0.4, ease: 'power3.in' }, DUR - 0.45)
+  tl.to('#p-linea', { scaleY: 0, duration: 0.25, ease: 'power2.in' }, DUR - 0.25)
+</script>

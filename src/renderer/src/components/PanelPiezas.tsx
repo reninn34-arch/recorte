@@ -1,0 +1,213 @@
+import { useEffect, useMemo, useState } from 'react'
+import type { PiezaAnimada, ValoresPieza, VariablePieza } from '../../../shared/piezas'
+import { anadirCapa, cambiarCapa, duracionesDeMedios, type CapaTL, type Timeline } from '../../../shared/timeline'
+import type { MedioProyecto, Project } from '../../../shared/types'
+import type { Historial } from '../hooks/timeline'
+import { Icon } from '../Icons'
+
+let cache: PiezaAnimada[] | null = null
+
+/**
+ * «Animadas»: piezas de diseño en movimiento (títulos, rótulos, llamados, datos, transiciones, cierres con logo),
+ * con los colores y el logo de la marca. Eliges una, cambias sus textos y colores, y entra en el cabezal como una capa
+ * con transparencia. Si eliges una ya puesta, la cambias aquí y se vuelve a animar.
+ */
+export function PanelPiezas({
+  proyecto,
+  timeline,
+  historial,
+  tiempo,
+  capaElegida,
+  onMedios,
+  onElegirCapa,
+  onAviso
+}: {
+  proyecto: Project
+  timeline: Timeline
+  historial: Historial
+  tiempo: number
+  capaElegida?: CapaTL
+  onMedios: (medios: MedioProyecto[]) => void
+  onElegirCapa: (id: string) => void
+  onAviso: (t: string) => void
+}) {
+  const [piezas, setPiezas] = useState<PiezaAnimada[]>(cache ?? [])
+  const [abierta, setAbierta] = useState<string | null>(null)
+  const [valores, setValores] = useState<ValoresPieza>({})
+  const [duracion, setDuracion] = useState(3)
+  const [animando, setAnimando] = useState(false)
+  useEffect(() => {
+    if (cache) return
+    void window.recorte.listarPiezas().then((l) => {
+      cache = l
+      setPiezas(l)
+    })
+  }, [])
+
+  // Una pieza ya puesta y elegida: se edita ella.
+  const editando = capaElegida?.pieza ? capaElegida : undefined
+  useEffect(() => {
+    if (!editando?.pieza) return
+    setAbierta(editando.pieza.id)
+    setValores(editando.pieza.valores)
+    setDuracion(editando.duracion)
+  }, [editando?.id])
+
+  const pieza = piezas.find((p) => p.id === abierta)
+  const porCategoria = useMemo(() => {
+    const m = new Map<string, PiezaAnimada[]>()
+    for (const p of piezas) m.set(p.categoria, [...(m.get(p.categoria) ?? []), p])
+    return [...m.entries()]
+  }, [piezas])
+
+  const abrir = (p: PiezaAnimada) => {
+    setAbierta(p.id)
+    setValores({})
+    setDuracion(p.duracion.defecto)
+  }
+
+  const colorDe = (x: VariablePieza): string => {
+    const v = valores[x.id] ?? x.defecto
+    if (v === 'marca') return proyecto.brand.primary
+    if (v === 'marca2') return proyecto.brand.secondary
+    return typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : '#ffffff'
+  }
+  const imagenes = (proyecto.medios ?? []).filter((m) => m.tipo === 'imagen')
+
+  const animar = async () => {
+    if (!pieza || animando) return
+    setAnimando(true)
+    try {
+      const r = await window.recorte.animarPieza(proyecto.id, pieza.id, valores, duracion)
+      onMedios(r.project.medios ?? [])
+      const medios = { principal: proyecto.source.duration, ...duracionesDeMedios(r.project.medios) }
+      if (editando) {
+        historial.aplicar(cambiarCapa(timeline, editando.id, { fuente: r.medio, duracion: r.duracion, pieza: { id: pieza.id, valores } }, medios))
+        onAviso(`Listo: «${pieza.nombre}» con los cambios.`)
+      } else {
+        const hecho = anadirCapa(
+          timeline,
+          { fuente: r.medio, inicio: tiempo, duracion: r.duracion, x: pieza.capa.x, y: pieza.capa.y, ancho: pieza.capa.ancho, pista: 3, pieza: { id: pieza.id, valores } },
+          medios
+        )
+        if (hecho.timeline === timeline) {
+          onAviso('No cupo en el cabezal: mueve el cabezal antes del final del video.')
+          return
+        }
+        historial.aplicar(hecho.timeline)
+        onElegirCapa(hecho.id)
+        onAviso(`Listo: «${pieza.nombre}» quedó en el cabezal. Muévela o alárgala como cualquier capa.`)
+      }
+    } catch (e) {
+      onAviso(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))
+    } finally {
+      setAnimando(false)
+    }
+  }
+
+  if (!piezas.length) return <p className="tl-dim">Cargando las animaciones…</p>
+
+  if (pieza) {
+    return (
+      <div className="pz">
+        <button className="ed-fila" onClick={() => setAbierta(null)}>
+          <Icon name="undo" size={14} />
+          <span>Todas las animaciones</span>
+        </button>
+        <span className="ed-seccion">{editando ? `Editando: ${pieza.nombre}` : pieza.nombre}</span>
+        {pieza.muestra && <video className="pz-muestra" src={pieza.muestra} autoPlay loop muted playsInline />}
+        <p className="tl-dim">{pieza.para}</p>
+        {pieza.vars.map((x) => (
+          <label key={x.id} className={`pz-campo ${x.tipo === 'si' ? 'pz-si' : ''}`}>
+            <span>{x.nombre}</span>
+            {x.tipo === 'texto' && (
+              <input className="tl-texto-input" value={String(valores[x.id] ?? x.defecto)} onChange={(e) => setValores({ ...valores, [x.id]: e.target.value })} />
+            )}
+            {x.tipo === 'numero' && (
+              <input className="tl-texto-input" type="number" value={Number(valores[x.id] ?? x.defecto)} onChange={(e) => setValores({ ...valores, [x.id]: Number(e.target.value) })} />
+            )}
+            {x.tipo === 'color' && (
+              <span className="pz-color">
+                <input type="color" className="tl-color" value={colorDe(x)} onChange={(e) => setValores({ ...valores, [x.id]: e.target.value })} />
+                <button type="button" className="chip" onClick={() => setValores({ ...valores, [x.id]: 'marca' })} title="El color principal de la marca">
+                  Marca
+                </button>
+                <button type="button" className="chip" onClick={() => setValores({ ...valores, [x.id]: 'marca2' })} title="El segundo color de la marca">
+                  Marca 2
+                </button>
+              </span>
+            )}
+            {x.tipo === 'si' && (
+              <input type="checkbox" checked={(valores[x.id] ?? x.defecto) === true} onChange={(e) => setValores({ ...valores, [x.id]: e.target.checked })} />
+            )}
+            {x.tipo === 'imagen' && (
+              <select value={String(valores[x.id] ?? x.defecto)} onChange={(e) => setValores({ ...valores, [x.id]: e.target.value })}>
+                <option value="">Ninguna</option>
+                {proyecto.brand.logo && <option value="marca">El logo de la marca</option>}
+                {imagenes.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.nombre}
+                  </option>
+                ))}
+              </select>
+            )}
+          </label>
+        ))}
+        <label className="pz-campo">
+          <span>Dura (s)</span>
+          <input
+            className="tl-texto-input"
+            type="number"
+            step={0.1}
+            min={pieza.duracion.min}
+            max={pieza.duracion.max}
+            value={duracion}
+            onChange={(e) => setDuracion(Math.max(pieza.duracion.min, Math.min(pieza.duracion.max, Number(e.target.value) || pieza.duracion.defecto)))}
+          />
+        </label>
+        {pieza.vars.some((x) => x.tipo === 'imagen') && !proyecto.brand.logo && !imagenes.length && (
+          <p className="tl-dim">Para el logo: arrastra tu logo (PNG) a la biblioteca o ponlo en la marca del proyecto.</p>
+        )}
+        <button className="btn small primary" disabled={animando} onClick={() => void animar()}>
+          <Icon name="sparkles" size={13} /> {animando ? 'Animando… (la primera vez tarda un poco)' : editando ? 'Volver a animar con los cambios' : 'Poner en el cabezal'}
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="pz">
+      <p className="tl-dim">Diseño en movimiento con tus colores y tu logo: eliges, cambias el texto y entra en el cabezal.</p>
+      {porCategoria.map(([cat, lista]) => (
+        <div key={cat}>
+          <span className="ed-seccion">{cat}</span>
+          <div className="pz-grilla">
+            {lista.map((p) => (
+              <button key={p.id} className="pz-tarjeta" onClick={() => abrir(p)} title={p.para}>
+                {p.muestra ? (
+                  <video
+                    src={p.muestra}
+                    muted
+                    loop
+                    playsInline
+                    preload="metadata"
+                    onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.pause()
+                      e.currentTarget.currentTime = 0
+                    }}
+                  />
+                ) : (
+                  <span className="pz-sin-muestra">
+                    <Icon name="sparkles" size={18} />
+                  </span>
+                )}
+                <span>{p.nombre}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}

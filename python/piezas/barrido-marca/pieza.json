@@ -1,0 +1,14 @@
+{
+  "nombre": "Barrido de marca",
+  "para": "Para cambiar de escena: franjas de tus colores tapan la pantalla, asoma tu logo y destapan lo siguiente. Ponlo justo sobre un corte.",
+  "categoria": "Transiciones",
+  "duracion": { "defecto": 1.1, "min": 0.7, "max": 2.5 },
+  "capa": { "x": 0.5, "y": 0.5, "ancho": 1 },
+  "centrada": true,
+  "vars": [
+    { "id": "color1", "tipo": "color", "nombre": "Primera franja", "defecto": "marca" },
+    { "id": "color2", "tipo": "color", "nombre": "Segunda franja", "defecto": "marca2" },
+    { "id": "color3", "tipo": "color", "nombre": "Tercera franja", "defecto": "#ffffff" },
+    { "id": "logo", "tipo": "imagen", "nombre": "Logo en el centro (opcional)", "defecto": "marca" }
+  ]
+}

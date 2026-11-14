@@ -52,6 +52,8 @@ import { estabilizarTramo } from './estabilizar'
 import { desfasePorSonido } from './multicam'
 import { prepararEscala } from './escala'
 import { arreglarVoz, revisarAudio } from './revisaraudio'
+import { listarPiezas, renderizarPieza } from './piezas'
+import { valoresConMarca, type ValoresPieza } from '../shared/piezas'
 import { atenderVoz } from './vozagente'
 import { proyectoDesdeReceta } from './recetaeditor'
 import { medirReferencia } from './estilo/referencia'
@@ -2008,6 +2010,39 @@ app.whenReady().then(() => {
   }
   setTimeout(() => void revisarModelos(), 20_000)
   setInterval(() => void revisarModelos(), 60 * 60_000)
+  // ===== Piezas animadas (HyperFrames) =====
+  ipcMain.handle('piezas:lista', () => listarPiezas().map((p) => ({ ...p, muestra: p.muestra ? `recorte-media://piezas/${p.id}.mp4` : undefined })))
+  /** Anima una pieza con sus datos al tamaño del video, la agrega a la biblioteca y devuelve el medio. */
+  async function animarPieza(id: string, piezaId: string, valores: ValoresPieza, duracion: number) {
+    const p = proyectos.abrir(id)
+    if (!p) throw new Error('El proyecto ya no existe.')
+    const pieza = listarPiezas().find((x) => x.id === piezaId)
+    if (!pieza) throw new Error('Esa pieza no existe.')
+    const resueltos = valoresConMarca(pieza, valores, { primary: p.brand.primary, secondary: p.brand.secondary, logo: p.brand.logo })
+    // Las imágenes: el logo de la marca, un medio de la biblioteca (por su id) o una ruta del equipo.
+    const imagenes: Record<string, string> = {}
+    for (const x of pieza.vars.filter((y) => y.tipo === 'imagen')) {
+      const v = String(resueltos[x.id] ?? '')
+      const medio = p.medios?.find((m) => m.id === v && m.tipo === 'imagen')
+      const ruta = medio ? medio.ruta : v && existsSync(v) ? v : v && existsSync(join(proyectos.carpeta(id), v)) ? join(proyectos.carpeta(id), v) : ''
+      imagenes[x.id] = ruta
+      if (!ruta) resueltos[x.id] = ''
+    }
+    const ancho = p.source.width || 1080
+    const alto = p.source.height || 1920
+    const r = await renderizarPieza(proyectos.carpeta(id), piezaId, resueltos, imagenes, ancho, alto, duracion)
+    const ruta = join(proyectos.carpeta(id), r.archivo)
+    const ya = p.medios?.find((m) => m.ruta === ruta)
+    if (ya) return { project: p, medio: ya.id, duracion: r.duracion }
+    const hecho = await agregarRutas(id, [ruta])
+    if (!hecho.agregados.length) throw new Error(hecho.fallos[0] ?? 'No pude agregar la animación a la biblioteca.')
+    return { project: hecho.project, medio: hecho.agregados[0], duracion: r.duracion }
+  }
+  ipcMain.handle('piezas:animar', async (_evento, id: unknown, piezaId: unknown, valores: unknown, duracion: unknown) => {
+    if (typeof id !== 'string' || typeof piezaId !== 'string' || !valores || typeof valores !== 'object' || typeof duracion !== 'number') throw new Error('Datos inválidos.')
+    return animarPieza(id, piezaId, valores as ValoresPieza, duracion)
+  })
+
   // Las palabras de cada audio de voz con su segundo (para subtítulos que van con lo que se dice). Se guardan junto al
   // audio: si no cambió, no se vuelve a transcribir.
   ipcMain.handle('voz:palabras', async (_evento, id: unknown, archivos: unknown) => {
@@ -2745,6 +2780,23 @@ app.whenReady().then(() => {
           const fallosVoz = await generarVocesDelChat(id, normalizarTimeline(timeline, proyecto.source.duration, duracionesDeMedios(proyecto.medios)), turno.operaciones)
           if (fallosVoz.length) turno.mensaje = `${turno.mensaje}\n\nNo pude generar la voz: ${fallosVoz.join(' ')}`
         }
+        // Las piezas animadas que pidió: se animan aquí (con la marca) y quedan en la biblioteca antes de aplicar.
+        if (turno.ok) {
+          const fallosPieza: string[] = []
+          for (const o of turno.operaciones) {
+            if (o.op !== 'anadir_pieza') continue
+            try {
+              const r = await animarPieza(id, o.pieza, o.valores ?? {}, o.duracion ?? listarPiezas().find((x) => x.id === o.pieza)?.duracion.defecto ?? 3)
+              o.medio = r.medio
+              o.duracionReal = r.duracion
+              const { transcript: _t, ...ligero } = r.project
+              for (const w of BrowserWindow.getAllWindows()) w.webContents.send('proyecto:externo', { proyecto: ligero, quien: 'recorte', conTimeline: false })
+            } catch (e) {
+              fallosPieza.push(`${o.pieza}: ${e instanceof Error ? e.message : String(e)}`)
+            }
+          }
+          if (fallosPieza.length) turno.mensaje = `${turno.mensaje}\n\nNo pude animar: ${fallosPieza.join(' ')}`
+        }
         // Los efectos de sonido que pidió: su audio se copia al proyecto antes de aplicar.
         if (turno.ok) {
           for (const o of turno.operaciones) {
@@ -2906,6 +2958,7 @@ app.whenReady().then(() => {
     },
     abrirEnApp: (id) => alFrente('proyecto:abrir', id),
     quitarFondo: (id, medio) => quitarFondo(id, medio),
+    piezas: { listar: listarPiezas, animar: animarPieza },
     animarImagen: (id, medio, tipo) => animarImagen(id, medio, tipo),
     // ===== Crear por MCP (6.3) =====
     creaciones: {

@@ -1,0 +1,58 @@
+<style>
+  #p-fondo { position: absolute; inset: 0; background: var(--fondo); }
+  #p-caja { position: absolute; left: 7%; right: 7%; top: 50%; text-align: center; }
+  #p-etiqueta { display: inline-block; font-family: 'Montserrat', sans-serif; font-weight: 700; font-size: 3.4vmin; letter-spacing: .5vmin;
+    text-transform: uppercase; color: var(--fondoEtiqueta); background: var(--acento); padding: 1vmin 2.6vmin; border-radius: 99vmin; opacity: 0; margin-bottom: 3vmin; }
+  #p-titulo { font-family: 'Archivo Black', 'Montserrat', sans-serif; font-weight: 900; line-height: .98; color: var(--colorTexto);
+    text-transform: uppercase; letter-spacing: -.2vmin; text-shadow: 0 1vmin 2.4vmin rgba(0,0,0,.28); }
+  #p-titulo .pal { display: inline-block; margin: 0 1.2vmin; opacity: 0; }
+  #p-barra { height: 2.2vmin; width: 0; background: var(--acento); margin: 2.4vmin auto 0; border-radius: 2vmin; }
+  .p-chispa { position: absolute; width: 2vmin; height: 2vmin; border-radius: 50%; background: var(--acento); opacity: 0; }
+</style>
+<div id="p-fondo"></div>
+<div id="p-caja">
+  <div id="p-etiqueta" data-var-text="etiqueta"></div>
+  <div id="p-titulo"></div>
+  <div id="p-barra"></div>
+</div>
+<script>
+  // Título que golpea: cada palabra entra grande y se clava en su sitio con un pequeño temblor, la barra de color
+  // lo subraya y unas chispas saltan del último golpe. Sale encogiéndose rápido.
+  if (!v.conFondo) document.getElementById('p-fondo').style.display = 'none'
+  // El centrado lo lleva GSAP (si no, el temblor lo pisaría).
+  tl.set('#p-caja', { yPercent: -50 }, 0)
+  if (!v.etiqueta) document.getElementById('p-etiqueta').style.display = 'none'
+  const vmin = Math.min(W, H) / 100
+  const palabras = String(v.texto || '').trim().split(/\s+/).filter(Boolean)
+  const largo = String(v.texto || '').length
+  // Más corto, más grande: que quepa en el ancho.
+  const tam = Math.max(7, Math.min(17, (W < H ? 150 : 210) / Math.max(4, Math.sqrt(largo) * 2.6)))
+  const titulo = document.getElementById('p-titulo')
+  titulo.style.fontSize = tam + 'vmin'
+  palabras.forEach((p, i) => {
+    const s = document.createElement('span')
+    s.className = 'pal'
+    s.textContent = p
+    titulo.appendChild(s)
+    const t = 0.12 + i * 0.16
+    tl.fromTo(s, { opacity: 0, scale: 2.6, y: -2 * vmin, rotation: i % 2 ? 6 : -6 }, { immediateRender: false, opacity: 1, scale: 1, y: 0, rotation: 0, duration: 0.22, ease: 'power4.in' }, t)
+    tl.to('#p-caja', { x: (i % 2 ? 1 : -1) * 0.8 * vmin, duration: 0.04, yoyo: true, repeat: 3, ease: 'none' }, t + 0.22)
+  })
+  const fin = 0.12 + palabras.length * 0.16 + 0.12
+  if (v.etiqueta) tl.fromTo('#p-etiqueta', { opacity: 0, y: 2 * vmin }, { immediateRender: false, opacity: 1, y: 0, duration: 0.35, ease: 'back.out(2)' }, 0.05)
+  tl.to('#p-barra', { width: '62%', duration: 0.45, ease: 'power3.out' }, fin)
+  const caja = document.getElementById('p-caja')
+  for (let i = 0; i < 10; i++) {
+    const c = document.createElement('i')
+    c.className = 'p-chispa'
+    c.style.left = 50 + (i % 2 ? 18 : -18) + '%'
+    c.style.top = '50%'
+    caja.appendChild(c)
+    const ang = (i / 10) * Math.PI * 2
+    tl.fromTo(c, { opacity: 1, x: 0, y: 0, scale: 1 }, { immediateRender: false, opacity: 0, x: Math.cos(ang) * 14 * vmin, y: Math.sin(ang) * 14 * vmin, scale: 0.2, duration: 0.6, ease: 'power3.out' }, fin - 0.1)
+  }
+  // Vive un poco (respira) y sale.
+  tl.to('#p-titulo', { scale: 1.03, duration: Math.max(0.3, DUR - fin - 0.9), ease: 'sine.inOut' }, fin + 0.2)
+  tl.to('#p-caja', { scale: 0.6, opacity: 0, duration: 0.3, ease: 'power3.in' }, DUR - 0.3)
+  if (v.conFondo) tl.to('#p-fondo', { opacity: 0, duration: 0.3 }, DUR - 0.3)
+</script>
