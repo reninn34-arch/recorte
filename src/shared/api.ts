@@ -463,6 +463,11 @@ export interface RecorteApi {
   palabrasDeVoces: (id: string, archivos: string[]) => Promise<Record<string, { texto: string; inicio: number; fin: number }[]>>
   /** Las piezas animadas (títulos, rótulos, cierres…) que se pueden poner. */
   listarPiezas: () => Promise<PiezaAnimada[]>
+  /** Crea (o cambia, con `base`) una animación con el agente conectado; tarda minutos. Queda en «Mis animaciones». */
+  crearPieza: (id: string, peticion: string, referencias: string[], base?: string) => Promise<PiezaAnimada>
+  pararPieza: () => Promise<boolean>
+  borrarPieza: (pieza: string) => Promise<boolean>
+  onPiezasProgreso: (cb: (texto: string) => void) => () => void
   /** Anima una pieza con sus datos y la agrega a la biblioteca: devuelve su medio para ponerlo como capa. */
   animarPieza: (id: string, pieza: string, valores: ValoresPieza, duracion: number) => Promise<{ project: Project; medio: string; duracion: number }>
   /** Revisa el audio de la edición: lo que suena mal y cómo arreglarlo. */

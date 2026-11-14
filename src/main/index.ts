@@ -53,7 +53,8 @@ import { desfasePorSonido } from './multicam'
 import { prepararEscala } from './escala'
 import { arreglarVoz, revisarAudio } from './revisaraudio'
 import { listarPiezas, renderizarPieza } from './piezas'
-import { valoresConMarca, type ValoresPieza } from '../shared/piezas'
+import { borrarPiezaPropia, crearPiezaConAgente } from './tallerpiezas'
+import { valoresConMarca, type PiezaAnimada, type ValoresPieza } from '../shared/piezas'
 import { atenderVoz } from './vozagente'
 import { proyectoDesdeReceta } from './recetaeditor'
 import { medirReferencia } from './estilo/referencia'
@@ -2011,7 +2012,7 @@ app.whenReady().then(() => {
   setTimeout(() => void revisarModelos(), 20_000)
   setInterval(() => void revisarModelos(), 60 * 60_000)
   // ===== Piezas animadas (HyperFrames) =====
-  ipcMain.handle('piezas:lista', () => listarPiezas().map((p) => ({ ...p, muestra: p.muestra ? `recorte-media://piezas/${p.id}.mp4` : undefined })))
+  ipcMain.handle('piezas:lista', () => listarPiezas().map((p) => ({ ...p, muestra: p.muestra ? `recorte-media://piezas/${p.id}.mp4?v=${Date.now()}` : undefined })))
   /** Anima una pieza con sus datos al tamaño del video, la agrega a la biblioteca y devuelve el medio. */
   async function animarPieza(id: string, piezaId: string, valores: ValoresPieza, duracion: number) {
     const p = proyectos.abrir(id)
@@ -2038,6 +2039,53 @@ app.whenReady().then(() => {
     if (!hecho.agregados.length) throw new Error(hecho.fallos[0] ?? 'No pude agregar la animación a la biblioteca.')
     return { project: hecho.project, medio: hecho.agregados[0], duracion: r.duracion }
   }
+  /**
+   * Crea (o cambia) una animación con el agente conectado: trabaja en su carpeta como un diseñador de motion (escribe,
+   * renderiza, mira y corrige) y la deja en «Mis animaciones». Tarda minutos; lo que va haciendo llega por 'piezas:progreso'.
+   */
+  let creandoPieza: AbortController | null = null
+  const conMuestraUrl = (p: PiezaAnimada) => ({ ...p, muestra: p.muestra ? `recorte-media://piezas/${p.id}.mp4` : undefined })
+  async function crearPieza(id: string, peticion: string, referencias: string[], base?: string): Promise<PiezaAnimada> {
+    const p = proyectos.abrir(id)
+    if (!p) throw new Error('El proyecto ya no existe.')
+    const config = await configAgente()
+    if (config.proveedor !== 'cli' || !config.comandoCli) {
+      throw new Error('Para crear animaciones nuevas conecta un agente que trabaje en tu equipo (Claude Code, Codex, Kimi u OpenCode).')
+    }
+    if (creandoPieza) throw new Error('Ya hay una animación creándose: espera a que termine o párala.')
+    creandoPieza = new AbortController()
+    const avisar = (texto: string) => {
+      for (const w of BrowserWindow.getAllWindows()) w.webContents.send('piezas:progreso', { texto })
+    }
+    try {
+      const pieza = await crearPiezaConAgente(
+        {
+          orden: config.comandoCli,
+          peticion,
+          marca: { nombre: p.brand.name || p.name, primary: p.brand.primary, secondary: p.brand.secondary, logo: p.brand.logo },
+          referencias,
+          ancho: p.source.width || 1080,
+          alto: p.source.height || 1920,
+          ...(base ? { base } : {})
+        },
+        avisar,
+        creandoPieza.signal
+      )
+      return conMuestraUrl(pieza)
+    } finally {
+      creandoPieza = null
+    }
+  }
+  ipcMain.handle('piezas:crear', async (_evento, id: unknown, peticion: unknown, referencias: unknown, base: unknown) => {
+    if (typeof id !== 'string' || typeof peticion !== 'string' || !peticion.trim()) throw new Error('Dime qué animación quieres.')
+    const refs = Array.isArray(referencias) ? referencias.filter((r): r is string => typeof r === 'string' && existsSync(r)) : []
+    return crearPieza(id, peticion.trim().slice(0, 2000), refs, typeof base === 'string' ? base : undefined)
+  })
+  ipcMain.handle('piezas:parar', () => {
+    creandoPieza?.abort()
+    return true
+  })
+  ipcMain.handle('piezas:borrar', (_evento, piezaId: unknown) => typeof piezaId === 'string' && borrarPiezaPropia(piezaId))
   ipcMain.handle('piezas:animar', async (_evento, id: unknown, piezaId: unknown, valores: unknown, duracion: unknown) => {
     if (typeof id !== 'string' || typeof piezaId !== 'string' || !valores || typeof valores !== 'object' || typeof duracion !== 'number') throw new Error('Datos inválidos.')
     return animarPieza(id, piezaId, valores as ValoresPieza, duracion)
@@ -2779,6 +2827,18 @@ app.whenReady().then(() => {
         if (turno.ok && turno.operaciones.some((o) => o.op === 'cambiar_voz' || o.op === 'anadir_voz')) {
           const fallosVoz = await generarVocesDelChat(id, normalizarTimeline(timeline, proyecto.source.duration, duracionesDeMedios(proyecto.medios)), turno.operaciones)
           if (fallosVoz.length) turno.mensaje = `${turno.mensaje}\n\nNo pude generar la voz: ${fallosVoz.join(' ')}`
+        }
+        // Las animaciones NUEVAS que pidió: el agente las crea (minutos) y pasan a ponerse como cualquier pieza.
+        if (turno.ok) {
+          for (const o of turno.operaciones) {
+            if (o.op !== 'crear_pieza') continue
+            try {
+              const nueva = await crearPieza(id, o.peticion, [])
+              Object.assign(o, { op: 'anadir_pieza', pieza: nueva.id })
+            } catch (e) {
+              turno.mensaje = `${turno.mensaje}\n\nNo pude crear la animación: ${e instanceof Error ? e.message : String(e)}`
+            }
+          }
         }
         // Las piezas animadas que pidió: se animan aquí (con la marca) y quedan en la biblioteca antes de aplicar.
         if (turno.ok) {

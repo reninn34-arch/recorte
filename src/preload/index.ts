@@ -148,6 +148,14 @@ const api: RecorteApi = {
   actualizacionInstalar: () => ipcRenderer.invoke('actualizacion:instalar'),
   revisarAudio: (id, timeline) => ipcRenderer.invoke('audio:revisar', id, timeline),
   listarPiezas: () => ipcRenderer.invoke('piezas:lista'),
+  crearPieza: (id, peticion, referencias, base) => ipcRenderer.invoke('piezas:crear', id, peticion, referencias, base),
+  pararPieza: () => ipcRenderer.invoke('piezas:parar'),
+  borrarPieza: (pieza) => ipcRenderer.invoke('piezas:borrar', pieza),
+  onPiezasProgreso: (cb) => {
+    const listener = (_evento: Electron.IpcRendererEvent, e: { texto: string }) => cb(e.texto)
+    ipcRenderer.on('piezas:progreso', listener)
+    return () => ipcRenderer.removeListener('piezas:progreso', listener)
+  },
   animarPieza: (id, pieza, valores, duracion) => ipcRenderer.invoke('piezas:animar', id, pieza, valores, duracion),
   palabrasDeVoces: (id, archivos) => ipcRenderer.invoke('voz:palabras', id, archivos),
   arreglarVoz: (id, archivo, accion, ventanas) => ipcRenderer.invoke('audio:arreglar-voz', id, archivo, accion, ventanas),

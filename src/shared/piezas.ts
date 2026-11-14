@@ -27,6 +27,10 @@ export interface PiezaAnimada {
   vars: VariablePieza[]
   /** Ruta de un video de muestra (para verla antes de ponerla). */
   muestra?: string
+  /** La creó el usuario con su agente (está en «Mis animaciones»). */
+  propia?: boolean
+  /** Lo que se le pidió al agente (para pedirle cambios después). */
+  pedido?: string
 }
 
 export type ValoresPieza = Record<string, string | number | boolean>

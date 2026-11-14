@@ -36,13 +36,65 @@ export function PanelPiezas({
   const [valores, setValores] = useState<ValoresPieza>({})
   const [duracion, setDuracion] = useState(3)
   const [animando, setAnimando] = useState(false)
+  // El taller: una animación nueva (o cambios) que hace el agente conectado.
+  const [pedido, setPedido] = useState('')
+  const [refs, setRefs] = useState<{ ruta: string; nombre: string }[]>([])
+  const [creando, setCreando] = useState(false)
+  const [lineas, setLineas] = useState<string[]>([])
+  const [cambios, setCambios] = useState('')
+  const recargar = async (abrirId?: string) => {
+    const l = await window.recorte.listarPiezas()
+    cache = l
+    setPiezas(l)
+    if (abrirId) {
+      setAbierta(abrirId)
+      setValores({})
+      const p = l.find((x) => x.id === abrirId)
+      if (p) setDuracion(p.duracion.defecto)
+    }
+  }
   useEffect(() => {
-    if (cache) return
-    void window.recorte.listarPiezas().then((l) => {
-      cache = l
-      setPiezas(l)
-    })
+    if (!cache) void recargar()
+    return window.recorte.onPiezasProgreso((t) => setLineas((l) => [...l.slice(-5), t]))
   }, [])
+  const crear = async (texto: string, base?: string) => {
+    if (!texto.trim() || creando) return
+    setCreando(true)
+    setLineas([])
+    try {
+      const nueva = await window.recorte.crearPieza(proyecto.id, texto, refs.map((r) => r.ruta), base)
+      await recargar(nueva.id)
+      setPedido('')
+      setCambios('')
+      setRefs([])
+      onAviso(`Listo: «${nueva.nombre}» quedó en «Mis animaciones». Revísala y ponla en el cabezal.`)
+    } catch (e) {
+      onAviso(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))
+    } finally {
+      setCreando(false)
+    }
+  }
+  const agregarRefs = (archivos: FileList | null) => {
+    const nuevas = [...(archivos ?? [])]
+      .map((f) => ({ ruta: window.recorte.rutaDeArchivo(f) ?? '', nombre: f.name }))
+      .filter((r) => r.ruta)
+    setRefs((r) => [...r, ...nuevas].slice(0, 8))
+  }
+  const enCurso = creando && (
+    <div className="pz-taller-curso">
+      <span className="pz-taller-puntos">
+        <Icon name="sparkles" size={13} /> Tu agente está trabajando (tarda unos minutos)
+      </span>
+      {lineas.map((l, i) => (
+        <span key={i} className="tl-dim">
+          {l}
+        </span>
+      ))}
+      <button className="btn small ghost" onClick={() => void window.recorte.pararPieza()}>
+        Parar
+      </button>
+    </div>
+  )
 
   // Una pieza ya puesta y elegida: se edita ella.
   const editando = capaElegida?.pieza ? capaElegida : undefined
@@ -171,13 +223,61 @@ export function PanelPiezas({
         <button className="btn small primary" disabled={animando} onClick={() => void animar()}>
           <Icon name="sparkles" size={13} /> {animando ? 'Animando… (la primera vez tarda un poco)' : editando ? 'Volver a animar con los cambios' : 'Poner en el cabezal'}
         </button>
+        <span className="ed-seccion">{pieza.propia ? 'Pedir cambios' : 'Hacer mi versión'}</span>
+        <textarea
+          className="tl-texto-input pz-pedido"
+          rows={3}
+          placeholder={pieza.propia ? 'Ej.: más lenta, que entre desde abajo, sin confeti, letra más grande…' : 'Ej.: igual pero con mi foto en un círculo y colores pastel'}
+          value={cambios}
+          disabled={creando}
+          onChange={(e) => setCambios(e.target.value)}
+        />
+        <button className="btn small" disabled={creando || !cambios.trim()} onClick={() => void crear(cambios, pieza.id)}>
+          <Icon name="sparkles" size={13} /> {pieza.propia ? 'Que mi agente la cambie' : 'Que mi agente haga mi versión'}
+        </button>
+        {enCurso}
+        {pieza.propia && !creando && (
+          <button
+            className="btn small ghost"
+            onClick={async () => {
+              if (!window.confirm(`¿Borrar «${pieza.nombre}» de tus animaciones? Las que ya pusiste en videos se quedan.`)) return
+              await window.recorte.borrarPieza(pieza.id)
+              setAbierta(null)
+              await recargar()
+            }}
+          >
+            Borrar de mis animaciones
+          </button>
+        )}
       </div>
     )
   }
 
   return (
     <div className="pz">
-      <p className="tl-dim">Diseño en movimiento con tus colores y tu logo: eliges, cambias el texto y entra en el cabezal.</p>
+      <div className="pz-taller">
+        <span className="ed-seccion">Crea una animación nueva</span>
+        <textarea
+          className="tl-texto-input pz-pedido"
+          rows={3}
+          placeholder="Descríbela como se la pedirías a un diseñador: qué dice, cómo entra y se mueve, el estilo y los colores. Ej.: «una cuenta regresiva del 3 al 1 con globos que explotan y luego ¡Black Friday!»"
+          value={pedido}
+          disabled={creando}
+          onChange={(e) => setPedido(e.target.value)}
+        />
+        <div className="pz-taller-fila">
+          <label className="btn small ghost pz-adjuntar" title="Un video o una imagen de algo que te gustó: tu agente se inspira en su estilo">
+            <Icon name="paperclip" size={13} /> Referencias
+            <input type="file" multiple accept="image/*,video/*" hidden onChange={(e) => agregarRefs(e.target.files)} />
+          </label>
+          <button className="btn small primary" disabled={creando || !pedido.trim()} onClick={() => void crear(pedido)}>
+            <Icon name="sparkles" size={13} /> Que mi agente la cree
+          </button>
+        </div>
+        {refs.length > 0 && <span className="tl-dim">Referencias: {refs.map((r) => r.nombre).join(', ')}</span>}
+        {!abierta && enCurso}
+      </div>
+      <p className="tl-dim">O elige una lista: con tus colores y tu logo, cambias el texto y entra en el cabezal.</p>
       {porCategoria.map(([cat, lista]) => (
         <div key={cat}>
           <span className="ed-seccion">{cat}</span>

@@ -112,6 +112,8 @@ export type OperacionTL =
    * y lo que dura de verdad; sin medio, no se pudo animar.
    */
   | { op: 'anadir_pieza'; pieza: string; inicio: number; duracion?: number; valores?: Record<string, string | number | boolean>; medio?: string; duracionReal?: number }
+  /** Una animación NUEVA a medida: la crea el agente conectado (minutos) y queda puesta y en «Mis animaciones». */
+  | { op: 'crear_pieza'; peticion: string; inicio: number; duracion?: number }
   | ({ op: 'cambiar_capa'; capa_n: number; inicio?: number } & CamposCapa)
   | { op: 'filtros'; grano?: number; polvo?: number; trama?: number; vineta?: number; parpadeo?: number }
   | { op: 'transicion'; clip?: number; tipo: TransicionClip | 'corte'; duracion?: number }
@@ -356,6 +358,12 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
           }
         }
         ops.push({ op: 'anadir_pieza', pieza: x.pieza, inicio: i, ...(num(x.duracion) !== null ? { duracion: num(x.duracion)! } : {}), valores })
+        break
+      }
+      case 'crear_pieza': {
+        const i = num(x.inicio)
+        if (i === null || typeof x.peticion !== 'string' || !x.peticion.trim()) break
+        ops.push({ op: 'crear_pieza', peticion: x.peticion.trim().slice(0, 1500), inicio: i, ...(num(x.duracion) !== null ? { duracion: num(x.duracion)! } : {}) })
         break
       }
       case 'cambiar_capa': {
@@ -658,6 +666,10 @@ export function aplicarOperaciones(
         }
         tl = r.timeline
         cambios.push(`Puse la animación «${o.pieza}» en ${mmss(o.inicio)}`)
+        break
+      }
+      case 'crear_pieza': {
+        fallos.push('No se pudo crear la animación nueva.')
         break
       }
       case 'cambiar_capa': {
@@ -1093,6 +1105,7 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
   barrido-marca (1.1 s: transición; ponla con su centro justo en un corte, inicio = corte − 0.55)
   destellos (2 s: celebrar un momento; "x","y" en % desde dónde salen)
   cierre-logo (2.4 s: el final, con el logo; "texto" eslogan opcional, "conFondo" true para tapar el video)
+- {"op":"crear_pieza","peticion":"…","inicio":T,"duracion":S}  (solo en el chat de Recorte) una animación NUEVA a medida cuando ninguna de las de arriba sirve o el usuario pide algo distinto: describe con detalle cómo debe verse y moverse (estilo, ritmo, colores, qué textos lleva). La crea tu agente con HyperFrames en unos minutos, queda puesta en el segundo T y guardada para reusarla.
 - {"op":"cambiar_capa","capa_n":N, …los mismos campos…}  y {"op":"borrar_capa","capa_n":N}
 - {"op":"transicion","clip":N,"tipo":"fundido|barrido-izquierda|barrido-derecha|barrido-arriba|barrido-abajo|zoom|desenfoque|destello|circulo|corte","duracion":0.45}  cómo entra el clip N sobre el anterior (sin "clip": en todos los cortes). Los barridos empujan la imagen hacia ese lado (como un paneo rápido); destello pasa por blanco; corte = sin transición. Con medida: un documental rápido usa cortes secos y alguna transición en los cambios de tema.
 - {"op":"filtros","grano":0.3,"polvo":0.2,"trama":0.4,"vineta":0.5,"parpadeo":0.1}  filtros para TODO el video, de 0 (nada) a 1 (fuerte): grano de película, polvo y rayas, trama de puntos de imprenta, viñeta (bordes oscuros) y parpadeo de proyector. Un 0 quita ese filtro. Para un aire de documental o de archivo: grano 0.3, polvo 0.2, viñeta 0.5; trama 0.4 para un aire de revista.

@@ -24,6 +24,23 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.55',
+    fecha: '2026-11-14',
+    resumen: 'Tu agente crea animaciones nuevas a tu medida: las diseña, las mira, las corrige y quedan en «Mis animaciones».',
+    novedades: [
+      {
+        icono: 'sparkles',
+        titulo: 'Crea una animación nueva',
+        texto: 'En «Animadas»: descríbela como a un diseñador (y si quieres, pásale un video o una imagen de referencia). Tu agente la hace con HyperFrames en unos minutos, la revisa cuadro a cuadro y la corrige. Queda en «Mis animaciones» para cualquier video, con tus colores y tu logo.'
+      },
+      {
+        icono: 'undo',
+        titulo: 'Pedir cambios y hacer tu versión',
+        texto: '«Pedir cambios» en una animación tuya («más lenta», «sin confeti») y tu agente la corrige recordando lo que hizo. En las de la app, «Hacer mi versión» crea una copia tuya cambiada. En el chat del editor, si pides algo que ninguna hace, tu agente la crea y la pone.'
+      }
+    ]
+  },
+  {
     version: '0.1.54',
     fecha: '2026-11-14',
     resumen: 'Animaciones de diseño en movimiento con tu marca: títulos, rótulos, llamados a la acción, datos, transiciones y cierres con logo.',

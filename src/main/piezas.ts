@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { app } from 'electron'
 import { extname, join } from 'node:path'
 import type { PiezaAnimada, ValoresPieza } from '../shared/piezas'
 import { pathAmpliado, resolverBinario } from './binarios'
@@ -18,29 +19,45 @@ import { rutaScriptPython } from './transcribir'
  */
 
 const carpetaPiezas = () => rutaScriptPython('piezas')
+/** Las animaciones que crea el usuario con su agente: fuera de la app, para que no se pierdan al actualizarla. */
+export const carpetaPropias = (): string => join(app.getPath('userData'), 'piezas-propias')
+/** Dónde está una pieza: las de la app o las del usuario. */
+export function carpetaDePieza(id: string): string | null {
+  if (!/^[\w-]{1,80}$/.test(id)) return null
+  for (const raiz of [carpetaPiezas(), carpetaPropias()]) if (existsSync(join(raiz, id, 'pieza.html'))) return join(raiz, id)
+  return null
+}
 /** La versión de GSAP que HyperFrames trae consigo (la sirve sin internet). */
 const GSAP = 'https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js'
 const HF_VERSION = '0.8.206'
 
 export function listarPiezas(): PiezaAnimada[] {
-  const raiz = carpetaPiezas()
-  if (!existsSync(raiz)) return []
   const piezas: PiezaAnimada[] = []
-  for (const id of readdirSync(raiz)) {
-    try {
-      const ficha = JSON.parse(readFileSync(join(raiz, id, 'pieza.json'), 'utf8'))
-      if (!existsSync(join(raiz, id, 'pieza.html'))) continue
-      piezas.push({ id, ...ficha, muestra: existsSync(join(raiz, id, 'muestra.mp4')) ? join(raiz, id, 'muestra.mp4') : undefined })
-    } catch {
-      // Una pieza rota no tumba la lista.
+  for (const [raiz, propia] of [[carpetaPiezas(), false], [carpetaPropias(), true]] as const) {
+    if (!existsSync(raiz)) continue
+    for (const id of readdirSync(raiz)) {
+      try {
+        const ficha = JSON.parse(readFileSync(join(raiz, id, 'pieza.json'), 'utf8'))
+        if (!existsSync(join(raiz, id, 'pieza.html')) || !Array.isArray(ficha.vars)) continue
+        piezas.push({
+          id,
+          ...ficha,
+          duracion: ficha.duracion ?? { defecto: 3, min: 1, max: 10 },
+          capa: ficha.capa ?? { x: 0.5, y: 0.5, ancho: 1 },
+          ...(propia ? { categoria: 'Mis animaciones', propia: true } : {}),
+          muestra: existsSync(join(raiz, id, 'muestra.mp4')) ? join(raiz, id, 'muestra.mp4') : undefined
+        })
+      } catch {
+        // Una pieza rota no tumba la lista.
+      }
     }
   }
-  const orden = ['Títulos', 'Rótulos', 'Textos', 'Datos', 'Llamados', 'Transiciones', 'Adornos', 'Cierres']
+  const orden = ['Mis animaciones', 'Títulos', 'Rótulos', 'Textos', 'Datos', 'Llamados', 'Transiciones', 'Adornos', 'Cierres']
   return piezas.sort((a, b) => orden.indexOf(a.categoria) - orden.indexOf(b.categoria) || a.nombre.localeCompare(b.nombre))
 }
 
 /** HyperFrames: el instalado, o con npx (Node trae npx; la primera vez lo baja). */
-function comandoHyperframes(): string[] | null {
+export function comandoHyperframes(): string[] | null {
   const hf = resolverBinario('hyperframes')
   if (hf) return [hf]
   const npx = resolverBinario('npx')
@@ -108,7 +125,9 @@ export async function renderizarPieza(
 ): Promise<{ archivo: string; duracion: number }> {
   const pieza = listarPiezas().find((p) => p.id === piezaId)
   if (!pieza) throw new Error(`No existe la pieza «${piezaId}».`)
-  const fragmento = readFileSync(join(carpetaPiezas(), piezaId, 'pieza.html'), 'utf8')
+  const carpeta = carpetaDePieza(piezaId)
+  if (!carpeta) throw new Error(`No existe la pieza «${piezaId}».`)
+  const fragmento = readFileSync(join(carpeta, 'pieza.html'), 'utf8')
   // Par (lo pide el codificador) y no más de 1920 de lado: se ve igual al ponerla encima.
   const escala = Math.min(1, 1920 / Math.max(ancho, alto))
   const w = Math.max(2, Math.round((ancho * escala) / 2) * 2)
