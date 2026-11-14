@@ -119,6 +119,12 @@ try {
   // Sin subtítulos no se puede elegir estilo.
   const sinSubs = aplicarOperaciones({ ...tl, textos: [], subtitulosHF: undefined }, ops, { duracionFuente: 4, transcript: [], medios: {} })
   assert.equal(sinSubs.fallos.length, 1)
+  // Un texto viejo (no marcado) se marca como subtítulo desde el chat o el MCP, y se desmarca.
+  const marcado = aplicarOperaciones(sinSubs.timeline, validarOperaciones([{ op: 'anadir_texto', inicio: 1, texto: 'Hola', subtitulo: true }, { op: 'cambiar_texto', texto_n: 1, subtitulo: true }]), { duracionFuente: 4, transcript: [], medios: {} }).timeline
+  assert.equal(marcado.textos.filter((t) => t.subtitulo).length, 1)
+  const desmarcado = aplicarOperaciones(marcado, validarOperaciones([{ op: 'cambiar_texto', texto_n: 1, subtitulo: false }]), { duracionFuente: 4, transcript: [], medios: {} }).timeline
+  assert.equal(desmarcado.textos.filter((t) => t.subtitulo).length, 0)
+  assert.ok(!('subtitulo' in desmarcado.textos[0]))
   console.log('subtítulos animados: todo bien')
 } finally {
   rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 400 })

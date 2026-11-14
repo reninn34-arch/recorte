@@ -82,7 +82,7 @@ export type OperacionTL =
   | { op: 'borrar_clip'; clip: number }
   | { op: 'mover_clip'; clip: number; a: number }
   | { op: 'recortar_clip'; clip: number; entrada?: number; salida?: number }
-  | { op: 'anadir_texto'; inicio: number; duracion?: number; texto: string; posicion?: PosicionTexto }
+  | { op: 'anadir_texto'; inicio: number; duracion?: number; texto: string; posicion?: PosicionTexto; subtitulo?: boolean }
   | {
       op: 'cambiar_texto'
       texto_n: number
@@ -105,6 +105,8 @@ export type OperacionTL =
       /** Posición libre: el centro del rótulo, en fracción del cuadro (0–1). */
       x?: number
       y?: number
+      /** Si es un subtítulo (parte del guion que dibujan los subtítulos animados). */
+      subtitulo?: boolean
     }
   | { op: 'borrar_texto'; texto_n: number }
   /** Lo que va encima del video: un medio de la biblioteca (por su id), en su sitio y su tamaño. */
@@ -310,7 +312,7 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
       case 'anadir_texto': {
         const i = num(x.inicio)
         if (i !== null && typeof x.texto === 'string' && x.texto.trim()) {
-          ops.push({ op: 'anadir_texto', inicio: i, duracion: num(x.duracion) ?? undefined, texto: x.texto.slice(0, 200), posicion: pos(x.posicion) })
+          ops.push({ op: 'anadir_texto', inicio: i, duracion: num(x.duracion) ?? undefined, texto: x.texto.slice(0, 200), posicion: pos(x.posicion), ...(typeof x.subtitulo === 'boolean' ? { subtitulo: x.subtitulo } : {}) })
         }
         break
       }
@@ -333,7 +335,8 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
             pintado: typeof x.pintado === 'string' && /^#[0-9a-f]{6}$/i.test(x.pintado) ? x.pintado : undefined,
             color_clave: typeof x.color_clave === 'string' && /^#[0-9a-f]{6}$/i.test(x.color_clave) ? x.color_clave : undefined,
             tiempos: Array.isArray(x.tiempos) && x.tiempos.every((y) => typeof y === 'number' && Number.isFinite(y)) ? (x.tiempos as number[]).slice(0, 200) : undefined,
-            ...(num(x.x) !== null && num(x.y) !== null ? { x: num(x.x)!, y: num(x.y)! } : {})
+            ...(num(x.x) !== null && num(x.y) !== null ? { x: num(x.x)!, y: num(x.y)! } : {}),
+            ...(typeof x.subtitulo === 'boolean' ? { subtitulo: x.subtitulo } : {})
           })
         }
         break
@@ -615,7 +618,7 @@ export function aplicarOperaciones(
           fallos.push('No pude añadir el texto: la timeline está vacía.')
           break
         }
-        tl = cambiarTexto(r.timeline, r.id, { duracion: o.duracion ?? 3, posicion: o.posicion ?? 'abajo' })
+        tl = cambiarTexto(r.timeline, r.id, { duracion: o.duracion ?? 3, posicion: o.posicion ?? 'abajo', ...(o.subtitulo ? { subtitulo: true } : {}) })
         cambios.push(`Añadí el texto «${o.texto}» en ${mmss(o.inicio)}`)
         break
       }
@@ -639,6 +642,7 @@ export function aplicarOperaciones(
         if (o.pintado !== undefined) cambio.pintado = o.pintado
         if (o.color_clave !== undefined) cambio.colorClave = o.color_clave
         if (o.tiempos !== undefined) cambio.tiempos = o.tiempos
+        if (o.subtitulo !== undefined) cambio.subtitulo = o.subtitulo
         if (o.x !== undefined && o.y !== undefined && o.posicion === undefined) {
           cambio.x = o.x
           cambio.y = o.y
@@ -1019,7 +1023,8 @@ export function describirTimelineParaAgente(
       t.tamano ? `tamaño ${t.tamano}` : '',
       t.color ? `color ${t.color}` : '',
       t.sinCaja ? 'sin caja' : t.caja ? `caja ${t.caja}` : '',
-      t.fuente ? `letra ${t.fuente}` : ''
+      t.fuente ? `letra ${t.fuente}` : '',
+      t.subtitulo ? 'subtítulo' : ''
     ].filter(Boolean)
     const donde = typeof t.x === 'number' && typeof t.y === 'number' ? `en x ${t.x} y ${t.y}` : t.posicion
     lineas.push(`  ${i + 1}. ${t.inicio.toFixed(2)}–${(t.inicio + t.duracion).toFixed(2)} ${donde}: «${t.texto.replace(/\n/g, ' / ')}»${estilo.length ? ` [${estilo.join(', ')}]` : ''}`)
@@ -1148,7 +1153,7 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
   barrido-marca (1.1 s: transición; ponla con su centro justo en un corte, inicio = corte − 0.55)
   destellos (2 s: celebrar un momento; "x","y" en % desde dónde salen)
   cierre-logo (2.4 s: el final, con el logo; "texto" eslogan opcional, "conFondo" true para tapar el video)
-- {"op":"subtitulos_animados","estilo":"subtitulos-rotulo","valores":{"colorClave":"#72f9fd"}}  SUBTÍTULOS ANIMADOS con HyperFrames: los textos de subtítulo (los que hiciste desde la voz) siguen siendo el guion y el estilo los dibuja encima, frase a frase y al ritmo de cada palabra; las palabras entre *asteriscos* van resaltadas. Estilos: subtitulos-rotulo (bloque oscuro, letra gruesa, la frase crece un poco; "colorCaja","colorTexto","colorClave","mayusculas","y","tamano"), subtitulos-pildora (palabra a palabra con la que suena sobre una píldora; "colorPildora","colorTexto","colorClave","mayusculas","y","tamano"), subtitulos-palabra (de a 1-3 palabras enormes al centro; "colorTexto","colorClave","porGrupo","y","tamano") y los que el usuario creó. "estilo":"ninguno" vuelve al texto simple. Si corriges un subtítulo con cambiar_texto, se vuelven a animar solos.
+- {"op":"subtitulos_animados","estilo":"subtitulos-rotulo","valores":{"colorClave":"#72f9fd"}}  SUBTÍTULOS ANIMADOS con HyperFrames: los textos de subtítulo (los que hiciste desde la voz) siguen siendo el guion y el estilo los dibuja encima, frase a frase y al ritmo de cada palabra; las palabras entre *asteriscos* van resaltadas. Estilos: subtitulos-rotulo (bloque oscuro, letra gruesa, la frase crece un poco; "colorCaja","colorTexto","colorClave","mayusculas","y","tamano"), subtitulos-pildora (palabra a palabra con la que suena sobre una píldora; "colorPildora","colorTexto","colorClave","mayusculas","y","tamano"), subtitulos-palabra (de a 1-3 palabras enormes al centro; "colorTexto","colorClave","porGrupo","y","tamano") y los que el usuario creó. "estilo":"ninguno" vuelve al texto simple. Si corriges un subtítulo con cambiar_texto, se vuelven a animar solos. Un texto que va con la voz pero no está marcado como subtítulo se marca con cambiar_texto "subtitulo":true (y anadir_texto acepta "subtitulo":true); "subtitulo":false lo saca.
 - {"op":"crear_pieza","peticion":"…","inicio":T,"duracion":S}  (solo en el chat de Recorte) una animación NUEVA a medida cuando ninguna de las de arriba sirve o el usuario pide algo distinto: describe con detalle cómo debe verse y moverse (estilo, ritmo, colores, qué textos lleva). La crea tu agente con HyperFrames en unos minutos, queda puesta en el segundo T y guardada para reusarla.
 - {"op":"cambiar_capa","capa_n":N, …los mismos campos…}  y {"op":"borrar_capa","capa_n":N}
 - {"op":"transicion","clip":N,"tipo":"fundido|barrido-izquierda|barrido-derecha|barrido-arriba|barrido-abajo|zoom|desenfoque|destello|circulo|corte","duracion":0.45}  cómo entra el clip N sobre el anterior (sin "clip": en todos los cortes). Los barridos empujan la imagen hacia ese lado (como un paneo rápido); destello pasa por blanco; corte = sin transición. Con medida: un documental rápido usa cortes secos y alguna transición en los cambios de tema.

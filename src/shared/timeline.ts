@@ -2598,6 +2598,7 @@ export function cambiarTexto(tl: Timeline, id: string, cambio: Partial<Omit<Text
       // Los tiempos de cada palabra siguen si el texto tiene las mismas palabras (se corrige una letra, no se reescribe).
       const tiempos = normalizarTiempos(cambio.tiempos ?? x.tiempos, nuevo.texto, nuevo.duracion)
       if (tiempos) nuevo.tiempos = tiempos
+      if (!nuevo.subtitulo) delete nuevo.subtitulo
       return nuevo
     })
   }

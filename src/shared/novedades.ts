@@ -24,6 +24,19 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.58',
+    fecha: '2026-11-14',
+    resumen: 'Los textos que ya tenías pueden volverse subtítulos animados.',
+    novedades: [
+      {
+        icono: 'type',
+        titulo: '«Es un subtítulo»',
+        texto:
+          'Al elegir un texto, marca «Es un subtítulo» y entra en los subtítulos animados con HyperFrames. Sirve para proyectos que hiciste antes, sin borrar y rehacer los textos; el chat y los agentes también pueden marcarlos.'
+      }
+    ]
+  },
+  {
     version: '0.1.57',
     fecha: '2026-11-14',
     resumen: 'Los subtítulos ahora los anima HyperFrames: estilos con movimiento de verdad, y si corriges una palabra se vuelven a animar.',

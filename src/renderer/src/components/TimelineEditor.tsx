@@ -3346,6 +3346,14 @@ export function TimelineEditor({
                 {textoElegido.tiempos ? 'Al ritmo de la voz' : 'Repartidas en lo que dura (hazlo desde la voz para que vaya con ella)'}
               </span>
             )}
+            <label className="tl-check" title="Los subtítulos son el guion de los subtítulos animados (se rehacen todos juntos)">
+              <input
+                type="checkbox"
+                checked={textoElegido.subtitulo === true}
+                onChange={(e) => historial.aplicar(cambiarTexto(timeline, textoElegido.id, { subtitulo: e.target.checked }))}
+              />
+              <span>Es un subtítulo</span>
+            </label>
             <label className="tl-check" title="Sin la caja oscura: solo la letra con su borde">
               <input
                 type="checkbox"
