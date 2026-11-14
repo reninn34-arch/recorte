@@ -24,6 +24,23 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.59',
+    fecha: '2026-11-14',
+    resumen: 'Arreglos de los subtítulos animados y de las animaciones que se ponen juntas.',
+    novedades: [
+      {
+        icono: 'type',
+        titulo: 'Rótulo más ancho',
+        texto: 'Los subtítulos estilo Rótulo usan el ancho del cuadro: una frase corta va en uno o dos renglones, no en cuatro.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Varias animaciones en un pedido',
+        texto: 'Si el chat o un agente pone varias animaciones de una vez, quedan todas (antes solo se quedaba la última).'
+      }
+    ]
+  },
+  {
     version: '0.1.58',
     fecha: '2026-11-14',
     resumen: 'Los textos que ya tenías pueden volverse subtítulos animados.',

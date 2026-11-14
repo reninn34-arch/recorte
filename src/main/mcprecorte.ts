@@ -7,7 +7,7 @@ import { aplicarOperaciones, describirTimelineParaAgente, OPERACIONES_DOC, valid
 import type { RenderResultado, TranscripcionResultado } from '../shared/api'
 import { COSTO_CLIP, ID_SEGURO, MAX_CLIPS_VEO, textoMuestra, VOCES_GEMINI, type Creacion, type PeticionCreacion } from '../shared/creacion'
 import { MODELOS_IMAGEN, modelosVideoVigentes, type PedidoFlow, type ResultadoFlow } from '../shared/flow'
-import { anadirCapa, anadirVoz, ANIMAR_CAPA, cambiarCapa, duracionesDeMedios, duracionTimeline, escalaAnimada, normalizarTimeline, ponerMusica, timelineInicial, ventanaTimeline, type Timeline, type TipoAnimar } from '../shared/timeline'
+import { anadirCapa, anadirVoz, ANIMAR_CAPA, cambiarCapa, duracionesDeMedios, duracionTimeline, escalaAnimada, conSubtitulosAnimados, normalizarTimeline, ponerMusica, timelineInicial, ventanaTimeline, type Timeline, type TipoAnimar } from '../shared/timeline'
 import type { Project } from '../shared/types'
 
 /** Lo que se añade a un pedido de imagen «para recortar» (lo mismo que PARA_RECORTAR del kit). */
@@ -275,7 +275,7 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
         const t = typeof args.segundo === 'number' ? Math.max(0, Math.min(args.segundo, total - 0.05)) : 0
         const tmp = mkdtempSync(join(tmpdir(), 'recorte-cuadro-'))
         try {
-          const ventana = ventanaTimeline(tl, t, Math.min(total, t + 0.4))
+          const ventana = ventanaTimeline(conSubtitulosAnimados(tl), t, Math.min(total, t + 0.4))
           const r = await exportarTimeline(p, ventana, ctx.proyectos.carpeta(p.id), { formato: 'original', subtitulos: false }, () => {}, tmp)
           if (!r.ok || !r.output) return fallo(r.error ?? 'No pude sacar el cuadro.')
           const jpg = join(tmp, 'cuadro.jpg')

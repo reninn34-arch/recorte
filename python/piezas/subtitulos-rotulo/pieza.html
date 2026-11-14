@@ -23,7 +23,7 @@
   frases.forEach((f, i) => {
     const el = document.createElement('div')
     el.className = 'p-frase'
-    el.style.cssText = `top:${y}%;font-size:${fs}px;max-width:${W * 0.84}px;padding:${fs * 0.32}px ${fs * 0.55}px;background:${v.colorCaja};color:${v.colorTexto}`
+    el.style.cssText = `top:${y}%;font-size:${fs}px;width:max-content;max-width:${W * 0.84}px;padding:${fs * 0.32}px ${fs * 0.55}px;background:${v.colorCaja};color:${v.colorTexto}`
     const claves = []
     f.p.forEach((w, k) => {
       const s = document.createElement('span')

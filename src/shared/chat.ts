@@ -682,8 +682,9 @@ export function aplicarOperaciones(
           fallos.push(`No pude animar «${o.pieza}».`)
           break
         }
-        const conPieza = { ...medios, [o.medio]: o.duracionReal }
-        const r = anadirCapa(tl, { fuente: o.medio, inicio: o.inicio, duracion: o.duracionReal, x: 0.5, y: 0.5, ancho: 1, pista: 3, pieza: { id: o.pieza, valores: o.valores ?? {} } }, conPieza)
+        // Queda en el mapa de medios: si no, la siguiente pieza de este mismo pedido borraría a esta al normalizar.
+        medios[o.medio] = o.duracionReal
+        const r = anadirCapa(tl, { fuente: o.medio, inicio: o.inicio, duracion: o.duracionReal, x: 0.5, y: 0.5, ancho: 1, pista: 3, pieza: { id: o.pieza, valores: o.valores ?? {} } }, medios)
         if (r.timeline === tl) {
           fallos.push(`«${o.pieza}» cae fuera del video.`)
           break
@@ -706,7 +707,10 @@ export function aplicarOperaciones(
         const antes = tl.subtitulosHF?.pieza === o.estilo ? tl.subtitulosHF.valores : {}
         tl = { ...tl, subtitulosHF: { pieza: o.estilo, valores: { ...antes, ...(o.valores ?? {}) } } }
         // Con el render hecho para esta misma timeline, quedan animados al día.
-        if (o.render?.medio && o.render.huella === huellaSubtitulos(tl)) tl = { ...tl, subtitulosHF: { ...tl.subtitulosHF!, ...o.render } }
+        if (o.render?.medio && o.render.huella === huellaSubtitulos(tl)) {
+          tl = { ...tl, subtitulosHF: { ...tl.subtitulosHF!, ...o.render } }
+          if (o.render.duracion) medios[o.render.medio] = o.render.duracion
+        }
         cambios.push(`Los subtítulos van animados con el estilo «${o.estilo}»`)
         break
       }

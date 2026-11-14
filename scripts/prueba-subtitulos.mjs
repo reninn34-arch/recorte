@@ -125,6 +125,12 @@ try {
   const desmarcado = aplicarOperaciones(marcado, validarOperaciones([{ op: 'cambiar_texto', texto_n: 1, subtitulo: false }]), { duracionFuente: 4, transcript: [], medios: {} }).timeline
   assert.equal(desmarcado.textos.filter((t) => t.subtitulo).length, 0)
   assert.ok(!('subtitulo' in desmarcado.textos[0]))
+  // Varias piezas en un mismo pedido: quedan todas (antes cada una borraba a la anterior).
+  const dos = aplicarOperaciones(tl, [
+    { op: 'anadir_pieza', pieza: 'icono-animado', inicio: 0.5, valores: {}, medio: 'm-a', duracionReal: 1 },
+    { op: 'anadir_pieza', pieza: 'icono-animado', inicio: 2, valores: {}, medio: 'm-b', duracionReal: 1 }
+  ], { duracionFuente: 4, transcript: [], medios: { 'm-subs': r.duracion } }).timeline
+  assert.deepEqual(dos.capas.map((c) => c.fuente), ['m-a', 'm-b'])
   console.log('subtítulos animados: todo bien')
 } finally {
   rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 400 })
