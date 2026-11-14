@@ -1,0 +1,15 @@
+{
+  "nombre": "Palabra gigante",
+  "para": "Subtítulos de impacto: de a una o dos palabras, enormes en el centro, que entran de golpe al ritmo de la voz; las resaltadas, más grandes y en tu color.",
+  "categoria": "Subtítulos",
+  "subtitulos": true,
+  "duracion": { "defecto": 8, "min": 0.5, "max": 900 },
+  "capa": { "x": 0.5, "y": 0.5, "ancho": 1 },
+  "vars": [
+    { "id": "colorTexto", "tipo": "color", "nombre": "Color de la letra", "defecto": "#ffffff" },
+    { "id": "colorClave", "tipo": "color", "nombre": "Color de las palabras resaltadas", "defecto": "marca" },
+    { "id": "porGrupo", "tipo": "numero", "nombre": "Palabras a la vez (1 a 3)", "defecto": 2 },
+    { "id": "y", "tipo": "numero", "nombre": "A qué altura (% desde arriba)", "defecto": 62 },
+    { "id": "tamano", "tipo": "numero", "nombre": "Tamaño (%)", "defecto": 100 }
+  ]
+}

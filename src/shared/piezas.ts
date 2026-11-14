@@ -31,6 +31,8 @@ export interface PiezaAnimada {
   propia?: boolean
   /** Lo que se le pidió al agente (para pedirle cambios después). */
   pedido?: string
+  /** Es un estilo de subtítulos: dibuja las frases de `v.frases` (las de los textos de subtítulo) en toda la capa. */
+  subtitulos?: boolean
 }
 
 export type ValoresPieza = Record<string, string | number | boolean>

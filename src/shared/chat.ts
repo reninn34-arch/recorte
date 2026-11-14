@@ -59,7 +59,7 @@ import {
   PARAMETROS_CLAVE_CAPA,
   ponerClaveCapa,
   quitarClaveCapa,
-  type ParametroClaveCapa, anadirCapa } from './timeline'
+  type ParametroClaveCapa, anadirCapa, huellaSubtitulos, subtitulosAlDia, type SubtitulosHF } from './timeline'
 import { INSTRUCCIONES_CRITERIO } from './gustos'
 import type { TranscriptSegment } from './types'
 
@@ -116,6 +116,11 @@ export type OperacionTL =
   | { op: 'anadir_pieza'; pieza: string; inicio: number; duracion?: number; valores?: Record<string, string | number | boolean>; medio?: string; duracionReal?: number }
   /** Una animación NUEVA a medida: la crea el agente conectado (minutos) y queda puesta y en «Mis animaciones». */
   | { op: 'crear_pieza'; peticion: string; inicio: number; duracion?: number }
+  /**
+   * Los subtítulos animados con HyperFrames: el estilo (una pieza de «Subtítulos») y sus valores, o "ninguno" para
+   * volver al texto simple. El proceso principal los anima y deja aquí el render (si no, se animan al exportar).
+   */
+  | { op: 'subtitulos_animados'; estilo: string; valores?: Record<string, string | number | boolean>; render?: SubtitulosHF }
   | ({ op: 'cambiar_capa'; capa_n: number; inicio?: number } & CamposCapa)
   | { op: 'filtros'; grano?: number; polvo?: number; trama?: number; vineta?: number; parpadeo?: number }
   | { op: 'transicion'; clip?: number; tipo: TransicionClip | 'corte'; duracion?: number }
@@ -361,6 +366,17 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
           }
         }
         ops.push({ op: 'anadir_pieza', pieza: x.pieza, inicio: i, ...(num(x.duracion) !== null ? { duracion: num(x.duracion)! } : {}), valores })
+        break
+      }
+      case 'subtitulos_animados': {
+        if (typeof x.estilo !== 'string' || !/^[\w-]{1,60}$/.test(x.estilo)) break
+        const valores: Record<string, string | number | boolean> = {}
+        if (x.valores && typeof x.valores === 'object') {
+          for (const [k, v] of Object.entries(x.valores as Record<string, unknown>)) {
+            if (/^[\w-]{1,40}$/.test(k) && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')) valores[k] = typeof v === 'string' ? v.slice(0, 200) : v
+          }
+        }
+        ops.push({ op: 'subtitulos_animados', estilo: x.estilo, valores })
         break
       }
       case 'crear_pieza': {
@@ -670,6 +686,24 @@ export function aplicarOperaciones(
         }
         tl = r.timeline
         cambios.push(`Puse la animación «${o.pieza}» en ${mmss(o.inicio)}`)
+        break
+      }
+      case 'subtitulos_animados': {
+        if (o.estilo === 'ninguno') {
+          const { subtitulosHF: _s, ...resto } = tl
+          tl = resto
+          cambios.push('Los subtítulos vuelven a ser texto simple')
+          break
+        }
+        if (!tl.textos.some((t) => t.subtitulo)) {
+          fallos.push('No hay subtítulos: créalos primero desde la voz.')
+          break
+        }
+        const antes = tl.subtitulosHF?.pieza === o.estilo ? tl.subtitulosHF.valores : {}
+        tl = { ...tl, subtitulosHF: { pieza: o.estilo, valores: { ...antes, ...(o.valores ?? {}) } } }
+        // Con el render hecho para esta misma timeline, quedan animados al día.
+        if (o.render?.medio && o.render.huella === huellaSubtitulos(tl)) tl = { ...tl, subtitulosHF: { ...tl.subtitulosHF!, ...o.render } }
+        cambios.push(`Los subtítulos van animados con el estilo «${o.estilo}»`)
         break
       }
       case 'crear_pieza': {
@@ -991,6 +1025,11 @@ export function describirTimelineParaAgente(
     lineas.push(`  ${i + 1}. ${t.inicio.toFixed(2)}–${(t.inicio + t.duracion).toFixed(2)} ${donde}: «${t.texto.replace(/\n/g, ' / ')}»${estilo.length ? ` [${estilo.join(', ')}]` : ''}`)
   })
   if (tl.textos.length === 0) lineas.push('  (ninguno)')
+  if (tl.subtitulosHF) {
+    lineas.push(
+      `Subtítulos animados con HyperFrames: estilo «${tl.subtitulosHF.pieza}» ${JSON.stringify(tl.subtitulosHF.valores)} (${subtitulosAlDia(tl) ? 'al día' : 'por volver a animar'}); los textos de subtítulo son su guion.`
+    )
+  }
   const biblioteca = Object.entries(nombres)
   if (biblioteca.length) {
     lineas.push('Medios de la biblioteca (para «anadir_capa», por su id):')
@@ -1109,6 +1148,7 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
   barrido-marca (1.1 s: transición; ponla con su centro justo en un corte, inicio = corte − 0.55)
   destellos (2 s: celebrar un momento; "x","y" en % desde dónde salen)
   cierre-logo (2.4 s: el final, con el logo; "texto" eslogan opcional, "conFondo" true para tapar el video)
+- {"op":"subtitulos_animados","estilo":"subtitulos-rotulo","valores":{"colorClave":"#72f9fd"}}  SUBTÍTULOS ANIMADOS con HyperFrames: los textos de subtítulo (los que hiciste desde la voz) siguen siendo el guion y el estilo los dibuja encima, frase a frase y al ritmo de cada palabra; las palabras entre *asteriscos* van resaltadas. Estilos: subtitulos-rotulo (bloque oscuro, letra gruesa, la frase crece un poco; "colorCaja","colorTexto","colorClave","mayusculas","y","tamano"), subtitulos-pildora (palabra a palabra con la que suena sobre una píldora; "colorPildora","colorTexto","colorClave","mayusculas","y","tamano"), subtitulos-palabra (de a 1-3 palabras enormes al centro; "colorTexto","colorClave","porGrupo","y","tamano") y los que el usuario creó. "estilo":"ninguno" vuelve al texto simple. Si corriges un subtítulo con cambiar_texto, se vuelven a animar solos.
 - {"op":"crear_pieza","peticion":"…","inicio":T,"duracion":S}  (solo en el chat de Recorte) una animación NUEVA a medida cuando ninguna de las de arriba sirve o el usuario pide algo distinto: describe con detalle cómo debe verse y moverse (estilo, ritmo, colores, qué textos lleva). La crea tu agente con HyperFrames en unos minutos, queda puesta en el segundo T y guardada para reusarla.
 - {"op":"cambiar_capa","capa_n":N, …los mismos campos…}  y {"op":"borrar_capa","capa_n":N}
 - {"op":"transicion","clip":N,"tipo":"fundido|barrido-izquierda|barrido-derecha|barrido-arriba|barrido-abajo|zoom|desenfoque|destello|circulo|corte","duracion":0.45}  cómo entra el clip N sobre el anterior (sin "clip": en todos los cortes). Los barridos empujan la imagen hacia ese lado (como un paneo rápido); destello pasa por blanco; corte = sin transición. Con medida: un documental rápido usa cortes secos y alguna transición en los cambios de tema.

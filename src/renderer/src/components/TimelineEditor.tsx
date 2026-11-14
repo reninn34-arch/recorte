@@ -223,6 +223,7 @@ export function TimelineEditor({
   ponerSonido,
   paneles,
   panelMedios,
+  panelSubtitulos,
   pestanasExtra,
   miniaturaDe,
   urlDe,
@@ -282,6 +283,8 @@ export function TimelineEditor({
   paneles: { biblioteca: HTMLElement | null; inspector: HTMLElement | null; transporte: HTMLElement | null }
   /** La pestaña «Medios» de la biblioteca (los archivos del proyecto). */
   panelMedios?: ReactNode
+  /** Los subtítulos animados con HyperFrames (estilo, colores y volver a animarlos). */
+  panelSubtitulos?: ReactNode
   /** Más pestañas de la biblioteca (los clips que propone la IA, la cola de renders…). */
   pestanasExtra?: { id: string; nombre: string; icono: IconName; contenido: ReactNode }[]
   timeline: Timeline
@@ -1493,6 +1496,7 @@ export function TimelineEditor({
                       <span>Quitar los {tl.textos.filter((x) => x.subtitulo).length} subtítulos</span>
                     </button>
                   )}
+                  {panelSubtitulos}
                   <span className="ed-seccion">Plantillas</span>
                   {PLANTILLAS_TEXTO.map((x) => (
                     <button

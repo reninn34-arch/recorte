@@ -1,0 +1,47 @@
+<style>
+  .p-frase { position: absolute; left: 50%; opacity: 0; text-align: center; font-family: 'Montserrat', sans-serif; font-weight: 900;
+    line-height: 1.12; border-radius: 1.6vmin; box-shadow: 0 1.2vmin 3vmin rgba(0,0,0,.28); }
+  .p-palabra { display: inline-block; white-space: pre; }
+</style>
+<div id="p-subs"></div>
+<script>
+  // Subtítulos «Rótulo»: cada frase en un bloque oscuro que aparece creciendo un poco (de 86 % a 100 %) y se va con
+  // un fundido; las palabras resaltadas (*así*) van en el color clave y dan un saltito justo cuando se dicen.
+  // v.frases es un JSON: [{ t, a, b, p: [{ w, k, a }] }] con los segundos desde que empieza la capa.
+  const DEMO = [
+    { a: 0.2, b: 2.2, p: [{ w: 'Todo', a: 0.2 }, { w: 'en', a: 0.5 }, { w: 'un', a: 0.7 }, { w: 'solo', k: true, a: 0.9 }, { w: 'lugar', k: true, a: 1.2 }] },
+    { a: 2.3, b: 4.4, p: [{ w: 'Ven', a: 2.3 }, { w: 'a', a: 2.6 }, { w: 'visitarnos', k: true, a: 2.8 }] },
+    { a: 4.5, b: 7.6, p: [{ w: 'Así', a: 4.5 }, { w: 'se', a: 4.8 }, { w: 'ven', a: 5.0 }, { w: 'tus', a: 5.3 }, { w: 'subtítulos', k: true, a: 5.6 }] }
+  ]
+  let frases = []
+  try { frases = JSON.parse(v.frases || '[]') } catch (e) { frases = [] }
+  if (!frases.length) frases = DEMO
+  const vmin = Math.min(W, H) / 100
+  const fs = Math.max(2, (W > H ? 5.2 : 5.6) * vmin * Math.max(30, Math.min(250, Number(v.tamano) || 100)) / 100)
+  const y = Math.max(5, Math.min(95, Number(v.y) || 76))
+  const caja = document.getElementById('p-subs')
+  frases.forEach((f, i) => {
+    const el = document.createElement('div')
+    el.className = 'p-frase'
+    el.style.cssText = `top:${y}%;font-size:${fs}px;max-width:${W * 0.84}px;padding:${fs * 0.32}px ${fs * 0.55}px;background:${v.colorCaja};color:${v.colorTexto}`
+    const claves = []
+    f.p.forEach((w, k) => {
+      const s = document.createElement('span')
+      s.className = 'p-palabra'
+      s.textContent = (v.mayusculas ? w.w.toUpperCase() : w.w) + (k < f.p.length - 1 ? ' ' : '')
+      if (w.k) { s.style.color = v.colorClave; claves.push({ s, a: w.a }) }
+      el.appendChild(s)
+    })
+    caja.appendChild(el)
+    tl.set(el, { xPercent: -50, yPercent: -50 }, 0)
+    const fin = Math.max(f.a + 0.25, f.b)
+    // Entra creciendo (si la frase anterior acaba justo, no hay hueco: la nueva tapa a la otra).
+    tl.fromTo(el, { opacity: 0, scale: 0.86 }, { immediateRender: false, opacity: 1, scale: 1, duration: 0.2, ease: 'back.out(2)' }, f.a)
+    claves.forEach((c) => {
+      tl.fromTo(c.s, { scale: 1 }, { immediateRender: false, keyframes: { scale: [1, 1.14, 1] }, duration: 0.3, ease: 'power2.out' }, Math.max(f.a + 0.05, c.a))
+    })
+    const siguiente = frases[i + 1]
+    const pegada = siguiente && siguiente.a - fin < 0.06
+    tl.to(el, { opacity: 0, duration: pegada ? 0.01 : 0.12, ease: 'power1.in' }, pegada ? Math.max(f.a + 0.2, siguiente.a) : fin - 0.08)
+  })
+</script>

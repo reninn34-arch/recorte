@@ -1,0 +1,16 @@
+{
+  "nombre": "Rótulo",
+  "para": "Subtítulos en un bloque oscuro de esquinas redondas, letra gruesa y las palabras resaltadas en tu color; cada frase aparece creciendo un poco y la palabra clave salta cuando se dice.",
+  "categoria": "Subtítulos",
+  "subtitulos": true,
+  "duracion": { "defecto": 8, "min": 0.5, "max": 900 },
+  "capa": { "x": 0.5, "y": 0.5, "ancho": 1 },
+  "vars": [
+    { "id": "colorCaja", "tipo": "color", "nombre": "Color del bloque", "defecto": "#0a2540" },
+    { "id": "colorTexto", "tipo": "color", "nombre": "Color de la letra", "defecto": "#ffffff" },
+    { "id": "colorClave", "tipo": "color", "nombre": "Color de las palabras resaltadas", "defecto": "marca" },
+    { "id": "mayusculas", "tipo": "si", "nombre": "En mayúsculas", "defecto": false },
+    { "id": "y", "tipo": "numero", "nombre": "A qué altura (% desde arriba)", "defecto": 76 },
+    { "id": "tamano", "tipo": "numero", "nombre": "Tamaño (%)", "defecto": 100 }
+  ]
+}

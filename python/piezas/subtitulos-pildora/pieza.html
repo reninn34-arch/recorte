@@ -1,0 +1,54 @@
+<style>
+  .p-frase { position: absolute; left: 50%; opacity: 0; text-align: center; font-family: 'Montserrat', sans-serif; font-weight: 900;
+    line-height: 1.32; }
+  .p-palabra { display: inline-block; white-space: pre; border-radius: 1.2vmin; opacity: 0;
+    text-shadow: 0 .35vmin 0 rgba(0,0,0,.55), 0 0 1.4vmin rgba(0,0,0,.45); }
+</style>
+<div id="p-subs"></div>
+<script>
+  // Subtítulos «Píldora»: cada palabra aparece con un salto cuando se dice; la que suena va sobre una píldora de color.
+  // v.frases es un JSON: [{ t, a, b, p: [{ w, k, a }] }] con los segundos desde que empieza la capa.
+  const DEMO = [
+    { a: 0.2, b: 2.2, p: [{ w: 'Todo', a: 0.2 }, { w: 'en', a: 0.5 }, { w: 'un', a: 0.7 }, { w: 'solo', k: true, a: 0.9 }, { w: 'lugar', k: true, a: 1.2 }] },
+    { a: 2.3, b: 4.4, p: [{ w: 'Ven', a: 2.3 }, { w: 'a', a: 2.6 }, { w: 'visitarnos', k: true, a: 2.8 }] },
+    { a: 4.5, b: 7.6, p: [{ w: 'Así', a: 4.5 }, { w: 'se', a: 4.8 }, { w: 'ven', a: 5.0 }, { w: 'tus', a: 5.3 }, { w: 'subtítulos', k: true, a: 5.6 }] }
+  ]
+  let frases = []
+  try { frases = JSON.parse(v.frases || '[]') } catch (e) { frases = [] }
+  if (!frases.length) frases = DEMO
+  const vmin = Math.min(W, H) / 100
+  const fs = Math.max(2, (W > H ? 5.6 : 6.4) * vmin * Math.max(30, Math.min(250, Number(v.tamano) || 100)) / 100)
+  const y = Math.max(5, Math.min(95, Number(v.y) || 72))
+  const caja = document.getElementById('p-subs')
+  frases.forEach((f, i) => {
+    const el = document.createElement('div')
+    el.className = 'p-frase'
+    el.style.cssText = `top:${y}%;font-size:${fs}px;width:${W * 0.86}px`
+    const spans = f.p.map((w) => {
+      const s = document.createElement('span')
+      s.className = 'p-palabra'
+      s.textContent = v.mayusculas ? w.w.toUpperCase() : w.w
+      s.style.padding = `0 ${fs * 0.16}px`
+      s.style.color = w.k ? v.colorClave : v.colorTexto
+      el.appendChild(s)
+      el.appendChild(document.createTextNode(' '))
+      return s
+    })
+    caja.appendChild(el)
+    tl.set(el, { xPercent: -50, yPercent: -50 }, 0)
+    const fin = Math.max(f.a + 0.25, f.b)
+    tl.set(el, { opacity: 1 }, f.a)
+    f.p.forEach((w, k) => {
+      const s = spans[k]
+      const a = Math.max(f.a, Math.min(fin - 0.1, w.a))
+      const sig = k + 1 < f.p.length ? Math.max(a + 0.05, Math.min(fin, f.p[k + 1].a)) : fin
+      tl.fromTo(s, { opacity: 0, scale: 0.55, y: fs * 0.25 }, { immediateRender: false, opacity: 1, scale: 1, y: 0, duration: 0.16, ease: 'back.out(3)' }, a)
+      // La que suena: sobre la píldora (las resaltadas, en blanco sobre la píldora para que se lean).
+      tl.set(s, { backgroundColor: v.colorPildora, color: w.k ? '#ffffff' : v.colorTexto, textShadow: 'none' }, a)
+      tl.set(s, { backgroundColor: 'rgba(0,0,0,0)', color: w.k ? v.colorClave : v.colorTexto, textShadow: '0 0.35vmin 0 rgba(0,0,0,.55), 0 0 1.4vmin rgba(0,0,0,.45)' }, sig)
+    })
+    const siguiente = frases[i + 1]
+    const pegada = siguiente && siguiente.a - fin < 0.06
+    tl.to(el, { opacity: 0, duration: pegada ? 0.01 : 0.1 }, pegada ? Math.max(f.a + 0.2, siguiente.a) : fin - 0.06)
+  })
+</script>

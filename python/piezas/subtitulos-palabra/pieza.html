@@ -1,0 +1,50 @@
+<style>
+  .p-grupo { position: absolute; left: 50%; opacity: 0; text-align: center; font-family: 'Montserrat', sans-serif; font-weight: 900;
+    line-height: 1.02; text-transform: uppercase; letter-spacing: -.1vmin;
+    text-shadow: 0 .5vmin 0 rgba(0,0,0,.5), 0 0 2.4vmin rgba(0,0,0,.4); }
+  .p-palabra { display: inline-block; white-space: pre; }
+</style>
+<div id="p-subs"></div>
+<script>
+  // Subtítulos «Palabra gigante»: la frase se corta en grupos de 1 a 3 palabras que entran de golpe (de grande a su
+  // tamaño) cuando se dice la primera de cada grupo; las resaltadas, más grandes y en el color clave.
+  // v.frases es un JSON: [{ t, a, b, p: [{ w, k, a }] }] con los segundos desde que empieza la capa.
+  const DEMO = [
+    { a: 0.2, b: 2.2, p: [{ w: 'Todo', a: 0.2 }, { w: 'en', a: 0.5 }, { w: 'un', a: 0.7 }, { w: 'solo', k: true, a: 0.9 }, { w: 'lugar', k: true, a: 1.2 }] },
+    { a: 2.3, b: 4.4, p: [{ w: 'Ven', a: 2.3 }, { w: 'a', a: 2.6 }, { w: 'visitarnos', k: true, a: 2.8 }] },
+    { a: 4.5, b: 7.6, p: [{ w: 'Así', a: 4.5 }, { w: 'se', a: 4.8 }, { w: 'ven', a: 5.0 }, { w: 'tus', a: 5.3 }, { w: 'subtítulos', k: true, a: 5.6 }] }
+  ]
+  let frases = []
+  try { frases = JSON.parse(v.frases || '[]') } catch (e) { frases = [] }
+  if (!frases.length) frases = DEMO
+  const vmin = Math.min(W, H) / 100
+  const fs = Math.max(2, (W > H ? 9 : 11) * vmin * Math.max(30, Math.min(250, Number(v.tamano) || 100)) / 100)
+  const y = Math.max(5, Math.min(95, Number(v.y) || 62))
+  const n = Math.max(1, Math.min(3, Math.round(Number(v.porGrupo) || 2)))
+  const caja = document.getElementById('p-subs')
+  // Todos los grupos, en orden (un grupo nunca cruza de una frase a otra).
+  const grupos = []
+  frases.forEach((f) => {
+    for (let k = 0; k < f.p.length; k += n) grupos.push({ p: f.p.slice(k, k + n), b: Math.max(f.a + 0.25, f.b), a: Math.max(f.a, f.p[k].a) })
+  })
+  grupos.forEach((g, i) => {
+    const el = document.createElement('div')
+    el.className = 'p-grupo'
+    el.style.cssText = `top:${y}%;font-size:${fs}px;width:${W * 0.9}px;color:${v.colorTexto}`
+    g.p.forEach((w, k) => {
+      const s = document.createElement('span')
+      s.className = 'p-palabra'
+      s.textContent = w.w + (k < g.p.length - 1 ? ' ' : '')
+      if (w.k) { s.style.color = v.colorClave; s.style.fontSize = '1.18em' }
+      el.appendChild(s)
+    })
+    caja.appendChild(el)
+    tl.set(el, { xPercent: -50, yPercent: -50 }, 0)
+    const sig = grupos[i + 1]
+    const fin = sig ? Math.min(g.b, sig.a) : g.b
+    const giro = i % 2 ? 2 : -2
+    tl.fromTo(el, { opacity: 0, scale: 1.45, rotation: giro * 2 }, { immediateRender: false, opacity: 1, scale: 1, rotation: giro, duration: 0.14, ease: 'power3.out' }, g.a)
+    tl.to(el, { scale: 1.04, duration: Math.max(0.05, fin - g.a - 0.2), ease: 'none' }, g.a + 0.14)
+    tl.to(el, { opacity: 0, duration: sig && sig.a - fin < 0.06 ? 0.01 : 0.08 }, Math.max(g.a + 0.16, fin - (sig && sig.a - fin < 0.06 ? 0.01 : 0.08)))
+  })
+</script>

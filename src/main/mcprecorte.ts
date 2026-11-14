@@ -44,6 +44,8 @@ export interface ContextoMcp {
   /** Quita el fondo liso de una imagen de la biblioteca y la agrega como medio nuevo. */
   quitarFondo: (id: string, medio: string) => Promise<{ project: Project; medio: string }>
   /** Las piezas animadas (HyperFrames) y animar una con sus datos: devuelve su medio para ponerla como capa. */
+  /** Si los subtítulos animados quedaron atrás, los vuelve a animar (y guarda la timeline al día). */
+  subtitulos?: (id: string, tl: Timeline) => Promise<Timeline>
   piezas?: {
     listar: () => PiezaAnimada[]
     animar: (id: string, pieza: string, valores: ValoresPieza, duracion: number) => Promise<{ project: Project; medio: string; duracion: number }>
@@ -345,8 +347,18 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
           ctx.proyectos.save(actual)
           ctx.avisarCambio(actual, sesion.cliente, true)
         }
+        let notaSubs = ''
+        if (r.timeline.subtitulosHF && ctx.subtitulos && r.cambios.length) {
+          try {
+            const listo = await ctx.subtitulos(p.id, r.timeline)
+            if (listo !== r.timeline) notaSubs = 'Los subtítulos animados quedaron al día (HyperFrames los volvió a dibujar).'
+          } catch (e) {
+            notaSubs = `No pude animar los subtítulos (se animan al exportar): ${e instanceof Error ? e.message : String(e)}`
+          }
+        }
         const partes = [
           r.cambios.length ? `Hecho: ${r.cambios.join('; ')}.` : 'No cambió nada.',
+          notaSubs,
           r.fallos.length ? `No se pudo: ${r.fallos.join(' ')}` : '',
           fallosVoz.length ? `Voz que no salió: ${fallosVoz.join(' ')}` : '',
           `La timeline dura ahora ${duracionTimeline(r.timeline).toFixed(1)} s.`

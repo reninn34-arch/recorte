@@ -108,7 +108,7 @@ export function PanelPiezas({
   const pieza = piezas.find((p) => p.id === abierta)
   const porCategoria = useMemo(() => {
     const m = new Map<string, PiezaAnimada[]>()
-    for (const p of piezas) m.set(p.categoria, [...(m.get(p.categoria) ?? []), p])
+    for (const p of piezas.filter((x) => !x.subtitulos)) m.set(p.categoria, [...(m.get(p.categoria) ?? []), p])
     return [...m.entries()]
   }, [piezas])
 

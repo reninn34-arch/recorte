@@ -24,6 +24,29 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.57',
+    fecha: '2026-11-14',
+    resumen: 'Los subtítulos ahora los anima HyperFrames: estilos con movimiento de verdad, y si corriges una palabra se vuelven a animar.',
+    novedades: [
+      {
+        icono: 'sparkles',
+        titulo: 'Subtítulos animados con HyperFrames',
+        texto:
+          'En Texto › Subtítulos elige un estilo animado (Rótulo, Píldora o Palabra gigante), cambia sus colores y anímalos. Los textos siguen en la timeline: corriges una palabra o un tiempo a mano y se vuelven a animar con el cambio (al exportar, solos).'
+      },
+      {
+        icono: 'type',
+        titulo: 'Tus propios estilos de subtítulos',
+        texto: 'Descríbele a tu agente cómo quieres que se muevan tus subtítulos y lo crea con HyperFrames; queda entre tus estilos para cualquier video.'
+      },
+      {
+        icono: 'enviar',
+        titulo: 'El chat también los pone',
+        texto: 'Pídele «subtítulos tipo rótulo con las palabras clave en turquesa» y quedan animados; si después corrige un texto, se rehacen solos.'
+      }
+    ]
+  },
+  {
     version: '0.1.56',
     fecha: '2026-11-14',
     resumen: 'Subtítulos tipo rótulo con palabras clave en color, y una animación nueva de íconos para ilustrar lo que dices.',

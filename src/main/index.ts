@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, shell } from 'electron'
-import { ANIMAR_CAPA, duracionTimeline, duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, SONIDOS_INCLUIDOS, timelineInicial, timelineVacia, type Timeline } from '../shared/timeline'
+import { ANIMAR_CAPA, frasesSubtitulos, huellaSubtitulos, subtitulosAlDia, duracionTimeline, duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, SONIDOS_INCLUIDOS, timelineInicial, timelineVacia, type Timeline } from '../shared/timeline'
 import { randomUUID } from 'node:crypto'
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, join, resolve, sep } from 'node:path'
@@ -67,7 +67,7 @@ import { archivosVersion, armarBase, baseDe, EstilosPropios, versionBase } from 
 import { turnoAgente } from './chat'
 import { buscarActualizacion, estadoActualizacion, instalarActualizacion, prepararActualizaciones } from './actualizar'
 import { activarGustos, agregarGustos, bloqueGustos, cargarGustos, olvidarGustos, quitarGusto, senalGusto, usoCreacion } from './gustos'
-import type { MensajeChat, OperacionTL } from '../shared/chat'
+import { aplicarOperaciones, type MensajeChat, type OperacionTL } from '../shared/chat'
 import { buscarPython, rutaScriptPython, transcribir, transcribirArchivo } from './transcribir'
 
 // El esquema tiene que declararse antes de que Electron esté listo.
@@ -2040,6 +2040,47 @@ app.whenReady().then(() => {
     return { project: hecho.project, medio: hecho.agregados[0], duracion: r.duracion }
   }
   /**
+   * Anima los subtítulos con su estilo de HyperFrames: las frases salen de los textos de subtítulo (lo que se corrigió a
+   * mano) y el render queda como un medio del proyecto. Devuelve la timeline con los subtítulos animados al día.
+   */
+  async function animarSubtitulos(id: string, tl: Timeline, onProgreso?: (pct: number, texto?: string) => void) {
+    const p = proyectos.abrir(id)
+    if (!p) throw new Error('El proyecto ya no existe.')
+    const s = tl.subtitulosHF
+    if (!s) throw new Error('Elige primero un estilo de subtítulos animados.')
+    const pieza = listarPiezas().find((x) => x.id === s.pieza && x.subtitulos)
+    if (!pieza) throw new Error(`No existe el estilo de subtítulos «${s.pieza}».`)
+    const { inicio, duracion, frases } = frasesSubtitulos(tl)
+    if (!frases.length) throw new Error('No hay subtítulos: créalos desde la voz primero.')
+    const valores = { ...valoresConMarca(pieza, s.valores, { primary: p.brand.primary, secondary: p.brand.secondary, logo: p.brand.logo }), frases: JSON.stringify(frases) }
+    const r = await renderizarPieza(proyectos.carpeta(id), pieza.id, valores, {}, p.source.width || 1080, p.source.height || 1920, duracion, onProgreso)
+    const ruta = join(proyectos.carpeta(id), r.archivo)
+    let project = p
+    let medio = p.medios?.find((m) => m.ruta === ruta)?.id
+    if (!medio) {
+      const hecho = await agregarRutas(id, [ruta])
+      if (!hecho.agregados.length) throw new Error(hecho.fallos[0] ?? 'No pude agregar los subtítulos a la biblioteca.')
+      project = hecho.project
+      medio = hecho.agregados[0]
+    }
+    const timeline: Timeline = { ...tl, subtitulosHF: { ...s, medio, huella: huellaSubtitulos(tl), inicio, duracion: r.duracion } }
+    return { project, timeline }
+  }
+  /** Antes de exportar (o de que el agente mire): si los subtítulos animados quedaron atrás, se vuelven a animar. */
+  async function subtitulosListos(id: string, tl: Timeline, onProgreso?: (pct: number, texto?: string) => void): Promise<Timeline> {
+    if (!tl.subtitulosHF || subtitulosAlDia(tl) || !frasesSubtitulos(tl).frases.length) return tl
+    const r = await animarSubtitulos(id, tl, onProgreso)
+    // Que el editor también los tenga al día (si no lo cambiaron mientras tanto).
+    const guardado = proyectos.abrir(id)
+    if (guardado?.timeline && huellaSubtitulos(guardado.timeline) === huellaSubtitulos(tl)) {
+      guardado.timeline = { ...guardado.timeline, subtitulosHF: r.timeline.subtitulosHF }
+      proyectos.save(guardado)
+      const { transcript: _t, ...ligero } = guardado
+      for (const w of BrowserWindow.getAllWindows()) w.webContents.send('proyecto:externo', { proyecto: ligero, quien: 'recorte', conTimeline: true })
+    }
+    return r.timeline
+  }
+  /**
    * Crea (o cambia) una animación con el agente conectado: trabaja en su carpeta como un diseñador de motion (escribe,
    * renderiza, mira y corrige) y la deja en «Mis animaciones». Tarda minutos; lo que va haciendo llega por 'piezas:progreso'.
    */
@@ -2089,6 +2130,13 @@ app.whenReady().then(() => {
   ipcMain.handle('piezas:animar', async (_evento, id: unknown, piezaId: unknown, valores: unknown, duracion: unknown) => {
     if (typeof id !== 'string' || typeof piezaId !== 'string' || !valores || typeof valores !== 'object' || typeof duracion !== 'number') throw new Error('Datos inválidos.')
     return animarPieza(id, piezaId, valores as ValoresPieza, duracion)
+  })
+
+  ipcMain.handle('subtitulos:animar', async (_evento, id: unknown, timeline: unknown) => {
+    const p = typeof id === 'string' ? proyectos.abrir(id) : null
+    if (!p || !timeline || typeof timeline !== 'object') throw new Error('Datos inválidos.')
+    const tl = normalizarTimeline(timeline, p.source.duration, duracionesDeMedios(p.medios))
+    return animarSubtitulos(p.id, tl, (pct, texto) => enviarProgreso({ id: p.id, fase: 'subtitulos', pct, texto: texto ?? 'Animando los subtítulos' }))
   })
 
   // Las palabras de cada audio de voz con su segundo (para subtítulos que van con lo que se dice). Se guardan junto al
@@ -2767,14 +2815,16 @@ app.whenReady().then(() => {
         ...(crudas.soloAudio === 'wav' || crudas.soloAudio === 'mp3' ? { soloAudio: crudas.soloAudio } : {})
       }
       // Se exporta la timeline que ve el usuario, validada contra el material.
-      const valida = normalizarTimeline(timeline, proyecto.source.duration, duracionesDeMedios(proyecto.medios))
+      let valida = normalizarTimeline(timeline, proyecto.source.duration, duracionesDeMedios(proyecto.medios))
 
       enRender.add(id)
       try {
         let resultado: RenderResultado
         try {
+          // Los subtítulos animados, al día con lo corregido a mano (HyperFrames los vuelve a dibujar).
+          valida = await subtitulosListos(id, valida, (pct, texto) => enviarProgreso({ id, fase: 'exportar', pct: pct * 0.3, texto: texto ?? 'Animando los subtítulos' }))
           resultado = await exportarTimeline(
-            proyecto,
+            proyectos.abrir(id) ?? proyecto,
             valida,
             proyectos.carpeta(id),
             elegidas,
@@ -2856,6 +2906,25 @@ app.whenReady().then(() => {
             }
           }
           if (fallosPieza.length) turno.mensaje = `${turno.mensaje}\n\nNo pude animar: ${fallosPieza.join(' ')}`
+        }
+        // Los subtítulos animados: si quedan con estilo y no al día (lo eligió o corrigió textos), se animan aquí y el
+        // render viaja en la operación (así entran al día en el mismo paso de deshacer).
+        if (turno.ok && turno.operaciones.length) {
+          try {
+            const actual = proyectos.abrir(id) ?? proyecto
+            const base = normalizarTimeline(timeline, actual.source.duration, duracionesDeMedios(actual.medios))
+            const despues = aplicarOperaciones(base, turno.operaciones, { duracionFuente: actual.source.duration, transcript: actual.transcript, medios: duracionesDeMedios(actual.medios) }).timeline
+            if (despues.subtitulosHF && !subtitulosAlDia(despues) && frasesSubtitulos(despues).frases.length) {
+              const r = await animarSubtitulos(id, despues)
+              turno.operaciones.push({ op: 'subtitulos_animados', estilo: despues.subtitulosHF.pieza, valores: {}, render: r.timeline.subtitulosHF })
+              const { transcript: _t, ...ligero } = r.project
+              for (const w of BrowserWindow.getAllWindows()) w.webContents.send('proyecto:externo', { proyecto: ligero, quien: 'recorte', conTimeline: false })
+            }
+          } catch (e) {
+            turno.mensaje = `${turno.mensaje}
+
+No pude animar los subtítulos (se animan al exportar): ${e instanceof Error ? e.message : String(e)}`
+          }
         }
         // Los efectos de sonido que pidió: su audio se copia al proyecto antes de aplicar.
         if (turno.ok) {
@@ -3019,6 +3088,7 @@ app.whenReady().then(() => {
     abrirEnApp: (id) => alFrente('proyecto:abrir', id),
     quitarFondo: (id, medio) => quitarFondo(id, medio),
     piezas: { listar: listarPiezas, animar: animarPieza },
+    subtitulos: (id, tl) => subtitulosListos(id, tl),
     animarImagen: (id, medio, tipo) => animarImagen(id, medio, tipo),
     // ===== Crear por MCP (6.3) =====
     creaciones: {

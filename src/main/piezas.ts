@@ -52,7 +52,7 @@ export function listarPiezas(): PiezaAnimada[] {
       }
     }
   }
-  const orden = ['Mis animaciones', 'Títulos', 'Rótulos', 'Textos', 'Datos', 'Llamados', 'Transiciones', 'Adornos', 'Cierres']
+  const orden = ['Subtítulos', 'Mis animaciones', 'Títulos', 'Rótulos', 'Textos', 'Datos', 'Llamados', 'Transiciones', 'Adornos', 'Cierres']
   return piezas.sort((a, b) => orden.indexOf(a.categoria) - orden.indexOf(b.categoria) || a.nombre.localeCompare(b.nombre))
 }
 

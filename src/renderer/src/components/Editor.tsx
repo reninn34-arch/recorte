@@ -14,6 +14,7 @@ import { PanelHistorial } from './PanelHistorial'
 import { PanelLimpieza } from './PanelLimpieza'
 import { PanelAudio } from './PanelAudio'
 import { PanelPiezas } from './PanelPiezas'
+import { SubtitulosAnimados } from './SubtitulosAnimados'
 
 const CLAVE_ALTO_TL = 'recorte.altoLineaDeTiempo'
 import { mediaUrl } from '../media'
@@ -589,6 +590,9 @@ export function Editor({
         miniaturaDe={miniaturaDe}
         urlDe={proyecto.demo ? undefined : (archivo) => mediaUrl(proyecto.id, archivo)}
         ondaDe={proyecto.demo ? undefined : (fuente) => `onda:${proyecto.id}:${fuente}`}
+        panelSubtitulos={
+          proyecto.demo ? undefined : <SubtitulosAnimados proyecto={proyecto} timeline={timeline} historial={historial} onMedios={onMedios} onAviso={onAviso} />
+        }
         panelMedios={
           <>
             {origen && fuentes[origen] && (

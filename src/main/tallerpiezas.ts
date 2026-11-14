@@ -100,8 +100,19 @@ con HyperFrames (HTML + CSS + GSAP renderizado cuadro a cuadro). Tiene que verse
 - Tipos: texto, color (#rrggbb, o "marca" / "marca2" para los colores de la marca), imagen ("marca" = el logo), si, numero.
 - Pon como variables los textos y colores que alguien querría cambiar; los textos por defecto, genéricos y en español.
 
+## Estilos de subtítulos (si te piden un estilo de subtítulos)
+- En pieza.json: \`"subtitulos": true\`, \`"duracion": { "defecto": 8, "min": 0.5, "max": 900 }\` y como variables solo
+  colores, tamaño, altura (\`y\` en %) y opciones; NO pongas variables de texto (el texto lo pone Recorte).
+- La pieza dura todo el video con voz y dibuja las frases de \`v.frases\`, un JSON (léelo con try/catch):
+  \`[{ "t": "Todo en un *solo* lugar", "a": 0.2, "b": 2.2, "p": [{ "w": "Todo", "k": false, "a": 0.2 }, …] }]\`:
+  cada frase está de \`a\` a \`b\` (segundos desde el inicio de la capa) y \`p\` son sus palabras con \`k\` (va
+  resaltada) y \`a\` (cuándo se dice). Si viene vacío, usa unas frases de ejemplo (así se prueba con probar.mjs).
+- Crea los elementos de cada frase con JS y anímalos en \`tl\` en sus segundos (nada visible fuera de su tramo; una
+  frase que empieza justo al acabar otra la reemplaza sin hueco). Mira \`ejemplos/subtitulos-rotulo\`.
+- Que se lea siempre: letra gruesa, contraste (caja o sombra), dentro del 84 % del ancho, a lo más dos líneas.
+
 ## Cómo trabajas (obligatorio)
-1. Mira \`ejemplos/\` (dos piezas que funcionan bien) y las referencias del usuario en \`referencias/\` si hay.
+1. Mira \`ejemplos/\` (piezas que funcionan bien) y las referencias del usuario en \`referencias/\` si hay.
 2. Escribe pieza.html y pieza.json.
 3. Ejecuta \`node taller/probar.mjs\` (renderiza con los colores y el logo de la marca y deja \`revision/cuadros.png\`, ocho
    cuadros sobre un fondo de prueba, y \`revision/final.png\`). Si falla, lee el error y arréglalo.
@@ -203,7 +214,7 @@ export async function crearPiezaConAgente(p: PedidoPieza, onLinea: (t: string) =
   writeFileSync(join(dir, 'AGENTS.md'), GUIA, 'utf8')
   writeFileSync(join(dir, 'CLAUDE.md'), GUIA, 'utf8')
   writeFileSync(join(dir, 'taller', 'probar.mjs'), PROBAR, 'utf8')
-  for (const ej of ['cierre-logo', 'titulo-impacto', 'frase-pildora']) {
+  for (const ej of ['cierre-logo', 'titulo-impacto', 'frase-pildora', 'subtitulos-rotulo']) {
     const o = join(rutaScriptPython('piezas'), ej)
     if (!existsSync(o)) continue
     mkdirSync(join(dir, 'ejemplos', ej), { recursive: true })

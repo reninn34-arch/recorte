@@ -157,6 +157,7 @@ const api: RecorteApi = {
     return () => ipcRenderer.removeListener('piezas:progreso', listener)
   },
   animarPieza: (id, pieza, valores, duracion) => ipcRenderer.invoke('piezas:animar', id, pieza, valores, duracion),
+  animarSubtitulos: (id, timeline) => ipcRenderer.invoke('subtitulos:animar', id, timeline),
   palabrasDeVoces: (id, archivos) => ipcRenderer.invoke('voz:palabras', id, archivos),
   arreglarVoz: (id, archivo, accion, ventanas) => ipcRenderer.invoke('audio:arreglar-voz', id, archivo, accion, ventanas),
   interfazEstado: () => ipcRenderer.invoke('interfaz:estado'),

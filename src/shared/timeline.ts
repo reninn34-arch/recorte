@@ -683,6 +683,23 @@ export interface Timeline {
   multicam?: MulticamTL
   /** Capas de ajuste: tramos que cambian el color o desenfocan todo lo de abajo (el video y las capas, no los textos). */
   ajustesCapa?: CapaAjusteTL[]
+  /**
+   * Los subtítulos animados con HyperFrames: los textos con `subtitulo` siguen siendo el guion (se corrigen a mano en
+   * el editor) y una pieza de estilo «Subtítulos» los dibuja encima. `medio` es el último render y `huella` con qué
+   * frases y valores se hizo: si cambian, hay que volver a animarlos (mientras, se ven como texto normal).
+   */
+  subtitulosHF?: SubtitulosHF
+}
+
+export interface SubtitulosHF {
+  /** La pieza de estilo (una de la categoría «Subtítulos»). */
+  pieza: string
+  valores: Record<string, string | number | boolean>
+  medio?: FuenteId
+  huella?: string
+  /** Dónde empieza la capa del render (segundo de la timeline). */
+  inicio?: number
+  duracion?: number
 }
 
 /** Lo que puede hacer una capa de ajuste (los ajustes de color del clip, y desenfocar). */
@@ -1117,7 +1134,8 @@ export function cambiarPista(tl: Timeline, id: PistaId, cambio: PistaTL): Timeli
  * La timeline tal como se ve y suena: sin lo de las pistas ocultas o silenciadas. Es la que usan el monitor y el
  * MP4; la que se edita conserva todo. Los clips no cambian de sitio (la pista de video solo pierde su sonido).
  */
-export function timelineActiva(tl: Timeline): Timeline {
+export function timelineActiva(entrada: Timeline): Timeline {
+  const tl = conSubtitulosAnimados(entrada)
   const p = tl.pistas
   if (!p || !PISTAS.some((x) => p[x.id]?.oculta || (p[x.id]?.volumen ?? 1) !== 1)) return tl
   const { capas, voces, sonidos, musica, ajustesCapa, ...resto } = tl
@@ -1148,6 +1166,92 @@ export function timelineActiva(tl: Timeline): Timeline {
       : {}),
     ...(musica && !p.musica?.oculta ? { musica: vMusica !== 1 ? { ...musica, volumen: musica.volumen * vMusica } : musica } : {})
   }
+}
+
+// ===== Subtítulos animados (HyperFrames) =====
+
+/** Una frase de subtítulo para la pieza de estilo: el texto (con *resaltadas*), cuándo está y cuándo se dice cada palabra. */
+export interface FraseSubtitulo {
+  /** El texto tal cual (las palabras entre asteriscos van resaltadas). */
+  t: string
+  /** Desde y hasta, en segundos desde que empieza la capa. */
+  a: number
+  b: number
+  /** Las palabras (sin asteriscos), si va resaltada y cuándo empieza cada una (segundos desde que empieza la capa). */
+  p: { w: string; k: boolean; a: number }[]
+}
+
+/** Los subtítulos de la timeline en orden, y el tramo que cubre la capa que los dibuja. */
+export function frasesSubtitulos(tl: Timeline): { inicio: number; duracion: number; frases: FraseSubtitulo[] } {
+  const subs = tl.textos.filter((t) => t.subtitulo && sinMarcas(t.texto).trim()).sort((a, b) => a.inicio - b.inicio)
+  if (!subs.length) return { inicio: 0, duracion: 0, frases: [] }
+  const inicio = Math.max(0, subs[0].inicio - 0.3)
+  const fin = Math.max(...subs.map((t) => t.inicio + t.duracion))
+  const r = (n: number) => Math.round(n * 1000) / 1000
+  const frases = subs.map((t) => {
+    const tiempos = tiemposPalabras(t)
+    const palabras: { w: string; k: boolean }[] = []
+    for (const parte of partesClave(t.texto)) for (const w of parte.texto.split(/\s+/).filter(Boolean)) palabras.push({ w, k: parte.clave })
+    return {
+      t: t.texto,
+      a: r(t.inicio - inicio),
+      b: r(t.inicio + t.duracion - inicio),
+      p: palabras.map((x, k) => ({ ...x, a: r(t.inicio - inicio + (tiempos[k]?.inicio ?? 0)) }))
+    }
+  })
+  return { inicio: r(inicio), duracion: r(fin - inicio + 0.4), frases }
+}
+
+/** Un resumen corto de un texto (para saber si algo cambió). */
+export function huellaTexto(texto: string): string {
+  let a = 0x811c9dc5
+  let b = 0x01000193
+  for (let i = 0; i < texto.length; i++) {
+    const c = texto.charCodeAt(i)
+    a = Math.imul(a ^ c, 0x01000193) >>> 0
+    b = Math.imul(b ^ c, 0x5bd1e995) >>> 0
+  }
+  return a.toString(16).padStart(8, '0') + b.toString(16).padStart(8, '0')
+}
+
+/** Con qué se animan los subtítulos (la pieza, sus valores y las frases): si cambia, el render ya no vale. */
+export function huellaSubtitulos(tl: Timeline): string {
+  const s = tl.subtitulosHF
+  if (!s) return ''
+  const { inicio, duracion, frases } = frasesSubtitulos(tl)
+  return huellaTexto(JSON.stringify({ pieza: s.pieza, valores: s.valores, inicio, duracion, frases }))
+}
+
+/** Si los subtítulos animados están puestos y al día con lo que dice el editor. */
+export function subtitulosAlDia(tl: Timeline): boolean {
+  const s = tl.subtitulosHF
+  return !!(s && s.medio && s.huella && s.huella === huellaSubtitulos(tl))
+}
+
+/** El id de la capa que dibuja los subtítulos animados (no se edita: se rehace). */
+export const CAPA_SUBTITULOS = 'subtitulos-animados'
+
+/**
+ * Con los subtítulos animados al día, los textos de subtítulo dejan su sitio a la capa del render (encima de todo).
+ * Si no están al día, se ven como texto normal hasta que se vuelvan a animar.
+ */
+export function conSubtitulosAnimados(tl: Timeline): Timeline {
+  const s = tl.subtitulosHF
+  if (!s || !s.medio || !subtitulosAlDia(tl)) return tl
+  const capa: CapaTL = {
+    id: CAPA_SUBTITULOS,
+    fuente: s.medio,
+    inicio: s.inicio ?? 0,
+    duracion: s.duracion ?? 1,
+    x: 0.5,
+    y: 0.5,
+    ancho: 1,
+    desde: 0,
+    pista: PISTAS_ENCIMA
+  }
+  // Con la pista de textos oculta, tampoco se ven.
+  const oculta = tl.pistas?.texto?.oculta
+  return { ...tl, textos: tl.textos.filter((t) => !t.subtitulo), capas: oculta ? tl.capas : [...(tl.capas ?? []), capa] }
 }
 
 // ===== Crear =====
@@ -1269,6 +1373,30 @@ export function normalizarTimeline(entrada: unknown, duracionFuente: number, otr
     ...(normalizarAjustesCapa(crudo.ajustesCapa, total).length ? { ajustesCapa: normalizarAjustesCapa(crudo.ajustesCapa, total) } : {}),
     ...(normalizarMulticam(crudo.multicam, (f) => f === FUENTE_PRINCIPAL || otras[f] !== undefined)
       ? { multicam: normalizarMulticam(crudo.multicam, (f) => f === FUENTE_PRINCIPAL || otras[f] !== undefined) }
+      : {}),
+    ...(normalizarSubtitulosHF(crudo.subtitulosHF, otras) ? { subtitulosHF: normalizarSubtitulosHF(crudo.subtitulosHF, otras) } : {})
+  }
+}
+
+function normalizarSubtitulosHF(entrada: unknown, otras: Record<string, number>): SubtitulosHF | undefined {
+  if (!entrada || typeof entrada !== 'object') return undefined
+  const x = entrada as Partial<SubtitulosHF>
+  if (typeof x.pieza !== 'string' || !x.pieza) return undefined
+  const valores: SubtitulosHF['valores'] = {}
+  for (const [k, v] of Object.entries(x.valores && typeof x.valores === 'object' ? x.valores : {})) {
+    if (typeof v === 'string' || typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v))) valores[k] = v
+  }
+  const conMedio = typeof x.medio === 'string' && otras[x.medio] !== undefined && typeof x.huella === 'string'
+  return {
+    pieza: x.pieza,
+    valores,
+    ...(conMedio
+      ? {
+          medio: x.medio,
+          huella: x.huella,
+          inicio: typeof x.inicio === 'number' && x.inicio >= 0 ? x.inicio : 0,
+          duracion: typeof x.duracion === 'number' && x.duracion > 0 ? x.duracion : otras[x.medio as string]
+        }
       : {})
   }
 }

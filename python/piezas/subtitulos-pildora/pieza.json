@@ -1,0 +1,16 @@
+{
+  "nombre": "Píldora",
+  "para": "Subtítulos palabra a palabra: cada palabra salta cuando se dice y la que suena va sobre una píldora de tu color, con letra blanca gruesa y sombra. Muy de TikTok y Reels.",
+  "categoria": "Subtítulos",
+  "subtitulos": true,
+  "duracion": { "defecto": 8, "min": 0.5, "max": 900 },
+  "capa": { "x": 0.5, "y": 0.5, "ancho": 1 },
+  "vars": [
+    { "id": "colorPildora", "tipo": "color", "nombre": "Color de la píldora", "defecto": "marca" },
+    { "id": "colorTexto", "tipo": "color", "nombre": "Color de la letra", "defecto": "#ffffff" },
+    { "id": "colorClave", "tipo": "color", "nombre": "Color de las palabras resaltadas", "defecto": "#ffe14d" },
+    { "id": "mayusculas", "tipo": "si", "nombre": "En mayúsculas", "defecto": true },
+    { "id": "y", "tipo": "numero", "nombre": "A qué altura (% desde arriba)", "defecto": 72 },
+    { "id": "tamano", "tipo": "numero", "nombre": "Tamaño (%)", "defecto": 100 }
+  ]
+}

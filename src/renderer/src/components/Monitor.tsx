@@ -45,6 +45,7 @@ import {
   DESENFOQUE_CLIP,
   ajustesEn,
   ponerClaveCapa,
+  CAPA_SUBTITULOS,
 } from '../../../shared/timeline'
 import { useMusica, useSincronizar, useTamano, useVoces, type FuentesVista, type Historial, type Reproductor } from '../hooks/timeline'
 import type { Elegido } from './TimelineEditor'
@@ -436,7 +437,12 @@ export function Monitor({
             const ancho = b && !b.fin ? (b.ancho ?? e.ancho) : e.ancho
             const fin = editando && c.fin && !c.claves ? { ...c.fin, ...(b?.fin ? { x: b.x, y: b.y, ancho: b.ancho ?? c.fin.ancho } : {}) } : null
             return (
-              <div key={c.id} className="monitor-capa-grupo" style={filtroAjuste ? { filter: filtroAjuste } : undefined}>
+              <div
+                key={c.id}
+                className="monitor-capa-grupo"
+                // Los subtítulos animados ocupan todo el cuadro: no se agarran (se corrigen en sus textos).
+                style={{ ...(filtroAjuste ? { filter: filtroAjuste } : {}), ...(c.id === CAPA_SUBTITULOS ? { pointerEvents: 'none' } : {}) }}
+              >
                 {fin && (
                   <>
                     <svg className="monitor-recorrido" viewBox="0 0 100 100" preserveAspectRatio="none">
