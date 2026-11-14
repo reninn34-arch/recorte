@@ -24,6 +24,18 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.53',
+    fecha: '2026-11-14',
+    resumen: 'Las palabras pintadas se ven bien en cualquier cuadro.',
+    novedades: [
+      {
+        icono: 'check',
+        titulo: 'Pintar palabras, pulido',
+        texto: 'Al mirar un cuadro suelto (o exportar solo un tramo) a mitad de una frase, las palabras ya dichas salen pintadas y la que se está diciendo sigue pintándose: ya no vuelve a empezar desde cero.'
+      }
+    ]
+  },
+  {
     version: '0.1.52',
     fecha: '2026-11-14',
     resumen: 'Las palabras se pintan cuando se dicen: subtítulos tipo karaoke al ritmo exacto de la voz.',

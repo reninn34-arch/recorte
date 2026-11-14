@@ -399,7 +399,8 @@ export function tiemposPalabras(t: Pick<TextoTL, 'texto' | 'animacion' | 'tiempo
   const n = palabrasDe(t.texto).length
   if (!n) return []
   let inicios: number[]
-  if (t.tiempos && t.tiempos.length === n) inicios = t.tiempos.map((x) => Math.max(0, Math.min(x, t.duracion)))
+  // Negativos: palabras que ya se dijeron antes de que empiece este trozo (un cuadro suelto a mitad de la frase).
+  if (t.tiempos && t.tiempos.length === n) inicios = t.tiempos.map((x) => Math.min(x, t.duracion))
   else if (t.animacion === 'palabras') {
     const paso = pasoAnimacion(t)
     inicios = Array.from({ length: n }, (_, k) => k * paso)
@@ -419,8 +420,8 @@ function normalizarTiempos(tiempos: unknown, texto: string, duracion: number): n
   if (!Array.isArray(tiempos)) return undefined
   const n = palabrasDe(texto).length
   if (!n || tiempos.length !== n || !tiempos.every((x) => typeof x === 'number' && Number.isFinite(x))) return undefined
-  let previo = 0
-  return (tiempos as number[]).map((x) => (previo = Math.round(Math.max(previo, Math.min(duracion, Math.max(0, x))) * 1000) / 1000))
+  let previo = -600
+  return (tiempos as number[]).map((x) => (previo = Math.round(Math.max(previo, Math.min(duracion, Math.max(-600, x))) * 1000) / 1000))
 }
 
 /**
@@ -2985,7 +2986,14 @@ export function ventanaTimeline(tl: Timeline, desde: number, hasta: number): Tim
   const { musica: _m, ...resto } = corta
   return {
     ...resto,
-    textos: tl.textos.map(dentro).filter((x): x is TextoTL => x !== null),
+    // Un rótulo que ya venía de antes: sus palabras siguen donde iban (no vuelven a aparecer ni a pintarse desde cero).
+    textos: tl.textos
+      .map((x) => {
+        const d = dentro(x)
+        if (!d || x.inicio >= a || !x.tiempos) return d
+        return { ...d, tiempos: x.tiempos.map((s) => Math.round((s - (a - x.inicio)) * 1000) / 1000) }
+      })
+      .filter((x): x is TextoTL => x !== null),
     ...(tl.voces?.length ? { voces: tl.voces.map(dentro).filter((x): x is VozTL => x !== null) } : {}),
     capas: capas.filter((x): x is CapaTL => x !== null),
     ...(tl.sonidos?.length ? { sonidos: tl.sonidos.map(dentro).filter((x): x is SonidoTL => x !== null) } : {})

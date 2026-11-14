@@ -936,9 +936,12 @@ export function animarAss(t: TextoTL, lineas: string, libre: { x: number; y: num
       .map((x) => {
         if (x === '\\N' || /^\s+$/.test(x)) return x
         const w = tiempos[k++] ?? { inicio: reloj, dura: 0.3 }
+        const fin = w.inicio + w.dura
+        // Ya dicha antes de este trozo: pintada desde el principio. A medias: termina de pintarse en lo que le queda.
+        if (fin <= 0) return `{\\k0}${x}`
         const espera = Math.max(0, w.inicio - reloj)
-        reloj = w.inicio + w.dura
-        return `{${espera > 0.005 ? `\\k${cs(espera)}` : ''}\\kf${cs(w.dura)}}${x}`
+        reloj = fin
+        return `{${espera > 0.005 ? `\\k${cs(espera)}` : ''}\\kf${cs(w.inicio < 0 ? fin : w.dura)}}${x}`
       })
       .join('')
     return { inicio: `\\2c${base}&\\1c${pintado}&`, cuerpo }

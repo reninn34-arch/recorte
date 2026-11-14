@@ -96,6 +96,12 @@ try {
   const repartidas = tiemposPalabras({ ...rot, tiempos: undefined })
   assert.equal(repartidas.length, 3)
   assert.ok(repartidas[2].inicio > 0.9 && repartidas[2].inicio < 1.2, JSON.stringify(repartidas))
+  // Un cuadro suelto a mitad de un rótulo pintado: lo ya dicho sigue pintado.
+  const { ventanaTimeline: ventana2 } = await import('../src/shared/timeline.ts')
+  const conRotulo = { version: 1, clips: [{ id: 'a', fuente: 'principal', entrada: 0, salida: 4 }], textos: [{ ...rot, inicio: 1 }] }
+  const w2 = ventana2(conRotulo, 2.5, 2.9).textos[0]
+  const t2 = tiemposPalabras(w2)
+  assert.ok(t2[0].inicio < 0 && t2[0].inicio + t2[0].dura <= 0.001, JSON.stringify(t2))
   console.log('pintar palabras: karaoke al ritmo de la voz en el MP4 ✓')
   console.log('prueba audio: ok')
 } finally {
