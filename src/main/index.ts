@@ -51,6 +51,7 @@ import { picosDeArchivo } from './onda'
 import { estabilizarTramo } from './estabilizar'
 import { desfasePorSonido } from './multicam'
 import { prepararEscala } from './escala'
+import { arreglarVoz, revisarAudio } from './revisaraudio'
 import { atenderVoz } from './vozagente'
 import { proyectoDesdeReceta } from './recetaeditor'
 import { medirReferencia } from './estilo/referencia'
@@ -1761,7 +1762,7 @@ app.whenReady().then(() => {
     })
   })
   // Separar el audio: el sonido de un tramo de un video sale a `media/` como WAV, para ponerlo en una pista de sonidos.
-  ipcMain.handle('proyecto:extraer-audio', async (_evento, id: unknown, fuente: unknown, desde: unknown, hasta: unknown) => {
+  ipcMain.handle('proyecto:extraer-audio', async (_evento, id: unknown, fuente: unknown, desde: unknown, hasta: unknown, velocidad: unknown) => {
     if (typeof id !== 'string' || typeof fuente !== 'string' || typeof desde !== 'number' || typeof hasta !== 'number' || !(hasta > desde)) throw new Error('Datos inválidos.')
     const p = proyectos.abrir(id)
     if (!p) throw new Error('El proyecto ya no existe.')
@@ -1771,8 +1772,17 @@ app.whenReady().then(() => {
     const media = join(proyectos.carpeta(id), 'media')
     mkdirSync(media, { recursive: true })
     const nombre = `audio-${randomUUID().slice(0, 8)}.wav`
+    // Con la velocidad del clip (0.25× a 4×): atempo la cambia sin cambiar el tono, en pasos de 0.5 a 2.
+    const v = typeof velocidad === 'number' && Number.isFinite(velocidad) ? Math.min(4, Math.max(0.25, velocidad)) : 1
+    const pasos: number[] = []
+    for (let resto = v; Math.abs(resto - 1) > 0.001; ) {
+      const paso = Math.min(2, Math.max(0.5, resto))
+      pasos.push(paso)
+      resto /= paso
+    }
+    const tempo = pasos.length ? ['-af', pasos.map((x) => `atempo=${x.toFixed(4)}`).join(',')] : []
     const r = await ejecutar(
-      [`"${resolverBinario('ffmpeg') ?? 'ffmpeg'}"`, '-y', '-v', 'error', '-ss', Math.max(0, desde).toFixed(3), '-t', (hasta - desde).toFixed(3), '-i', `"${ruta}"`, '-vn', '-ac', '2', '-ar', '48000', `"${join(media, nombre)}"`],
+      [`"${resolverBinario('ffmpeg') ?? 'ffmpeg'}"`, '-y', '-v', 'error', '-ss', Math.max(0, desde).toFixed(3), '-t', (hasta - desde).toFixed(3), '-i', `"${ruta}"`, '-vn', ...tempo, '-ac', '2', '-ar', '48000', `"${join(media, nombre)}"`],
       media,
       300_000
     )
@@ -1998,6 +2008,20 @@ app.whenReady().then(() => {
   }
   setTimeout(() => void revisarModelos(), 20_000)
   setInterval(() => void revisarModelos(), 60 * 60_000)
+  // Revisar el audio de la edición (palabras cortadas, cortes secos, respiraciones, ruido…) y arreglar una frase de voz.
+  ipcMain.handle('audio:revisar', async (_evento, id: unknown, timeline: unknown) => {
+    const p = typeof id === 'string' ? proyectos.get(id) : null
+    if (!p || !timeline || typeof timeline !== 'object') throw new Error('Proyecto inválido.')
+    return revisarAudio(p, timeline as Timeline, proyectos.carpeta(p.id))
+  })
+  ipcMain.handle('audio:arreglar-voz', async (_evento, id: unknown, archivo: unknown, accion: unknown, ventanas: unknown) => {
+    const p = typeof id === 'string' ? proyectos.get(id) : null
+    if (!p || typeof archivo !== 'string' || !/^media\/[\w.-]+$/.test(archivo) || (accion !== 'respiraciones' && accion !== 'limpiar')) throw new Error('Datos inválidos.')
+    const v = Array.isArray(ventanas)
+      ? ventanas.filter((w): w is [number, number] => Array.isArray(w) && w.length === 2 && w.every((n) => typeof n === 'number' && Number.isFinite(n))).slice(0, 500)
+      : []
+    return arreglarVoz(proyectos.carpeta(p.id), archivo, accion, v)
+  })
   ipcMain.handle('agentes:versiones', () => versionesAgentes())
   ipcMain.handle('agentes:pago', async (_evento, id: unknown, cambio: unknown) => {
     if (typeof id !== 'string') return agentesConPago()

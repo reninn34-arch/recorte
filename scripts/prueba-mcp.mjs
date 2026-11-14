@@ -61,7 +61,7 @@ const herramientas = herramientasRecorte({
   // Crear por MCP (6.3), con una creación y una voz de mentira.
   creaciones: {
     nueva: async (pet) => {
-      const c = { id: 'c-prueba', nombre: pet.peticion.slice(0, 40), fase: 'plan', formato: pet.formato, mensajes: [], version: 0, vozElegida: pet.vozElegida, flow: pet.flow, directo: pet.directo }
+      const c = { id: 'c-prueba', nombre: pet.peticion.slice(0, 40), fase: 'plan', formato: pet.formato, mensajes: [], version: 0, vozElegida: pet.vozElegida, flow: pet.flow, directo: pet.directo, tareas: pet.tareas }
       creadas.set(c.id, c)
       return c
     },
@@ -210,6 +210,28 @@ try {
   assert.match((await llamar('ver_proyecto', { proyecto: id })).content[0].text, /Textos \(rótulos\):\n {2}\(ninguno\)/)
   const mal = await llamar('ver_proyecto', { proyecto: 'no existe' })
   assert.equal(mal.isError, true)
+  // Crear eligiendo agente, modelo y esfuerzo.
+  const conModelo = await llamar('crear_video', { peticion: 'Un video corto de la tienda', agente: 'claude', modelo: 'opus', esfuerzo: 'medium' })
+  assert.ok(!conModelo.isError, conModelo.content[0].text)
+  assert.match(conModelo.content[0].text, /claude · opus · esfuerzo medium/)
+  assert.deepEqual(creadas.get('c-prueba').tareas?.video, { agente: 'claude', modelo: 'opus', esfuerzo: 'medium' })
+  assert.equal((await llamar('crear_video', { peticion: 'x', modelo: 'opus' })).isError, true, 'modelo sin agente: no')
+  // Música de la biblioteca y voz grabada por el usuario (limpia).
+  assert.match((await llamar('poner_audio', { proyecto: id, tipo: 'musica' })).content[0].text, /calma-lofi-relajado/)
+  const mus = await llamar('poner_audio', { proyecto: id, tipo: 'musica', pista: 'calma-lofi-relajado', volumen: 0.3 })
+  assert.ok(!mus.isError, mus.content[0].text)
+  assert.equal(proyectos.get(id).timeline.musica?.volumen, 0.3)
+  const grabada = join(dir, 'grabada.wav')
+  spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', "aevalsrc='0.2*sin(2*PI*200*t)*between(t,0.5,1.5)':s=48000:d=2.5", grabada])
+  const vocesAntes = proyectos.get(id).timeline.voces?.length ?? 0
+  const vz = await llamar('poner_audio', { proyecto: id, tipo: 'voz', ruta: grabada, inicio: 0.2, texto: 'hola' })
+  assert.ok(!vz.isError, vz.content[0].text)
+  const voces = proyectos.get(id).timeline.voces
+  assert.equal(voces.length, vocesAntes + 1)
+  const nuevaVoz = voces.find((x) => x.texto === 'hola')
+  assert.ok(nuevaVoz && nuevaVoz.duracion < 1.4, `sin los silencios de los extremos: ${nuevaVoz?.duracion}`)
+  const rev = await llamar('revisar_audio', { proyecto: id })
+  assert.ok(!rev.isError, rev.content[0].text)
   console.log('prueba mcp: ok')
 } finally {
   servidor.detener()

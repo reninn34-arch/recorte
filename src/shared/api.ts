@@ -1,6 +1,7 @@
 import type { MensajeChat, OperacionTL } from './chat'
 import type { Gustos, SenalGusto } from './gustos'
 import type { MusicaTL, Timeline } from './timeline'
+import type { ProblemaAudio } from './audio'
 import type { AjustesCreacion, Creacion, EstiloPropio, MensajeCreacion, ModeloAgente, PeticionCreacion } from './creacion'
 import type { EstadoFlow, PedidoFlow, ResultadoFlow } from './flow'
 import type { AjustesIA, Project, TranscriptSegment } from './types'
@@ -272,7 +273,8 @@ export interface RecorteApi {
   /** Multicámara: cuánto está corrida cada toma respecto de la primera, por su sonido (y cuánto se parecen, 0 a 1). */
   sincronizar: (id: string, fuentes: string[]) => Promise<{ fuente: string; desfase: number; confianza: number }[]>
   /** Saca el sonido de un tramo de un video a la carpeta del proyecto (para separarlo del clip). */
-  extraerAudio: (id: string, fuente: string, desde: number, hasta: number) => Promise<{ archivo: string; duracion: number; nombre: string }>
+  /** El sonido de un tramo de un video como archivo aparte (con `velocidad`, a la velocidad del clip). */
+  extraerAudio: (id: string, fuente: string, desde: number, hasta: number, velocidad?: number) => Promise<{ archivo: string; duracion: number; nombre: string }>
   /** Saca el cuadro de un video (en ese segundo de su fuente) a la biblioteca como imagen, para congelarlo. */
   congelarCuadro: (id: string, fuente: string, segundo: number) => Promise<{ project: Project; medio: string }>
   /** La ruta en el disco de un archivo soltado o pegado (de Windows). */
@@ -456,6 +458,10 @@ export interface RecorteApi {
   onHerramienta: (cb: (p: { id: string; pct: number; texto: string }) => void) => () => void
   /** La sesión de un agente se cayó mientras trabajaba: hay que volver a conectarlo. */
   onSesionCaida: (cb: (id: EstadoAgente['id']) => void) => () => void
+  /** Revisa el audio de la edición: lo que suena mal y cómo arreglarlo. */
+  revisarAudio: (id: string, timeline: Timeline) => Promise<ProblemaAudio[]>
+  /** Procesa el audio de una frase de voz (bajar respiraciones o limpiarla) y da el archivo nuevo. */
+  arreglarVoz: (id: string, archivo: string, accion: 'respiraciones' | 'limpiar', ventanas?: [number, number][]) => Promise<{ archivo: string; duracion: number }>
   /** El tamaño de la interfaz: automático (según la ventana) o fijo. */
   interfazEstado: () => Promise<{ automatica: boolean; escala: number }>
   /** Fija el tamaño (0.7 a 2.2) o lo vuelve automático (null). */

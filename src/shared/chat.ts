@@ -855,9 +855,20 @@ export function aplicarOperaciones(
           break
         }
         const nueva = timelineDesdeCortes(cortes)
-        // Los rótulos que sigan cabiendo se conservan.
+        // Solo cambia la pista de video: la música, la voz, las capas, los sonidos, los rótulos y las marcas
+        // que sigan cabiendo se conservan (antes se perdían y había que volver a ponerlos).
         const total = duracionTimeline(nueva)
-        tl = { ...nueva, textos: tl.textos.filter((t) => t.inicio < total).map((t) => ({ ...t, id: t.id || nuevoId('texto') })) }
+        const cabe = <T extends { inicio: number }>(x: T) => x.inicio < total
+        tl = {
+          ...tl,
+          clips: nueva.clips,
+          textos: tl.textos.filter(cabe).map((t) => ({ ...t, id: t.id || nuevoId('texto') })),
+          ...(tl.capas ? { capas: tl.capas.filter(cabe) } : {}),
+          ...(tl.sonidos ? { sonidos: tl.sonidos.filter(cabe) } : {}),
+          ...(tl.voces ? { voces: tl.voces.filter(cabe) } : {}),
+          ...(tl.ajustesCapa ? { ajustesCapa: tl.ajustesCapa.filter(cabe) } : {}),
+          ...(tl.marcadores ? { marcadores: tl.marcadores.filter((m) => m.t < total) } : {})
+        }
         cambios.push(`Armé la edición con ${cortes.length} ${cortes.length === 1 ? 'corte' : 'cortes'} del material (${total.toFixed(1)} s)`)
         break
       }
@@ -956,7 +967,7 @@ export function describirTimelineParaAgente(
   lineas.push(
     tl.musica
       ? `Música: «${tl.musica.nombre}», volumen ${tl.musica.volumen.toFixed(2)}, ${tl.musica.ducking ? 'baja cuando hay voz' : 'volumen fijo'}.`
-      : 'Música: ninguna (solo el usuario puede elegir el archivo, con el botón «Música»).'
+      : 'Música: ninguna (se pone con el botón «Música» o, por MCP, con poner_audio).'
   )
 
   // Un proyecto del agente: sus clips salen de la versión limpia de SU video (mismo tiempo que el

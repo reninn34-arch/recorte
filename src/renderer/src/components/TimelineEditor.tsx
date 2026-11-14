@@ -116,8 +116,7 @@ import {
   PISTAS_SONIDOS,
   deslizarContenido,
   desplazarClip,
-  type ColorMarcador
-} from '../../../shared/timeline'
+  type ColorMarcador, unirAudio, dividirSonido } from '../../../shared/timeline'
 import type { OpcionesExport } from '../../../shared/api'
 import type { TranscriptSegment } from '../../../shared/types'
 import type { Historial } from '../hooks/timeline'
@@ -247,7 +246,8 @@ export function TimelineEditor({
     pedido: { desde: number; hasta: number; en: number; x: number; y: number; ancho: number; alto: number }
   ) => Promise<{ recorrido: { f: number; x: number; y: number }[]; perdido: number }>
   /** Separa el sonido del clip (lo pasa a la pista de sonidos). */
-  onSepararAudio?: (clipId: string) => void
+  /** Separa el sonido de uno o varios clips en la pista de sonidos. */
+  onSepararAudio?: (ids: string | string[]) => void
   separando?: boolean
   /** Anida varios clips seguidos en uno. */
   onAnidar?: (ids: string[]) => void
@@ -310,7 +310,7 @@ export function TimelineEditor({
   onAnimarCapa?: (capaId: string, tipo: TipoAnimar | null) => void
   quitandoFondo?: boolean
   /** La biblioteca: lo que se puede poner encima del video. */
-  medios?: { id: string; nombre: string; tipo: 'video' | 'imagen' }[]
+  medios?: { id: string; nombre: string; tipo: 'video' | 'imagen'; conAudio?: boolean }[]
   /** Lo que dura cada medio (para validar las capas). */
   duraciones?: Record<string, number>
   /** Copia un efecto de sonido al proyecto (uno incluido o, sin id, uno del equipo). */
@@ -336,6 +336,8 @@ export function TimelineEditor({
   }, [elegido])
   /** Si una fuente es un video (la velocidad no tiene sentido en una foto). */
   const esVideo = (fuente: string) => fuente === 'principal' || medios?.find((m) => m.id === fuente)?.tipo === 'video'
+  /** Si el clip tiene sonido que separar (un video con audio). */
+  const conSonido = (fuente: string) => fuente === 'principal' || (medios?.find((m) => m.id === fuente)?.tipo === 'video' && medios.find((m) => m.id === fuente)?.conAudio !== false)
   const clasePista = (id: PistaId) => `${tl.pistas?.[id]?.bloqueada ? 'is-bloqueada' : ''} ${tl.pistas?.[id]?.oculta ? 'is-oculta' : ''}`
   // ===== Efectos: se aplican al clip elegido con un clic, o a cualquier clip arrastrándolos sobre él =====
   const [buscarEfecto, setBuscarEfecto] = useState('')
@@ -835,6 +837,14 @@ export function TimelineEditor({
   // ===== Acciones =====
 
   function accionDividir() {
+    // Con un sonido suelto elegido (como el audio separado), S lo divide a él en el cabezal.
+    if (elegido?.tipo === 'sonido') {
+      const r = dividirSonido(timeline, elegido.id, tiempo)
+      if (r.timeline !== timeline) {
+        historial.aplicar(r.timeline)
+        return
+      }
+    }
     historial.aplicar(dividir(timeline, tiempo))
   }
 
@@ -1074,6 +1084,20 @@ export function TimelineEditor({
         ...(onAnidar && clipsV.length === varios.length && clipsSeguidos(timeline, clipsV)
           ? [{ nombre: `Anidar los ${varios.length} en un clip`, accion: () => onAnidar(clipsV) }]
           : []),
+        ...(() => {
+          const conAudio = clipsV.filter((id) => {
+            const c = timeline.clips.find((x) => x.id === id)
+            return c && conSonido(c.fuente) && !(tl.sonidos ?? []).some((s) => s.deClip === c.id)
+          })
+          return onSepararAudio && conAudio.length ? [{ nombre: `Separar el audio de ${conAudio.length === 1 ? '1 clip' : `los ${conAudio.length} clips`}`, accion: () => onSepararAudio(conAudio) }] : []
+        })(),
+        ...(clipsV.length
+          ? [
+              { nombre: 'Silenciar todos', accion: () => historial.aplicar(clipsV.reduce((x, id) => silenciarClip(x, id, true), timeline)) },
+              { nombre: 'Volver a oír todos', accion: () => historial.aplicar(clipsV.reduce((x, id) => silenciarClip(x, id, false), timeline)) }
+            ]
+          : []),
+        { tipo: 'separador' },
         { nombre: `Borrar los ${varios.length}`, atajo: 'Supr', peligro: true, accion: () => acciones.current.accionBorrar() }
       ])
       return
@@ -1091,7 +1115,17 @@ export function TimelineEditor({
         { nombre: 'Pegar en el cabezal', atajo: 'Ctrl+V', desactivada: !portapapeles.current, accion: () => acciones.current.accionPegar() },
         { tipo: 'separador' },
         ...(video ? [{ nombre: c.mudo ? 'Volver a oír' : 'Silenciar', accion: () => historial.aplicar(silenciarClip(timeline, c.id, !c.mudo)) }] : []),
-        ...(video && onSepararAudio && !c.mudo ? [{ nombre: 'Separar audio', accion: () => onSepararAudio(c.id) }] : []),
+        ...(() => {
+          if (!video || !conSonido(c.fuente) || !onSepararAudio) return []
+          // Si ya se separó: volver a unirlo (como «Vincular» en Premiere).
+          const suelto = (tl.sonidos ?? []).find((s) => s.deClip === c.id)
+          if (suelto) return [{ nombre: 'Volver a unir el audio', accion: () => historial.aplicar(unirAudio(timeline, suelto.id)) }]
+          return [
+            c.rampa
+              ? { nombre: 'Separar audio (quita antes la rampa de velocidad)', desactivada: true, accion: () => {} }
+              : { nombre: 'Separar audio', accion: () => onSepararAudio(c.id) }
+          ]
+        })(),
         ...(video && onEstabilizar ? [{ nombre: 'Estabilizar', accion: () => onEstabilizar(c.id) }] : []),
         ...(onCongelar && video ? [{ nombre: 'Congelar el cuadro del cabezal', atajo: 'Mayús+F', accion: () => onCongelar() }] : []),
         ...(video && !c.rampa
@@ -1114,6 +1148,34 @@ export function TimelineEditor({
         ? [{ nombre: 'Pegar en el cabezal', atajo: 'Ctrl+V', desactivada: !portapapeles.current, accion: () => acciones.current.accionPegar() }]
         : []),
       ...(cual.tipo === 'capa' ? [{ nombre: 'Ir a su principio', accion: () => onBuscar(tl.capas?.find((x) => x.id === cual.id)?.inicio ?? tiempo) }] : []),
+      ...(() => {
+        // El sonido suelto (un efecto o el audio separado de un clip): dividir, volumen y volver a unirlo.
+        if (cual.tipo !== 'sonido') return []
+        const s = tl.sonidos?.find((x) => x.id === cual.id)
+        if (!s) return []
+        const vol = s.volumen ?? VOLUMEN_SONIDO
+        const unible = s.deClip && timeline.clips.some((c) => c.id === s.deClip)
+        return [
+          { tipo: 'separador' as const },
+          {
+            nombre: 'Dividir aquí',
+            atajo: 'S',
+            desactivada: !(t > s.inicio + DURACION_MINIMA && t < s.inicio + s.duracion - DURACION_MINIMA),
+            accion: () => {
+              const r = dividirSonido(timeline, s.id, t)
+              if (r.timeline !== timeline) historial.aplicar(r.timeline)
+            }
+          },
+          ...(unible ? [{ nombre: 'Volver a unir al video', accion: () => historial.aplicar(unirAudio(timeline, s.id)) }] : []),
+          { tipo: 'titulo' as const, nombre: 'Volumen' },
+          ...[
+            ['Silenciar', 0],
+            ['50 %', 0.5],
+            ['100 %', 1],
+            ['150 %', 1.5]
+          ].map(([n, v]) => ({ nombre: `${n}${Math.abs(vol - (v as number)) < 0.01 ? '  ✓' : ''}`, accion: () => historial.aplicar(cambiarSonido(timeline, s.id, { volumen: v as number })) }))
+        ]
+      })(),
       { tipo: 'separador' },
       borrar
     ])
@@ -2289,16 +2351,23 @@ export function TimelineEditor({
             <button className="btn small ghost" onClick={accionBorrar}>
               <Icon name="trash" size={14} /> Borrar
             </button>
-            {onSepararAudio && esVideo(clipElegido.clip.fuente) && !clipElegido.clip.mudo && (
-              <button
-                className="btn small ghost"
-                disabled={separando}
-                onClick={() => onSepararAudio(clipElegido.clip.id)}
-                title="Desvincula el sonido: pasa a la pista de sonidos y lo mueves o recortas aparte de la imagen (para que la voz entre antes o se quede después del corte)."
-              >
-                <Icon name="music" size={14} /> {separando ? 'Separando…' : 'Separar audio'}
-              </button>
-            )}
+            {onSepararAudio && conSonido(clipElegido.clip.fuente) && !clipElegido.clip.rampa && (() => {
+              const suelto = (tl.sonidos ?? []).find((x) => x.deClip === clipElegido.clip.id)
+              return suelto ? (
+                <button className="btn small ghost" onClick={() => historial.aplicar(unirAudio(timeline, suelto.id))} title="El sonido separado vuelve al clip (el clip vuelve a sonar).">
+                  <Icon name="music" size={14} /> Volver a unir el audio
+                </button>
+              ) : (
+                <button
+                  className="btn small ghost"
+                  disabled={separando}
+                  onClick={() => onSepararAudio(clipElegido.clip.id)}
+                  title="Desvincula el sonido: pasa a la pista de sonidos y lo mueves o recortas aparte de la imagen (para que la voz entre antes o se quede después del corte)."
+                >
+                  <Icon name="music" size={14} /> {separando ? 'Separando…' : 'Separar audio'}
+                </button>
+              )
+            })()}
             {clipElegido.clip.anidado && (
               <button
                 className="btn small ghost"

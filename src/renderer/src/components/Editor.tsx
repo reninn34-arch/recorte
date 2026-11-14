@@ -12,6 +12,7 @@ import { MonitorOrigen } from './MonitorOrigen'
 import { useMenuContextual } from './MenuContextual'
 import { PanelHistorial } from './PanelHistorial'
 import { PanelLimpieza } from './PanelLimpieza'
+import { PanelAudio } from './PanelAudio'
 
 const CLAVE_ALTO_TL = 'recorte.altoLineaDeTiempo'
 import { mediaUrl } from '../media'
@@ -201,18 +202,28 @@ export function Editor({
   const [origen, setOrigen] = useState<string | null>(null)
   /** Separar el audio de un clip: su sonido pasa a la pista de sonidos y el clip queda mudo. */
   const [separando, setSeparando] = useState(false)
-  async function separarAudioDe(clipId: string) {
-    const c = timeline.clips.find((x) => x.id === clipId)
-    if (!c || separando) return
-    if (c.rampa || Math.abs((c.velocidad ?? 1) - 1) > 0.005) {
-      onAviso('Para separar el sonido, el clip tiene que ir a velocidad normal.')
+  /** Separa el sonido de uno o varios clips de video (con su velocidad) en la pista de sonidos, en un solo paso. */
+  async function separarAudioDe(ids: string | string[]) {
+    const lista = (Array.isArray(ids) ? ids : [ids]).map((id) => timeline.clips.find((x) => x.id === id)).filter((c): c is NonNullable<typeof c> => !!c)
+    if (!lista.length || separando) return
+    const conRampa = lista.filter((c) => c.rampa)
+    if (conRampa.length === lista.length) {
+      onAviso('Ese clip tiene una rampa de velocidad: quítala (o ponle una velocidad fija) para separar su sonido.')
       return
     }
     setSeparando(true)
     try {
-      const r = await window.recorte.extraerAudio(proyecto.id, c.fuente, c.entrada, c.salida)
-      historial.aplicar(separarAudio(timeline, clipId, r.archivo, r.nombre, r.duracion))
-      onAviso('Listo: el sonido quedó aparte en la pista de sonidos. Muévelo o recórtalo sin tocar la imagen.')
+      let tl = timeline
+      for (const c of lista.filter((x) => !x.rampa)) {
+        const r = await window.recorte.extraerAudio(proyecto.id, c.fuente, c.entrada, c.salida, c.velocidad ?? 1)
+        tl = separarAudio(tl, c.id, r.archivo, r.nombre, r.duracion)
+      }
+      historial.aplicar(tl)
+      const n = lista.length - conRampa.length
+      onAviso(
+        `Listo: ${n === 1 ? 'el sonido quedó' : `el sonido de los ${n} clips quedó`} aparte en la pista de sonidos. Muévelo o recórtalo sin tocar la imagen` +
+          (conRampa.length ? ` (${conRampa.length} con rampa de velocidad no se separaron).` : '. Clic derecho en él: «Volver a unir al video».')
+      )
     } catch (error) {
       onAviso(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error))
     } finally {
@@ -672,6 +683,7 @@ export function Editor({
             contenido: (
               <>
                 {!proyecto.demo && <PanelLimpieza timeline={timeline} historial={historial} transcript={proyecto.transcript} onAviso={onAviso} />}
+                {!proyecto.demo && <PanelAudio proyecto={proyecto} timeline={timeline} historial={historial} onBuscar={reproductor.buscar} onAviso={onAviso} />}
                 <span className="ed-seccion">Edición del agente</span>
                 {proyecto.receta && (
                   <button className="ed-fila" onClick={() => proyecto.receta && llevarATimeline(timelineDesdeReceta(proyecto.receta))}>
@@ -750,7 +762,7 @@ export function Editor({
         congelando={congelando}
         onAnimarCapa={proyecto.demo ? undefined : (capaId, tipo) => void animarCapa(capaId, tipo)}
         quitandoFondo={quitandoFondo}
-        medios={proyecto.demo ? undefined : (proyecto.medios ?? []).map((m) => ({ id: m.id, nombre: m.nombre, tipo: m.tipo }))}
+        medios={proyecto.demo ? undefined : (proyecto.medios ?? []).map((m) => ({ id: m.id, nombre: m.nombre, tipo: m.tipo, conAudio: m.conAudio }))}
         duraciones={duraciones}
         ponerSonido={
           proyecto.demo

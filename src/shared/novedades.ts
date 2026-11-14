@@ -24,6 +24,33 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.51',
+    fecha: '2026-11-14',
+    resumen: 'Revisar el audio encuentra y arregla lo que suena mal, separar el audio de un video está completo y los tiempos de la voz son más exactos.',
+    novedades: [
+      {
+        icono: 'volumen',
+        titulo: 'Revisar el audio',
+        texto: 'En la pestaña IA: escucha tu edición y te dice dónde un corte se come una palabra (suena a que la persona se ahoga), los cortes secos, las respiraciones fuertes, el ruido de fondo y los silencios largos. Cada cosa con «Ir» y «Arreglar», o «Arreglar todo» de una vez (Ctrl+Z lo deshace).'
+      },
+      {
+        icono: 'music',
+        titulo: 'Separar audio, completo',
+        texto: 'Clic derecho en un video con sonido: «Separar audio» siempre está, aunque el clip esté silenciado o con otra velocidad. Separa varios clips a la vez, vuelve a unirlo al video, y en el audio separado: dividir aquí (o la tecla S) y volumen rápido.'
+      },
+      {
+        icono: 'type',
+        titulo: 'Subtítulos y cortes justo a tiempo',
+        texto: 'La transcripción pega cada frase a donde de verdad empieza y termina la voz: los subtítulos, «quitar pausas» y los cortes ya no se adelantan ni se atrasan.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Arreglos',
+        texto: 'Rehacer los cortes con el agente ya no borra la música, la voz ni las capas, y la vista de un cuadro muestra las capas animadas donde van. Los agentes conectados ahora pueden poner música y tu voz grabada (limpia) y elegir modelo y esfuerzo al crear un video.'
+      }
+    ]
+  },
+  {
     version: '0.1.50',
     fecha: '2026-11-13',
     resumen: 'El monitor a pantalla completa, una barra de controles que siempre cabe y los modelos de tus agentes al día solos.',

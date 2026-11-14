@@ -3282,3 +3282,15 @@ button { cursor: pointer; }
 .soltando-archivos::after { content: attr(data-soltar); position: absolute; inset: 6px; z-index: 50; display: grid; place-items: center; border: 2px dashed #5aa9ff; border-radius: 12px; background: color-mix(in srgb, #0b0c0a 70%, #5aa9ff); color: #fff; font-size: 15px; font-weight: 600; pointer-events: none; }
 /* Los avisos flotan sin tapar: los clics y los archivos soltados pasan a lo de abajo. */
 .toast { pointer-events: none; }
+
+/* Revisar el audio: lo que suena mal, con «Ir» y «Arreglar». */
+.audio-lista { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.audio-item { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--line-2); }
+.audio-item.peso-2 { border-left-color: #ff7b7b; }
+.audio-item.peso-1 { border-left-color: #ffc861; }
+.audio-item.peso-0 { border-left-color: #5aa9ff; }
+.audio-item-texto { display: flex; flex-direction: column; gap: 2px; font-size: 12px; line-height: 1.4; min-width: 0; overflow-wrap: anywhere; }
+.audio-item-texto strong { font-size: 12px; }
+.audio-item-texto span { color: var(--muted); }
+.audio-item-botones { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.audio-ok { margin: 8px 0 0; font-size: 12px; color: var(--accent); }

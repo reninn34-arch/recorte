@@ -1,20 +1,23 @@
 import { spawnSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, extname, join } from 'node:path'
 import { aplicarOperaciones, describirTimelineParaAgente, OPERACIONES_DOC, validarOperaciones, type OperacionTL } from '../shared/chat'
 import type { RenderResultado, TranscripcionResultado } from '../shared/api'
-import { COSTO_CLIP, MAX_CLIPS_VEO, textoMuestra, VOCES_GEMINI, type Creacion, type PeticionCreacion } from '../shared/creacion'
+import { COSTO_CLIP, ID_SEGURO, MAX_CLIPS_VEO, textoMuestra, VOCES_GEMINI, type Creacion, type PeticionCreacion } from '../shared/creacion'
 import { MODELOS_IMAGEN, modelosVideoVigentes, type PedidoFlow, type ResultadoFlow } from '../shared/flow'
-import { ANIMAR_CAPA, cambiarCapa, duracionesDeMedios, duracionTimeline, escalaAnimada, normalizarTimeline, timelineInicial, ventanaTimeline, type Timeline, type TipoAnimar } from '../shared/timeline'
+import { anadirVoz, ANIMAR_CAPA, cambiarCapa, duracionesDeMedios, duracionTimeline, escalaAnimada, normalizarTimeline, ponerMusica, timelineInicial, ventanaTimeline, type Timeline, type TipoAnimar } from '../shared/timeline'
 import type { Project } from '../shared/types'
 
 /** Lo que se añade a un pedido de imagen «para recortar» (lo mismo que PARA_RECORTAR del kit). */
 const PARA_RECORTAR =
   ' Aislado sobre un fondo verde croma liso y uniforme (#00B140), sin degradados, sin sombras ni suelo en el fondo, el sujeto entero dentro del encuadre con un poco de margen, sin texto.'
 import { exportarTimeline } from './exportar'
-import { rutaFfmpeg } from './ffmpeg'
+import { duracionMedio, rutaFfmpeg } from './ffmpeg'
+import { rutaScriptPython } from './transcribir'
+import { arreglarVoz, revisarAudio } from './revisaraudio'
+import { NOMBRE_PROBLEMA } from '../shared/audio'
 import type { HerramientaMcp, ResultadoHerramienta } from './mcp'
 import type { Proyectos } from './proyectos'
 
@@ -363,6 +366,156 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
       }
     },
     {
+      nombre: 'poner_audio',
+      descripcion:
+        'Pone audio en un proyecto: la MÚSICA de fondo (un archivo del equipo o una pista libre de la biblioteca de Recorte por su nombre, ' +
+        'p. ej. "calma-lofi-relajado") o una VOZ GRABADA por el usuario (un audio suyo, no generado) en la pista de voz, desde el segundo ' +
+        '"inicio". Con "limpiar": true la voz sale sin ruido de fondo, con la voz más clara y a volumen de redes (no cambia cómo suena la ' +
+        'persona) y sin los silencios del principio y del final. Sin "ruta" ni "pista" y con tipo "musica", lista la biblioteca.',
+      esquema: {
+        type: 'object',
+        properties: {
+          proyecto: proyectoArg,
+          tipo: { type: 'string', enum: ['musica', 'voz'], description: 'musica (de fondo) o voz (una grabación del usuario).' },
+          ruta: { type: 'string', description: 'Ruta completa del audio (mp3, wav, m4a, aac, ogg, opus, flac).' },
+          pista: { type: 'string', description: 'Solo música: el nombre de una pista de la biblioteca de Recorte (sin «.mp3»).' },
+          inicio: { type: 'number', description: 'Solo voz: segundo de la timeline donde empieza (por defecto 0).' },
+          texto: { type: 'string', description: 'Solo voz: lo que dice (para verlo en la pista).' },
+          limpiar: { type: 'boolean', description: 'Solo voz: quitar ruido, aclarar y nivelar (por defecto true).' },
+          volumen: { type: 'number', description: 'Música 0–1 (por defecto 0.35; bajo una voz, 0.2–0.4). Voz 0–1.5 (por defecto 1).' },
+          ducking: { type: 'boolean', description: 'Solo música: que baje sola mientras hay voz (por defecto true).' }
+        },
+        required: ['proyecto', 'tipo']
+      },
+      correr: async (args, sesion) => {
+        const p = buscar(args.proyecto)
+        const carpetaMusica = rutaScriptPython('musica')
+        const biblioteca = (): { archivo: string; titulo?: string; animo?: string; estilo?: string; duracion?: number }[] => {
+          try {
+            const c = JSON.parse(readFileSync(join(carpetaMusica, 'catalogo.json'), 'utf8'))
+            return Array.isArray(c) ? c : (c.pistas ?? [])
+          } catch {
+            return []
+          }
+        }
+        const tipo = args.tipo === 'voz' ? 'voz' : 'musica'
+        let origen = typeof args.ruta === 'string' ? args.ruta.trim() : ''
+        if (tipo === 'musica' && !origen) {
+          const nombre = texto(args.pista).replace(/\.mp3$/i, '')
+          const lista = biblioteca()
+          if (!nombre)
+            return ok(
+              lista.length
+                ? `Música libre de Recorte (usa "pista" con el nombre):\n${lista.map((x) => `- ${x.archivo.replace(/\.mp3$/, '')}: ${x.titulo ?? ''} (${x.animo ?? ''}, ${x.estilo ?? ''}, ${Math.round(x.duracion ?? 0)} s)`).join('\n')}`
+                : 'No encuentro la biblioteca de música de Recorte.'
+            )
+          const x = lista.find((m) => m.archivo.replace(/\.mp3$/, '') === nombre)
+          if (!x) return fallo(`No hay una pista «${nombre}». Llama sin "pista" para ver la lista.`)
+          origen = join(carpetaMusica, x.archivo)
+        }
+        if (!origen || !existsSync(origen) || !/\.(mp3|wav|m4a|aac|ogg|opus|flac)$/i.test(origen)) return fallo('No encuentro ese audio (mp3, wav, m4a, aac, ogg, opus o flac).')
+        const media = join(ctx.proyectos.carpeta(p.id), 'media')
+        mkdirSync(media, { recursive: true })
+        const base =
+          basename(origen, extname(origen))
+            .normalize('NFD')
+            .replace(/[̀-ͯ]/g, '')
+            .replace(/[^\w-]+/g, '-')
+            .replace(/^-+|-+$/g, '')
+            .slice(0, 40) || tipo
+        const limpiar = tipo === 'voz' && args.limpiar !== false
+        const nombreArchivo = `${tipo}-${base}-${Date.now().toString(36)}${limpiar ? '.wav' : extname(origen).toLowerCase()}`
+        const destino = join(media, nombreArchivo)
+        if (limpiar) {
+          // Ruido fuera antes de comprimir (si no, la compresión lo sube), voz clara sin cambiar su timbre, nivel de redes
+          // y sin los silencios de los extremos.
+          const filtro = [
+            'aformat=channel_layouts=mono',
+            'silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.08',
+            'areverse',
+            'silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.25',
+            'areverse',
+            'highpass=f=85',
+            'afftdn=nr=20:nf=-45:tn=1',
+            'equalizer=f=220:t=q:w=1.2:g=-2',
+            'equalizer=f=3000:t=q:w=1:g=2',
+            'deesser=i=0.25',
+            'acompressor=threshold=-20dB:ratio=2:attack=15:release=200:makeup=1',
+            'loudnorm=I=-16:TP=-1.5:LRA=9:linear=true'
+          ].join(',')
+          const r = spawnSync(rutaFfmpeg(), ['-v', 'error', '-y', '-i', origen, '-af', filtro, '-ar', '48000', destino], { timeout: 120_000 })
+          if (r.status !== 0 || !existsSync(destino)) return fallo(`No pude limpiar la voz: ${String(r.stderr ?? '').slice(0, 300)}`)
+        } else copyFileSync(origen, destino)
+        const duracion = await duracionMedio(destino)
+        if (!(duracion > 0)) return fallo('No pude leer ese audio.')
+        const antes = timelineDe(p)
+        let tl: Timeline
+        let hecho: string
+        if (tipo === 'musica') {
+          const volumen = typeof args.volumen === 'number' ? Math.max(0, Math.min(1, args.volumen)) : 0.35
+          tl = ponerMusica(antes, { archivo: `media/${nombreArchivo}`, nombre: basename(origen), volumen, ducking: args.ducking !== false })
+          hecho = `Puse la música «${basename(origen)}» (volumen ${Math.round(volumen * 100)} %${args.ducking !== false ? ', baja cuando hay voz' : ''}).`
+        } else {
+          const inicio = typeof args.inicio === 'number' ? Math.max(0, args.inicio) : 0
+          const volumen = typeof args.volumen === 'number' ? Math.max(0, Math.min(1.5, args.volumen)) : 1
+          tl = anadirVoz(antes, { inicio, duracion: Math.round(duracion * 1000) / 1000, archivo: `media/${nombreArchivo}`, texto: texto(args.texto).slice(0, 2000), volumen }).timeline
+          hecho = `Puse la voz grabada en ${inicio.toFixed(2)}–${(inicio + duracion).toFixed(2)} s${limpiar ? ' (limpia: sin ruido, clara y nivelada, sin silencios en los extremos)' : ''}.`
+        }
+        const actual = ctx.proyectos.get(p.id)!
+        actual.timeline = tl
+        delete actual.timelinePendiente
+        actual.updatedAt = Date.now()
+        ctx.proyectos.save(actual)
+        ctx.avisarCambio(actual, sesion.cliente, true)
+        return ok(`${hecho}\nLa timeline dura ${duracionTimeline(tl).toFixed(1)} s.`)
+      }
+    },
+    {
+      nombre: 'revisar_audio',
+      descripcion:
+        'Escucha el audio de la edición y dice lo que suena mal: un corte que se come una palabra (suena a que la persona se ahoga), ' +
+        'un corte seco que hace clic, frases de voz que empiezan o acaban cortadas, respiraciones fuertes, ruido de fondo, silencios ' +
+        'largos y saturación, cada cosa con su segundo. Con "arreglar": true arregla todo lo que tiene arreglo (alarga o adelanta el ' +
+        'borde del clip hasta que la palabra termine, suaviza los cortes, baja las respiraciones, limpia la voz). Úsala antes de exportar.',
+      esquema: { type: 'object', properties: { proyecto: proyectoArg, arreglar: { type: 'boolean', description: 'Arreglar lo que se pueda (un paso que se deshace con Ctrl+Z).' } }, required: ['proyecto'] },
+      correr: async (args, sesion) => {
+        const p = buscar(args.proyecto)
+        const carpeta = ctx.proyectos.carpeta(p.id)
+        let tl = timelineDe(p)
+        const problemas = await revisarAudio(p, tl, carpeta)
+        if (!problemas.length) return ok('El audio suena bien: ningún corte se come una palabra y no hay ruido ni respiraciones fuertes.')
+        const lista = problemas.map((x) => `- [${NOMBRE_PROBLEMA[x.tipo]}] ${x.texto}${x.arreglo ? ` (arreglo: ${x.etiqueta})` : ''}`).join('\n')
+        if (args.arreglar !== true) return ok(`Lo que suena mal:\n${lista}\nCon "arreglar": true se arregla lo que tiene arreglo.`)
+        let hechos = 0
+        for (const x of [...problemas].filter((y) => y.arreglo).sort((a, b) => b.t - a.t)) {
+          const a = x.arreglo!
+          if (a.tipo === 'ops') {
+            const r = aplicarOperaciones(tl, a.ops, { duracionFuente: p.source.duration, transcript: p.transcript, medios: duracionesDeMedios(p.medios) })
+            if (r.cambios.length) (tl = r.timeline), hechos++
+          } else {
+            const v = tl.voces?.find((y) => y.id === a.voz)
+            if (!v) continue
+            const r = await arreglarVoz(carpeta, v.archivo, a.accion, a.ventanas)
+            tl = { ...tl, voces: tl.voces!.map((y) => (y.id === v.id ? { ...y, archivo: r.archivo, duracion: r.duracion } : y)) }
+            hechos++
+          }
+        }
+        if (hechos) {
+          const actual = ctx.proyectos.get(p.id)!
+          actual.timeline = tl
+          delete actual.timelinePendiente
+          actual.updatedAt = Date.now()
+          ctx.proyectos.save(actual)
+          ctx.avisarCambio(actual, sesion.cliente, true)
+        }
+        const quedan = await revisarAudio(ctx.proyectos.get(p.id)!, tl, carpeta)
+        return ok(
+          `Lo que sonaba mal:\n${lista}\nArreglé ${hechos}. ` +
+            (quedan.length ? `Queda (sin arreglo automático o para mirar):\n${quedan.map((x) => `- [${NOMBRE_PROBLEMA[x.tipo]}] ${x.texto}`).join('\n')}` : 'Ahora suena bien.')
+        )
+      }
+    },
+    {
       nombre: 'quitar_fondo',
       descripcion:
         'Quita el fondo de una imagen de la biblioteca y la agrega como un medio nuevo con transparencia, recortado al sujeto: así ' +
@@ -567,6 +720,9 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
             clips: { type: 'boolean', description: 'Que el agente pueda generar clips de video con Google Flow (gastan créditos).' },
             modelo_clips: { type: 'string', description: `Modelo de los clips: ${modelosVideoVigentes().join(', ')}.` },
             directo: { type: 'boolean', description: 'Empezar el video sin esperar el «Hazlo» (el agente decide lo que dude).' },
+            agente: { type: 'string', enum: ['claude', 'codex', 'gemini', 'kimi', 'opencode', 'antigravity'], description: 'Qué agente conectado hace el video (por defecto, el activo de la app). Ej.: "claude".' },
+            modelo: { type: 'string', description: 'El modelo de ese agente, como lo nombra él (Claude: "opus", "sonnet", "haiku"; Codex: su slug). Sin él, el suyo de siempre.' },
+            esfuerzo: { type: 'string', description: 'Cuánto piensa el modelo, si lo admite: low, medium, high, xhigh o max. Ej.: "medium".' },
             confirmacion: confirmacionArg
           },
           required: ['peticion']
@@ -592,6 +748,14 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
           const clave = `crear:${JSON.stringify({ ...args, confirmacion: undefined })}`
           if (gasto && !confirmado(clave, args)) return pedirPermiso(clave, `${gasto}. Además el agente usa el plan de tu agente (Claude Code, Codex…).`)
           const duracion = typeof args.duracion === 'number' && args.duracion > 0 ? Math.min(600, Math.round(args.duracion)) : 0
+          // Quién lo hace: un agente, su modelo y su esfuerzo (como en «Modelo» de la caja de crear).
+          const agentes = ['claude', 'codex', 'gemini', 'kimi', 'opencode', 'antigravity'] as const
+          const agente = agentes.find((a) => a === args.agente)
+          if (args.agente !== undefined && !agente) return fallo(`Agente desconocido. Usa uno de: ${agentes.join(', ')}.`)
+          const seguro = (v: unknown) => (typeof v === 'string' && ID_SEGURO.test(v.trim()) ? v.trim() : undefined)
+          if ((args.modelo !== undefined && !seguro(args.modelo)) || (args.esfuerzo !== undefined && !seguro(args.esfuerzo))) return fallo('Modelo o esfuerzo con caracteres no válidos.')
+          if (!agente && (args.modelo !== undefined || args.esfuerzo !== undefined)) return fallo('Para elegir modelo o esfuerzo di también "agente".')
+          const eleccion = agente ? { agente, ...(seguro(args.modelo) ? { modelo: seguro(args.modelo) } : {}), ...(seguro(args.esfuerzo) ? { esfuerzo: seguro(args.esfuerzo) } : {}) } : undefined
           const c = await ctx.creaciones.nueva({
             peticion: peticion.slice(0, 4000),
             estilo: 'libre',
@@ -601,12 +765,13 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
             modo: 'agente',
             ...(flow ? { flow } : {}),
             ...(vozElegida ? { vozElegida } : {}),
-            ...(args.directo === true ? { directo: true } : {})
+            ...(args.directo === true ? { directo: true } : {}),
+            ...(eleccion ? { tareas: { guion: eleccion, video: eleccion } } : {})
           })
           if (gasto) recordarGasto(c, gasto)
           ctx.charlar(c.id)
           return ok(
-            `Creación «${c.nombre}» empezada (id ${c.id}). El agente de Recorte está mirando el material y preparando ${args.directo === true ? 'el plan y luego el video' : 'el plan'}: ` +
+            `Creación «${c.nombre}» empezada (id ${c.id})${eleccion ? `, con ${eleccion.agente}${eleccion.modelo ? ` · ${eleccion.modelo}` : ''}${eleccion.esfuerzo ? ` · esfuerzo ${eleccion.esfuerzo}` : ''} (si ese agente no está conectado, lo hace el activo)` : ''}. El agente de Recorte está mirando el material y preparando ${args.directo === true ? 'el plan y luego el video' : 'el plan'}: ` +
               'tarda unos minutos. Mira cómo va con ver_creacion (espera un par de minutos entre consultas). El usuario también lo ve en Recorte (abrir_en_recorte).'
           )
         }

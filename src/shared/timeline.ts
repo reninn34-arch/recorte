@@ -586,6 +586,8 @@ export interface SonidoTL {
   desde?: number
   /** Lo que dura el archivo entero (hasta dónde se puede alargar al recortar). */
   largo?: number
+  /** Si es el sonido separado de un clip de video: su id (para volver a unirlo). */
+  deClip?: string
 }
 
 export const VOLUMEN_SONIDO = 0.6
@@ -1290,6 +1292,7 @@ export function normalizarSonidos(entrada: unknown, total: number): SonidoTL[] {
       ...(typeof s.pista === 'number' && Math.round(s.pista) >= 2 ? { pista: Math.min(PISTAS_SONIDOS, Math.round(s.pista)) } : {}),
       ...(typeof s.desde === 'number' && s.desde > 0.001 ? { desde: Math.round(s.desde * 1000) / 1000 } : {}),
       ...(typeof s.largo === 'number' && s.largo > 0 ? { largo: Math.round(s.largo * 1000) / 1000 } : {}),
+      ...(typeof s.deClip === 'string' && s.deClip ? { deClip: s.deClip } : {}),
       ...(typeof s.volumen === 'number' && Number.isFinite(s.volumen) && Math.abs(s.volumen - VOLUMEN_SONIDO) > 1e-3 ? { volumen: pinza(s.volumen, 0, 1.5) } : {})
     })
   }
@@ -2124,6 +2127,7 @@ export function separarAudio(tl: Timeline, id: string, archivo: string, nombre: 
     archivo,
     nombre,
     volumen: Math.min(1.5, t.clip.sonido?.volumen ?? 1),
+    deClip: id,
     ...(pista > 1 ? { pista } : {})
   }
   const sonidos = normalizarSonidos([...(tl.sonidos ?? []), sonido], duracionTimeline(tl))
@@ -2737,6 +2741,33 @@ export function cambiarSonido(tl: Timeline, id: string, cambio: Partial<Omit<Son
   return { ...tl, sonidos: normalizarSonidos(tl.sonidos.map((s) => (s.id === id ? { ...s, ...cambio } : s)), duracionTimeline(tl)) }
 }
 
+/**
+ * Vuelve a unir al video el sonido que se le separó: el clip vuelve a sonar y el sonido suelto se quita (como
+ * «Vincular» en Premiere). Si el clip ya no existe, no hace nada.
+ */
+export function unirAudio(tl: Timeline, sonidoId: string): Timeline {
+  const s = tl.sonidos?.find((x) => x.id === sonidoId)
+  if (!s?.deClip || !tl.clips.some((c) => c.id === s.deClip)) return tl
+  // Todos los pedazos de ese sonido (si se dividió), para que no suene doble.
+  const resto = tl.sonidos!.filter((x) => x.deClip !== s.deClip)
+  const { sonidos: _antes, ...sin } = silenciarClip(tl, s.deClip, false)
+  return resto.length ? { ...sin, sonidos: resto } : sin
+}
+
+/** Divide un sonido suelto en el segundo `t` de la timeline: quedan dos que siguen sonando igual. */
+export function dividirSonido(tl: Timeline, id: string, t: number): { timeline: Timeline; id?: string } {
+  const s = tl.sonidos?.find((x) => x.id === id)
+  if (!s) return { timeline: tl }
+  const primero = t - s.inicio
+  if (primero < DURACION_MINIMA || s.duracion - primero < DURACION_MINIMA) return { timeline: tl }
+  const nuevo: SonidoTL = { ...s, id: nuevoId('sonido'), inicio: t, duracion: s.duracion - primero, desde: (s.desde ?? 0) + primero }
+  const sonidos = normalizarSonidos(
+    tl.sonidos!.flatMap((x) => (x.id === id ? [{ ...x, duracion: primero }, nuevo] : [x])),
+    duracionTimeline(tl)
+  )
+  return { timeline: { ...tl, sonidos }, id: nuevo.id }
+}
+
 export function borrarSonido(tl: Timeline, id: string): Timeline {
   if (!tl.sonidos?.some((s) => s.id === id)) return tl
   const sonidos = tl.sonidos.filter((s) => s.id !== id)
@@ -2840,8 +2871,20 @@ export function ventanaTimeline(tl: Timeline, desde: number, hasta: number): Tim
           return { x: ini.x, y: ini.y, ancho: ini.ancho, giro: ini.giro, fin: { x: fin.x, y: fin.y, ancho: fin.ancho, giro: fin.giro } }
         })()
       : {}
-    // Si la capa ya venía de antes, su video sigue desde donde iba y su entrada ya pasó.
-    return c.inicio < a ? { ...d, ...recorrido, desde: (c.desde ?? 0) + (a - c.inicio), entrada: undefined } : { ...d, ...recorrido }
+    // Si la capa ya venía de antes, su video sigue desde donde iba, su entrada ya pasó y sus claves se corren:
+    // en el nuevo segundo 0 vale lo que valía en el corte (si no, quedaba congelada en su primera clave).
+    if (c.inicio >= a) return { ...d, ...recorrido }
+    const corrido = a - c.inicio
+    const claves = c.claves
+      ? (Object.fromEntries(
+          Object.entries(c.claves).map(([p, lista]) => {
+            const l = lista as ClaveTL[]
+            if (!l.length) return [p, l]
+            return [p, [{ f: 0, v: valorClave(l, corrido) }, ...l.filter((k) => k.f > corrido + 1e-3).map((k) => ({ f: k.f - corrido, v: k.v }))]]
+          })
+        ) as ClavesCapa)
+      : undefined
+    return { ...d, ...recorrido, desde: (c.desde ?? 0) + corrido, entrada: undefined, ...(claves ? { claves } : {}) }
   })
   const { musica: _m, ...resto } = corta
   return {
