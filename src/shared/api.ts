@@ -145,7 +145,7 @@ export interface EstadoVozGoogle {
   error?: string
 }
 
-export type FaseProgreso = 'ingesta' | 'transcripcion' | 'render' | 'exportar' | 'creacion' | 'subtitulos'
+export type FaseProgreso = 'ingesta' | 'transcripcion' | 'render' | 'exportar' | 'creacion' | 'subtitulos' | 'persona'
 
 export interface EstadoActualizacion {
   /** desarrollo: no es la app instalada; al-dia: no hay nada nuevo; lista: bajada, falta reiniciar. */
@@ -470,6 +470,8 @@ export interface RecorteApi {
   onPiezasProgreso: (cb: (texto: string) => void) => () => void
   /** Anima una pieza con sus datos y la agrega a la biblioteca: devuelve su medio para ponerlo como capa. */
   animarPieza: (id: string, pieza: string, valores: ValoresPieza, duracion: number) => Promise<{ project: Project; medio: string; duracion: number }>
+  /** Separa del fondo a la persona de un clip: el recorte (un medio con transparencia) y dónde va como capa. */
+  recortarPersona: (id: string, timeline: Timeline, clip: string) => Promise<{ project: Project; medio: string; inicio: number; duracion: number; clip: string }>
   /** Anima los subtítulos con su estilo de HyperFrames (con lo que dicen ahora los textos): la timeline al día. */
   animarSubtitulos: (id: string, timeline: Timeline) => Promise<{ project: Project; timeline: Timeline }>
   /** Revisa el audio de la edición: lo que suena mal y cómo arreglarlo. */

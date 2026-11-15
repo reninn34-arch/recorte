@@ -82,7 +82,7 @@ export type OperacionTL =
   | { op: 'borrar_clip'; clip: number }
   | { op: 'mover_clip'; clip: number; a: number }
   | { op: 'recortar_clip'; clip: number; entrada?: number; salida?: number }
-  | { op: 'anadir_texto'; inicio: number; duracion?: number; texto: string; posicion?: PosicionTexto; subtitulo?: boolean }
+  | { op: 'anadir_texto'; inicio: number; duracion?: number; texto: string; posicion?: PosicionTexto; subtitulo?: boolean; detras?: boolean }
   | {
       op: 'cambiar_texto'
       texto_n: number
@@ -107,6 +107,8 @@ export type OperacionTL =
       y?: number
       /** Si es un subtítulo (parte del guion que dibujan los subtítulos animados). */
       subtitulo?: boolean
+      /** Va detrás de las capas (de la persona recortada). */
+      detras?: boolean
     }
   | { op: 'borrar_texto'; texto_n: number }
   /** Lo que va encima del video: un medio de la biblioteca (por su id), en su sitio y su tamaño. */
@@ -122,6 +124,11 @@ export type OperacionTL =
    * Los subtítulos animados con HyperFrames: el estilo (una pieza de «Subtítulos») y sus valores, o "ninguno" para
    * volver al texto simple. El proceso principal los anima y deja aquí el render (si no, se animan al exportar).
    */
+  /**
+   * Separa del fondo a la persona de un clip y la pone encima de él (pista 3): lo que quede entre los dos se ve detrás
+   * de ella. El proceso principal hace el recorte antes de aplicar y deja aquí su medio y el clip; sin medio, no se pudo.
+   */
+  | { op: 'recortar_persona'; clip: number; medio?: string; clipId?: string; duracionReal?: number }
   | { op: 'subtitulos_animados'; estilo: string; valores?: Record<string, string | number | boolean>; render?: SubtitulosHF }
   | ({ op: 'cambiar_capa'; capa_n: number; inicio?: number } & CamposCapa)
   | { op: 'filtros'; grano?: number; polvo?: number; trama?: number; vineta?: number; parpadeo?: number }
@@ -312,7 +319,7 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
       case 'anadir_texto': {
         const i = num(x.inicio)
         if (i !== null && typeof x.texto === 'string' && x.texto.trim()) {
-          ops.push({ op: 'anadir_texto', inicio: i, duracion: num(x.duracion) ?? undefined, texto: x.texto.slice(0, 200), posicion: pos(x.posicion), ...(typeof x.subtitulo === 'boolean' ? { subtitulo: x.subtitulo } : {}) })
+          ops.push({ op: 'anadir_texto', inicio: i, duracion: num(x.duracion) ?? undefined, texto: x.texto.slice(0, 200), posicion: pos(x.posicion), ...(typeof x.subtitulo === 'boolean' ? { subtitulo: x.subtitulo } : {}), ...(typeof x.detras === 'boolean' ? { detras: x.detras } : {}) })
         }
         break
       }
@@ -336,7 +343,8 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
             color_clave: typeof x.color_clave === 'string' && /^#[0-9a-f]{6}$/i.test(x.color_clave) ? x.color_clave : undefined,
             tiempos: Array.isArray(x.tiempos) && x.tiempos.every((y) => typeof y === 'number' && Number.isFinite(y)) ? (x.tiempos as number[]).slice(0, 200) : undefined,
             ...(num(x.x) !== null && num(x.y) !== null ? { x: num(x.x)!, y: num(x.y)! } : {}),
-            ...(typeof x.subtitulo === 'boolean' ? { subtitulo: x.subtitulo } : {})
+            ...(typeof x.subtitulo === 'boolean' ? { subtitulo: x.subtitulo } : {}),
+            ...(typeof x.detras === 'boolean' ? { detras: x.detras } : {})
           })
         }
         break
@@ -369,6 +377,11 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
           }
         }
         ops.push({ op: 'anadir_pieza', pieza: x.pieza, inicio: i, ...(num(x.duracion) !== null ? { duracion: num(x.duracion)! } : {}), valores })
+        break
+      }
+      case 'recortar_persona': {
+        const n = num(x.clip)
+        if (n !== null) ops.push({ op: 'recortar_persona', clip: n })
         break
       }
       case 'subtitulos_animados': {
@@ -618,7 +631,7 @@ export function aplicarOperaciones(
           fallos.push('No pude añadir el texto: la timeline está vacía.')
           break
         }
-        tl = cambiarTexto(r.timeline, r.id, { duracion: o.duracion ?? 3, posicion: o.posicion ?? 'abajo', ...(o.subtitulo ? { subtitulo: true } : {}) })
+        tl = cambiarTexto(r.timeline, r.id, { duracion: o.duracion ?? 3, posicion: o.posicion ?? 'abajo', ...(o.subtitulo ? { subtitulo: true } : {}), ...(o.detras ? { detras: true } : {}) })
         cambios.push(`Añadí el texto «${o.texto}» en ${mmss(o.inicio)}`)
         break
       }
@@ -643,6 +656,7 @@ export function aplicarOperaciones(
         if (o.color_clave !== undefined) cambio.colorClave = o.color_clave
         if (o.tiempos !== undefined) cambio.tiempos = o.tiempos
         if (o.subtitulo !== undefined) cambio.subtitulo = o.subtitulo
+        if (o.detras !== undefined) cambio.detras = o.detras
         if (o.x !== undefined && o.y !== undefined && o.posicion === undefined) {
           cambio.x = o.x
           cambio.y = o.y
@@ -691,6 +705,29 @@ export function aplicarOperaciones(
         }
         tl = r.timeline
         cambios.push(`Puse la animación «${o.pieza}» en ${mmss(o.inicio)}`)
+        break
+      }
+      case 'recortar_persona': {
+        if (!o.medio || !o.clipId || !o.duracionReal) {
+          fallos.push(`No pude separar a la persona del clip ${o.clip}.`)
+          break
+        }
+        // Donde esté el clip ahora (otra operación de este pedido pudo moverlo).
+        const tr = tramos(tl).find((x) => x.clip.id === o.clipId)
+        if (!tr) {
+          fallos.push(`El clip ${o.clip} ya no está: no puse a su persona.`)
+          break
+        }
+        medios[o.medio] = o.duracionReal
+        // Una sola por clip: la anterior (de otro recorte del mismo clip) se va.
+        for (const vieja of (tl.capas ?? []).filter((c) => c.persona?.clip === o.clipId)) tl = borrarCapa(tl, vieja.id)
+        const r = anadirCapa(tl, { fuente: o.medio, inicio: tr.inicio, duracion: Math.min(o.duracionReal, tr.fin - tr.inicio), x: 0.5, y: 0.5, ancho: 1, pista: 3, persona: { clip: o.clipId } }, medios)
+        if (r.timeline === tl) {
+          fallos.push(`No pude poner a la persona del clip ${o.clip}.`)
+          break
+        }
+        tl = r.timeline
+        cambios.push(`Separé a la persona del clip ${o.clip} y la puse encima (lo que va en las pistas 1 y 2 y los textos «detrás» quedan detrás de ella)`)
         break
       }
       case 'subtitulos_animados': {
@@ -1157,6 +1194,7 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
   barrido-marca (1.1 s: transición; ponla con su centro justo en un corte, inicio = corte − 0.55)
   destellos (2 s: celebrar un momento; "x","y" en % desde dónde salen)
   cierre-logo (2.4 s: el final, con el logo; "texto" eslogan opcional, "conFondo" true para tapar el video)
+- {"op":"recortar_persona","clip":N}  SEPARA A LA PERSONA DEL FONDO en ese clip (tarda: unos 10 s por segundo de clip) y la pone encima de él, calzada. Con eso: (1) TEXTO DETRÁS DE LA PERSONA: un cambiar_texto o anadir_texto con "detras":true se ve por detrás de su cabeza y su cuerpo (el título grande que la persona tapa: úsalo con letra gruesa y grande, "tamano" 2 o más, sin caja, donde la persona lo tape en parte); (2) lo que pongas en las pistas 1 y 2 (anadir_pieza, anadir_capa) también queda detrás de ella; (3) FONDO DESENFOCADO O CAMBIADO: desenfoca el clip, o pon una imagen a pantalla completa en la pista 1, y la persona sigue nítida encima. Hazlo en clips donde se ve bien a la persona (no de muy lejos ni saliendo del cuadro). Si después cambias el recorte, el zoom o el color del clip, vuelve a pedirlo.
 - {"op":"subtitulos_animados","estilo":"subtitulos-rotulo","valores":{"colorClave":"#72f9fd"}}  SUBTÍTULOS ANIMADOS con HyperFrames: los textos de subtítulo (los que hiciste desde la voz) siguen siendo el guion y el estilo los dibuja encima, frase a frase y al ritmo de cada palabra; las palabras entre *asteriscos* van resaltadas. Estilos: subtitulos-rotulo (bloque oscuro, letra gruesa, la frase crece un poco; "colorCaja","colorTexto","colorClave","mayusculas","y","tamano"), subtitulos-pildora (palabra a palabra con la que suena sobre una píldora; "colorPildora","colorTexto","colorClave","mayusculas","y","tamano"), subtitulos-palabra (de a 1-3 palabras enormes al centro; "colorTexto","colorClave","porGrupo","y","tamano") y los que el usuario creó. "estilo":"ninguno" vuelve al texto simple. Si corriges un subtítulo con cambiar_texto, se vuelven a animar solos. Un texto que va con la voz pero no está marcado como subtítulo se marca con cambiar_texto "subtitulo":true (y anadir_texto acepta "subtitulo":true); "subtitulo":false lo saca.
 - {"op":"crear_pieza","peticion":"…","inicio":T,"duracion":S}  (solo en el chat de Recorte) una animación NUEVA a medida cuando ninguna de las de arriba sirve o el usuario pide algo distinto: describe con detalle cómo debe verse y moverse (estilo, ritmo, colores, qué textos lleva). La crea tu agente con HyperFrames en unos minutos, queda puesta en el segundo T y guardada para reusarla.
 - {"op":"cambiar_capa","capa_n":N, …los mismos campos…}  y {"op":"borrar_capa","capa_n":N}

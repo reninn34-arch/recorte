@@ -44,6 +44,8 @@ export interface ContextoMcp {
   /** Quita el fondo liso de una imagen de la biblioteca y la agrega como medio nuevo. */
   quitarFondo: (id: string, medio: string) => Promise<{ project: Project; medio: string }>
   /** Las piezas animadas (HyperFrames) y animar una con sus datos: devuelve su medio para ponerla como capa. */
+  /** Separa del fondo a la persona de un clip (tal como se ve): el medio del recorte y lo que dura. */
+  persona?: (id: string, tl: Timeline, clip: string) => Promise<{ medio: string; duracion: number }>
   /** Si los subtítulos animados quedaron atrás, los vuelve a animar (y guarda la timeline al día). */
   subtitulos?: (id: string, tl: Timeline) => Promise<Timeline>
   piezas?: {
@@ -325,6 +327,22 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
           const s = await ctx.copiarSonido(p.id, o.sonido)
           if (s) o.audio = s
         }
+        // La persona de un clip se separa del fondo antes de aplicar (el recorte queda en la biblioteca).
+        let falloPersona = ''
+        for (const o of ops as OperacionTL[]) {
+          if (o.op !== 'recortar_persona' || !ctx.persona) continue
+          try {
+            const base = timelineDe(p)
+            const clip = base.clips[Math.round(o.clip) - 1]
+            if (!clip) continue
+            const r = await ctx.persona(p.id, base, clip.id)
+            o.medio = r.medio
+            o.clipId = clip.id
+            o.duracionReal = r.duracion
+          } catch (e) {
+            falloPersona = e instanceof Error ? e.message : String(e)
+          }
+        }
         // Las piezas animadas se animan antes de aplicar (quedan en la biblioteca).
         for (const o of ops as OperacionTL[]) {
           if (o.op !== 'anadir_pieza' || !ctx.piezas) continue
@@ -359,7 +377,7 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
         const partes = [
           r.cambios.length ? `Hecho: ${r.cambios.join('; ')}.` : 'No cambió nada.',
           notaSubs,
-          r.fallos.length ? `No se pudo: ${r.fallos.join(' ')}` : '',
+          r.fallos.length ? `No se pudo: ${r.fallos.join(' ')}${falloPersona ? ` (${falloPersona})` : ''}` : '',
           fallosVoz.length ? `Voz que no salió: ${fallosVoz.join(' ')}` : '',
           `La timeline dura ahora ${duracionTimeline(r.timeline).toFixed(1)} s.`
         ]

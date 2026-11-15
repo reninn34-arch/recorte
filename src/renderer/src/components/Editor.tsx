@@ -18,7 +18,7 @@ import { SubtitulosAnimados } from './SubtitulosAnimados'
 
 const CLAVE_ALTO_TL = 'recorte.altoLineaDeTiempo'
 import { mediaUrl } from '../media'
-import { ajustarClip, ponerMusica, anadirSonido, sobrescribirClip, separarAudio, sonidoUnicoMulticam, inicioEscenaMulticam, anidarClips, clipsSeguidos, cambiarATramo, ubicar, capaNueva, cambiarCapa, cambiarFuente, escalaAnimada, type TipoAnimar, duracionTimeline, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, timelineActiva, type Timeline } from '../../../shared/timeline'
+import { ajustarClip, anadirCapa, borrarCapa, duracionesDeMedios, ponerMusica, anadirSonido, sobrescribirClip, separarAudio, sonidoUnicoMulticam, inicioEscenaMulticam, anidarClips, clipsSeguidos, cambiarATramo, ubicar, capaNueva, cambiarCapa, cambiarFuente, escalaAnimada, type TipoAnimar, duracionTimeline, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, timelineActiva, type Timeline } from '../../../shared/timeline'
 import { useHistorial, useReproductor, type FuentesVista } from '../hooks/timeline'
 import { Monitor } from './Monitor'
 import { MediosPanel } from './MediosPanel'
@@ -282,6 +282,34 @@ export function Editor({
       onAviso(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error))
     } finally {
       setEstabilizando(null)
+    }
+  }
+  /**
+   * Separa a la persona del fondo del clip: su recorte (tal como se ve el clip) queda encima de él, en la pista 3. Lo
+   * que vaya en las pistas 1 y 2 y los textos «detrás» se ven por detrás de ella.
+   */
+  const [recortandoPersona, setRecortandoPersona] = useState<{ clip: string; pct: number } | null>(null)
+  async function separarPersona(clipId: string) {
+    if (recortandoPersona || !timeline.clips.some((x) => x.id === clipId)) return
+    setRecortandoPersona({ clip: clipId, pct: 0 })
+    const dejar = window.recorte.onProgreso((p) => {
+      if (p.id === proyecto.id && p.fase === 'persona') setRecortandoPersona({ clip: clipId, pct: p.pct })
+    })
+    try {
+      const r = await window.recorte.recortarPersona(proyecto.id, timeline, clipId)
+      onMedios(r.project.medios ?? [])
+      const medios = { principal: proyecto.source.duration, ...duracionesDeMedios(r.project.medios) }
+      // Una por clip: si ya tenía, se cambia por la nueva.
+      const sinVieja = (timeline.capas ?? []).filter((c) => c.persona?.clip === clipId).reduce((t, c) => borrarCapa(t, c.id), timeline)
+      const hecho = anadirCapa(sinVieja, { fuente: r.medio, inicio: r.inicio, duracion: r.duracion, x: 0.5, y: 0.5, ancho: 1, pista: 3, persona: { clip: clipId } }, medios)
+      if (hecho.timeline === sinVieja) throw new Error('No pude poner el recorte en la timeline.')
+      historial.aplicar(hecho.timeline)
+      onAviso('Listo: la persona quedó encima de su clip. Marca «Detrás de la persona» en un texto, o pon algo en las pistas 1 o 2, y se verá por detrás de ella.')
+    } catch (error) {
+      onAviso(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error))
+    } finally {
+      dejar()
+      setRecortandoPersona(null)
     }
   }
   async function congelar() {
@@ -785,6 +813,8 @@ export function Editor({
         seguirZona={proyecto.demo ? undefined : (fuente, pedido) => window.recorte.seguirZona(proyecto.id, fuente, pedido)}
         sacandoCuadro={sacandoCuadro}
         onEstabilizar={proyecto.demo ? undefined : (clipId) => void estabilizar(clipId)}
+        onSepararPersona={proyecto.demo ? undefined : (clipId) => void separarPersona(clipId)}
+        separandoPersona={recortandoPersona}
         estabilizando={estabilizando}
         congelando={congelando}
         onAnimarCapa={proyecto.demo ? undefined : (capaId, tipo) => void animarCapa(capaId, tipo)}

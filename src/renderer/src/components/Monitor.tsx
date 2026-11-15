@@ -440,8 +440,8 @@ export function Monitor({
               <div
                 key={c.id}
                 className="monitor-capa-grupo"
-                // Los subtítulos animados ocupan todo el cuadro: no se agarran (se corrigen en sus textos).
-                style={{ ...(filtroAjuste ? { filter: filtroAjuste } : {}), ...(c.id === CAPA_SUBTITULOS ? { pointerEvents: 'none' } : {}) }}
+                // Los subtítulos animados y la persona recortada ocupan todo el cuadro: no se agarran (se eligen en la timeline).
+                style={{ ...(filtroAjuste ? { filter: filtroAjuste } : {}), ...(c.id === CAPA_SUBTITULOS || c.persona ? { pointerEvents: 'none' } : {}) }}
               >
                 {fin && (
                   <>
@@ -502,7 +502,7 @@ export function Monitor({
             return (
               <span
                 key={r.id}
-                className={`monitor-rotulo ${libre ? 'libre' : r.posicion} ${r.sinCaja ? 'sin-caja' : ''} ${elegida ? 'is-elegida' : ''}`}
+                className={`monitor-rotulo ${libre ? 'libre' : r.posicion} ${r.sinCaja ? 'sin-caja' : ''} ${elegida ? 'is-elegida' : ''} ${r.detras ? 'detras' : ''}`}
                 style={{
                   ...(libre ? { left: `${libre.x * 100}%`, top: `${libre.y * 100}%` } : {}),
                   ...(r.tamano ? { fontSize: `calc(var(--rotulo) * ${r.tamano})` } : {}),

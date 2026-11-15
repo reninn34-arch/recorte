@@ -232,6 +232,8 @@ export function TimelineEditor({
   congelando,
   onEstabilizar,
   estabilizando,
+  onSepararPersona,
+  separandoPersona,
   onExportarCuadro,
   onPantallaCompleta,
   pantallaCompleta,
@@ -268,6 +270,10 @@ export function TimelineEditor({
   onEstabilizar?: (clipId: string) => void
   /** El clip que se está estabilizando. */
   estabilizando?: string | null
+  /** Separa a la persona del fondo del clip y la pone encima (para textos y piezas detrás de ella, o cambiar el fondo). */
+  onSepararPersona?: (clipId: string) => void
+  /** El clip al que se le está separando la persona, y cuánto lleva (0 a 1). */
+  separandoPersona?: { clip: string; pct: number } | null
   /** Congela el cuadro del cabezal: lo pone como un clip quieto ahí mismo. */
   onCongelar?: () => void
   congelando?: boolean
@@ -1136,6 +1142,9 @@ export function TimelineEditor({
           ]
         })(),
         ...(video && onEstabilizar ? [{ nombre: 'Estabilizar', accion: () => onEstabilizar(c.id) }] : []),
+        ...(video && onSepararPersona
+          ? [{ nombre: (tl.capas ?? []).some((x) => x.persona?.clip === c.id) ? 'Volver a separar a la persona' : 'Separar a la persona del fondo', desactivada: Boolean(separandoPersona), accion: () => onSepararPersona(c.id) }]
+          : []),
         ...(onCongelar && video ? [{ nombre: 'Congelar el cuadro del cabezal', atajo: 'Mayús+F', accion: () => onCongelar() }] : []),
         ...(video && !c.rampa
           ? [
@@ -2415,6 +2424,21 @@ export function TimelineEditor({
                 <Icon name="velocidad" size={14} /> {estabilizando === clipElegido.clip.id ? 'Estabilizando…' : 'Estabilizar'}
               </button>
             )}
+            {onSepararPersona && esVideo(clipElegido.clip.fuente) && (
+              <button
+                className="btn small ghost"
+                disabled={Boolean(separandoPersona)}
+                onClick={() => onSepararPersona(clipElegido.clip.id)}
+                title="Separa a la persona del fondo y la pone encima del clip: así un texto «detrás», un título o un logo se ven por detrás de ella, o le cambias o desenfocas el fondo. Tarda unos 10 segundos por cada segundo del clip."
+              >
+                <Icon name="seleccion" size={14} />{' '}
+                {separandoPersona?.clip === clipElegido.clip.id
+                  ? `Separando a la persona… ${Math.round(separandoPersona.pct * 100)} %`
+                  : (tl.capas ?? []).some((x) => x.persona?.clip === clipElegido.clip.id)
+                    ? 'Volver a separar a la persona'
+                    : 'Separar a la persona'}
+              </button>
+            )}
             <div className="tl-ajustes">
               <details className="ed-grupo" open={Boolean(clipElegido.clip.zonas?.length)}>
                 <summary className="ed-seccion">
@@ -3354,6 +3378,17 @@ export function TimelineEditor({
               />
               <span>Es un subtítulo</span>
             </label>
+            <label className="tl-check" title="El texto va por detrás de lo que hay encima del video: con la persona separada del fondo, queda detrás de ella">
+              <input
+                type="checkbox"
+                checked={textoElegido.detras === true}
+                onChange={(e) => historial.aplicar(cambiarTexto(timeline, textoElegido.id, { detras: e.target.checked }))}
+              />
+              <span>Detrás de la persona</span>
+            </label>
+            {textoElegido.detras && !(tl.capas ?? []).some((x) => x.persona) && (
+              <span className="tl-dim">Para que se note, separa a la persona: elige el clip y pulsa «Separar a la persona».</span>
+            )}
             <label className="tl-check" title="Sin la caja oscura: solo la letra con su borde">
               <input
                 type="checkbox"

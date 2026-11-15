@@ -2834,7 +2834,9 @@ button { cursor: pointer; }
 .cr-sugiere-botones { display: flex; flex-wrap: wrap; gap: 6px; }
 
 /* El cuadro del video final dentro del monitor: capas encima y rótulos, movibles con el ratón. */
-.monitor-cuadro { position: absolute; inset: 0; margin: auto; pointer-events: none; }
+.monitor-cuadro { position: absolute; inset: 0; margin: auto; pointer-events: none; isolation: isolate; }
+/* Un texto «detrás» va por debajo de las capas (de la persona recortada), como en el MP4. */
+.monitor-rotulo.detras { z-index: -1; }
 .monitor-cuadro > * { pointer-events: auto; }
 .monitor-rotulo.libre { transform: translate(-50%, -50%); bottom: auto; }
 .monitor-rotulo.is-elegida, .monitor-capa.is-elegida { outline: 2px dashed var(--accent, #7aa2ff); outline-offset: 3px; }

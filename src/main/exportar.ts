@@ -141,9 +141,11 @@ function escribirAss(
   timeline: Timeline,
   voz: Bloque[],
   ancho: number,
-  alto: number
+  alto: number,
+  /** true: solo los textos «detrás» (se pintan antes de las capas); false: los demás y la voz. */
+  detras = false
 ): string | null {
-  const textos = timeline.textos.filter((t) => t.texto.trim())
+  const textos = timeline.textos.filter((t) => t.texto.trim() && (t.detras === true) === detras)
   if (textos.length === 0 && voz.length === 0) return null
 
   const corto = Math.min(ancho, alto)
@@ -215,7 +217,7 @@ ${estilos.join('\n')}
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 ${eventos}
 `
-  const nombre = 'rotulos-timeline.ass'
+  const nombre = detras ? 'rotulos-detras.ass' : 'rotulos-timeline.ass'
   writeFileSync(join(carpeta, nombre), contenido, 'utf8')
   return nombre
 }
@@ -281,8 +283,11 @@ export async function exportarTimeline(
 
   const voz = opciones.subtitulos ? bloquesDeVoz(proyecto, timeline) : []
   let ass: string | null
+  let assDetras: string | null
   try {
     ass = escribirAss(carpeta, proyecto, timeline, voz, ancho, alto)
+    // Los textos «detrás» van por debajo de las capas (de la persona recortada): se pintan antes que ellas.
+    assDetras = escribirAss(carpeta, proyecto, timeline, [], ancho, alto, true)
     if (voz.length) writeFileSync(join(salidas, `${base}.srt`), construirSrt(voz), 'utf8')
   } catch (error) {
     return { ok: false, error: `No pude preparar los rótulos: ${error instanceof Error ? error.message : String(error)}` }
@@ -543,6 +548,10 @@ export async function exportarTimeline(
   // Lo que va encima (imágenes, logos, íconos, tomas de apoyo): cada capa en su sitio, su tamaño y
   // su entrada, igual que en el monitor. Va debajo de los rótulos.
   let capaBase = '[vcat]'
+  if (assDetras) {
+    partes.push(`[vcat]subtitles=${assDetras}${letrasEn(carpeta) ? ':fontsdir=fuentes' : ''}[vcatDetras]`)
+    capaBase = '[vcatDetras]'
+  }
   // En el orden de sus pistas: las de una pista más alta se pintan después (tapan a las de abajo).
   const capas = capasEnOrden((timeline.capas ?? []).filter((c) => fuenteDe(c.fuente)))
   // FFmpeg pone las capas en píxeles enteros: una que se mueve o crece despacio temblaría. Con alguna así,
@@ -551,7 +560,7 @@ export async function exportarTimeline(
   const anchoC = ancho * sup
   const altoC = alto * sup
   if (sup > 1) {
-    partes.push(`[vcat]scale=${anchoC}:${altoC}:flags=bicubic[vcatSup]`)
+    partes.push(`${capaBase}scale=${anchoC}:${altoC}:flags=bicubic[vcatSup]`)
     capaBase = '[vcatSup]'
   }
   capas.forEach((c, i) => {

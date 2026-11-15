@@ -69,6 +69,7 @@ import { buscarActualizacion, estadoActualizacion, instalarActualizacion, prepar
 import { activarGustos, agregarGustos, bloqueGustos, cargarGustos, olvidarGustos, quitarGusto, senalGusto, usoCreacion } from './gustos'
 import { aplicarOperaciones, type MensajeChat, type OperacionTL } from '../shared/chat'
 import { buscarPython, rutaScriptPython, transcribir, transcribirArchivo } from './transcribir'
+import { recortarPersonaDeClip } from './persona'
 
 // El esquema tiene que declararse antes de que Electron esté listo.
 protocol.registerSchemesAsPrivileged([
@@ -2066,6 +2067,24 @@ app.whenReady().then(() => {
     const timeline: Timeline = { ...tl, subtitulosHF: { ...s, medio, huella: huellaSubtitulos(tl), inicio, duracion: r.duracion } }
     return { project, timeline }
   }
+  /**
+   * Separa del fondo a la persona de un clip (tal como se ve) y deja el recorte en la biblioteca: se pone encima del
+   * mismo clip, en la pista más alta, y lo que quede entre los dos se ve detrás de ella.
+   */
+  async function recortarPersona(id: string, tl: Timeline, clipId: string) {
+    const p = proyectos.abrir(id)
+    if (!p) throw new Error('El proyecto ya no existe.')
+    const r = await recortarPersonaDeClip(p, proyectos.carpeta(id), tl, clipId, (pct, texto) => enviarProgreso({ id, fase: 'persona', pct, texto: texto ?? 'Separando a la persona' }))
+    let project = p
+    let medio = p.medios?.find((m) => m.ruta === r.archivo)?.id
+    if (!medio) {
+      const hecho = await agregarRutas(id, [r.archivo])
+      if (!hecho.agregados.length) throw new Error(hecho.fallos[0] ?? 'No pude agregar el recorte a la biblioteca.')
+      project = hecho.project
+      medio = hecho.agregados[0]
+    }
+    return { project, medio, inicio: r.inicio, duracion: r.duracion, clip: clipId }
+  }
   /** Antes de exportar (o de que el agente mire): si los subtítulos animados quedaron atrás, se vuelven a animar. */
   async function subtitulosListos(id: string, tl: Timeline, onProgreso?: (pct: number, texto?: string) => void): Promise<Timeline> {
     if (!tl.subtitulosHF || subtitulosAlDia(tl) || !frasesSubtitulos(tl).frases.length) return tl
@@ -2132,6 +2151,11 @@ app.whenReady().then(() => {
     return animarPieza(id, piezaId, valores as ValoresPieza, duracion)
   })
 
+  ipcMain.handle('persona:recortar', async (_evento, id: unknown, timeline: unknown, clip: unknown) => {
+    const p = typeof id === 'string' ? proyectos.abrir(id) : null
+    if (!p || !timeline || typeof timeline !== 'object' || typeof clip !== 'string') throw new Error('Datos inválidos.')
+    return recortarPersona(p.id, normalizarTimeline(timeline, p.source.duration, duracionesDeMedios(p.medios)), clip)
+  })
   ipcMain.handle('subtitulos:animar', async (_evento, id: unknown, timeline: unknown) => {
     const p = typeof id === 'string' ? proyectos.abrir(id) : null
     if (!p || !timeline || typeof timeline !== 'object') throw new Error('Datos inválidos.')
@@ -2890,6 +2914,27 @@ app.whenReady().then(() => {
             }
           }
         }
+        // La persona que pidió separar del fondo: el recorte se hace aquí y queda en la biblioteca antes de aplicar.
+        if (turno.ok) {
+          for (const o of turno.operaciones) {
+            if (o.op !== 'recortar_persona') continue
+            try {
+              const base = normalizarTimeline(timeline, proyecto.source.duration, duracionesDeMedios((proyectos.abrir(id) ?? proyecto).medios))
+              const clip = base.clips[Math.round(o.clip) - 1]
+              if (!clip) continue
+              const r = await recortarPersona(id, base, clip.id)
+              o.medio = r.medio
+              o.clipId = clip.id
+              o.duracionReal = r.duracion
+              const { transcript: _t, ...ligero } = r.project
+              for (const w of BrowserWindow.getAllWindows()) w.webContents.send('proyecto:externo', { proyecto: ligero, quien: 'recorte', conTimeline: false })
+            } catch (e) {
+              turno.mensaje = `${turno.mensaje}
+
+No pude separar a la persona: ${e instanceof Error ? e.message : String(e)}`
+            }
+          }
+        }
         // Las piezas animadas que pidió: se animan aquí (con la marca) y quedan en la biblioteca antes de aplicar.
         if (turno.ok) {
           const fallosPieza: string[] = []
@@ -3089,6 +3134,10 @@ No pude animar los subtítulos (se animan al exportar): ${e instanceof Error ? e
     quitarFondo: (id, medio) => quitarFondo(id, medio),
     piezas: { listar: listarPiezas, animar: animarPieza },
     subtitulos: (id, tl) => subtitulosListos(id, tl),
+    persona: async (id, tl, clip) => {
+      const r = await recortarPersona(id, tl, clip)
+      return { medio: r.medio, duracion: r.duracion }
+    },
     animarImagen: (id, medio, tipo) => animarImagen(id, medio, tipo),
     // ===== Crear por MCP (6.3) =====
     creaciones: {

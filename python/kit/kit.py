@@ -7,6 +7,8 @@ Uso (desde la carpeta de trabajo):
                                                               cómo queda una foto a pantalla completa
   python kit/kit.py armar <receta.json> [--prueba 0.5,3,8]    hace el video (o solo esos fotogramas)
   python kit/kit.py recortar <imagen> [--salida x.png]       quita un fondo liso: un PNG con transparencia para una capa
+  python kit/kit.py recortar-persona <video> [--desde s --hasta s] [--salida x.webm]   separa a la persona del fondo de un
+                                                             video: un WebM con transparencia para ponerlo encima
 
 La receta está explicada en kit/RECETA.md. Todo sale en una sola pasada: los fotogramas se dibujan con
 NumPy y Pillow y van por tubería a FFmpeg, con la música recortada y su fundido.
@@ -3376,6 +3378,89 @@ def recortar_video(ruta, salida=None):
     return {'archivo': salida, 'ancho': w, 'alto': h, 'cuadros': n}
 
 
+def recortar_persona(ruta, salida=None, desde=None, hasta=None):
+    """Separa del fondo a la persona (o al sujeto principal) de un video cualquiera, cuadro a cuadro con el modelo, y la
+    deja en un WebM con transparencia del mismo tamaño y duración: puesto como capa encima del mismo video, lo que quede
+    entre los dos (un título, un logo) se ve DETRÁS de la persona; y desenfocando o cambiando lo de abajo, cambia el fondo.
+
+    La silueta se estabiliza en el tiempo (donde la imagen no cambió entre un cuadro y el siguiente, se parece a la del
+    cuadro anterior) para que el borde no tiemble. Va diciendo «PROGRESO 0.42» por stderr."""
+    import cv2
+    info = probar(ruta)
+    if not info.get('ancho'):
+        raise SystemExit('Ese archivo no tiene imagen.')
+    w, h = int(info['ancho']), int(info['alto'])
+    if max(w, h) > 1920:
+        k = 1920 / max(w, h)
+        w, h = round(w * k), round(h * k)
+    w -= w % 2
+    h -= h % 2
+    salida = salida or os.path.splitext(ruta)[0] + '-persona.webm'
+    r = subprocess.run([FFPROBE, '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate', '-of', 'csv=p=0', ruta],
+                       capture_output=True, text=True)
+    fps = (r.stdout.strip() or '30/1').split(',')[0]
+    try:
+        num, den = (float(x) for x in (fps.split('/') + ['1'])[:2])
+        fps_n = num / max(den, 1e-6)
+    except ValueError:
+        fps_n = 30.0
+    tramo_ = []
+    if desde:
+        tramo_ += ['-ss', f'{float(desde):.3f}']
+    if hasta:
+        tramo_ += ['-t', f'{float(hasta) - float(desde or 0):.3f}']
+    dur = (float(hasta) if hasta else info['duracion']) - float(desde or 0)
+    total = max(1, round(dur * fps_n))
+    sesion = modelo_fondo()
+    nombre_entrada = sesion.get_inputs()[0].name
+    lee = subprocess.Popen([FFMPEG, '-v', 'error', *tramo_, '-i', ruta, '-vf', f'scale={w}:{h}', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
+                           stdout=subprocess.PIPE)
+    os.makedirs(os.path.dirname(os.path.abspath(salida)), exist_ok=True)
+    escribe = subprocess.Popen([FFMPEG, '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', f'{w}x{h}', '-r', fps, '-i', '-',
+                                '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-b:v', '0', '-crf', '24', '-row-mt', '1', '-cpu-used', '4',
+                                '-auto-alt-ref', '0', salida], stdin=subprocess.PIPE)
+    media = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+    borde = max(1, round(min(w, h) / 500))
+    previa, gris_previo, n, visibles, cubre = None, None, 0, 0, 0.0
+    try:
+        while True:
+            datos = lee.stdout.read(w * h * 3)
+            if len(datos) < w * h * 3:
+                break
+            a = np.frombuffer(datos, np.uint8).reshape(h, w, 3)
+            chico = cv2.resize(a, (1024, 1024), interpolation=cv2.INTER_AREA).astype(np.float32)
+            chico = chico / max(float(chico.max()), 1e-6) - media
+            m = sesion.run(None, {nombre_entrada: chico.transpose(2, 0, 1)[None]})[0][0, 0]
+            m = (m - m.min()) / max(float(m.max() - m.min()), 1e-6)
+            m = cv2.resize(m, (w, h), interpolation=cv2.INTER_LINEAR)
+            # Decidido (sin zonas a medias que dejan ver el fondo a través de la persona) pero con la orilla suave.
+            alfa = cv2.GaussianBlur(np.clip((m - 0.3) / 0.4, 0, 1).astype(np.float32), (2 * borde + 1, 2 * borde + 1), 0)
+            gris = cv2.cvtColor(cv2.resize(a, (w // 4, h // 4), interpolation=cv2.INTER_AREA), cv2.COLOR_RGB2GRAY).astype(np.float32)
+            if previa is not None:
+                # Donde la imagen casi no cambió, la silueta tampoco debería: se mezcla con la anterior (quita el temblor
+                # del borde). Donde hay movimiento, manda la nueva (sin estela).
+                quieto = np.clip(1 - cv2.GaussianBlur(np.abs(gris - gris_previo), (9, 9), 0) / 12, 0, 1) * 0.55
+                quieto = cv2.resize(quieto, (w, h), interpolation=cv2.INTER_LINEAR)
+                alfa = alfa * (1 - quieto) + previa * quieto
+            previa, gris_previo = alfa, gris
+            parte = float(alfa.mean())
+            cubre += parte
+            visibles += parte > 0.004
+            escribe.stdin.write(np.dstack([a, (alfa * 255).astype(np.uint8)]).tobytes())
+            n += 1
+            if n % 10 == 0:
+                print(f'PROGRESO {min(0.99, n / total):.3f}', file=sys.stderr, flush=True)
+    finally:
+        lee.kill()
+    escribe.stdin.close()
+    if escribe.wait() != 0 or not n:
+        raise SystemExit('No pude escribir el video de la persona.')
+    if visibles < n * 0.2:
+        os.remove(salida)
+        raise SystemExit('No encontré a una persona (ni un sujeto claro) en ese tramo del video.')
+    return {'archivo': salida, 'ancho': w, 'alto': h, 'cuadros': n, 'duracion': round(n / fps_n, 3), 'cubre': round(cubre / n, 3)}
+
+
 def recortar_croma(a, fondo, salida):
     """Verde croma, como lo hacen los programas de efectos: la transparencia sale de cuánto domina el verde
     en cada píxel (clave por diferencia de color). Así el humo y el pelo quedan semitransparentes y sin verde,
@@ -4525,6 +4610,11 @@ def main():
     rv = sub.add_parser('recortar-video')
     rv.add_argument('clip')
     rv.add_argument('--salida')
+    rpe = sub.add_parser('recortar-persona')
+    rpe.add_argument('video')
+    rpe.add_argument('--salida')
+    rpe.add_argument('--desde', type=float)
+    rpe.add_argument('--hasta', type=float)
     rv2 = sub.add_parser('revisar')
     rv2.add_argument('video')
     rv2.add_argument('--referencia', help='el video de referencia, para comparar ritmo y estilo')
@@ -4631,6 +4721,8 @@ def main():
         print(json.dumps(separar(x.imagen, x.planos, x.salida), ensure_ascii=False))
     elif x.orden == 'recortar':
         print(json.dumps(recortar(x.imagen, x.salida, x.tolerancia, x.modo), ensure_ascii=False))
+    elif x.orden == 'recortar-persona':
+        print(json.dumps(recortar_persona(x.video, x.salida, x.desde, x.hasta), ensure_ascii=False))
     elif x.orden == 'golpes':
         golpes(x.archivo, x.n)
     elif x.orden == 'hoja':

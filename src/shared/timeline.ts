@@ -367,6 +367,8 @@ export interface TextoTL {
   tiempos?: number[]
   /** Un subtítulo hecho desde la voz (se rehacen todos juntos con otro estilo). */
   subtitulo?: boolean
+  /** Va DETRÁS de lo que hay encima del video (de la persona recortada, sobre todo): el título por detrás de la cabeza. */
+  detras?: boolean
 }
 
 export type AnimacionTexto = 'palabras' | 'maquina' | 'pop' | 'subir' | 'pintar' | 'rotulo'
@@ -539,6 +541,11 @@ export interface CapaTL {
   animada?: { tipo: TipoAnimar; base: FuenteId; escala?: number }
   /** Si es una pieza animada (HyperFrames): cuál y con qué datos, para cambiarlos y volver a animarla. */
   pieza?: { id: string; valores: Record<string, string | number | boolean> }
+  /**
+   * La persona de un clip, separada de su fondo (un WebM con transparencia del clip tal como se ve): va encima del
+   * mismo clip, así lo que quede entre los dos (títulos, logos, textos «detrás») se ve detrás de la persona.
+   */
+  persona?: { clip: string }
   /**
    * Escena 2.5D: a qué distancia está la capa, 0 (pegada al fondo: se mueve con él) a 1 (muy cerca de la
    * cámara: se mueve y crece 2,5 veces más que el fondo). Sin ella, la capa no sigue a la cámara.
@@ -1346,6 +1353,7 @@ export function normalizarTimeline(entrada: unknown, duracionFuente: number, otr
       texto: typeof t.texto === 'string' ? t.texto : '',
       posicion: t.posicion === 'arriba' || t.posicion === 'centro' ? t.posicion : 'abajo',
       ...(t.subtitulo === true ? { subtitulo: true } : {}),
+      ...(t.detras === true ? { detras: true } : {}),
       ...estiloTexto(t),
       ...posicionLibre(t),
       ...(() => {
@@ -1478,6 +1486,7 @@ export function normalizarCapas(entrada: unknown, total: number, medios: Record<
             }
           }
         : {}),
+      ...(c.persona && typeof c.persona.clip === 'string' && c.persona.clip ? { persona: { clip: c.persona.clip.slice(0, 80) } } : {}),
       ...(typeof c.profundidad === 'number' && Number.isFinite(c.profundidad) ? { profundidad: Math.round(pinza(c.profundidad, 0, 1) * 100) / 100 } : {}),
       ...(num(c.desenfoque, 0) > 0.005 ? { desenfoque: Math.round(pinza(num(c.desenfoque, 0), 0, 1) * 100) / 100 } : {}),
       ...(normalizarClavesCapa(c.claves, pinza(c.duracion, DURACION_MINIMA, Math.max(DURACION_MINIMA, total - inicio)))
@@ -2599,6 +2608,7 @@ export function cambiarTexto(tl: Timeline, id: string, cambio: Partial<Omit<Text
       const tiempos = normalizarTiempos(cambio.tiempos ?? x.tiempos, nuevo.texto, nuevo.duracion)
       if (tiempos) nuevo.tiempos = tiempos
       if (!nuevo.subtitulo) delete nuevo.subtitulo
+      if (!nuevo.detras) delete nuevo.detras
       return nuevo
     })
   }

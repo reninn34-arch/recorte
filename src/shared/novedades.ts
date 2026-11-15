@@ -24,6 +24,35 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.62',
+    fecha: '2026-11-15',
+    resumen: 'Separa a la persona del fondo en un video: textos y títulos por detrás de ella, o cámbiale el fondo.',
+    novedades: [
+      {
+        icono: 'seleccion',
+        titulo: 'Separar a la persona',
+        texto:
+          'Elige un clip y pulsa «Separar a la persona»: Recorte la recorta cuadro a cuadro (tal como se ve el clip, con su zoom y su color) y la pone encima. Tarda unos 10 segundos por cada segundo de clip y no gasta créditos.'
+      },
+      {
+        icono: 'type',
+        titulo: 'Texto detrás de la persona',
+        texto:
+          'Marca «Detrás de la persona» en un texto y queda por detrás de su cabeza y su cuerpo, como en los reels. Lo que pongas en las pistas 1 y 2 (títulos animados, logos) también queda detrás.'
+      },
+      {
+        icono: 'image',
+        titulo: 'Cambiar o desenfocar el fondo',
+        texto: 'Con la persona separada, desenfoca el clip o pon una imagen a pantalla completa debajo: ella sigue nítida encima.'
+      },
+      {
+        icono: 'enviar',
+        titulo: 'También desde el chat',
+        texto: 'Pídele «pon el título detrás de ella en el clip 3» y el agente separa a la persona y coloca el texto.'
+      }
+    ]
+  },
+  {
     version: '0.1.61',
     fecha: '2026-11-15',
     resumen: 'Los videos con muchos clips ya no agotan la memoria al armarse.',
