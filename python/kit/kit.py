@@ -1673,18 +1673,35 @@ class Video(Momento):
         dur = self.hasta + L.transicion - self.desde
         filtro = (f"fps={L.fps},scale={L.W}:{L.H}:force_original_aspect_ratio=increase,"
                   f"crop={L.W}:{L.H}:(iw-{L.W})*{e.get('cx', 0.5)}:(ih-{L.H})*{e.get('cy', 0.5)},format=rgb24")
-        self.proc = subprocess.Popen([FFMPEG, '-v', 'error', '-ss', str(m.get('inicio', 0)), '-t', f'{dur:.3f}', '-i', L.ruta(m['archivo']),
-                                      '-vf', filtro, '-f', 'rawvideo', '-'], stdout=subprocess.PIPE)
+        # El lector se abre cuando hace falta el primer cuadro y se cierra al acabar el tramo: con muchos clips y varios
+        # trabajadores, abrirlos todos de entrada (un FFmpeg decodificando por clip y por trabajador) agota la memoria.
+        self.orden = [FFMPEG, '-v', 'error', '-ss', str(m.get('inicio', 0)), '-t', f'{dur:.3f}', '-i', L.ruta(m['archivo']),
+                      '-vf', filtro, '-f', 'rawvideo', '-']
+        self.proc = None
+        self.acabado = False
         self.leidos = 0
         self.ultimo = Image.new('RGB', (L.W, L.H), L.fondo)
+
+    def cerrar(self):
+        if self.proc is not None:
+            try:
+                self.proc.kill()
+                self.proc.stdout.close()
+            except OSError:
+                pass
+            self.proc = None
+        self.acabado = True
 
     def cuadro(self, t):
         L = self.L
         quiero = int((t - self.desde) * L.fps)
-        while self.leidos <= quiero:
+        if self.proc is None and not self.acabado and self.leidos <= quiero:
+            self.proc = subprocess.Popen(self.orden, stdout=subprocess.PIPE)
+        while self.proc is not None and self.leidos <= quiero:
             datos = self.proc.stdout.read(L.W * L.H * 3)
             if len(datos) < L.W * L.H * 3:
-                break  # se acabó el tramo: se queda el último cuadro
+                self.cerrar()  # se acabó el tramo: se queda el último cuadro
+                break
             self.ultimo = Image.frombytes('RGB', (L.W, L.H), datos)
             self.leidos += 1
         capa = self.ultimo.convert('RGBA')
@@ -2314,6 +2331,9 @@ def cuadro(L, momentos, t, dur, fundido_final):
     lienzo = Image.new('RGBA', (L.W, L.H), L.fondo + (255,))
     for m in momentos:
         if not m.visible(t):
+            # Un video que ya pasó suelta su lector (y su memoria).
+            if isinstance(m, Video) and m.proc is not None and t > m.hasta + L.transicion:
+                m.cerrar()
             continue
         capa = m.cuadro(t, lienzo) if isinstance(m, (Texto, Encima)) else m.cuadro(t)
         tipo = getattr(m, 'tipo_entrada', None)
@@ -2759,14 +2779,14 @@ def armar(ruta, prueba=None, todo=False):
             if hay_video and i:
                 for m in momentos:
                     if isinstance(m, Video):
-                        m.proc.kill()
+                        m.cerrar()
                 _, L, momentos, dur = cargar(ruta)
             p = os.path.join(revision, f'prueba-{t:05.2f}.jpg')
             cuadro(L, momentos, t, dur, fundido_final).save(p, quality=88)
             rutas.append(os.path.relpath(p, L.base))
         for m in momentos:
             if isinstance(m, Video):
-                m.proc.kill()
+                m.cerrar()
         print(json.dumps({'pruebas': rutas, **({'avisos': avisos} if avisos else {})}, ensure_ascii=False))
         return
     salida = L.ruta(r.get('salida', 'salida/final.mp4'))
@@ -2871,7 +2891,12 @@ def armar(ruta, prueba=None, todo=False):
 
         def _proximo():
             _rellenar()
-            r = cola.popleft().get()
+            # Con tope: si un trabajador muere (sin memoria, por ejemplo) el pool no avisa y esto esperaría para siempre.
+            try:
+                r = cola.popleft().get(timeout=300)
+            except multiprocessing.TimeoutError:
+                raise SystemExit('El render se trabó: un cuadro tardó más de 5 minutos (¿se quedó sin memoria el equipo?). '
+                                 'Prueba con menos núcleos: KIT_HILOS=2.')
             _rellenar()
             return r
         pendientes = True
@@ -2908,7 +2933,7 @@ def armar(ruta, prueba=None, todo=False):
         raise SystemExit('FFmpeg falló al codificar.')
     for m in momentos:
         if isinstance(m, Video):
-            m.proc.kill()
+            m.cerrar()
     hoja_ruta = hoja(salida, 12, os.path.join(revision, 'hoja-final.jpg'))
     info = probar(salida)
     try:

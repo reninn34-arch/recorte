@@ -24,6 +24,19 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.61',
+    fecha: '2026-11-15',
+    resumen: 'Los videos con muchos clips ya no agotan la memoria al armarse.',
+    novedades: [
+      {
+        icono: 'film',
+        titulo: 'Armado sin quedarse sin memoria',
+        texto:
+          'Con muchos clips, el armado abría todos a la vez en cada núcleo y el equipo se quedaba sin memoria (el video se trababa sin avisar). Ahora cada clip se abre cuando le toca y se cierra al terminar: un promo de 12 clips se arma en minuto y medio. Y si algo se traba, el armado se corta y dice por qué.'
+      }
+    ]
+  },
+  {
     version: '0.1.60',
     fecha: '2026-11-15',
     resumen: 'Los videos que hace tu agente desde una tarjeta ya no se quedan colgados al armarse.',
