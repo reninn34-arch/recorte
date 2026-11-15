@@ -179,9 +179,11 @@ try {
   writeFileSync(
     join(trabajo, 'receta-capas.json'),
     JSON.stringify({
-      ancho: 270, alto: 480, fps: 12, duracion: 3, salida: 'salida/capas.mp4', fundido_final: 0,
-      momentos: [{ tipo: 'foto', archivo: 'negro.jpg', desde: 0, hasta: 3, acercar: false }],
-      capas: [{ archivo: 'logo.png', desde: 1, hasta: 3, x: 0.25, y: 0.2, ancho: 0.3, entrada: 'fundido' }],
+      // 60 cuadros: con 48 o más el kit dibuja en paralelo (los trabajadores leen la receta; con efectos de sonido,
+      // un error hacía que leyeran el audio y se relanzaran sin fin).
+      ancho: 270, alto: 480, fps: 12, duracion: 5, salida: 'salida/capas.mp4', fundido_final: 0,
+      momentos: [{ tipo: 'foto', archivo: 'negro.jpg', desde: 0, hasta: 5, acercar: false }],
+      capas: [{ archivo: 'logo.png', desde: 1, hasta: 5, x: 0.25, y: 0.2, ancho: 0.3, entrada: 'fundido' }],
       sonidos: [{ sonido: 'pop', en: 2, volumen: 1 }]
     })
   )

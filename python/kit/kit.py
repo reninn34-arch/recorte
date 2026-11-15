@@ -2650,15 +2650,22 @@ def hilos_render(receta_peso_gb=1.5):
 
 
 def _iniciar_trabajador(ruta, fundido_final):
-    import cv2
-    # Cada trabajador usa un núcleo: el paralelismo está en los cuadros, no dentro de cada uno.
-    cv2.setNumThreads(1)
-    _r, L, momentos, dur = cargar(ruta)
-    _TRABAJADOR.update(L=L, momentos=momentos, dur=dur, ff=fundido_final)
+    # Si un trabajador no puede arrancar, no se deja morir: Python lo relanzaría sin fin y el render no acabaría
+    # nunca. Se guarda el error y el primer cuadro que se le pida lo devuelve (el render falla al momento, con causa).
+    try:
+        import cv2
+        # Cada trabajador usa un núcleo: el paralelismo está en los cuadros, no dentro de cada uno.
+        cv2.setNumThreads(1)
+        _r, L, momentos, dur = cargar(ruta)
+        _TRABAJADOR.update(L=L, momentos=momentos, dur=dur, ff=fundido_final)
+    except BaseException as e:  # noqa: BLE001
+        _TRABAJADOR['error'] = f'{type(e).__name__}: {e}'
 
 
 def _dibujar(i):
     w = _TRABAJADOR
+    if 'error' in w:
+        raise RuntimeError(f'Un trabajador del render no pudo arrancar: {w["error"]}')
     return np.asarray(cuadro(w['L'], w['momentos'], i / w['L'].fps, w['dur'], w['ff']), dtype=np.uint8).tobytes()
 
 
@@ -2788,10 +2795,11 @@ def armar(ruta, prueba=None, todo=False):
         pistas.append(f'[v{i}]')
     # Los efectos de sonido: uno de los que trae Recorte (`"sonido": "pop"`) o un archivo, en su segundo.
     for i, s in enumerate(r.get('sonidos') or []):
-        ruta = sonido_incluido(s['sonido']) if s.get('sonido') else L.ruta(s.get('archivo', ''))
-        if not os.path.isfile(ruta):
+        # Ojo: no se llama `ruta` (esa es la receta, que luego leen los trabajadores del render).
+        ruta_sonido = sonido_incluido(s['sonido']) if s.get('sonido') else L.ruta(s.get('archivo', ''))
+        if not os.path.isfile(ruta_sonido):
             raise SystemExit(f'Sonido {i + 1}: no encuentro «{s.get("sonido") or s.get("archivo")}».')
-        entrada_audio += ['-i', ruta]
+        entrada_audio += ['-i', ruta_sonido]
         n = len(entrada_audio) // 2
         partes.append(f'[{n}:a]aresample=48000,aformat=channel_layouts=stereo,volume={float(s.get("volumen", 0.6))},'
                       f'adelay={int(float(s.get("en", 0)) * 1000)}:all=1[s{i}]')

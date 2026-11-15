@@ -24,6 +24,25 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.60',
+    fecha: '2026-11-15',
+    resumen: 'Los videos que hace tu agente desde una tarjeta ya no se quedan colgados al armarse.',
+    novedades: [
+      {
+        icono: 'film',
+        titulo: 'Videos con efectos de sonido que no terminaban',
+        texto:
+          'Si el video llevaba efectos de sonido (un pop, un confeti), el armado se quedaba trabado para siempre y la tarjeta acababa en «No dejaste un archivo nuevo». Ya arma normal: un promo de 17 s, en unos 2 minutos.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Recorte espera a tu agente',
+        texto:
+          'Si tu agente sigue trabajando después de decir que terminó (esperando un render), Recorte ya no lo corta a los 10 segundos: espera a que acabe.'
+      }
+    ]
+  },
+  {
     version: '0.1.59',
     fecha: '2026-11-14',
     resumen: 'Arreglos de los subtítulos animados y de las animaciones que se ponen juntas.',

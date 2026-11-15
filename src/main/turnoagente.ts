@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { ADAPTADORES, type EventoAgente } from './adaptadoresagente'
 import { agenteDeOrden } from './agentes'
 import { pathAmpliado } from './binarios'
+import { trabajoDeFondo } from './procesos'
 import { entornoParaAgente, falloDeAgente, matarArbol, Parado } from './ia'
 
 /**
@@ -101,6 +102,8 @@ export async function turnoAgente(p: PeticionTurno): Promise<ResultadoTurno> {
     let cerrado = false
     let ultimaSalida = Date.now()
     let graciaFinal: ReturnType<typeof setTimeout> | null = null
+    let finEn = 0
+    let avisoFondo = false
 
     const limpiar = () => {
       if (!archivoPrompt) return
@@ -150,14 +153,28 @@ export async function turnoAgente(p: PeticionTurno): Promise<ResultadoTurno> {
         else if (ev.t === 'respuesta') respuesta = ad.conSesion ? ev.texto : respuesta + ev.texto
         else if (ev.t === 'fin') {
           final = ev
-          // Dijo que terminó: si no sale (dejó un servidor, un render, un shell abierto), se le
-          // da un respiro y se cierra. Así nunca se queda colgado al terminar.
+          finEn = Date.now()
+          // Dijo que terminó: si no sale (dejó un servidor o un shell abierto), se le da un respiro y se cierra.
+          // Pero un «fin» no siempre es el final: Claude Code cierra un turno, y si le llega el aviso de un render que
+          // dejó corriendo (o de una tarea vieja) sigue trabajando. Mientras hable o tenga un render en marcha, se espera.
           if (!graciaFinal) {
-            graciaFinal = setTimeout(() => {
+            const revisar = async () => {
               if (cerrado) return
+              const callado = Date.now() - Math.max(ultimaSalida, finEn) >= 10_000
+              const deFondo = callado ? await trabajoDeFondo(hijo.pid) : false
+              if (cerrado) return
+              if (!callado || deFondo) {
+                if (deFondo && !avisoFondo) {
+                  avisoFondo = true
+                  p.onLinea('El agente espera a que termine su render: Recorte no lo corta')
+                }
+                graciaFinal = setTimeout(() => void revisar(), 10_000)
+                return
+              }
               matarArbol(hijo)
               terminar(0)
-            }, 10_000)
+            }
+            graciaFinal = setTimeout(() => void revisar(), 10_000)
           }
         }
       }
