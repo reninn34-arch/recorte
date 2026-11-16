@@ -61,6 +61,28 @@ try {
   assert.ok(Math.abs(capaEnTramo.desde - 5) < 0.01, 'el medio sigue en su cuadro (desde 5, no desde 1): ' + capaEnTramo.desde)
   assert.deepEqual(capaEnTramo.claves.x.map((c) => +c.f.toFixed(2)), [-4, 2], 'sus fotogramas clave se corren')
 
+  // Una capa con entrada «pop» que se desplaza de un lado a otro: en el tramo 4-8 no vuelve a entrar y sigue donde iba.
+  const movil = normalizarTimeline({ ...base, capas: [{ id: 'k3', fuente: 'm1', inicio: 2, duracion: 6, x: 0.2, y: 0.5, ancho: 0.2, entrada: 'pop', fin: { x: 0.8, y: 0.5, ancho: 0.2, giro: 0 } }] }, 10, { m1: 5 })
+  const { estadoCapa } = await import('../src/shared/timeline.ts')
+  const original = movil.capas[0]
+  const recortada = soloTramo(movil, 4, 8).capas[0]
+  assert.equal(recortada.entrada, undefined, 'la entrada no se repite')
+  for (const dt of [0, 1, 2.5, 4]) {
+    const a = estadoCapa(original, dt + 2, false).x
+    const b = estadoCapa(recortada, dt, false).x
+    assert.ok(Math.abs(a - b) < 0.001, 'el recorrido sigue donde iba (' + dt + ' s: ' + a.toFixed(3) + ' vs ' + b.toFixed(3) + ')')
+  }
+  // Un texto palabra a palabra que empezó en el segundo 3: en el tramo 4-8, las palabras ya dichas quedan dichas.
+  const { tiemposPalabras } = await import('../src/shared/timeline.ts')
+  const conTexto = normalizarTimeline({ ...base, textos: [{ id: 't2', texto: 'uno dos tres cuatro cinco seis', inicio: 3, duracion: 3, posicion: 'abajo', animacion: 'palabras' }] }, 10, { m1: 5 })
+  const tOrig = tiemposPalabras(conTexto.textos[0]).map((w) => w.inicio)
+  const tTramo = soloTramo(conTexto, 4, 8).textos[0]
+  assert.equal(tTramo.inicio, 0)
+  assert.deepEqual(tiemposPalabras(tTramo).map((w) => +w.inicio.toFixed(3)), tOrig.map((x) => +(x - 1).toFixed(3)), 'las palabras siguen a su ritmo, ya avanzadas 1 s')
+  // Un texto con «pop» que ya entró: no vuelve a entrar.
+  const conPop = normalizarTimeline({ ...base, textos: [{ id: 't3', texto: 'Hola', inicio: 2, duracion: 4, posicion: 'abajo', animacion: 'pop' }] }, 10, { m1: 5 })
+  assert.equal(soloTramo(conPop, 4, 8).textos[0].animacion, undefined, 'el pop no se repite')
+
   // Render de verdad del tramo pesado.
   const almacen = { get: () => proyecto, carpeta: () => dir }
   const listos = []

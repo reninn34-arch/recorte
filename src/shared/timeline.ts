@@ -905,7 +905,7 @@ export function extraerRango(tl: Timeline, a: number, b: number): Timeline {
   )
   if (!dentro.size || dentro.size === cortada.clips.length) return tl
   type ConTramo = { inicio: number; duracion: number }
-  const correr = <T extends ConTramo>(x: T, acortable: boolean, sinCabeza?: (x: T, corte: number) => T): T | null => {
+  const correr = <T extends ConTramo>(x: T, acortable: boolean, sinCabeza?: (r: T, corte: number, original: T) => T): T | null => {
     const i = x.inicio
     const f = x.inicio + x.duracion
     if (f <= a + EPSILON) return x
@@ -916,18 +916,38 @@ export function extraerRango(tl: Timeline, a: number, b: number): Timeline {
     if (nf - ni < DURACION_MINIMA) return null
     const r = { ...x, inicio: ni, duracion: nf - ni }
     // Empezaba dentro de lo quitado: se le fue el principio, y lo que queda sigue mostrando lo que mostraba ahí.
-    return sinCabeza && i >= a - EPSILON ? sinCabeza(r, b - i) : r
+    return sinCabeza && i >= a - EPSILON ? sinCabeza(r, b - i, x) : r
   }
-  const lista = <T extends ConTramo>(xs: T[] | undefined, acortable: boolean, sinCabeza?: (x: T, corte: number) => T): T[] =>
+  const lista = <T extends ConTramo>(xs: T[] | undefined, acortable: boolean, sinCabeza?: (r: T, corte: number, original: T) => T): T[] =>
     (xs ?? []).map((x) => correr(x, acortable, sinCabeza)).filter((x): x is T => x !== null)
-  // A una capa sin su principio, el medio se le corre (sigue en el mismo cuadro) y sus fotogramas clave, también.
-  const capaSinCabeza = (c: CapaTL, corte: number): CapaTL => ({
-    ...c,
-    desde: (c.desde ?? 0) + corte,
-    ...(c.claves
-      ? { claves: Object.fromEntries(Object.entries(c.claves).map(([k, v]) => [k, (v ?? []).map((cl) => ({ ...cl, f: cl.f - corte }))])) as ClavesCapa }
-      : {})
-  })
+  // A una capa sin su principio: el medio se le corre (sigue en el mismo cuadro); su recorrido y sus fotogramas clave
+  // siguen donde iban (el recorrido pasa a claves, que se pueden correr), y la entrada (pop, fundido, desde un lado) ya
+  // pasó: no se repite.
+  const capaSinCabeza = (r: CapaTL, corte: number, original: CapaTL): CapaTL => {
+    const { entrada: _e, fin, ...c } = r
+    const claves: ClavesCapa = { ...(c.claves ?? {}) }
+    if (fin) {
+      const D = original.duracion
+      const desdeA = { x: c.x, y: c.y, ancho: c.ancho, giro: c.giro ?? 0 }
+      for (const k of ['x', 'y', 'ancho', 'giro'] as const) {
+        if (!claves[k]) claves[k] = [{ f: 0, v: desdeA[k] }, { f: D, v: fin[k] }]
+      }
+    }
+    const corridas = Object.fromEntries(Object.entries(claves).map(([k, v]) => [k, (v ?? []).map((cl) => ({ ...cl, f: cl.f - corte }))])) as ClavesCapa
+    return { ...c, desde: (c.desde ?? 0) + corte, ...(Object.keys(corridas).length ? { claves: corridas } : {}) }
+  }
+  // A un texto sin su principio: las palabras ya dichas quedan dichas (como al dividirlo) y una entrada que ya pasó no se
+  // repite.
+  const textoSinCabeza = (r: TextoTL, corte: number, original: TextoTL): TextoTL => {
+    if (!r.animacion) return r
+    if (r.animacion === 'palabras' || r.animacion === 'pintar') {
+      return { ...r, tiempos: tiemposPalabras(original).map((w) => Math.round((w.inicio - corte) * 1000) / 1000) }
+    }
+    const entra = r.animacion === 'maquina' ? pasoAnimacion(r) * r.texto.replace(/s/g, '').length + APARECER_S : 0.35
+    if (corte < entra) return r
+    const { animacion: _a, ...sin } = r
+    return sin
+  }
   // Las marcas de dentro se van; las de después se corren. Dos que quedan en el mismo punto (la de la entrada y la de
   // la salida) se juntan en una.
   const marcadores = (tl.marcadores ?? [])
@@ -941,7 +961,7 @@ export function extraerRango(tl: Timeline, a: number, b: number): Timeline {
   return conClips(
     {
       ...resto,
-      textos: lista(cortada.textos, true),
+      textos: lista(cortada.textos, true, textoSinCabeza),
       ...(voces.length ? { voces } : {}),
       ...(capas.length ? { capas } : {}),
       ...(sonidos.length ? { sonidos } : {}),
