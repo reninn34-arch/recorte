@@ -298,7 +298,7 @@ assert.ok(Math.abs(centro6(1.7) - centro6(1.4)) > 40, 'en el corte la capa salta
   assert.ok(r10.ok, r10.error)
   const tal = mp4(r10, 'salidas-son0')
   const baja = ajustarSonidoClip(base, 'c1', { volumen: 0.5, entra: 1, sale: 1 })
-  assert.deepEqual(sonidoDe(baja.clips[0]), { volumen: 0.5, entra: 1, sale: 1, limpio: 0, realce: 0 })
+  assert.deepEqual(sonidoDe(baja.clips[0]), { volumen: 0.5, entra: 1, sale: 1, limpio: 0, realce: 0, graves: 0, medios: 0, agudos: 0, comprimir: 0 })
   assert.ok(Math.abs(volumenClipEn(baja.clips[0], 0.5, 4) - 0.25) < 0.001 && Math.abs(volumenClipEn(baja.clips[0], 2, 4) - 0.5) < 0.001, 'el monitor sube y baja el volumen con los fundidos')
   assert.deepEqual(normalizarTimeline(baja, 4, {}).clips[0].sonido, { volumen: 0.5, entra: 1, sale: 1 }, 'el sonido del clip sobrevive a guardar y abrir')
   const dos = dividir(baja, 2)
