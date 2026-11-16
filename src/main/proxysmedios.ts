@@ -10,8 +10,11 @@ const CODECS_LIVIANOS = new Set(['h264', 'vp8', 'vp9', 'av1'])
  * Un video de la biblioteca necesita copia liviana para el monitor si es más grande que 1080p o de un códec pesado o que el
  * monitor no lee. Con varias pistas de video a la vez, un 4K sin copia es lo que más hace trabar la reproducción.
  */
-export function necesitaProxy(info: Pick<VideoInfo, 'width' | 'height' | 'codec'>): boolean {
-  if (Math.max(info.width, info.height) > 1920 || Math.min(info.width, info.height) > 1080) return true
+export function necesitaProxy(info: Pick<VideoInfo, 'width' | 'height' | 'codec' | 'alfa'>): boolean {
+  // Con transparencia (las piezas animadas, los recortes) la copia en MP4 la perdería y taparía el video de abajo.
+  if (info.alfa) return false
+  // Un poco más de 1080p (1088 de las piezas verticales) no cuenta como pesado.
+  if (Math.max(info.width, info.height) > 2048 || Math.min(info.width, info.height) > 1200) return true
   return Boolean(info.codec) && !CODECS_LIVIANOS.has(String(info.codec).toLowerCase())
 }
 
@@ -34,7 +37,7 @@ export function prepararProxysDeMedios(
   alCambiar: (proyecto: Project) => void,
   alProgreso: (pct: number, texto: string) => void = () => {}
 ): void {
-  const pendientes = (proyectos.abrir(id)?.medios ?? []).filter((m) => m.tipo === 'video' && m.proxy === undefined && !enCola.has(`${id}/${m.id}`))
+  const pendientes = (proyectos.abrir(id)?.medios ?? []).filter((m) => m.tipo === 'video' && m.proxy !== '' && !enCola.has(`${id}/${m.id}`))
   for (const medio of pendientes) {
     const clave = `${id}/${medio.id}`
     enCola.add(clave)
@@ -54,6 +57,12 @@ async function hacerUno(proyectos: Almacen, id: string, medio: MedioProyecto, al
   try {
     if (!existsSync(medio.ruta)) return // el original no está: se vuelve a intentar cuando esté
     const info = await probeVideo(medio.ruta)
+    if (medio.proxy) {
+      // Ya tenía copia. Si no le corresponde (hecha por una regla anterior, o es un video con transparencia), se quita.
+      if (necesitaProxy(info)) return
+      rmSync(join(proyectos.carpeta(id), medio.proxy), { force: true })
+      return guardar('')
+    }
     if (!necesitaProxy(info)) return guardar('')
     const carpeta = join(proyectos.carpeta(id), 'medios')
     mkdirSync(carpeta, { recursive: true })

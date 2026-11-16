@@ -135,7 +135,12 @@ export function useHistorial(actual: Timeline, onCambiar: (t: Timeline) => void,
 }
 
 export interface Reproductor {
+  /** El `<video>` que se ve y suena ahora (uno de los dos de `videos`). */
   videoRef: React.RefObject<HTMLVideoElement | null>
+  /** Los dos `<video>` del monitor: mientras uno suena, el otro ya se coloca en el clip que sigue (sin pausa en el corte). */
+  videos: [React.RefObject<HTMLVideoElement | null>, React.RefObject<HTMLVideoElement | null>]
+  /** Cuál de los dos se ve ahora. */
+  activo: 0 | 1
   tiempo: number
   reproduciendo: boolean
   /** La imagen que se ve ahora (clip de imagen), o null si es video. */
@@ -145,7 +150,7 @@ export interface Reproductor {
   buscar: (t: number) => void
   /** Para el `<video>`: eventos que mantienen el estado al día. */
   eventos: {
-    onLoadedMetadata: () => void
+    onLoadedMetadata: (e: React.SyntheticEvent<HTMLVideoElement>) => void
   }
 }
 
@@ -158,7 +163,16 @@ export type FuentesVista = Record<string, { url: string; tipo: 'video' | 'imagen
  * clip es de otra fuente; los de imagen se ven en una capa encima y avanzan con su propio reloj.
  */
 export function useReproductor(timeline: Timeline, clave: string, fuentes: FuentesVista): Reproductor {
-  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const refA = useRef<HTMLVideoElement | null>(null)
+  const refB = useRef<HTMLVideoElement | null>(null)
+  const activoRef = useRef<0 | 1>(0)
+  const [activo, setActivo] = useState<0 | 1>(0)
+  // El `<video>` que se ve; siempre es uno de los dos.
+  const videoRef = useMemo(
+    () => ({ get current() { return (activoRef.current === 0 ? refA : refB).current } }) as React.RefObject<HTMLVideoElement | null>,
+    []
+  )
+  const otroVideo = () => (activoRef.current === 0 ? refB : refA).current
   const [tiempo, setTiempo] = useState(0)
   const [reproduciendo, setReproduciendo] = useState(false)
   const [imagen, setImagen] = useState<string | null>(null)
@@ -169,7 +183,18 @@ export function useReproductor(timeline: Timeline, clave: string, fuentes: Fuent
   const tiempoRef = useRef(0)
   const indiceRef = useRef(0)
   const jugando = useRef(false)
-  const srcActual = useRef<string | null>(null)
+  /** Lo que tiene cargado cada `<video>`. */
+  const srcDe = useRef<[string | null, string | null]>([null, null])
+  /** Lo cargado en el que se ve; asignarle null olvida los dos (hay que volver a cargar). */
+  const srcActual = useMemo(
+    () => ({
+      get current(): string | null { return srcDe.current[activoRef.current] },
+      set current(v: string | null) { if (v === null) srcDe.current = [null, null]; else srcDe.current[activoRef.current] = v }
+    }),
+    []
+  )
+  /** Para qué tramo está colocado el segundo `<video>` (la clave de `claveDe`). */
+  const preparado = useRef<string | null>(null)
   /** Segundo de fuente a buscar en cuanto cargue el archivo nuevo. */
   const pendiente = useRef<number | null>(null)
 
@@ -209,6 +234,7 @@ export function useReproductor(timeline: Timeline, clave: string, fuentes: Fuent
     jugando.current = false
     setReproduciendo(false)
     videoRef.current?.pause()
+    otroVideo()?.pause()
   }, [])
 
   const alternar = useCallback(() => {
@@ -247,6 +273,48 @@ export function useReproductor(timeline: Timeline, clave: string, fuentes: Fuent
     if (!reproduciendo) return
     let cuadro = 0
     let antes = performance.now()
+    const claveDe = (t: ReturnType<typeof tramos>[number], idx: number) => `${idx}|${fuenteDe(t.clip.fuente)?.url}|${t.clip.entrada}`
+    // El segundo <video> va a la entrada del clip que sigue mientras suena este: en el corte solo se cambia de uno a otro.
+    const preparar = (lista: ReturnType<typeof tramos>, idx: number) => {
+      const sig = lista[idx + 1]
+      const otro = otroVideo()
+      const f = sig ? fuenteDe(sig.clip.fuente) : undefined
+      if (!sig || !otro || !f || f.tipo !== 'video') return
+      const clave = claveDe(sig, idx + 1)
+      const i = 1 - activoRef.current
+      if (preparado.current === clave && srcDe.current[i] === f.url) return
+      preparado.current = clave
+      otro.pause()
+      otro.muted = true
+      if (srcDe.current[i] !== f.url) {
+        srcDe.current[i] = f.url
+        otro.src = f.url
+      }
+      const ir = () => {
+        otro.currentTime = sig.clip.entrada
+      }
+      if (otro.readyState >= 1) ir()
+      else otro.addEventListener('loadedmetadata', ir, { once: true })
+    }
+    const cambiarAlPreparado = (lista: ReturnType<typeof tramos>, sig: ReturnType<typeof tramos>[number]): boolean => {
+      const viejo = videoRef.current
+      const otro = otroVideo()
+      const f = fuenteDe(sig.clip.fuente)
+      const i = 1 - activoRef.current
+      if (!viejo || !otro || f?.tipo !== 'video') return false
+      if (preparado.current !== claveDe(sig, indiceRef.current + 1) || srcDe.current[i] !== f.url) return false
+      if (otro.readyState < 2 || otro.seeking || Math.abs(otro.currentTime - sig.clip.entrada) > 0.1) return false
+      otro.muted = viejo.muted
+      otro.volume = viejo.volume
+      otro.playbackRate = velocidadEnFuente(sig.clip, sig.clip.entrada)
+      void otro.play().catch(() => {})
+      viejo.pause()
+      activoRef.current = i as 0 | 1
+      setActivo(activoRef.current)
+      preparado.current = null
+      setImagen(null)
+      return true
+    }
     const siguiente = (lista: ReturnType<typeof tramos>, fin: number) => {
       const sig = lista[indiceRef.current + 1]
       if (!sig) {
@@ -257,10 +325,14 @@ export function useReproductor(timeline: Timeline, clave: string, fuentes: Fuent
       }
       const tramoAhora = lista[indiceRef.current]
       const video = videoRef.current
-      // Mismo archivo de video: basta con saltar.
-      if (video && tramoAhora && sig.clip.fuente === tramoAhora.clip.fuente && fuenteDe(sig.clip.fuente)?.tipo === 'video') {
+      if (video && cambiarAlPreparado(lista, sig)) {
+        // Sin pausa: el otro <video> ya estaba en su sitio.
         indiceRef.current += 1
-        video.currentTime = sig.clip.entrada
+        tiempoRef.current = sig.inicio
+      } else if (video && tramoAhora && sig.clip.fuente === tramoAhora.clip.fuente && fuenteDe(sig.clip.fuente)?.tipo === 'video') {
+        // Mismo archivo de video: basta con saltar (y si sigue justo donde va, ni eso).
+        indiceRef.current += 1
+        if (Math.abs(video.currentTime - sig.clip.entrada) > 0.05) video.currentTime = sig.clip.entrada
         tiempoRef.current = sig.inicio
       } else {
         colocar(sig.inicio)
@@ -294,6 +366,7 @@ export function useReproductor(timeline: Timeline, clave: string, fuentes: Fuent
           // Cámara lenta o rápida: el video corre a la velocidad del clip (con rampa, la de este momento).
           const vel = velocidadEnFuente(tramo.clip, video.currentTime)
           if (Math.abs(video.playbackRate - vel) > 0.005) video.playbackRate = vel
+          preparar(lista, indiceRef.current)
         }
       }
       setTiempo(tiempoRef.current)
@@ -305,6 +378,8 @@ export function useReproductor(timeline: Timeline, clave: string, fuentes: Fuent
 
   return {
     videoRef,
+    videos: [refA, refB],
+    activo,
     tiempo,
     reproduciendo,
     imagen,
@@ -312,9 +387,10 @@ export function useReproductor(timeline: Timeline, clave: string, fuentes: Fuent
     pausar: detener,
     buscar: colocar,
     eventos: {
-      onLoadedMetadata: () => {
+      onLoadedMetadata: (e: React.SyntheticEvent<HTMLVideoElement>) => {
         const video = videoRef.current
-        if (!video) return
+        // El de reserva carga por su cuenta (lo coloca `preparar`).
+        if (!video || e.currentTarget !== video) return
         if (pendiente.current !== null) {
           video.currentTime = pendiente.current
           pendiente.current = null

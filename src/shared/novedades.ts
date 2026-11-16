@@ -24,6 +24,25 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.66',
+    fecha: '2026-11-16',
+    resumen: 'Arregla el monitor que se veía negro con los subtítulos animados y quita la pausa en los cortes al reproducir.',
+    novedades: [
+      {
+        icono: 'video',
+        titulo: 'El monitor vuelve a mostrar el video con las piezas animadas',
+        texto:
+          'En la 0.1.65 las piezas con transparencia (subtítulos «píldora», íconos) recibían una copia liviana sin transparencia y tapaban el video con un fondo negro. Ahora esos archivos no reciben copia, y las copias malas que ya se habían hecho se borran solas al abrir el proyecto.'
+      },
+      {
+        icono: 'video',
+        titulo: 'Cortes sin pausa al reproducir',
+        texto:
+          'Al llegar al corte entre dos clips, el monitor se detenía un instante y la voz podía desfasarse. Ahora tiene un segundo video listo en el siguiente clip y solo cambia de uno a otro, así que la reproducción sigue sin tropiezos.'
+      }
+    ]
+  },
+  {
     version: '0.1.65',
     fecha: '2026-11-16',
     resumen: 'El monitor va más fluido con videos 4K o pesados: Recorte les hace una copia liviana por su cuenta.',

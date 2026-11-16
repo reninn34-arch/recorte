@@ -338,14 +338,18 @@ export function Monitor({
               />
             )}
             <div className="monitor-movimiento" style={movimiento}>
-              <video
-                ref={reproductor.videoRef}
-                data-pista-audio="video"
-                crossOrigin="anonymous"
-                preload="auto"
-                style={{ ...estiloImagen, visibility: vacia || enImagen ? 'hidden' : 'visible' }}
-                {...reproductor.eventos}
-              />
+              {/* Dos <video>: mientras uno suena, el otro ya está en el clip que sigue, y en el corte solo se cambia. */}
+              {([0, 1] as const).map((i) => (
+                <video
+                  key={i}
+                  ref={reproductor.videos[i]}
+                  data-pista-audio="video"
+                  crossOrigin="anonymous"
+                  preload="auto"
+                  style={{ ...estiloImagen, visibility: vacia || enImagen || reproductor.activo !== i ? 'hidden' : 'visible' }}
+                  {...reproductor.eventos}
+                />
+              ))}
               {enImagen && <img className="monitor-imagen" src={reproductor.imagen!} alt="" style={estiloImagen} />}
               {/* Las zonas tapadas del clip: lo mismo que el MP4 (un recuadro difuminado o en negro). */}
               {!vacia &&

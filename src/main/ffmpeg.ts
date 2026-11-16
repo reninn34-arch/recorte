@@ -11,6 +11,8 @@ export interface VideoInfo {
   hasAudio: boolean
   /** El códec del video (h264, hevc, prores…). */
   codec?: string
+  /** Tiene transparencia (un webm con alfa, ProRes 4444…): una copia en MP4 la perdería. */
+  alfa?: boolean
 }
 
 export const rutaFfmpeg = (): string => process.env.RECORTE_FFMPEG ?? 'ffmpeg'
@@ -66,6 +68,13 @@ function fpsDe(cadena?: string): number {
   return Math.round(fps * 100) / 100
 }
 
+/** VP8/VP9 con alfa lo marca con la etiqueta ALPHA_MODE (ffprobe lo muestra como yuv420p); los demás, con su formato de píxel. */
+function tieneAlfa(video: { pix_fmt?: string; tags?: Record<string, string> }): boolean {
+  const etiqueta = Object.entries(video.tags ?? {}).find(([k]) => k.toLowerCase() === 'alpha_mode')?.[1]
+  if (etiqueta === '1') return true
+  return /^(yuva|rgba|bgra|argb|abgr|gbrap|ya)/.test(video.pix_fmt ?? '')
+}
+
 export async function probeVideo(ruta: string): Promise<VideoInfo> {
   const { stdout } = await exec(
     rutaFfprobe(),
@@ -83,6 +92,8 @@ export async function probeVideo(ruta: string): Promise<VideoInfo> {
       r_frame_rate?: string
       duration?: string
       codec_name?: string
+      pix_fmt?: string
+      tags?: Record<string, string>
       side_data_list?: Array<{ rotation?: number }>
     }>
   }
@@ -99,7 +110,8 @@ export async function probeVideo(ruta: string): Promise<VideoInfo> {
     height: Number(girado ? video.width : video.height ?? 0),
     fps: fpsDe(video.avg_frame_rate ?? video.r_frame_rate),
     hasAudio: datos.streams?.some((s) => s.codec_type === 'audio') ?? false,
-    codec: video.codec_name
+    codec: video.codec_name,
+    alfa: tieneAlfa(video)
   }
 }
 
