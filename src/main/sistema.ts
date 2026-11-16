@@ -9,7 +9,7 @@ import { pathAmpliado, resolverBinario } from './binarios'
 import { rutaFfmpeg } from './ffmpeg'
 import { buscarPython, rutaScriptPython } from './transcribir'
 import { edgeExe } from './vozgoogle'
-import { descargarHerramienta } from './herramientas'
+import { descargarHerramienta, PUEDE_BAJAR } from './herramientas'
 import { matarArbol } from './ia'
 
 /**
@@ -62,7 +62,7 @@ async function tamano(ruta: string, limite = 20000): Promise<number> {
   return total
 }
 
-const enWindows = process.platform === 'win32'
+const enWindows = PUEDE_BAJAR
 
 async function herramientas(): Promise<Herramienta[]> {
   const python = await buscarPython()

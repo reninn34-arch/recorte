@@ -26,7 +26,7 @@ export async function buscarPython(): Promise<{ cmd: string; args: string[] } | 
   // El Python que bajó Recorte (Ajustes → Herramientas de video) va antes que el del sistema.
   const propio = pythonPropio()
   if (propio) candidatos.push({ cmd: propio, args: [] })
-  candidatos.push({ cmd: 'python', args: [] }, { cmd: 'py', args: ['-3'] })
+  candidatos.push({ cmd: 'python', args: [] }, { cmd: 'python3', args: [] }, { cmd: 'py', args: ['-3'] })
 
   for (const candidato of candidatos) {
     try {

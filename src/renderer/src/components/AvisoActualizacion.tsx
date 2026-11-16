@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import type { EstadoActualizacion } from '../../../shared/api'
 import { Icon } from '../Icons'
 
+const PAGINA_VERSIONES = 'https://github.com/reninn34-arch/recorte/releases/latest'
+
 /**
  * El aviso de versión nueva, abajo a la izquierda. Mientras se baja, discreto; cuando
  * está lista, pide reiniciar (o se instala sola al cerrar Recorte).
@@ -23,6 +25,24 @@ export function AvisoActualizacion() {
         <span>
           Bajando Recorte {e.nueva}… {e.pct ?? 0}%
         </span>
+      </div>
+    )
+  }
+  if (e.fase === 'manual') {
+    return (
+      <div className="actualizacion" role="alert">
+        <Icon name="sparkles" size={16} />
+        <div className="actualizacion-texto">
+          <strong>Hay una Recorte nueva: {e.nueva}</strong>
+          {e.notas && <span className="actualizacion-notas">{e.notas}</span>}
+          <span>Bájala de la página de versiones y reemplaza la app. Tus proyectos no se tocan.</span>
+        </div>
+        <button className="btn small ghost" onClick={() => setLuego(true)}>
+          Luego
+        </button>
+        <a className="btn small primary" href={PAGINA_VERSIONES} target="_blank" rel="noreferrer">
+          Descargar
+        </a>
       </div>
     )
   }
@@ -59,6 +79,7 @@ export function FilaVersion({ onNovedades }: { onNovedades?: () => void }) {
     : e.fase === 'al-dia' ? 'Tienes la última versión.'
     : e.fase === 'bajando' ? `Bajando la versión ${e.nueva}… ${e.pct ?? 0}%`
     : e.fase === 'lista' ? `La versión ${e.nueva} está lista para instalar.`
+    : e.fase === 'manual' ? `Hay una versión nueva (${e.nueva}): bájala de la página de versiones.`
     : e.fase === 'error' ? `No pude revisar: ${e.error ?? 'sin conexión'}`
     : 'Se revisa sola al abrir Recorte y cada cuatro horas.'
   return (
@@ -78,6 +99,10 @@ export function FilaVersion({ onNovedades }: { onNovedades?: () => void }) {
           <button className="btn small primary" onClick={() => void window.recorte.actualizacionInstalar()}>
             Reiniciar y actualizar
           </button>
+        ) : e.fase === 'manual' ? (
+          <a className="btn small primary" href={PAGINA_VERSIONES} target="_blank" rel="noreferrer">
+            Descargar
+          </a>
         ) : (
           <button
             className="btn small ghost"

@@ -1,0 +1,83 @@
+# Recorte para Mac: compila el .dmg en una Mac de GitHub y lo prueba de verdad (baja FFmpeg, Python y Node como lo hace la
+# app, exporta con ese FFmpeg y abre la app compilada). No toca el instalador de Windows ni los releases: el .dmg queda
+# como archivo de la ejecución (Actions → la ejecución → «Artifacts») hasta que se decida publicarlo.
+#
+# Se corre a mano (Actions → «Compilar para Mac» → Run workflow) o al subir a la rama `mac-prueba`.
+name: Compilar para Mac
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - mac-prueba
+
+permissions:
+  contents: read
+
+jobs:
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npx electron-vite build
+
+      # Lo que baja la app con su botón (Ajustes → Herramientas): FFmpeg (con x264 y libass), Python 3.12 y Node.
+      - name: Probar las descargas de herramientas
+        run: npm run prueba:herramientas
+
+      # Con el FFmpeg que acaba de bajar la app (no el de Homebrew): lo mismo que haría un usuario.
+      - name: Probar la exportación y los medios con ese FFmpeg
+        run: |
+          export PATH="$(node -p "require('os').tmpdir()")/herramientas/ffmpeg/bin:$PATH"
+          which ffmpeg
+          npm run prueba:edicion
+          npm run prueba:exportar
+          npm run prueba:medios
+          npm run prueba:proxys
+
+      - run: node scripts/licencia-instalador.mjs
+      - name: Compilar los .dmg
+        run: npx electron-builder --mac --publish never
+
+      - name: Mirar lo que salió
+        run: |
+          ls -la release
+          APP=$(ls -d release/mac-arm64/Recorte.app)
+          echo "--- firma"
+          codesign -dv "$APP" 2>&1 | head -10 || true
+          codesign --verify --deep --strict "$APP" && echo "la firma es válida"
+          echo "--- el kit de Python va dentro"
+          test -f "$APP/Contents/Resources/python/kit/kit.py"
+          ls "$APP/Contents/Resources/python" | head -20
+
+      # Abre la app compilada con una carpeta de datos nueva y espera a que muestre su ventana.
+      - name: Abrir la app compilada
+        run: |
+          APP=$(ls -d release/mac-arm64/Recorte.app)
+          "$APP/Contents/MacOS/Recorte" --user-data-dir="$RUNNER_TEMP/datos" --remote-debugging-port=9333 > "$RUNNER_TEMP/app.log" 2>&1 &
+          PID=$!
+          OK=0
+          for i in $(seq 1 60); do
+            if curl -s http://127.0.0.1:9333/json | grep -q '"title": "Recorte"'; then OK=1; break; fi
+            sleep 1
+          done
+          kill $PID 2>/dev/null || true
+          if [ "$OK" != "1" ]; then
+            echo "La app no abrió su ventana. Registro:"
+            cat "$RUNNER_TEMP/app.log"
+            exit 1
+          fi
+          echo "la app abrió su ventana"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Recorte-Mac
+          path: release/*.dmg
+          retention-days: 7

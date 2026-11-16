@@ -20,6 +20,23 @@ win:
   # Nombre fijo: el botón del README baja siempre la última (releases/latest/download/…).
   artifactName: ${productName}-Setup.${ext}
 
+# Mac: un .dmg para Apple Silicon (M1 y siguientes) y otro para Intel. Sin firma de Apple (hace falta una cuenta de
+# desarrollador): la primera vez se abre con clic derecho → Abrir. Por eso la app no se actualiza sola en Mac:
+# avisa de la versión nueva y manda a la página de versiones (ver main/actualizar.ts).
+mac:
+  category: public.app-category.video
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  artifactName: ${productName}-Mac-${arch}.${ext}
+  # Sin certificado: se firma "ad hoc" (hace falta en Apple Silicon para que la app arranque).
+  identity: null
+
+dmg:
+  title: Recorte ${version}
+
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true

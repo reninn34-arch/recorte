@@ -1,17 +1,18 @@
 import { app } from 'electron'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs'
+import { chmodSync, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
 import { anadirCarpetaBinarios } from './binarios'
 
 /**
  * Las herramientas que Recorte baja con un botón (como Sloth): FFmpeg, Python y Node.js,
- * cada una en `<userData>/herramientas/`, sin instalar nada en Windows ni tocar las que
+ * cada una en `<userData>/herramientas/`, sin instalar nada en Windows ni en el Mac ni tocar las que
  * el usuario ya tenga. Se bajan de su fuente oficial y se comprueba su huella SHA-256:
  *
- * - FFmpeg: la compilación GPL de BtbN (trae x264, que usa toda la exportación). Recorte
- *   no la reparte: el usuario la baja de su página y la app la llama como programa aparte.
+ * - FFmpeg: en Windows, la compilación GPL de BtbN; en Mac, la estática de Martin Riedl (las dos traen x264 y
+ *   libass, que usa toda la exportación). Recorte no la reparte: el usuario la baja de su página y la app la llama
+ *   como programa aparte.
  * - Python: python-build-standalone (astral-sh), un Python completo y portátil, con pip.
  * - Node.js: el zip oficial de nodejs.org (la LTS), para instalar agentes y HyperFrames.
  */
@@ -21,7 +22,20 @@ export const DESCARGABLES: IdDescargable[] = ['ffmpeg', 'python', 'node']
 
 const raiz = () => join(app.getPath('userData'), 'herramientas')
 
+const EN_MAC = process.platform === 'darwin'
+/** Dónde se puede bajar: Windows (x64) y Mac (Apple Silicon o Intel). */
+export const PUEDE_BAJAR = process.platform === 'win32' || EN_MAC
+/** El equipo, como lo llaman los paquetes. */
+const OBJETIVO: 'win-x64' | 'mac-arm64' | 'mac-x64' = EN_MAC ? (process.arch === 'arm64' ? 'mac-arm64' : 'mac-x64') : 'win-x64'
+
 export function carpetas(): Record<IdDescargable, string[]> {
+  if (EN_MAC) {
+    return {
+      ffmpeg: [join(raiz(), 'ffmpeg', 'bin')],
+      python: [join(raiz(), 'python', 'bin')],
+      node: [join(raiz(), 'node', 'bin')]
+    }
+  }
   return {
     ffmpeg: [join(raiz(), 'ffmpeg', 'bin')],
     python: [join(raiz(), 'python'), join(raiz(), 'python', 'Scripts')],
@@ -29,14 +43,19 @@ export function carpetas(): Record<IdDescargable, string[]> {
   }
 }
 
+/** El programa de cada herramienta dentro de lo bajado. */
+function programa(id: IdDescargable): string {
+  if (EN_MAC) return { ffmpeg: join(raiz(), 'ffmpeg', 'bin', 'ffmpeg'), python: join(raiz(), 'python', 'bin', 'python3'), node: join(raiz(), 'node', 'bin', 'node') }[id]
+  return { ffmpeg: join(raiz(), 'ffmpeg', 'bin', 'ffmpeg.exe'), python: join(raiz(), 'python', 'python.exe'), node: join(raiz(), 'node', 'node.exe') }[id]
+}
+
 export function tieneHerramienta(id: IdDescargable): boolean {
-  const exe = { ffmpeg: join(raiz(), 'ffmpeg', 'bin', 'ffmpeg.exe'), python: join(raiz(), 'python', 'python.exe'), node: join(raiz(), 'node', 'node.exe') }[id]
-  return existsSync(exe)
+  return existsSync(programa(id))
 }
 
 /** El Python propio de Recorte, si ya se bajó. */
 export function pythonPropio(): string | null {
-  const exe = join(raiz(), 'python', 'python.exe')
+  const exe = programa('python')
   return existsSync(exe) ? exe : null
 }
 
@@ -100,7 +119,7 @@ async function huellaDe(rel: ReleaseGitHub, nombre: string, sumas: RegExp): Prom
   return h.toLowerCase()
 }
 
-async function paqueteFfmpeg(): Promise<Paquete> {
+async function paqueteFfmpegWindows(): Promise<Paquete> {
   const rel = await json<ReleaseGitHub>('https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest')
   // La versión estable más nueva (nX.Y), no la de desarrollo («master»).
   const candidatos = rel.assets
@@ -118,13 +137,31 @@ async function paqueteFfmpeg(): Promise<Paquete> {
   }
 }
 
+/** Los dos programas de FFmpeg para Mac (vienen en zips aparte), con su huella. La versión de «release» más nueva. */
+export async function paquetesFfmpegMac(): Promise<Paquete[]> {
+  const arq = OBJETIVO === 'mac-arm64' ? 'arm64' : 'amd64'
+  const salida: Paquete[] = []
+  for (const nombre of ['ffmpeg', 'ffprobe']) {
+    // La dirección «latest» redirige a la carpeta de la versión; se lee a dónde llegó (sin bajar el archivo).
+    const r = await fetch(`https://ffmpeg.martin-riedl.de/redirect/latest/macos/${arq}/release/${nombre}.zip`, { headers: { 'User-Agent': CABECERAS['User-Agent'], Range: 'bytes=0-0' } })
+    await r.body?.cancel().catch(() => {})
+    if (!r.ok || !r.url.endsWith(`/${nombre}.zip`)) throw new Error(`No encontré ${nombre} para Mac en su página (${r.status}).`)
+    const h = (await texto(`${r.url}.sha256`)).trim().split(/\s+/)[0]
+    if (!/^[a-f0-9]{64}$/i.test(h)) throw new Error('No encontré la huella de FFmpeg.')
+    salida.push({ url: r.url, nombre: `${nombre}.zip`, sha256: h.toLowerCase(), version: /\/(\d+\.\d+(?:\.\d+)?)\/[^/]+$/.exec(r.url)?.[1] ?? /_(\d+\.\d+(?:\.\d+)?)\/[^/]+$/.exec(r.url)?.[1] ?? 'última' })
+  }
+  return salida
+}
+
+const TRIPLETE_PYTHON = { 'win-x64': 'x86_64-pc-windows-msvc', 'mac-arm64': 'aarch64-apple-darwin', 'mac-x64': 'x86_64-apple-darwin' } as const
+
 async function paquetePython(): Promise<Paquete> {
   const rel = await json<ReleaseGitHub>('https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest')
   // 3.12: todos los paquetes de Recorte (faster-whisper, OpenCV) tienen ruedas para ella.
   const elegido = rel.assets
-    .filter((a) => /^cpython-3\.12\.\d+\+\d+-x86_64-pc-windows-msvc-install_only\.tar\.gz$/.test(a.name))
+    .filter((a) => new RegExp(`^cpython-3\\.12\\.\\d+\\+\\d+-${TRIPLETE_PYTHON[OBJETIVO]}-install_only\\.tar\\.gz$`).test(a.name))
     .sort((a, b) => b.name.localeCompare(a.name, 'en', { numeric: true }))[0]
-  if (!elegido) throw new Error('No encontré Python 3.12 para Windows en su página.')
+  if (!elegido) throw new Error('No encontré Python 3.12 para este equipo en su página.')
   return {
     url: elegido.browser_download_url,
     nombre: elegido.name,
@@ -136,9 +173,10 @@ async function paquetePython(): Promise<Paquete> {
 
 async function paqueteNode(): Promise<Paquete> {
   const lista = await json<{ version: string; lts: string | false; files: string[] }[]>('https://nodejs.org/dist/index.json')
-  const lts = lista.find((v) => v.lts && v.files.includes('win-x64-zip'))
-  if (!lts) throw new Error('No encontré Node.js para Windows.')
-  const nombre = `node-${lts.version}-win-x64.zip`
+  const archivo = { 'win-x64': 'win-x64-zip', 'mac-arm64': 'osx-arm64-tar', 'mac-x64': 'osx-x64-tar' }[OBJETIVO]
+  const lts = lista.find((v) => v.lts && v.files.includes(archivo))
+  if (!lts) throw new Error('No encontré Node.js para este equipo.')
+  const nombre = { 'win-x64': `node-${lts.version}-win-x64.zip`, 'mac-arm64': `node-${lts.version}-darwin-arm64.tar.gz`, 'mac-x64': `node-${lts.version}-darwin-x64.tar.gz` }[OBJETIVO]
   const sumas = await texto(`https://nodejs.org/dist/${lts.version}/SHASUMS256.txt`)
   const h = sumas.split(/\r?\n/).find((l) => l.trim().endsWith(` ${nombre}`))?.trim().split(/\s+/)[0]
   if (!h) throw new Error('No encontré la huella de Node.js.')
@@ -180,7 +218,7 @@ async function bajar(p: Paquete, destino: string, onProgreso: (pct: number, text
   }
 }
 
-/** Descomprime con el `tar` de Windows (lee .zip y .tar.gz). */
+/** Descomprime con el `tar` del sistema (el de Windows y el de Mac leen .zip y .tar.gz). */
 function descomprimir(archivo: string, destino: string): Promise<void> {
   mkdirSync(destino, { recursive: true })
   return new Promise((ok, mal) => {
@@ -188,9 +226,43 @@ function descomprimir(archivo: string, destino: string): Promise<void> {
     const hijo = spawn(tar, ['-xf', archivo, '-C', destino], { windowsHide: true })
     let error = ''
     hijo.stderr.on('data', (b: Buffer) => (error += b.toString('utf8')))
-    hijo.on('error', () => mal(new Error('No pude descomprimir (falta tar de Windows).')))
+    hijo.on('error', () => mal(new Error('No pude descomprimir (falta el programa tar del sistema).')))
     hijo.on('close', (c) => (c === 0 ? ok() : mal(new Error(`No pude descomprimir: ${error.trim().slice(-200)}`))))
   })
+}
+
+/** En Mac, FFmpeg y FFprobe vienen en zips aparte: cada uno trae su programa suelto y se juntan en `ffmpeg/bin`. */
+async function descargarFfmpegMac(onProgreso: (pct: number, texto: string) => void, senal?: AbortSignal): Promise<{ version: string }> {
+  const paquetes = await paquetesFfmpegMac()
+  const base = raiz()
+  const temporal = join(base, '.bajando-ffmpeg')
+  rmSync(temporal, { recursive: true, force: true })
+  mkdirSync(temporal, { recursive: true })
+  try {
+    const nuevo = join(temporal, 'ffmpeg')
+    mkdirSync(join(nuevo, 'bin'), { recursive: true })
+    for (const [i, p] of paquetes.entries()) {
+      const archivo = join(temporal, p.nombre)
+      await bajar(p, archivo, (x, t) => onProgreso((i + x) * 0.45, t), senal)
+      onProgreso(0.45 * (i + 1), 'Descomprimiendo')
+      const fuera = join(temporal, `fuera-${i}`)
+      await descomprimir(archivo, fuera)
+      const programa = p.nombre.replace(/\.zip$/, '')
+      const dentro = join(fuera, programa)
+      if (!existsSync(dentro)) throw new Error('El paquete no trae lo que esperaba.')
+      renameSync(dentro, join(nuevo, 'bin', programa))
+      chmodSync(join(nuevo, 'bin', programa), 0o755)
+    }
+    const final = join(base, 'ffmpeg')
+    rmSync(final, { recursive: true, force: true })
+    renameSync(nuevo, final)
+    if (!tieneHerramienta('ffmpeg')) throw new Error('El paquete no trae lo que esperaba.')
+    activarHerramientas()
+    onProgreso(1, 'Listo')
+    return { version: paquetes[0].version }
+  } finally {
+    rmSync(temporal, { recursive: true, force: true })
+  }
 }
 
 const enCurso = new Map<IdDescargable, Promise<{ version: string }>>()
@@ -203,9 +275,10 @@ export function descargarHerramienta(
   const ya = enCurso.get(id)
   if (ya) return ya
   const trabajo = (async () => {
-    if (process.platform !== 'win32') throw new Error('Por ahora solo se baja en Windows.')
+    if (!PUEDE_BAJAR) throw new Error('Por ahora solo se baja en Windows y en Mac.')
     onProgreso(0, 'Buscando la última versión')
-    const p = id === 'ffmpeg' ? await paqueteFfmpeg() : id === 'python' ? await paquetePython() : await paqueteNode()
+    if (id === 'ffmpeg' && EN_MAC) return descargarFfmpegMac(onProgreso, senal)
+    const p = id === 'ffmpeg' ? await paqueteFfmpegWindows() : id === 'python' ? await paquetePython() : await paqueteNode()
     const base = raiz()
     const temporal = join(base, `.bajando-${id}`)
     rmSync(temporal, { recursive: true, force: true })
@@ -223,6 +296,7 @@ export function descargarHerramienta(
       rmSync(final, { recursive: true, force: true })
       renameSync(carpeta, final)
       if (!tieneHerramienta(id)) throw new Error('El paquete no trae lo que esperaba.')
+      if (EN_MAC) for (const d of carpetas()[id]) if (existsSync(d)) for (const f of readdirSync(d)) try { chmodSync(join(d, f), 0o755) } catch { /* un archivo que no se puede: se sigue */ }
       activarHerramientas()
       onProgreso(1, 'Listo')
       return { version: p.version }

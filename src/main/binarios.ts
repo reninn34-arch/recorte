@@ -1,4 +1,5 @@
 import { existsSync, readdirSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
 /**
@@ -15,6 +16,11 @@ export function anadirCarpetaBinarios(dir: string): void {
 }
 
 function candidatos(): string[] {
+  if (process.platform === 'darwin') {
+    // Una app abierta desde el Dock solo trae /usr/bin:/bin: se suman Homebrew y los globales de npm.
+    const casa = homedir()
+    return [...extras, '/opt/homebrew/bin', '/usr/local/bin', join(casa, '.npm-global', 'bin'), join(casa, '.local', 'bin'), join(casa, '.bun', 'bin')].filter((d) => existsSync(d))
+  }
   const appData = process.env.APPDATA ?? ''
   const localAppData = process.env.LOCALAPPDATA ?? ''
   const dirs = [

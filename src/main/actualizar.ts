@@ -14,6 +14,8 @@ import type { EstadoActualizacion } from '../shared/api'
 
 const { autoUpdater } = electronUpdater
 const CADA = 4 * 60 * 60_000
+/** En Mac, sin la firma de Apple la app no se puede reemplazar sola: se avisa y la versión nueva se baja a mano. */
+const A_MANO = process.platform === 'darwin'
 
 let estado: EstadoActualizacion = { fase: 'nada', version: app.getVersion() }
 
@@ -51,7 +53,7 @@ export async function buscarActualizacion(): Promise<EstadoActualizacion> {
     avisar({ fase: 'desarrollo' })
     return estado
   }
-  if (estado.fase === 'bajando' || estado.fase === 'lista') return estado
+  if (estado.fase === 'bajando' || estado.fase === 'lista' || estado.fase === 'manual') return estado
   try {
     avisar({ fase: 'buscando', error: undefined })
     await autoUpdater.checkForUpdates()
@@ -69,9 +71,11 @@ export function instalarActualizacion(): void {
 
 export function prepararActualizaciones(): void {
   if (!app.isPackaged) return
-  autoUpdater.autoDownload = true
-  autoUpdater.autoInstallOnAppQuit = true
-  autoUpdater.on('update-available', (info) => avisar({ fase: 'bajando', nueva: info.version, pct: 0, notas: resumenNotas(info.releaseNotes) }))
+  autoUpdater.autoDownload = !A_MANO
+  autoUpdater.autoInstallOnAppQuit = !A_MANO
+  autoUpdater.on('update-available', (info) =>
+    avisar(A_MANO ? { fase: 'manual', nueva: info.version, notas: resumenNotas(info.releaseNotes) } : { fase: 'bajando', nueva: info.version, pct: 0, notas: resumenNotas(info.releaseNotes) })
+  )
   autoUpdater.on('update-not-available', () => avisar({ fase: 'al-dia', revisado: Date.now() }))
   autoUpdater.on('download-progress', (p) => avisar({ fase: 'bajando', pct: Math.round(p.percent) }))
   autoUpdater.on('update-downloaded', (info) =>

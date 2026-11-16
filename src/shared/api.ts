@@ -148,8 +148,11 @@ export interface EstadoVozGoogle {
 export type FaseProgreso = 'ingesta' | 'transcripcion' | 'render' | 'exportar' | 'creacion' | 'subtitulos' | 'persona'
 
 export interface EstadoActualizacion {
-  /** desarrollo: no es la app instalada; al-dia: no hay nada nuevo; lista: bajada, falta reiniciar. */
-  fase: 'nada' | 'desarrollo' | 'buscando' | 'al-dia' | 'bajando' | 'lista' | 'error'
+  /**
+   * desarrollo: no es la app instalada; al-dia: no hay nada nuevo; lista: bajada, falta reiniciar;
+   * manual: hay una versión nueva pero en este equipo se baja a mano (el Mac, mientras la app no esté firmada por Apple).
+   */
+  fase: 'nada' | 'desarrollo' | 'buscando' | 'al-dia' | 'bajando' | 'lista' | 'manual' | 'error'
   /** La versión que corre ahora. */
   version: string
   /** La versión nueva, si hay. */
