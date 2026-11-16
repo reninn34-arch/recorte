@@ -5,11 +5,14 @@ Edita hablando, crea videos desde cero y aprende cómo te gusta editar.</p>
 
 <p align="center">
   <a href="https://github.com/reninn34-arch/recorte/releases/latest/download/Recorte-Setup.exe"><img alt="Descargar para Windows" src="https://img.shields.io/badge/Descargar%20para%20Windows-Recorte--Setup.exe-c8f169?style=for-the-badge&logo=windows&logoColor=111511&labelColor=c8f169&color=1b2116"></a>
+  <a href="https://github.com/reninn34-arch/recorte/releases/latest/download/Recorte-Mac-arm64.dmg"><img alt="Descargar para Mac (chip Apple)" src="https://img.shields.io/badge/Descargar%20para%20Mac-chip%20Apple%20(M1%E2%80%A6)-c8f169?style=for-the-badge&logo=apple&logoColor=111511&labelColor=c8f169&color=1b2116"></a>
+  <a href="https://github.com/reninn34-arch/recorte/releases/latest/download/Recorte-Mac-x64.dmg"><img alt="Descargar para Mac (Intel)" src="https://img.shields.io/badge/Mac-Intel-1b2116?style=for-the-badge&logo=apple&logoColor=c8f169&labelColor=1b2116&color=3a4232"></a>
 </p>
 
 <p align="center">
   <a href="https://github.com/reninn34-arch/recorte/releases/latest"><img alt="Versión" src="https://img.shields.io/github/v/release/reninn34-arch/recorte?label=versi%C3%B3n&color=c8f169&labelColor=1b2116"></a>
   <img alt="Windows 10 y 11" src="https://img.shields.io/badge/Windows-10%20%C2%B7%2011-1b2116?logo=windows&logoColor=c8f169">
+  <img alt="macOS" src="https://img.shields.io/badge/macOS-chip%20Apple%20%C2%B7%20Intel-1b2116?logo=apple&logoColor=c8f169">
   <a href="LICENSE"><img alt="Licencia" src="https://img.shields.io/badge/licencia-propietaria-1b2116?labelColor=1b2116&color=3a4232"></a>
 </p>
 
@@ -36,12 +39,28 @@ Edita hablando, crea videos desde cero y aprende cómo te gusta editar.</p>
 
 ## Instalar
 
+### Windows
+
 1. [Descarga **Recorte-Setup.exe**](https://github.com/reninn34-arch/recorte/releases/latest/download/Recorte-Setup.exe) y ábrelo.
 2. Si Windows dice «Windows protegió tu PC», da clic en **Más información** y luego en
    **Ejecutar de todas formas** (el instalador todavía no está firmado).
 3. Al abrir Recorte, conecta tu agente. En **Ajustes → Herramientas de video**, el botón
    **Instalar todo lo que falta** baja FFmpeg, Python con sus paquetes, Node.js y HyperFrames
    a la carpeta de Recorte, sin instalar nada en Windows.
+
+### Mac
+
+1. Descarga el de tu Mac: [**chip Apple** (M1, M2, M3…)](https://github.com/reninn34-arch/recorte/releases/latest/download/Recorte-Mac-arm64.dmg) o [**Intel**](https://github.com/reninn34-arch/recorte/releases/latest/download/Recorte-Mac-x64.dmg).
+   ¿No sabes cuál? Menú Apple (la manzana, arriba a la izquierda) → **Acerca de esta Mac**: si dice «Chip Apple M…», es el primero.
+2. Abre el .dmg y arrastra **Recorte** a **Aplicaciones**.
+3. La primera vez, macOS dice que no puede comprobar la app (todavía no está firmada por Apple).
+   Ve a **Ajustes del Sistema → Privacidad y seguridad**, baja hasta el aviso de Recorte y da clic
+   en **Abrir igualmente**. Solo se pide una vez.
+4. Igual que en Windows: conecta tu agente y en **Ajustes → Herramientas de video** pulsa
+   **Instalar todo lo que falta**.
+
+En Mac, Recorte avisa cuando hay una versión nueva, pero se baja a mano (botón **Descargar**) y se
+reemplaza en Aplicaciones: sin la firma de Apple no puede actualizarse solo.
 
 ### Actualizaciones
 

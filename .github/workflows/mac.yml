@@ -2,7 +2,8 @@
 # app, exporta con ese FFmpeg y abre la app compilada). No toca el instalador de Windows ni los releases: el .dmg queda
 # como archivo de la ejecución (Actions → la ejecución → «Artifacts») hasta que se decida publicarlo.
 #
-# Se corre a mano (Actions → «Compilar para Mac» → Run workflow) o al subir a la rama `mac-prueba`.
+# Se corre a mano (Actions → «Compilar para Mac» → Run workflow), al subir a la rama `mac-prueba`, o desde
+# release.yml al publicar una versión: entonces, si todo pasa, sube los .dmg a ese release.
 name: Compilar para Mac
 
 on:
@@ -10,14 +11,19 @@ on:
   push:
     branches:
       - mac-prueba
-
-permissions:
-  contents: read
+  workflow_call:
+    inputs:
+      etiqueta:
+        description: El release (vX.Y.Z) al que se suben los .dmg
+        type: string
+        default: ''
 
 jobs:
   mac:
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -55,7 +61,8 @@ jobs:
           APP=$(ls -d release/mac-arm64/Recorte.app)
           echo "--- firma"
           codesign -dv "$APP" 2>&1 | head -10 || true
-          codesign --verify --deep --strict "$APP" && echo "la firma es válida"
+          codesign --verify --deep --strict "$APP"
+          echo "la firma es válida"
           echo "--- el kit de Python va dentro"
           test -f "$APP/Contents/Resources/python/kit/kit.py"
           ls "$APP/Contents/Resources/python" | head -20
@@ -84,3 +91,9 @@ jobs:
           name: Recorte-Mac
           path: release/*.dmg
           retention-days: 7
+
+      - name: Subir los .dmg al release
+        if: inputs.etiqueta != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ inputs.etiqueta }}" release/Recorte-Mac-arm64.dmg release/Recorte-Mac-x64.dmg --clobber

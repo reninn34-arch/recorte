@@ -21,8 +21,8 @@ win:
   artifactName: ${productName}-Setup.${ext}
 
 # Mac: un .dmg para Apple Silicon (M1 y siguientes) y otro para Intel. Sin firma de Apple (hace falta una cuenta de
-# desarrollador): la primera vez se abre con clic derecho → Abrir. Por eso la app no se actualiza sola en Mac:
-# avisa de la versión nueva y manda a la página de versiones (ver main/actualizar.ts).
+# desarrollador): la primera vez se confirma en Ajustes del Sistema → Privacidad y seguridad → «Abrir igualmente». Por
+# eso la app no se actualiza sola en Mac: avisa de la versión nueva y manda a la página de versiones (main/actualizar.ts).
 mac:
   category: public.app-category.video
   target:
@@ -31,8 +31,11 @@ mac:
         - arm64
         - x64
   artifactName: ${productName}-Mac-${arch}.${ext}
-  # Sin certificado: se firma "ad hoc" (hace falta en Apple Silicon para que la app arranque).
+  # Sin certificado: electron-builder no firma y scripts/firmar-mac.cjs le pone la firma «ad hoc» completa (sin ella,
+  # en Apple Silicon la app bajada sale como «dañada»).
   identity: null
+
+afterPack: scripts/firmar-mac.cjs
 
 dmg:
   title: Recorte ${version}
