@@ -44,6 +44,8 @@ import {
   matrizColor,
   soloTramo,
   curvasColor,
+  cuboDeZona,
+  zonaColorActiva,
   ajustesDeCapa,
   CLAVES_CURVA_COLOR,
   ajustesEn,
@@ -415,7 +417,14 @@ async function exportarTimelineAhora(
       writeFileSync(join(carpeta, archivo), cuboDeCurvas(curvas), 'utf8')
       lut = `,format=gbrp,lut1d=file=${archivo}:interp=linear`
     }
-    const crudo = `[${iv}:v]${ritmo},fps=${fps},${zoom}${encuadre}${lento}${fondoBorroso},setsar=1${lut}${color}${efectos}`
+    // El color por zonas (cambia solo un color): una LUT 3D, después del color del clip.
+    let zona = ''
+    if (zonaColorActiva(a)) {
+      const archivo = `zona-color-${i}.cube`
+      writeFileSync(join(carpeta, archivo), cuboDeZona(a), 'utf8')
+      zona = `,format=gbrp,lut3d=file=${archivo}:interp=tetrahedral`
+    }
+    const crudo = `[${iv}:v]${ritmo},fps=${fps},${zoom}${encuadre}${lento}${fondoBorroso},setsar=1${lut}${color}${zona}${efectos}`
     // Las zonas tapadas (una cara, una placa): cada una se recorta, se difumina o se pinta de negro y se pega en su sitio.
     let base = crudo
     // Las de modo «borrar» no se tapan aquí: el clip sin el objeto va encima como otra capa.

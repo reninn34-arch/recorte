@@ -2898,7 +2898,7 @@ app.whenReady().then(() => {
     rmSync(tmp, { recursive: true, force: true })
     try {
       const fps = proyecto.source.fps > 0 ? proyecto.source.fps : 30
-      const r = await exportarTimeline(proyecto, valida, proyectos.carpeta(id), { formato: 'original', subtitulos: false, desde: Math.max(0, segundo), hasta: segundo + 3 / fps, calidad: 'alta' }, () => {}, tmp)
+      const r = await exportarTimeline(proyecto, valida, proyectos.carpeta(id), { formato: 'original', subtitulos: false, desde: Math.max(0, segundo), hasta: segundo + Math.max(0.12, 3 / fps), calidad: 'alta' }, () => {}, tmp)
       if (!r.ok || !r.output) return { ok: false, error: r.error ?? 'No pude sacar el cuadro.' }
       const destino = carpetaDelProyecto(await carpetaVideos(), proyecto.name)
       mkdirSync(destino, { recursive: true })
@@ -3190,6 +3190,9 @@ No pude animar los subtítulos (se animan al exportar): ${e instanceof Error ? e
   ipcMain.handle('vista:existentes', (_e, id: string, claves: string[]) => vistaPrevia.existentes(id, Array.isArray(claves) ? claves : []))
   ipcMain.handle('vista:preparar', (_e, id: string, timeline: Timeline, desde: number) => timeline && Array.isArray(timeline.clips) ? vistaPrevia.preparar(id, timeline, Number(desde) || 0) : undefined)
   ipcMain.handle('vista:pausar', (_e, id: string) => vistaPrevia.pausar(id))
+  ipcMain.handle('vista:cuadro', (_e, id: string, timeline: Timeline, t: number) =>
+    timeline && Array.isArray(timeline.clips) && Number.isFinite(t) ? vistaPrevia.cuadro(id, timeline, Math.max(0, t)) : null
+  )
   ipcMain.handle('actualizacion:estado', () => estadoActualizacion())
   ipcMain.handle('actualizacion:buscar', () => buscarActualizacion())
   ipcMain.handle('actualizacion:instalar', () => instalarActualizacion())

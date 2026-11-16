@@ -2824,6 +2824,17 @@ export function TimelineEditor({
                     ]
                   ],
                   [
+                    'Color por zonas',
+                    [
+                      ['zonaMatiz', 'Color elegido', 0, 360, 1, (v: number) => `${nombreMatiz(v)} · ${Math.round(v)}°`],
+                      ['zonaAncho', 'Cuánto color entra', 5, 90, 1, (v: number) => `±${Math.round(v)}°`],
+                      ['zonaSuave', 'Borde suave', 0, 1, 0.01, (v: number) => `${Math.round(v * 100)} %`],
+                      ['zonaGiro', 'Cambiar el tono', -180, 180, 1, (v: number) => (v ? `${v > 0 ? '+' : ''}${Math.round(v)}°` : 'no')],
+                      ['zonaSat', 'Saturación', -1, 1, 0.01, (v: number) => (v ? `${v > 0 ? '+' : '−'}${Math.round(Math.abs(v) * 100)}` : '0')],
+                      ['zonaLuz', 'Luz', -1, 1, 0.01, (v: number) => (v ? `${v > 0 ? '+' : '−'}${Math.round(Math.abs(v) * 100)}` : '0')]
+                    ]
+                  ],
+                  [
                     'Efectos',
                     [
                       ['desenfoque', 'Desenfoque', 0, 1, 0.01, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no')],
@@ -3553,4 +3564,17 @@ export function TimelineEditor({
 /** Si un recorrido es el mismo que otro (para reconocer el movimiento elegido en el menú). */
 function sinCambios(a: FinCapa, b: FinCapa): boolean {
   return Math.abs(a.x - b.x) < 0.002 && Math.abs(a.y - b.y) < 0.002 && Math.abs(a.ancho - b.ancho) < 0.002 && Math.abs(a.giro - b.giro) < 0.1
+}
+
+/** El nombre del color de un tono (para el color por zonas). */
+function nombreMatiz(h: number): string {
+  const x = ((h % 360) + 360) % 360
+  if (x < 15 || x >= 345) return 'Rojos'
+  if (x < 45) return 'Naranjas y piel'
+  if (x < 75) return 'Amarillos'
+  if (x < 150) return 'Verdes'
+  if (x < 200) return 'Cianes y cielo'
+  if (x < 260) return 'Azules'
+  if (x < 290) return 'Violetas'
+  return 'Magentas'
 }

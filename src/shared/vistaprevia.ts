@@ -1,4 +1,4 @@
-import { duracionTimeline, timelineActiva, tramos, type Timeline } from './timeline'
+import { ajustesDe, duracionTimeline, timelineActiva, tramos, ubicar, zonaColorActiva, type Timeline } from './timeline'
 import type { Project } from './types'
 
 /**
@@ -65,10 +65,23 @@ export function tramosVista(timeline: Timeline, firma: string): TramoVista[] {
     const textos = enTramo(tl.textos, desde, hasta)
     const capas = enTramo(tl.capas, desde, hasta)
     const ajustes = enTramo(tl.ajustesCapa, desde, hasta)
-    const pesado = Boolean(capas.length || ajustes.length || tl.filtros || textos.some((t) => t.animacion) || lista.some((t) => t.inicio < hasta && t.fin > desde && t.clip.zonas?.length))
+    const pesado = Boolean(capas.length || ajustes.length || tl.filtros || textos.some((t) => t.animacion) || lista.some((t) => t.inicio < hasta && t.fin > desde && (t.clip.zonas?.length || zonaColorActiva(ajustesDe(t.clip)))))
     salida.push({ desde, hasta, pesado, clave: huella(JSON.stringify([firma, hasta - desde, global, clips, textos, capas, ajustes])) })
   }
   return salida
+}
+
+/**
+ * El cuadro fijo del monitor en pausa, para lo que el monitor no sabe pintar en vivo (el color por zonas): la clave del
+ * video de debajo en el segundo `t` (sin capas ni textos, que el monitor sigue poniendo encima), o null si no hace falta.
+ */
+export function claveCuadro(timeline: Timeline, t: number, firma: string, fps: number): string | null {
+  const tl = timelineActiva(timeline)
+  const u = ubicar(tl, t)
+  if (!u || !zonaColorActiva(ajustesDe(u.clip))) return null
+  const previo = u.indice > 0 ? tl.clips[u.indice - 1] : null
+  const cuadro = Math.round((t - u.inicio) * fps)
+  return huella(JSON.stringify([firma, 'cuadro', u.clip, previo, cuadro]))
 }
 
 /** Una clave válida (para no leer ni escribir fuera de la carpeta del caché). */

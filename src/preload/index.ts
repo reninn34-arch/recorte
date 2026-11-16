@@ -174,6 +174,7 @@ const api: RecorteApi = {
   vistaExistentes: (id, claves) => ipcRenderer.invoke('vista:existentes', id, claves),
   vistaPreparar: (id, timeline, desde) => ipcRenderer.invoke('vista:preparar', id, timeline, desde),
   vistaPausar: (id) => ipcRenderer.invoke('vista:pausar', id),
+  vistaCuadro: (id, timeline, t) => ipcRenderer.invoke('vista:cuadro', id, timeline, t),
   onVistaLista: (cb) => {
     const listener = (_evento: Electron.IpcRendererEvent, e: { id: string; clave: string }) => cb(e)
     ipcRenderer.on('vista:lista', listener)

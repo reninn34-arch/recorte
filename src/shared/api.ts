@@ -464,6 +464,8 @@ export interface RecorteApi {
   vistaPreparar: (id: string, timeline: Timeline, desde: number) => Promise<void>
   /** Deja de empezar tramos nuevos (se está reproduciendo). */
   vistaPausar: (id: string) => Promise<void>
+  /** El cuadro fijo del monitor en pausa para lo que no se pinta en vivo (el color por zonas): su clave y su archivo. */
+  vistaCuadro: (id: string, timeline: Timeline, t: number) => Promise<{ clave: string; archivo: string } | null>
   onVistaLista: (cb: (e: { id: string; clave: string }) => void) => () => void
   /** Progreso de una herramienta que se baja o se instala desde Ajustes. */
   onHerramienta: (cb: (p: { id: string; pct: number; texto: string }) => void) => () => void

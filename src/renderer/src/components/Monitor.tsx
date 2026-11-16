@@ -381,6 +381,8 @@ export function Monitor({
                 />
               ))}
               {enImagen && <img className="monitor-imagen" src={reproductor.imagen!} alt="" style={estiloImagen} />}
+              {/* En pausa, lo que el monitor no pinta en vivo (el color por zonas): el cuadro ya pintado, con su encuadre. */}
+              {vistaPrevia?.cuadro && !reproductor.reproduciendo && !enImagen && <img className="monitor-imagen monitor-fijo" src={vistaPrevia.cuadro} alt="" />}
               {/* Las zonas tapadas del clip: lo mismo que el MP4 (un recuadro difuminado o en negro). */}
               {!vacia &&
                 clipActual?.zonas?.map((z0, k) => {

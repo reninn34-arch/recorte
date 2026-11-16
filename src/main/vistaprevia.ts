@@ -1,10 +1,12 @@
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { Timeline } from '../shared/timeline'
+import { spawn } from 'node:child_process'
+import { timelineActiva, type Timeline } from '../shared/timeline'
 import type { Project } from '../shared/types'
-import { esClaveVista, firmaProyecto, tramosVista, type TramoVista } from '../shared/vistaprevia'
+import { claveCuadro, esClaveVista, firmaProyecto, tramosVista, type TramoVista } from '../shared/vistaprevia'
 import { exportarTimeline } from './exportar'
+import { rutaFfmpeg } from './ffmpeg'
 
 interface Almacen {
   get(id: string): Project | null
@@ -25,6 +27,8 @@ export class VistaPrevia {
   /** Tramos que no se pudieron renderizar: no se reintentan en esta sesión. */
   private fallidos = new Set<string>()
   private trabajando = false
+  /** Cuadros fijos pedidos: tienen prioridad, mientras tanto no se empiezan tramos. */
+  private cuadrosEnCurso = 0
 
   private proyectos: Almacen
   private alListo: (id: string, clave: string) => void
@@ -50,6 +54,43 @@ export class VistaPrevia {
     void this.trabajar()
   }
 
+  /**
+   * El cuadro fijo del monitor en pausa (ver claveCuadro): el video de debajo en el segundo `t`, con todo su color, sin
+   * capas ni textos. Devuelve su clave y su archivo dentro del proyecto, o null si no hace falta o no se pudo.
+   */
+  async cuadro(id: string, timeline: Timeline, t: number): Promise<{ clave: string; archivo: string } | null> {
+    const proyecto = this.proyectos.get(id)
+    if (!proyecto) return null
+    const fps = proyecto.source.fps > 0 && proyecto.source.fps <= 60 ? proyecto.source.fps : 30
+    const clave = claveCuadro(timeline, t, firmaProyecto(proyecto), fps)
+    if (!clave) return null
+    const archivo = `vista-previa/cuadro-${clave}.jpg`
+    const final = join(this.proyectos.carpeta(id), archivo)
+    if (existsSync(final)) return { clave, archivo }
+    this.cuadrosEnCurso++
+    const base: Timeline = { ...timelineActiva(timeline), textos: [], capas: [], ajustesCapa: [] }
+    delete base.filtros
+    delete base.subtitulosHF
+    const tmp = mkdtempSync(join(tmpdir(), 'recorte-cuadro-'))
+    try {
+      const r = await exportarTimeline(proyecto, base, this.proyectos.carpeta(id), { formato: 'original', subtitulos: false, desde: t, hasta: t + Math.max(0.12, 3 / fps), resolucion: '720', calidad: 'alta' }, () => {}, tmp)
+      if (!r.ok || !r.output || !existsSync(r.output)) return null
+      mkdirSync(this.carpeta(id), { recursive: true })
+      const codigo = await new Promise<number | null>((ok) => {
+        const hijo = spawn(rutaFfmpeg(), ['-v', 'error', '-y', '-i', r.output!, '-frames:v', '1', '-q:v', '3', final], { windowsHide: true })
+        hijo.on('error', () => ok(null))
+        hijo.on('close', ok)
+      })
+      return codigo === 0 && existsSync(final) ? { clave, archivo } : null
+    } catch {
+      return null
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+      this.cuadrosEnCurso--
+      void this.trabajar()
+    }
+  }
+
   /** Deja de empezar tramos nuevos (el que está en curso termina). */
   pausar(id: string): void {
     this.pausados.add(id)
@@ -66,6 +107,7 @@ export class VistaPrevia {
   }
 
   private siguiente(): { id: string; proyecto: Project; timeline: Timeline; tramo: TramoVista } | null {
+    if (this.cuadrosEnCurso > 0) return null
     for (const [id, p] of this.pedidos) {
       if (this.pausados.has(id)) continue
       const proyecto = this.proyectos.get(id)

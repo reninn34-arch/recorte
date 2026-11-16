@@ -166,6 +166,19 @@ export interface AjustesClip {
   recorteDer?: number
   recorteArr?: number
   recorteAba?: number
+  // ----- Color por zonas (como el «secundario» de DaVinci o el HSL de Lumetri): cambia solo un color -----
+  /** El color que se elige, como tono (0 rojo, 30 naranja/piel, 60 amarillo, 120 verde, 180 cian, 220 azul, 300 magenta). */
+  zonaMatiz?: number
+  /** Cuánto tono a cada lado del elegido entra de lleno (grados). */
+  zonaAncho?: number
+  /** Cuánto se suaviza el borde de la zona (0 seco, 1 muy suave). */
+  zonaSuave?: number
+  /** Gira el tono de la zona (grados). */
+  zonaGiro?: number
+  /** Más o menos color en la zona (−1 gris, +1 el doble). */
+  zonaSat?: number
+  /** Más clara u oscura la zona. */
+  zonaLuz?: number
 }
 
 export const LIMITES_AJUSTES = {
@@ -199,7 +212,13 @@ export const LIMITES_AJUSTES = {
   recorteIzq: [0, 0.45, 0],
   recorteDer: [0, 0.45, 0],
   recorteArr: [0, 0.45, 0],
-  recorteAba: [0, 0.45, 0]
+  recorteAba: [0, 0.45, 0],
+  zonaMatiz: [0, 360, 0],
+  zonaAncho: [5, 90, 30],
+  zonaSuave: [0, 1, 0.5],
+  zonaGiro: [-180, 180, 0],
+  zonaSat: [-1, 1, 0],
+  zonaLuz: [-1, 1, 0]
 } as const satisfies Record<keyof AjustesClip, readonly [number, number, number]>
 
 /** Una zona tapada de un clip: un rectángulo del cuadro (en fracciones, con su centro en x, y). */
@@ -1666,8 +1685,75 @@ export function ajustesDe(clip: ClipTL | undefined): Required<AjustesClip> {
     recorteIzq: clip?.ajustes?.recorteIzq ?? 0,
     recorteDer: clip?.ajustes?.recorteDer ?? 0,
     recorteArr: clip?.ajustes?.recorteArr ?? 0,
-    recorteAba: clip?.ajustes?.recorteAba ?? 0
+    recorteAba: clip?.ajustes?.recorteAba ?? 0,
+    zonaMatiz: clip?.ajustes?.zonaMatiz ?? 0,
+    zonaAncho: clip?.ajustes?.zonaAncho ?? 30,
+    zonaSuave: clip?.ajustes?.zonaSuave ?? 0.5,
+    zonaGiro: clip?.ajustes?.zonaGiro ?? 0,
+    zonaSat: clip?.ajustes?.zonaSat ?? 0,
+    zonaLuz: clip?.ajustes?.zonaLuz ?? 0
   }
+}
+
+// ===== Color por zonas: una LUT 3D que cambia solo los colores cercanos al elegido =====
+
+/** Tiene color por zonas: algo que cambiar en la zona elegida. */
+export function zonaColorActiva(a: Pick<Required<AjustesClip>, 'zonaGiro' | 'zonaSat' | 'zonaLuz'>): boolean {
+  return Math.abs(a.zonaGiro) > 0.5 || Math.abs(a.zonaSat) > 0.005 || Math.abs(a.zonaLuz) > 0.005
+}
+
+const suaveZona = (p: number) => (p <= 0 ? 0 : p >= 1 ? 1 : p * p * (3 - 2 * p))
+
+/**
+ * Cuánto entra un color (r, g, b de 0 a 1) en la zona: 1 de lleno, 0 fuera. Por tono (cerca del elegido, con su borde
+ * suave) y por saturación: los grises no tienen tono y no entran.
+ */
+export function pesoZona(r: number, g: number, b: number, a: Pick<Required<AjustesClip>, 'zonaMatiz' | 'zonaAncho' | 'zonaSuave'>): number {
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  const croma = max - min
+  if (croma < 1e-6) return 0
+  let h = max === r ? ((g - b) / croma) % 6 : max === g ? (b - r) / croma + 2 : (r - g) / croma + 4
+  h = (h * 60 + 360) % 360
+  const d = Math.abs(((h - a.zonaMatiz + 540) % 360) - 180)
+  const borde = Math.max(1, a.zonaAncho * (0.2 + 1.8 * a.zonaSuave))
+  const porTono = d <= a.zonaAncho ? 1 : 1 - suaveZona((d - a.zonaAncho) / borde)
+  const sat = max > 0 ? croma / max : 0
+  return porTono * suaveZona((sat - 0.04) / 0.16)
+}
+
+/** Aplica el color por zonas a un color (r, g, b de 0 a 1). */
+export function colorZona(r: number, g: number, b: number, a: Required<AjustesClip>): [number, number, number] {
+  const w = pesoZona(r, g, b, a)
+  if (w <= 0) return [r, g, b]
+  // A HSL: se gira el tono, se cambia la saturación y la luz, y se mezcla con el original según el peso.
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  let l = (max + min) / 2
+  const c = max - min
+  let s = c === 0 ? 0 : c / (1 - Math.abs(2 * l - 1))
+  let h = c === 0 ? 0 : max === r ? ((g - b) / c) % 6 : max === g ? (b - r) / c + 2 : (r - g) / c + 4
+  h = (h * 60 + 360) % 360
+  h = (h + a.zonaGiro * w + 360) % 360
+  s = Math.max(0, Math.min(1, s * (1 + a.zonaSat * w)))
+  l = Math.max(0, Math.min(1, l + a.zonaLuz * w * (a.zonaLuz > 0 ? 1 - l : l) * 0.8))
+  const C = (1 - Math.abs(2 * l - 1)) * s
+  const X = C * (1 - Math.abs(((h / 60) % 2) - 1))
+  const m = l - C / 2
+  const [r1, g1, b1] = h < 60 ? [C, X, 0] : h < 120 ? [X, C, 0] : h < 180 ? [0, C, X] : h < 240 ? [0, X, C] : h < 300 ? [X, 0, C] : [C, 0, X]
+  return [r1 + m, g1 + m, b1 + m]
+}
+
+/** El color por zonas como archivo .cube 3D (lo lee el filtro lut3d de FFmpeg; el rojo varía más rápido). */
+export function cuboDeZona(a: Required<AjustesClip>, lado = 33): string {
+  const lineas = ['TITLE "Recorte color por zonas"', `LUT_3D_SIZE ${lado}`]
+  for (let bi = 0; bi < lado; bi++)
+    for (let gi = 0; gi < lado; gi++)
+      for (let ri = 0; ri < lado; ri++) {
+        const [r, g, b] = colorZona(ri / (lado - 1), gi / (lado - 1), bi / (lado - 1), a)
+        lineas.push(`${r.toFixed(5)} ${g.toFixed(5)} ${b.toFixed(5)}`)
+      }
+  return lineas.join('\n') + '\n'
 }
 
 // ===== Color tipo Lumetri: una curva por canal, la misma en el monitor (filtro SVG) y en el MP4 (lut1d) =====

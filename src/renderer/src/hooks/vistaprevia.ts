@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Timeline } from '../../../shared/timeline'
 import type { Project } from '../../../shared/types'
-import { firmaProyecto, tramosVista, type TramoVista } from '../../../shared/vistaprevia'
+import { claveCuadro, firmaProyecto, tramosVista, type TramoVista } from '../../../shared/vistaprevia'
+import { mediaUrl } from '../media'
 
 export interface VistaPrevia {
   tramos: TramoVista[]
   /** Las claves de los tramos que ya tienen su video. */
   listas: Set<string>
+  /** En pausa, el cuadro ya pintado de lo que el monitor no sabe pintar en vivo (el color por zonas), si es el de ahora. */
+  cuadro: string | null
 }
 
 /** Cuánto se espera sin editar ni reproducir antes de renderizar en segundo plano. */
@@ -64,5 +67,23 @@ export function useVistaPrevia(proyecto: Project, timeline: Timeline, reproducie
     return () => clearTimeout(t)
   }, [tramos, listas, reproduciendo, proyecto.id, timeline, apagada])
 
-  return apagada ? null : { tramos, listas }
+  // En pausa sobre un clip con color por zonas: el cuadro pintado por FFmpeg (el monitor no sabe hacerlo en vivo).
+  const fps = proyecto.source.fps > 0 && proyecto.source.fps <= 60 ? proyecto.source.fps : 30
+  const clave = apagada || reproduciendo ? null : claveCuadro(timeline, tiempo, firma, fps)
+  const [cuadro, setCuadro] = useState<{ clave: string; url: string } | null>(null)
+  useEffect(() => {
+    if (!clave) return
+    let vivo = true
+    const t = setTimeout(() => {
+      void window.recorte.vistaCuadro(proyecto.id, timeline, tiempoRef.current).then((r) => {
+        if (vivo && r) setCuadro({ clave: r.clave, url: mediaUrl(proyecto.id, r.archivo) })
+      })
+    }, 250)
+    return () => {
+      vivo = false
+      clearTimeout(t)
+    }
+  }, [clave, proyecto.id, timeline])
+
+  return apagada ? null : { tramos, listas, cuadro: clave && cuadro?.clave === clave ? cuadro.url : null }
 }
