@@ -36,6 +36,8 @@ jobs:
 
       # Lo que baja la app con su botón (Ajustes → Herramientas): FFmpeg (con x264 y libass), Python 3.12 y Node.
       - name: Probar las descargas de herramientas
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run prueba:herramientas
 
       # Con el FFmpeg y el Python que acaba de bajar la app (no los de Homebrew): lo mismo que haría un usuario, incluido

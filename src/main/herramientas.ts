@@ -91,7 +91,10 @@ interface Paquete {
 const CABECERAS = { 'User-Agent': `Recorte/${app.getVersion()}`, Accept: 'application/vnd.github+json' }
 
 async function json<T>(url: string): Promise<T> {
-  const r = await fetch(url, { headers: CABECERAS })
+  // En la integración continua (muchas máquinas con la misma dirección) GitHub limita las consultas sin identificar: ahí
+  // se usa el token de la ejecución. La app de los usuarios no lo tiene ni lo necesita.
+  const token = url.startsWith('https://api.github.com/') ? process.env.GITHUB_TOKEN : undefined
+  const r = await fetch(url, { headers: token ? { ...CABECERAS, Authorization: `Bearer ${token}` } : CABECERAS })
   if (!r.ok) throw new Error(`No pude consultar ${new URL(url).host} (${r.status}).`)
   return (await r.json()) as T
 }
