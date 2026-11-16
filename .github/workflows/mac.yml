@@ -53,6 +53,11 @@ jobs:
           npm run prueba:medios
           npm run prueba:proxys
 
+      # Antigravity (el agente de Google): se baja y se descomprime como en la app. Solo en la rama de prueba (230 MB).
+      - name: Probar la instalación de Antigravity
+        if: github.ref == 'refs/heads/mac-prueba'
+        run: npm run prueba:antigravity
+
       - run: node scripts/licencia-instalador.mjs
       - name: Compilar los .dmg
         run: npx electron-builder --mac --publish never

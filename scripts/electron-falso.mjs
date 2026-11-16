@@ -7,7 +7,7 @@ if (!globalThis.__recorteElectron) {
 }
 
 const FALSO = 'data:text/javascript,' + encodeURIComponent(
-  "import{tmpdir}from'node:os';export const app={isPackaged:false,getPath:()=>tmpdir(),getAppPath:()=>process.cwd(),getVersion:()=>'0.0.0'};export default{app}"
+  "import{tmpdir}from'node:os';export const app={isPackaged:false,getPath:()=>tmpdir(),getAppPath:()=>process.cwd(),getVersion:()=>'0.0.0'};export const shell={openExternal:async()=>{},showItemInFolder:()=>{}};export default{app,shell}"
 )
 
 export async function resolve(especificador, contexto, siguiente) {

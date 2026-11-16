@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, extname, join, resolve } from 'node:path'
 import { app, shell } from 'electron'
@@ -62,11 +62,13 @@ export async function instalarAntigravity(): Promise<void> {
   const archivo = join(destino, 'antigravity.zip')
   writeFileSync(archivo, bytes)
   try {
-    // El tar de Windows y macOS abre zips; en Linux hace falta unzip.
+    // En Windows, su tar (abre zips); en Mac, ditto (el del sistema, conserva los permisos); en Linux, unzip.
     const comando =
       process.platform === 'linux'
         ? `unzip -o -q "${archivo}" -d "${destino}"`
-        : `"${join(process.env.SystemRoot ?? '', 'System32', 'tar.exe')}" -xf "${archivo}" -C "${destino}"`
+        : process.platform === 'darwin'
+          ? `/usr/bin/ditto -x -k "${archivo}" "${destino}"`
+          : `"${join(process.env.SystemRoot ?? '', 'System32', 'tar.exe')}" -xf "${archivo}" -C "${destino}"`
     await new Promise<void>((resolver, rechazar) => {
       const hijo = spawn(comando, { shell: true, windowsHide: true })
       hijo.on('error', rechazar)
@@ -76,6 +78,13 @@ export async function instalarAntigravity(): Promise<void> {
     rmSync(archivo, { force: true })
   }
   if (!exeAntigravity()) throw new Error('Antigravity se descargó pero no encontré su programa.')
+  // Fuera de Windows, sus programas tienen que poder ejecutarse.
+  if (process.platform !== 'win32') {
+    for (const f of ['agy_acp_server.par', 'localharness_external']) {
+      const ruta = join(destino, f)
+      if (existsSync(ruta)) chmodSync(ruta, 0o755)
+    }
+  }
 }
 
 /** Las variables de Google del entorno mandarían sobre la cuenta del usuario: fuera. */
