@@ -24,6 +24,19 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.65',
+    fecha: '2026-11-16',
+    resumen: 'El monitor va más fluido con videos 4K o pesados: Recorte les hace una copia liviana por su cuenta.',
+    novedades: [
+      {
+        icono: 'video',
+        titulo: 'Copias livianas de tus videos',
+        texto:
+          'Cuando agregas un video más grande que 1080p (o de un formato que el monitor lee mal, como HEVC o ProRes), Recorte hace en segundo plano una copia de 720p y el monitor la usa. Al exportar, y en los efectos como persona, borrar o cielo, se sigue usando el video original: la calidad final no cambia. Los videos chicos no se tocan.'
+      }
+    ]
+  },
+  {
     version: '0.1.64',
     fecha: '2026-11-16',
     resumen: 'Recorta cualquier objeto con un clic, borra objetos con su forma exacta, cambia el cielo y aguanta videos largos.',

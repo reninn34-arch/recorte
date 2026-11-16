@@ -26,6 +26,7 @@ import { avisarSesionCaida, definirEntornoAgentes, empezarTrabajo, esParado, par
 import { comandoConEleccion } from './modelos'
 import { alCambiarCatalogo, catalogoAgente, eleccionVigente } from './catalogo'
 import { crearMiniatura, crearProxy, duracionMedio, probeVideo } from './ffmpeg'
+import { prepararProxysDeMedios } from './proxysmedios'
 import { proponerClipsConAgente, proponerClipsConIA, proponerRecetaConAgente, proponerRecetaConIA } from './ia'
 import { registrarMedia } from './media'
 import { proponerClips } from './momentos'
@@ -1490,6 +1491,18 @@ app.whenReady().then(() => {
     return agregarRutas(id, r.filePaths)
   })
   /** Agrega archivos a la biblioteca del proyecto (los copia no: se usan desde su ruta). */
+  /** La copia liviana de los videos de la biblioteca (para el monitor): se hace en segundo plano y el editor la usa al estar lista. */
+  function avisarProxysDeMedios(id: string) {
+    prepararProxysDeMedios(
+      proyectos,
+      id,
+      (p) => {
+        const { transcript: _t, ...ligero } = p
+        for (const w of BrowserWindow.getAllWindows()) w.webContents.send('proyecto:externo', { proyecto: ligero, quien: 'recorte', conTimeline: false })
+      },
+      (pct, texto) => enviarProgreso({ id, fase: 'ingesta', pct, texto })
+    )
+  }
   async function agregarRutas(id: string, rutas: string[]): Promise<{ project: Project; agregados: string[]; fallos: string[] }> {
     const carpeta = join(proyectos.carpeta(id), 'medios')
     mkdirSync(carpeta, { recursive: true })
@@ -1526,6 +1539,7 @@ app.whenReady().then(() => {
     const actual = proyectos.abrir(id)!
     actual.medios = [...(actual.medios ?? []), ...nuevos]
     proyectos.save(actual)
+    avisarProxysDeMedios(id)
     return { project: actual, agregados: nuevos.map((m) => m.id), fallos }
   }
   /** Copia un audio a `media/` del proyecto (para ponerlo como sonido o música). */
@@ -1895,7 +1909,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle('proyecto:abrir', (_evento, id: unknown) => {
     if (typeof id !== 'string') return null
-    return proyectos.abrir(id)
+    const abierto = proyectos.abrir(id)
+    // Los videos de la biblioteca que aún no tienen su copia liviana (proyectos de antes) la reciben ahora, en segundo plano.
+    if (abierto?.medios?.length) avisarProxysDeMedios(id)
+    return abierto
   })
 
   ipcMain.handle('proyecto:guardar', (_evento, proyecto: Project) => {

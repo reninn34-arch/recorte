@@ -9,6 +9,8 @@ export interface VideoInfo {
   height: number
   fps: number
   hasAudio: boolean
+  /** El códec del video (h264, hevc, prores…). */
+  codec?: string
 }
 
 export const rutaFfmpeg = (): string => process.env.RECORTE_FFMPEG ?? 'ffmpeg'
@@ -80,6 +82,7 @@ export async function probeVideo(ruta: string): Promise<VideoInfo> {
       avg_frame_rate?: string
       r_frame_rate?: string
       duration?: string
+      codec_name?: string
       side_data_list?: Array<{ rotation?: number }>
     }>
   }
@@ -95,7 +98,8 @@ export async function probeVideo(ruta: string): Promise<VideoInfo> {
     width: Number(girado ? video.height : video.width ?? 0),
     height: Number(girado ? video.width : video.height ?? 0),
     fps: fpsDe(video.avg_frame_rate ?? video.r_frame_rate),
-    hasAudio: datos.streams?.some((s) => s.codec_type === 'audio') ?? false
+    hasAudio: datos.streams?.some((s) => s.codec_type === 'audio') ?? false,
+    codec: video.codec_name
   }
 }
 

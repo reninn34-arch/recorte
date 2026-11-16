@@ -1,6 +1,6 @@
 import { carpetaDePieza } from './piezas'
 import { protocol } from 'electron'
-import { createReadStream, statSync } from 'node:fs'
+import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, join, resolve, sep } from 'node:path'
 import { Readable } from 'node:stream'
 import type { Creaciones } from './creaciones'
@@ -43,6 +43,11 @@ export function registrarMedia(proyectos: Proyectos, creaciones: Creaciones, car
       const proyecto = proyectos.get(id)
       const medio = proyecto?.medios?.find((m) => m.id === relativo.slice(6))
       if (!medio) return new Response('No encontrado', { status: 404 })
+      // El monitor usa la copia liviana si ya está hecha; lo demás (exportar, el kit) lee el original.
+      if (medio.proxy) {
+        const copia = join(proyectos.carpeta(id), medio.proxy)
+        if (existsSync(copia)) return servirArchivo(copia, request)
+      }
       return servirArchivo(medio.ruta, request)
     }
 

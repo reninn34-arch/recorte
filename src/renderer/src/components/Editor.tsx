@@ -114,7 +114,7 @@ export function Editor({
   const historial = useHistorial(timeline, onCambiarTimeline, proyecto.id)
   const fuentes = useMemo<FuentesVista>(() => {
     const lista: FuentesVista = { principal: { url: mediaUrl(proyecto.id, proyecto.proxy ?? 'fuente'), tipo: 'video' } }
-    for (const m of proyecto.medios ?? []) lista[m.id] = { url: mediaUrl(proyecto.id, `medio/${m.id}`), tipo: m.tipo }
+    for (const m of proyecto.medios ?? []) lista[m.id] = { url: mediaUrl(proyecto.id, `medio/${m.id}`) + (m.proxy ? '?copia=1' : ''), tipo: m.tipo }
     return lista
   }, [proyecto.id, proyecto.proxy, proyecto.medios])
   // Lo que suena y se ve es la timeline sin las pistas silenciadas (los clips no cambian de sitio).

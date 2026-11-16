@@ -15,6 +15,11 @@ export interface MedioProyecto {
   conAudio: boolean
   /** Miniatura dentro de la carpeta del proyecto (`medios/<id>.jpg`). */
   miniatura?: string
+  /**
+   * Una copia liviana (720p) para el monitor, dentro de la carpeta del proyecto (`medios/<id>-proxy.mp4`). La exportación
+   * sigue usando el original. Vacío: ya se revisó y no hace falta (un video chico, de un códec que el monitor lee bien).
+   */
+  proxy?: string
 }
 
 export type ClipStatus = 'sugerido' | 'elegido' | 'renderizando' | 'listo' | 'error'
