@@ -56,11 +56,38 @@ export async function buscarActualizacion(): Promise<EstadoActualizacion> {
   if (estado.fase === 'bajando' || estado.fase === 'lista' || estado.fase === 'manual') return estado
   try {
     avisar({ fase: 'buscando', error: undefined })
-    await autoUpdater.checkForUpdates()
+    if (A_MANO) await revisarAMano()
+    else await autoUpdater.checkForUpdates()
   } catch (e) {
     avisar({ fase: 'error', error: explicar(e) })
   }
   return estado
+}
+
+/** «1.2.10» es más nueva que «1.2.9» (número a número). */
+export function esMasNueva(nueva: string, actual: string): boolean {
+  const a = nueva.replace(/^v/, '').split('.').map((x) => Number.parseInt(x, 10) || 0)
+  const b = actual.replace(/^v/, '').split('.').map((x) => Number.parseInt(x, 10) || 0)
+  for (let i = 0; i < Math.max(a.length, b.length); i++) if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0)
+  return false
+}
+
+/**
+ * En Mac no hay actualización sola (sin la firma de Apple no se puede reemplazar la app): se mira la última versión
+ * publicada en GitHub y, si es más nueva, se avisa para bajarla a mano. electron-updater pediría un `latest-mac.yml` que
+ * no se publica.
+ */
+async function revisarAMano(): Promise<void> {
+  const r = await fetch('https://api.github.com/repos/reninn34-arch/recorte/releases/latest', {
+    headers: { 'User-Agent': `Recorte/${app.getVersion()}`, Accept: 'application/vnd.github+json' }
+  })
+  if (!r.ok) throw new Error(`GitHub respondió ${r.status}`)
+  const rel = (await r.json()) as { tag_name?: string; body?: string; assets?: { name: string }[] }
+  const nueva = (rel.tag_name ?? '').replace(/^v/, '')
+  // Solo si ya trae el .dmg (los de Mac se suben un rato después que el de Windows).
+  const conMac = (rel.assets ?? []).some((x) => x.name.endsWith('.dmg'))
+  if (nueva && conMac && esMasNueva(nueva, app.getVersion())) avisar({ fase: 'manual', nueva, notas: resumenNotas(rel.body) })
+  else avisar({ fase: 'al-dia', revisado: Date.now() })
 }
 
 export function instalarActualizacion(): void {
@@ -71,6 +98,11 @@ export function instalarActualizacion(): void {
 
 export function prepararActualizaciones(): void {
   if (!app.isPackaged) return
+  if (A_MANO) {
+    setTimeout(() => void buscarActualizacion(), 8_000)
+    setInterval(() => void buscarActualizacion(), CADA)
+    return
+  }
   autoUpdater.autoDownload = !A_MANO
   autoUpdater.autoInstallOnAppQuit = !A_MANO
   autoUpdater.on('update-available', (info) =>
