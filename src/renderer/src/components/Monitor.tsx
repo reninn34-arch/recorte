@@ -342,6 +342,7 @@ export function Monitor({
               {([0, 1] as const).map((i) => (
                 <video
                   key={i}
+                  className="monitor-video"
                   ref={reproductor.videos[i]}
                   data-pista-audio="video"
                   crossOrigin="anonymous"

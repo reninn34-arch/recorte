@@ -1430,6 +1430,8 @@ button { cursor: pointer; }
   cursor: pointer;
 }
 .monitor video { width: 100%; height: 100%; object-fit: contain; display: block; }
+/* Los dos <video> del monitor van uno encima del otro (se ve el activo): sin esto, el segundo queda debajo del cuadro. */
+.monitor-movimiento > video.monitor-video { position: absolute; inset: 0; }
 .monitor-lienzo { position: absolute; inset: 0; margin: auto; width: 100%; height: 100%; overflow: hidden; }
 .monitor-play {
   position: absolute;

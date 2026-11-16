@@ -26,8 +26,14 @@ export const NOVEDADES: VersionNovedades[] = [
   {
     version: '0.1.67',
     fecha: '2026-11-16',
-    resumen: 'Recorte ya se puede usar en Mac, con chip Apple o Intel.',
+    resumen: 'Arregla el monitor que se veía negro en un clip sí y otro no, y llega Recorte para Mac.',
     novedades: [
+      {
+        icono: 'video',
+        titulo: 'El monitor ya no se ve negro en los cortes',
+        texto:
+          'En la 0.1.66, al reproducir, un clip sí y otro no se veía negro (solo con los subtítulos encima): el segundo video del monitor quedaba fuera del cuadro. Ahora los dos ocupan el mismo lugar y se ven todos los clips.'
+      },
       {
         icono: 'download',
         titulo: 'Recorte para Mac',
