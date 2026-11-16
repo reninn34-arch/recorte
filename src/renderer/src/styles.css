@@ -1434,6 +1434,14 @@ button { cursor: pointer; }
 .monitor-movimiento > video.monitor-video { position: absolute; inset: 0; }
 /* La vista previa renderizada: encima de todo el cuadro, sin agarrar el ratón. El tramo siguiente espera cargado y oculto. */
 .monitor-vista { z-index: 3; }
+/* Los medidores de color, arriba a la derecha del monitor. */
+.monitor-medidores-boton { position: absolute; top: 8px; right: 8px; z-index: 6; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 80%, transparent); color: var(--muted); cursor: pointer; }
+.monitor-medidores-boton.is-on, .monitor-medidores-boton:hover { color: var(--text); border-color: var(--accent, #c8f169); }
+.medidores { position: absolute; top: 40px; right: 8px; z-index: 6; padding: 6px; border-radius: 8px; border: 1px solid var(--line); background: rgba(8, 10, 8, 0.9); cursor: default; }
+.medidores canvas { display: block; margin: 4px auto 0; background: #050605; border-radius: 4px; }
+.medidores-pestanas { display: flex; gap: 2px; }
+.medidores-pestanas button { flex: 1; padding: 3px 6px; font-size: 10.5px; border: none; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.medidores-pestanas button.is-on { background: color-mix(in srgb, var(--accent, #c8f169) 18%, transparent); color: var(--text); }
 .monitor-vista > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
 .monitor-vista > video.is-oculto { opacity: 0; }
 /* En la regla: los tramos pesados con la vista previa lista (verde) y los que aún se preparan (ámbar). */

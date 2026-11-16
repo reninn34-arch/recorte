@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } fr
 import type { Project } from '../../../shared/types'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
+import { Medidores } from './Medidores'
 import type { VistaPrevia } from '../hooks/vistaprevia'
 import type { TramoVista } from '../../../shared/vistaprevia'
 import {
@@ -175,6 +176,23 @@ export function Monitor({
   const letra = Math.min(cw, ch) * (ch > cw ? 0.06 : 0.065) * 0.93
 
   const [borrador, setBorrador] = useState<Borrador>(null)
+  // Los medidores de color (forma de onda, vectorscopio, histograma): se recuerda si estaban abiertos.
+  const [verMedidores, setVerMedidores] = useState(() => {
+    try {
+      return localStorage.getItem('recorte:medidores') === '1'
+    } catch {
+      return false
+    }
+  })
+  const alternarMedidores = () =>
+    setVerMedidores((v) => {
+      try {
+        localStorage.setItem('recorte:medidores', v ? '0' : '1')
+      } catch {
+        // Sin almacenamiento: se olvida al cerrar.
+      }
+      return !v
+    })
   // Una zona tapada que se está moviendo o agrandando con el ratón (se aplica al soltar).
   const [zonaMovida, setZonaMovida] = useState<{ k: number; z: ZonaTL } | null>(null)
   /** Mueve (o, desde su esquina, agranda) una zona tapada del clip elegido. */
@@ -566,6 +584,28 @@ export function Monitor({
             ) : null
           )}
         </div>
+      )}
+      {src && !vacia && !proyecto.demo && (
+        <button
+          className={`monitor-medidores-boton ${verMedidores ? 'is-on' : ''}`}
+          title="Medidores de color: forma de onda, vectorscopio e histograma"
+          aria-pressed={verMedidores}
+          onClick={(e) => {
+            e.stopPropagation()
+            alternarMedidores()
+          }}
+        >
+          <Icon name="sliders" size={14} />
+        </button>
+      )}
+      {verMedidores && src && !vacia && !proyecto.demo && (
+        <Medidores
+          video={reproductor.videoRef.current}
+          // El color del clip y de las capas de ajuste, como lo pinta el monitor (sin los desenfoques).
+          filtro={[estiloImagen.filter, filtroAjuste].filter(Boolean).join(' ').replace(/blur([^)]*)/g, '').trim()}
+          tiempo={reproductor.tiempo}
+          reproduciendo={reproductor.reproduciendo}
+        />
       )}
       {!reproductor.reproduciendo && src && !vacia && (
         <span className="monitor-play"><Icon name="play" size={26} /></span>
