@@ -1575,7 +1575,28 @@ export function notasMarkdown(version: string): string {
     '',
     ...v.novedades.map((n) => `- **${n.titulo}.** ${n.texto}`),
     '',
-    '**Instalar:** descarga `Recorte-Setup.exe`. Si ya tienes Recorte, se actualiza solo y te avisa para reiniciar.',
-    'Si Windows dice «Windows protegió tu PC»: *Más información* → *Ejecutar de todas formas*.'
+    ...instalar(version)
   ].join('\n')
+}
+
+/** Qué archivo bajar en cada equipo, con su enlace a esta versión, y cómo abrirlo la primera vez. */
+function instalar(version: string): string[] {
+  const base = `https://github.com/reninn34-arch/recorte/releases/download/v${version}`
+  return [
+    `## Descargar Recorte ${version}`,
+    '',
+    '| Tu equipo | Archivo |',
+    '| --- | --- |',
+    `| Windows 10 u 11 | [Recorte-Setup.exe](${base}/Recorte-Setup.exe) |`,
+    `| Mac con chip Apple (M1, M2, M3, M4…) | [Recorte-Mac-arm64.dmg](${base}/Recorte-Mac-arm64.dmg) |`,
+    `| Mac con procesador Intel | [Recorte-Mac-x64.dmg](${base}/Recorte-Mac-x64.dmg) |`,
+    '',
+    '**Windows:** abre el instalador. Si ya tienes Recorte, se actualiza solo y te avisa para reiniciar.',
+    'Si Windows dice «Windows protegió tu PC»: *Más información* → *Ejecutar de todas formas*.',
+    '',
+    '**Mac:** ¿cuál es tu Mac? Menú Apple → *Acerca de esta Mac*: si dice «Chip Apple M…», baja el de chip Apple; si dice',
+    '«Procesador Intel», el de Intel. Abre el .dmg y arrastra Recorte a *Aplicaciones*. La primera vez, macOS dice que no',
+    'puede comprobar la app (aún no está firmada por Apple): ve a *Ajustes del Sistema → Privacidad y seguridad* y da clic en',
+    '*Abrir igualmente*. En Mac, las versiones nuevas se avisan en la app y se bajan desde aquí.'
+  ]
 }
