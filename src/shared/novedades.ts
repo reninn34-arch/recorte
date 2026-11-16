@@ -24,6 +24,19 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.67',
+    fecha: '2026-11-16',
+    resumen: 'Recorte ya se puede usar en Mac, con chip Apple o Intel.',
+    novedades: [
+      {
+        icono: 'download',
+        titulo: 'Recorte para Mac',
+        texto:
+          'Hay un .dmg para Mac con chip Apple (M1 y siguientes) y otro para Intel, en la página de versiones. En Ajustes → Herramientas de video, «Instalar todo lo que falta» baja FFmpeg, Python y Node.js también en Mac. La primera vez, macOS pide confirmar en Ajustes del Sistema → Privacidad y seguridad → «Abrir igualmente», porque la app aún no está firmada por Apple; por eso en Mac las versiones nuevas se avisan y se bajan a mano.'
+      }
+    ]
+  },
+  {
     version: '0.1.66',
     fecha: '2026-11-16',
     resumen: 'Arregla el monitor que se veía negro con los subtítulos animados y quita la pausa en los cortes al reproducir.',
