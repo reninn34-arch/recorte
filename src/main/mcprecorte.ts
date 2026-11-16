@@ -46,6 +46,8 @@ export interface ContextoMcp {
   /** Las piezas animadas (HyperFrames) y animar una con sus datos: devuelve su medio para ponerla como capa. */
   /** Separa del fondo a la persona de un clip (tal como se ve): el medio del recorte y lo que dura. */
   persona?: (id: string, tl: Timeline, clip: string) => Promise<{ medio: string; duracion: number }>
+  /** Borra un objeto de un clip (tal como se ve): el medio del clip sin él y lo que dura. */
+  borrarObjeto?: (id: string, tl: Timeline, clip: string, zona: { x: number; y: number; ancho: number; alto: number }, hasta?: { x: number; y: number; ancho: number; alto: number }) => Promise<{ medio: string; duracion: number }>
   /** Si los subtítulos animados quedaron atrás, los vuelve a animar (y guarda la timeline al día). */
   subtitulos?: (id: string, tl: Timeline) => Promise<Timeline>
   piezas?: {
@@ -336,6 +338,21 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
             const clip = base.clips[Math.round(o.clip) - 1]
             if (!clip) continue
             const r = await ctx.persona(p.id, base, clip.id)
+            o.medio = r.medio
+            o.clipId = clip.id
+            o.duracionReal = r.duracion
+          } catch (e) {
+            falloPersona = e instanceof Error ? e.message : String(e)
+          }
+        }
+        // El objeto que se pidió borrar de un clip: se rellena antes de aplicar (queda en la biblioteca).
+        for (const o of ops as OperacionTL[]) {
+          if (o.op !== 'borrar_objeto' || !ctx.borrarObjeto) continue
+          try {
+            const base = timelineDe(p)
+            const clip = base.clips[Math.round(o.clip) - 1]
+            if (!clip) continue
+            const r = await ctx.borrarObjeto(p.id, base, clip.id, { x: o.x, y: o.y, ancho: o.ancho, alto: o.alto }, o.hasta_x !== undefined && o.hasta_y !== undefined ? { x: o.hasta_x, y: o.hasta_y, ancho: o.ancho, alto: o.alto } : undefined)
             o.medio = r.medio
             o.clipId = clip.id
             o.duracionReal = r.duracion

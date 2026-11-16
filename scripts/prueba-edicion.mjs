@@ -208,6 +208,13 @@ try {
   ok(limpio.textos[0] && limpio.textos[0].inicio < 4.6 - 1.5, `El texto de «vamos» debía correrse con el video: ${JSON.stringify(limpio.textos)}`)
   ok(buscarLimpieza(limpio0, tr2, { silencios: false, minimo: 0.7, muletillas: false, lista: [], repeticiones: false }).tramos.length === 0, 'Sin nada marcado no se quita nada.')
   console.log(`limpieza automática: ${halla.silencios} silencio, 1 muletilla y 1 repetición; ${halla.segundos.toFixed(2)} s menos y el texto se corre con el video ✓`)
+  // Tomas repetidas: la frase dicha dos veces tras un error; se queda la última.
+  const trT = [{ id: 't', start: 0, end: 12, text: '', words: [w('Hoy', 0, 0.3), w('les', 0.35, 0.5), w('voy', 0.55, 0.7), w('a', 0.75, 0.8), w('mo', 0.85, 1.0), w('Hoy', 2.0, 2.3), w('les', 2.35, 2.5), w('voy', 2.55, 2.7), w('a', 2.75, 2.8), w('mostrar', 2.85, 3.3), w('algo', 3.35, 3.7)] }]
+  const tlT = normalizarTimeline({ version: 1, clips: [{ id: 'c', fuente: 'principal', entrada: 0, salida: 4 }], textos: [] }, 20)
+  const hT = buscarLimpieza(tlT, trT, { silencios: false, minimo: 0.7, muletillas: false, lista: [], repeticiones: false, tomas: true })
+  ok(hT.tomas === 1 && hT.tramos[0][0] <= 0.01 && Math.abs(hT.tramos[0][1] - 1.98) < 0.05, `Las tomas repetidas no se hallaron bien: ${JSON.stringify(hT)}`)
+  ok(buscarLimpieza(tlT, trT, { silencios: false, minimo: 0.7, muletillas: false, lista: [], repeticiones: false }).tomas === 0, 'Sin marcar tomas no se quita nada.')
+  console.log('tomas repetidas: se queda la última ✓')
   console.log('prueba edición: ok')
 } catch (e) {
   console.error(`prueba edición: error · ${e instanceof Error ? e.message : String(e)}`)

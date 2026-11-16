@@ -24,6 +24,25 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.63',
+    fecha: '2026-11-16',
+    resumen: 'Borra objetos de un video y quita las tomas repetidas cuando te equivocas al hablar.',
+    novedades: [
+      {
+        icono: 'seleccion',
+        titulo: 'Borrar un objeto del video',
+        texto:
+          'En «Tapar una zona» elige el modo «Borrar (rellenar)», pon la zona sobre un logo, una marca de agua o un cartel y pulsa «Borrar lo marcado»: Recorte lo rellena con lo que lo rodea. Si el objeto se mueve, usa «Seguir». También se lo puedes pedir al agente. Va bien con objetos chicos sobre fondos parejos.'
+      },
+      {
+        icono: 'scissors',
+        titulo: 'Tomas repetidas en la limpieza',
+        texto:
+          'Si te equivocas y repites la frase desde el principio, la Limpieza automática quita el intento fallido y deja la última toma. Se activa con la casilla «Tomas repetidas».'
+      }
+    ]
+  },
+  {
     version: '0.1.62',
     fecha: '2026-11-15',
     resumen: 'Separa a la persona del fondo en un video: textos y títulos por detrás de ella, o cámbiale el fondo.',

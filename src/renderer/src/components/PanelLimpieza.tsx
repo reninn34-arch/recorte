@@ -7,7 +7,7 @@ import { Icon } from '../Icons'
 
 /** La limpieza automática de una toma hablada: silencios, muletillas y repeticiones, con un clic (y un solo deshacer). */
 export function PanelLimpieza({ timeline, historial, transcript, onAviso }: { timeline: Timeline; historial: Historial; transcript?: TranscriptSegment[]; onAviso: (t: string) => void }) {
-  const [l, setL] = useState<Limpieza>({ silencios: true, minimo: 0.7, muletillas: true, lista: MULETILLAS, repeticiones: true })
+  const [l, setL] = useState<Limpieza>({ silencios: true, minimo: 0.7, muletillas: true, lista: MULETILLAS, repeticiones: true, tomas: true })
   const [texto, setTexto] = useState(MULETILLAS.join(', '))
   const hallado = useMemo(() => buscarLimpieza(timeline, transcript, l), [timeline, transcript, l])
   if (!transcript?.length) {
@@ -53,6 +53,10 @@ export function PanelLimpieza({ timeline, historial, transcript, onAviso }: { ti
       <label className="tl-check">
         <input type="checkbox" checked={l.repeticiones} onChange={(e) => setL({ ...l, repeticiones: e.target.checked })} />
         Palabras repetidas («que que») <small className="tl-dim">({hallado.repeticiones})</small>
+      </label>
+      <label className="tl-check" title="Si te equivocas y repites la frase desde el principio, se queda la última toma.">
+        <input type="checkbox" checked={!!l.tomas} onChange={(e) => setL({ ...l, tomas: e.target.checked })} />
+        Tomas repetidas (te equivocas y la dices de nuevo) <small className="tl-dim">({hallado.tomas})</small>
       </label>
       <button
         className="btn small primary"

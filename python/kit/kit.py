@@ -3461,6 +3461,109 @@ def recortar_persona(ruta, salida=None, desde=None, hasta=None):
     return {'archivo': salida, 'ancho': w, 'alto': h, 'cuadros': n, 'duracion': round(n / fps_n, 3), 'cubre': round(cubre / n, 3)}
 
 
+def borrar_objeto(ruta, zona, salida=None, hasta_zona=None, recorrido=None):
+    """Borra un objeto (un logo, una marca de agua, un cartel, algo que se coló) de un video: lo rellena con lo que lo
+    rodea, cuadro a cuadro. `zona` es la caja del objeto como x,y,ancho,alto en fracciones del cuadro (x,y = el centro);
+    si el objeto se mueve de una punta a otra del clip, `hasta_zona` es donde termina y la caja va de una a otra.
+
+    El relleno se hace con el borde de la caja (Telea), se le suma el mismo grano que tiene la imagen alrededor para que no
+    se note un parche liso, y donde la imagen no cambió entre un cuadro y el siguiente se mezcla con el anterior (sin
+    parpadeo). Deja un MP4 (sin sonido) del mismo tamaño y duración. Va diciendo «PROGRESO 0.42» por stderr."""
+    import cv2
+    info = probar(ruta)
+    if not info.get('ancho'):
+        raise SystemExit('Ese archivo no tiene imagen.')
+    w, h = int(info['ancho']), int(info['alto'])
+    if max(w, h) > 1920:
+        k = 1920 / max(w, h)
+        w, h = round(w * k), round(h * k)
+    w -= w % 2
+    h -= h % 2
+
+    def caja(z):
+        v = [float(x) for x in (z.split(',') if isinstance(z, str) else z)]
+        if len(v) != 4 or v[2] <= 0 or v[3] <= 0:
+            raise SystemExit('La zona va como x,y,ancho,alto (fracciones del cuadro, x,y = el centro).')
+        return v
+    z0 = caja(zona)
+    z1 = caja(hasta_zona) if hasta_zona else z0
+    # Con un recorrido (el objeto que se mueve, cuadro a cuadro): [[segundo, x, y, ancho, alto], ...].
+    pasos = None
+    if recorrido:
+        pasos = np.array(json.load(open(recorrido, encoding='utf-8')), dtype=np.float64)
+        if pasos.ndim != 2 or pasos.shape[1] != 5 or not len(pasos):
+            raise SystemExit('El recorrido va como [[segundo, x, y, ancho, alto], ...].')
+    salida = salida or os.path.splitext(ruta)[0] + '-sin-objeto.mp4'
+    r = subprocess.run([FFPROBE, '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate', '-of', 'csv=p=0', ruta],
+                       capture_output=True, text=True)
+    fps = (r.stdout.strip() or '30/1').split(',')[0]
+    try:
+        num, den = (float(x) for x in (fps.split('/') + ['1'])[:2])
+        fps_n = num / max(den, 1e-6)
+    except ValueError:
+        fps_n = 30.0
+    total = max(1, round(info['duracion'] * fps_n))
+    lee = subprocess.Popen([FFMPEG, '-v', 'error', '-i', ruta, '-vf', f'scale={w}:{h}', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-'], stdout=subprocess.PIPE)
+    os.makedirs(os.path.dirname(os.path.abspath(salida)), exist_ok=True)
+    escribe = subprocess.Popen([FFMPEG, '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{w}x{h}', '-r', fps, '-i', '-',
+                                '-c:v', 'libx264', '-crf', '15', '-preset', 'fast', '-pix_fmt', 'yuv420p', '-an', '-movflags', '+faststart', salida],
+                               stdin=subprocess.PIPE)
+    rng = np.random.default_rng(7)
+    previo, n = None, 0
+    try:
+        while True:
+            datos = lee.stdout.read(w * h * 3)
+            if len(datos) < w * h * 3:
+                break
+            a = np.frombuffer(datos, np.uint8).reshape(h, w, 3).copy()
+            t = n / max(total - 1, 1)
+            if pasos is not None:
+                cx, cy, cw, ch = (float(np.interp(n / fps_n, pasos[:, 0], pasos[:, 1 + i])) for i in range(4))
+            else:
+                cx, cy, cw, ch = (z0[i] + (z1[i] - z0[i]) * t for i in range(4))
+            # La caja con un poco de aire (el borde de un logo casi nunca cae justo en su caja).
+            mx, my = max(3, round(cw * w * 0.1)), max(3, round(ch * h * 0.1))
+            x0 = max(0, round((cx - cw / 2) * w) - mx)
+            x1 = min(w, round((cx + cw / 2) * w) + mx)
+            y0 = max(0, round((cy - ch / 2) * h) - my)
+            y1 = min(h, round((cy + ch / 2) * h) + my)
+            if x1 - x0 >= 2 and y1 - y0 >= 2:
+                # Se trabaja sobre un recorte con contexto alrededor (es mucho más rápido que el cuadro entero).
+                pad = max(16, (x1 - x0) // 2, (y1 - y0) // 2)
+                X0, X1, Y0, Y1 = max(0, x0 - pad), min(w, x1 + pad), max(0, y0 - pad), min(h, y1 + pad)
+                parte = a[Y0:Y1, X0:X1].copy()
+                mascara = np.zeros(parte.shape[:2], np.uint8)
+                mascara[y0 - Y0:y1 - Y0, x0 - X0:x1 - X0] = 255
+                radio = int(max(3, min(12, min(x1 - x0, y1 - y0) / 4)))
+                lleno = cv2.inpaint(parte, mascara, radio, cv2.INPAINT_TELEA)
+                # El grano de lo que rodea (la caja liso se nota como un parche).
+                anillo = cv2.dilate(mascara, np.ones((2 * pad // 2 + 1,) * 2, np.uint8)) - mascara
+                gris = cv2.cvtColor(parte, cv2.COLOR_BGR2GRAY).astype(np.float32)
+                fino = gris - cv2.GaussianBlur(gris, (0, 0), 2.0)
+                ruido = float(fino[anillo > 0].std()) if (anillo > 0).any() else 0.0
+                if ruido > 0.4:
+                    lleno = np.clip(lleno.astype(np.float32) + rng.normal(0, ruido, lleno.shape[:2])[:, :, None] * 0.9, 0, 255).astype(np.uint8)
+                # Orilla suave: el parche se funde con lo de alrededor.
+                suave = cv2.GaussianBlur(mascara.astype(np.float32) / 255, (0, 0), max(1.5, radio / 3))[:, :, None]
+                nuevo = parte.astype(np.float32) * (1 - suave) + lleno.astype(np.float32) * suave
+                if previo is not None and previo[0].shape == nuevo.shape:
+                    quieto = float(np.abs(parte.astype(np.float32) - previo[1]).mean())
+                    if quieto < 6:
+                        nuevo = nuevo * 0.45 + previo[0] * 0.55
+                previo = (nuevo, parte.astype(np.float32))
+                a[Y0:Y1, X0:X1] = np.clip(nuevo, 0, 255).astype(np.uint8)
+            escribe.stdin.write(a.tobytes())
+            n += 1
+            if n % 10 == 0:
+                print(f'PROGRESO {min(0.99, n / total):.3f}', file=sys.stderr, flush=True)
+    finally:
+        lee.kill()
+    escribe.stdin.close()
+    if escribe.wait() != 0 or not n:
+        raise SystemExit('No pude escribir el video sin el objeto.')
+    return {'archivo': salida, 'ancho': w, 'alto': h, 'cuadros': n, 'duracion': round(n / fps_n, 3)}
+
+
 def recortar_croma(a, fondo, salida):
     """Verde croma, como lo hacen los programas de efectos: la transparencia sale de cuánto domina el verde
     en cada píxel (clave por diferencia de color). Así el humo y el pelo quedan semitransparentes y sin verde,
@@ -4615,6 +4718,12 @@ def main():
     rpe.add_argument('--salida')
     rpe.add_argument('--desde', type=float)
     rpe.add_argument('--hasta', type=float)
+    bo = sub.add_parser('borrar-objeto')
+    bo.add_argument('video')
+    bo.add_argument('--zona', required=True)
+    bo.add_argument('--recorrido')
+    bo.add_argument('--hasta-zona', dest='hasta_zona')
+    bo.add_argument('--salida')
     rv2 = sub.add_parser('revisar')
     rv2.add_argument('video')
     rv2.add_argument('--referencia', help='el video de referencia, para comparar ritmo y estilo')
@@ -4723,6 +4832,8 @@ def main():
         print(json.dumps(recortar(x.imagen, x.salida, x.tolerancia, x.modo), ensure_ascii=False))
     elif x.orden == 'recortar-persona':
         print(json.dumps(recortar_persona(x.video, x.salida, x.desde, x.hasta), ensure_ascii=False))
+    elif x.orden == 'borrar-objeto':
+        print(json.dumps(borrar_objeto(x.video, x.zona, x.salida, x.hasta_zona, x.recorrido), ensure_ascii=False))
     elif x.orden == 'golpes':
         golpes(x.archivo, x.n)
     elif x.orden == 'hoja':

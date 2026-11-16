@@ -406,9 +406,11 @@ export async function exportarTimeline(
     const crudo = `[${iv}:v]${ritmo},fps=${fps},${zoom}${encuadre}${lento}${fondoBorroso},setsar=1${lut}${color}${efectos}`
     // Las zonas tapadas (una cara, una placa): cada una se recorta, se difumina o se pinta de negro y se pega en su sitio.
     let base = crudo
-    if (t.clip.zonas?.length) {
+    // Las de modo «borrar» no se tapan aquí: el clip sin el objeto va encima como otra capa.
+    const zonasT = (t.clip.zonas ?? []).filter((z) => z.modo !== 'borrar')
+    if (zonasT.length) {
       partes.push(`${crudo}[zi${i}_0]`)
-      t.clip.zonas.forEach((z, k) => {
+      zonasT.forEach((z, k) => {
         const r = zonaEnPixeles(zonaEn(z, t.clip.entrada), ancho, alto)
         const radio = Math.max(1, Math.floor((z.fuerza * Math.min(r.w, r.h)) / 5))
         const tapa = z.modo === 'negro' ? 'drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill' : `boxblur=lr=${radio}:lp=2:cr=${Math.max(1, Math.floor(radio / 2))}:cp=2`
@@ -432,7 +434,7 @@ export async function exportarTimeline(
             `[za${i}_${k}][zc${i}_${k}]overlay@zo${i}_${k}=${r.x}:${r.y}[zi${i}_${k + 1}]`
         )
       })
-      base = `[zi${i}_${t.clip.zonas.length}]null`
+      base = `[zi${i}_${zonasT.length}]null`
     }
     // Con fotogramas clave en Transformar, la escala, la rotación y la posición cambian en cada cuadro.
     const movAnimado = Boolean(cl?.escala || cl?.posx || cl?.posy || cl?.giro)

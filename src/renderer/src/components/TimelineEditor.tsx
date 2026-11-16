@@ -234,6 +234,7 @@ export function TimelineEditor({
   estabilizando,
   onSepararPersona,
   separandoPersona,
+  onBorrarObjeto,
   onExportarCuadro,
   onPantallaCompleta,
   pantallaCompleta,
@@ -272,6 +273,8 @@ export function TimelineEditor({
   estabilizando?: string | null
   /** Separa a la persona del fondo del clip y la pone encima (para textos y piezas detrás de ella, o cambiar el fondo). */
   onSepararPersona?: (clipId: string) => void
+  /** Borra el objeto marcado con una zona «Borrar» del clip y deja el clip sin él encima. */
+  onBorrarObjeto?: (clipId: string) => void
   /** El clip al que se le está separando la persona, y cuánto lleva (0 a 1). */
   separandoPersona?: { clip: string; pct: number } | null
   /** Congela el cuadro del cabezal: lo pone como un clip quieto ahí mismo. */
@@ -2439,6 +2442,21 @@ export function TimelineEditor({
                     : 'Separar a la persona'}
               </button>
             )}
+            {onBorrarObjeto && esVideo(clipElegido.clip.fuente) && clipElegido.clip.zonas?.some((x) => x.modo === 'borrar') && (
+              <button
+                className="btn small ghost"
+                disabled={Boolean(separandoPersona)}
+                onClick={() => onBorrarObjeto(clipElegido.clip.id)}
+                title="Rellena con lo de alrededor la zona marcada en modo «Borrar» (un logo, una marca de agua, un cartel). Si el objeto se mueve, usa «Seguir» en la zona. Tarda unos 3 segundos por cada segundo del clip."
+              >
+                <Icon name="seleccion" size={14} />{' '}
+                {separandoPersona?.clip === clipElegido.clip.id
+                  ? `Borrando… ${Math.round(separandoPersona.pct * 100)} %`
+                  : (tl.capas ?? []).some((x) => x.borrado?.clip === clipElegido.clip.id)
+                    ? 'Volver a borrar lo marcado'
+                    : 'Borrar lo marcado'}
+              </button>
+            )}
             <div className="tl-ajustes">
               <details className="ed-grupo" open={Boolean(clipElegido.clip.zonas?.length)}>
                 <summary className="ed-seccion">
@@ -2478,6 +2496,7 @@ export function TimelineEditor({
                         <select value={z.modo} onChange={(e) => cambiar({ modo: e.target.value as ZonaTL['modo'] })} aria-label={`Cómo se tapa la zona ${k + 1}`}>
                           <option value="desenfoque">Difuminar</option>
                           <option value="negro">Negro</option>
+                          <option value="borrar">Borrar (rellenar)</option>
                         </select>
                         <button
                           className="ed-seccion-quitar"

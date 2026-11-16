@@ -3216,6 +3216,7 @@ button { cursor: pointer; }
 /* Zonas tapadas del clip (difuminar o negro), en el monitor y en el inspector. */
 .monitor-zona { position: absolute; pointer-events: none; overflow: hidden; }
 .monitor-zona.is-negro { background: #000; }
+.monitor-zona.is-borrar { outline: 2px dashed #ff5c8a; outline-offset: -1px; background: #ff5c8a22; }
 .ed-zona { display: flex; flex-direction: column; gap: 4px; padding: 8px; margin: 4px 0 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
 .ed-zona-cabeza { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .ed-zona-cabeza select { margin-left: auto; height: 24px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line-2); border-radius: 6px; font-size: 12px; }

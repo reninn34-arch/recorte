@@ -312,6 +312,29 @@ export function Editor({
       setRecortandoPersona(null)
     }
   }
+  /** Borra el objeto de la zona «Borrar» del clip: el clip sin él queda encima del original. */
+  async function borrarObjeto(clipId: string) {
+    if (recortandoPersona || !timeline.clips.some((x) => x.id === clipId)) return
+    setRecortandoPersona({ clip: clipId, pct: 0 })
+    const dejar = window.recorte.onProgreso((p) => {
+      if (p.id === proyecto.id && p.fase === 'persona') setRecortandoPersona({ clip: clipId, pct: p.pct })
+    })
+    try {
+      const r = await window.recorte.borrarObjeto(proyecto.id, timeline, clipId)
+      onMedios(r.project.medios ?? [])
+      const medios = { principal: proyecto.source.duration, ...duracionesDeMedios(r.project.medios) }
+      const sinVieja = (timeline.capas ?? []).filter((c) => c.borrado?.clip === clipId).reduce((t, c) => borrarCapa(t, c.id), timeline)
+      const hecho = anadirCapa(sinVieja, { fuente: r.medio, inicio: r.inicio, duracion: r.duracion, x: 0.5, y: 0.5, ancho: 1, pista: 3, borrado: { clip: clipId } }, medios)
+      if (hecho.timeline === sinVieja) throw new Error('No pude poner el clip sin el objeto en la timeline.')
+      historial.aplicar(hecho.timeline)
+      onAviso('Listo: el objeto ya no está. Si cambias el recorte o el color del clip, vuelve a pulsar «Borrar lo marcado».')
+    } catch (error) {
+      onAviso(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error))
+    } finally {
+      dejar()
+      setRecortandoPersona(null)
+    }
+  }
   async function congelar() {
     const u = ubicar(timeline, reproductor.tiempo)
     if (!u || congelando) return
@@ -815,6 +838,7 @@ export function Editor({
         onEstabilizar={proyecto.demo ? undefined : (clipId) => void estabilizar(clipId)}
         onSepararPersona={proyecto.demo ? undefined : (clipId) => void separarPersona(clipId)}
         separandoPersona={recortandoPersona}
+        onBorrarObjeto={proyecto.demo ? undefined : (clipId) => void borrarObjeto(clipId)}
         estabilizando={estabilizando}
         congelando={congelando}
         onAnimarCapa={proyecto.demo ? undefined : (capaId, tipo) => void animarCapa(capaId, tipo)}

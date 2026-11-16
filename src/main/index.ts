@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, shell } from 'electron'
-import { ANIMAR_CAPA, frasesSubtitulos, huellaSubtitulos, subtitulosAlDia, duracionTimeline, duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, SONIDOS_INCLUIDOS, timelineInicial, timelineVacia, type Timeline } from '../shared/timeline'
+import { ANIMAR_CAPA, fuenteEnClip, tramos, zonaEn, frasesSubtitulos, huellaSubtitulos, subtitulosAlDia, duracionTimeline, duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, SONIDOS_INCLUIDOS, timelineInicial, timelineVacia, type Timeline } from '../shared/timeline'
 import { randomUUID } from 'node:crypto'
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, join, resolve, sep } from 'node:path'
@@ -69,7 +69,7 @@ import { buscarActualizacion, estadoActualizacion, instalarActualizacion, prepar
 import { activarGustos, agregarGustos, bloqueGustos, cargarGustos, olvidarGustos, quitarGusto, senalGusto, usoCreacion } from './gustos'
 import { aplicarOperaciones, type MensajeChat, type OperacionTL } from '../shared/chat'
 import { buscarPython, rutaScriptPython, transcribir, transcribirArchivo } from './transcribir'
-import { recortarPersonaDeClip } from './persona'
+import { borrarObjetoDeClip, recortarPersonaDeClip, type ZonaObjeto } from './persona'
 
 // El esquema tiene que declararse antes de que Electron esté listo.
 protocol.registerSchemesAsPrivileged([
@@ -2085,6 +2085,21 @@ app.whenReady().then(() => {
     }
     return { project, medio, inicio: r.inicio, duracion: r.duracion, clip: clipId }
   }
+  /** Borra un objeto de un clip (tal como se ve) y deja el clip sin él en la biblioteca: va encima del mismo clip. */
+  async function borrarObjeto(id: string, tl: Timeline, clipId: string, zona: ZonaObjeto, hasta?: ZonaObjeto) {
+    const p = proyectos.abrir(id)
+    if (!p) throw new Error('El proyecto ya no existe.')
+    const r = await borrarObjetoDeClip(p, proyectos.carpeta(id), tl, clipId, zona, hasta, (pct, texto) => enviarProgreso({ id, fase: 'persona', pct, texto: texto ?? 'Borrando el objeto' }))
+    let project = p
+    let medio = p.medios?.find((m) => m.ruta === r.archivo)?.id
+    if (!medio) {
+      const hecho = await agregarRutas(id, [r.archivo])
+      if (!hecho.agregados.length) throw new Error(hecho.fallos[0] ?? 'No pude agregar el clip a la biblioteca.')
+      project = hecho.project
+      medio = hecho.agregados[0]
+    }
+    return { project, medio, inicio: r.inicio, duracion: r.duracion, clip: clipId }
+  }
   /** Antes de exportar (o de que el agente mire): si los subtítulos animados quedaron atrás, se vuelven a animar. */
   async function subtitulosListos(id: string, tl: Timeline, onProgreso?: (pct: number, texto?: string) => void): Promise<Timeline> {
     if (!tl.subtitulosHF || subtitulosAlDia(tl) || !frasesSubtitulos(tl).frases.length) return tl
@@ -2151,6 +2166,22 @@ app.whenReady().then(() => {
     return animarPieza(id, piezaId, valores as ValoresPieza, duracion)
   })
 
+  // Borra el objeto de la primera zona «Borrar» del clip (sigue su recorrido si la zona sigue algo que se mueve).
+  ipcMain.handle('objeto:borrar', async (_evento, id: unknown, timeline: unknown, clip: unknown) => {
+    const p = typeof id === 'string' ? proyectos.abrir(id) : null
+    if (!p || !timeline || typeof timeline !== 'object' || typeof clip !== 'string') throw new Error('Datos inválidos.')
+    const tl = normalizarTimeline(timeline, p.source.duration, duracionesDeMedios(p.medios))
+    const tr = tramos(tl).find((t) => t.clip.id === clip)
+    const z = tr?.clip.zonas?.find((x) => x.modo === 'borrar')
+    if (!tr || !z) throw new Error('Marca primero una zona en modo «Borrar» sobre el objeto.')
+    const largo = tr.fin - tr.inicio
+    const pasos: number[][] = []
+    for (let s = 0; s <= largo + 1e-6; s += z.recorrido?.length ? 0.1 : largo || 1) {
+      const e = zonaEn(z, fuenteEnClip(tr.clip, Math.min(s, largo)))
+      pasos.push([Math.round(s * 1000) / 1000, e.x, e.y, z.ancho, z.alto])
+    }
+    return borrarObjeto(p.id, tl, clip, { x: z.x, y: z.y, ancho: z.ancho, alto: z.alto, recorrido: pasos })
+  })
   ipcMain.handle('persona:recortar', async (_evento, id: unknown, timeline: unknown, clip: unknown) => {
     const p = typeof id === 'string' ? proyectos.abrir(id) : null
     if (!p || !timeline || typeof timeline !== 'object' || typeof clip !== 'string') throw new Error('Datos inválidos.')
@@ -2935,6 +2966,28 @@ No pude separar a la persona: ${e instanceof Error ? e.message : String(e)}`
             }
           }
         }
+        // El objeto que pidió borrar: se rellena aquí y el clip sin él queda en la biblioteca antes de aplicar.
+        if (turno.ok) {
+          for (const o of turno.operaciones) {
+            if (o.op !== 'borrar_objeto') continue
+            try {
+              const base = normalizarTimeline(timeline, proyecto.source.duration, duracionesDeMedios((proyectos.abrir(id) ?? proyecto).medios))
+              const clip = base.clips[Math.round(o.clip) - 1]
+              if (!clip) continue
+              const zona = { x: o.x, y: o.y, ancho: o.ancho, alto: o.alto }
+              const r = await borrarObjeto(id, base, clip.id, zona, o.hasta_x !== undefined && o.hasta_y !== undefined ? { ...zona, x: o.hasta_x, y: o.hasta_y } : undefined)
+              o.medio = r.medio
+              o.clipId = clip.id
+              o.duracionReal = r.duracion
+              const { transcript: _t, ...ligero } = r.project
+              for (const w of BrowserWindow.getAllWindows()) w.webContents.send('proyecto:externo', { proyecto: ligero, quien: 'recorte', conTimeline: false })
+            } catch (e) {
+              turno.mensaje = `${turno.mensaje}
+
+No pude borrar el objeto: ${e instanceof Error ? e.message : String(e)}`
+            }
+          }
+        }
         // Las piezas animadas que pidió: se animan aquí (con la marca) y quedan en la biblioteca antes de aplicar.
         if (turno.ok) {
           const fallosPieza: string[] = []
@@ -3136,6 +3189,10 @@ No pude animar los subtítulos (se animan al exportar): ${e instanceof Error ? e
     subtitulos: (id, tl) => subtitulosListos(id, tl),
     persona: async (id, tl, clip) => {
       const r = await recortarPersona(id, tl, clip)
+      return { medio: r.medio, duracion: r.duracion }
+    },
+    borrarObjeto: async (id, tl, clip, zona, hasta) => {
+      const r = await borrarObjeto(id, tl, clip, zona, hasta)
       return { medio: r.medio, duracion: r.duracion }
     },
     animarImagen: (id, medio, tipo) => animarImagen(id, medio, tipo),

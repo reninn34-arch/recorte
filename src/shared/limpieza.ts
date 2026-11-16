@@ -65,6 +65,38 @@ export function repeticionesEnTimeline(tl: Timeline, transcript: TranscriptSegme
   return salida
 }
 
+/**
+ * Las tomas repetidas: quien se equivoca y vuelve a decir la frase desde el principio («Hoy les voy a… Hoy les voy a
+ * mostrar…»). Se queda la ÚLTIMA toma: se quita desde donde empezó la primera hasta donde empieza la repetida. Una frase
+ * es lo que va entre pausas de más de medio segundo; cuenta como repetida si una de las próximas (en 25 s) arranca
+ * con las mismas tres palabras.
+ */
+export function tomasRepetidasEnTimeline(tl: Timeline, transcript: TranscriptSegment[] | undefined): [number, number][] {
+  const p = palabrasEnTimeline(tl, transcript).filter((x) => x.texto)
+  const frases: Palabra[][] = []
+  for (const w of p) {
+    const ult = frases[frases.length - 1]
+    if (ult && w.inicio - ult[ult.length - 1].fin < 0.5) ult.push(w)
+    else frases.push([w])
+  }
+  const arranque = (f: Palabra[]) => f.slice(0, 3).map((x) => x.texto)
+  const salida: [number, number][] = []
+  for (let i = 0; i < frases.length - 1; i++) {
+    const a = arranque(frases[i])
+    if (a.length < 3) continue
+    for (let j = i + 1; j < frases.length && j <= i + 4; j++) {
+      if (frases[j][0].inicio - frases[i][0].inicio > 25) break
+      const b = arranque(frases[j])
+      if (b.length === 3 && a.every((x, k) => x === b[k])) {
+        salida.push([frases[i][0].inicio - 0.02, frases[j][0].inicio - 0.02])
+        i = j - 1
+        break
+      }
+    }
+  }
+  return salida
+}
+
 /** Junta los tramos que se tocan o se pisan. */
 function juntar(tramosX: [number, number][]): [number, number][] {
   const orden = [...tramosX].sort((a, b) => a[0] - b[0])
@@ -84,6 +116,8 @@ export interface Limpieza {
   muletillas: boolean
   lista: string[]
   repeticiones: boolean
+  /** Las frases que se dijeron de nuevo tras un error: se queda la última toma. */
+  tomas?: boolean
 }
 
 /** Lo que encontraría la limpieza: cuántos de cada cosa y los segundos que se ahorran. */
@@ -91,8 +125,9 @@ export function buscarLimpieza(tl: Timeline, transcript: TranscriptSegment[] | u
   const silencios = l.silencios ? pausasEnTimeline(tl, transcript, Math.max(0.3, l.minimo)) : []
   const muletillas = l.muletillas ? muletillasEnTimeline(tl, transcript, l.lista) : []
   const repeticiones = l.repeticiones ? repeticionesEnTimeline(tl, transcript) : []
-  const todos = juntar([...silencios, ...muletillas, ...repeticiones])
-  return { silencios: silencios.length, muletillas: muletillas.length, repeticiones: repeticiones.length, tramos: todos, segundos: todos.reduce((s, [a, b]) => s + b - a, 0) }
+  const tomas = l.tomas ? tomasRepetidasEnTimeline(tl, transcript) : []
+  const todos = juntar([...silencios, ...muletillas, ...repeticiones, ...tomas])
+  return { silencios: silencios.length, muletillas: muletillas.length, repeticiones: repeticiones.length, tomas: tomas.length, tramos: todos, segundos: todos.reduce((s, [a, b]) => s + b - a, 0) }
 }
 
 /**
