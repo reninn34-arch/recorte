@@ -24,6 +24,19 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.69',
+    fecha: '2026-11-16',
+    resumen: 'Conectar un agente ya no pide instalar Node.js a mano, también en Mac.',
+    novedades: [
+      {
+        icono: 'download',
+        titulo: 'Conectar agentes sin instalar nada a mano',
+        texto:
+          'Si al pulsar «Instalar y conectar» falta Node.js, Recorte lo baja solo a su carpeta y sigue con el agente. En Mac, la ventana de la Terminal para iniciar sesión ya encuentra Node.js y el agente que bajó Recorte.'
+      }
+    ]
+  },
+  {
     version: '0.1.68',
     fecha: '2026-11-16',
     resumen: 'El monitor reproduce sin trabarse los tramos pesados, y llegan los medidores de color, el color por zonas, el ecualizador y el borrado de objetos grandes.',
