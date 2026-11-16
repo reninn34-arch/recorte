@@ -4,9 +4,9 @@
 Edita hablando, crea videos desde cero y aprende cómo te gusta editar.</p>
 
 <p align="center">
-  <a href="https://github.com/reninn34-arch/recorte/releases/latest/download/Recorte-Setup.exe"><img alt="Descargar para Windows" src="https://img.shields.io/badge/Descargar%20para%20Windows-Recorte--Setup.exe-c8f169?style=for-the-badge&logo=windows&logoColor=111511&labelColor=c8f169&color=1b2116"></a>
-  <a href="https://github.com/reninn34-arch/recorte/releases/latest/download/Recorte-Mac-arm64.dmg"><img alt="Descargar para Mac (chip Apple)" src="https://img.shields.io/badge/Descargar%20para%20Mac-chip%20Apple%20(M1%E2%80%A6)-c8f169?style=for-the-badge&logo=apple&logoColor=111511&labelColor=c8f169&color=1b2116"></a>
-  <a href="https://github.com/reninn34-arch/recorte/releases/latest/download/Recorte-Mac-x64.dmg"><img alt="Descargar para Mac (Intel)" src="https://img.shields.io/badge/Mac-Intel-1b2116?style=for-the-badge&logo=apple&logoColor=c8f169&labelColor=1b2116&color=3a4232"></a>
+  <a href="https://github.com/reninn34-arch/recorte/releases/latest/download/Recorte-Setup.exe"><img alt="Descargar para Windows (última versión)" src="https://img.shields.io/github/v/release/reninn34-arch/recorte?style=for-the-badge&amp;display_name=tag&amp;label=Descargar%20para%20Windows&amp;logo=windows&amp;logoColor=111511&amp;labelColor=c8f169&amp;color=1b2116"></a>
+  <a href="https://github.com/reninn34-arch/recorte/releases/latest/download/Recorte-Mac-arm64.dmg"><img alt="Descargar para Mac con chip Apple (última versión)" src="https://img.shields.io/github/v/release/reninn34-arch/recorte?style=for-the-badge&amp;display_name=tag&amp;label=Descargar%20para%20Mac%20%C2%B7%20chip%20Apple&amp;logo=apple&amp;logoColor=111511&amp;labelColor=c8f169&amp;color=1b2116"></a>
+  <a href="https://github.com/reninn34-arch/recorte/releases/latest/download/Recorte-Mac-x64.dmg"><img alt="Descargar para Mac con Intel (última versión)" src="https://img.shields.io/github/v/release/reninn34-arch/recorte?style=for-the-badge&amp;display_name=tag&amp;label=Mac%20%C2%B7%20Intel&amp;logo=apple&amp;logoColor=c8f169&amp;labelColor=1b2116&amp;color=3a4232"></a>
 </p>
 
 <p align="center">
@@ -17,7 +17,7 @@ Edita hablando, crea videos desde cero y aprende cómo te gusta editar.</p>
 </p>
 
 <p align="center">
-  <a href="https://github.com/reninn34-arch/recorte/releases/latest/download/Recorte-Setup.exe"><b>Descargar</b></a> ·
+  <a href="https://github.com/reninn34-arch/recorte/releases/latest"><b>Descargar</b></a> ·
   <a href="https://github.com/reninn34-arch/recorte/releases">Todas las versiones</a> ·
   <a href="LICENSE">Licencia</a>
 </p>
