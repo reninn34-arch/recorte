@@ -235,6 +235,8 @@ export function TimelineEditor({
   onSepararPersona,
   separandoPersona,
   onBorrarObjeto,
+  onCambiarCielo,
+  onRecortarObjeto,
   onExportarCuadro,
   onPantallaCompleta,
   pantallaCompleta,
@@ -273,6 +275,10 @@ export function TimelineEditor({
   estabilizando?: string | null
   /** Separa a la persona del fondo del clip y la pone encima (para textos y piezas detrás de ella, o cambiar el fondo). */
   onSepararPersona?: (clipId: string) => void
+  /** Recorta el objeto marcado con una zona «Recortar» (rotoscopia por clic) y lo deja encima del clip, con transparencia. */
+  onRecortarObjeto?: (clipId: string) => void
+  /** Cambia el cielo del clip (un cielo de la lista o la ruta de una imagen) y deja el clip con el cielo nuevo encima. */
+  onCambiarCielo?: (clipId: string, cielo: string) => void
   /** Borra el objeto marcado con una zona «Borrar» del clip y deja el clip sin él encima. */
   onBorrarObjeto?: (clipId: string) => void
   /** El clip al que se le está separando la persona, y cuánto lleva (0 a 1). */
@@ -358,6 +364,7 @@ export function TimelineEditor({
   const clasePista = (id: PistaId) => `${tl.pistas?.[id]?.bloqueada ? 'is-bloqueada' : ''} ${tl.pistas?.[id]?.oculta ? 'is-oculta' : ''}`
   // ===== Efectos: se aplican al clip elegido con un clic, o a cualquier clip arrastrándolos sobre él =====
   const [buscarEfecto, setBuscarEfecto] = useState('')
+  const [cieloElegido, setCieloElegido] = useState('atardecer')
   const coincide = (x: { nombre: string; para?: string }) => {
     const q = buscarEfecto.trim().toLowerCase()
     return !q || x.nombre.toLowerCase().includes(q) || Boolean(x.para?.toLowerCase().includes(q))
@@ -2442,6 +2449,45 @@ export function TimelineEditor({
                     : 'Separar a la persona'}
               </button>
             )}
+            {onRecortarObjeto && esVideo(clipElegido.clip.fuente) && clipElegido.clip.zonas?.some((x) => x.modo === 'recortar') && (
+              <button
+                className="btn small ghost"
+                disabled={Boolean(separandoPersona)}
+                onClick={() => onRecortarObjeto(clipElegido.clip.id)}
+                title="Recorta con bordes finos el objeto que rodea la zona marcada en modo «Recortar» y lo sigue por todo el clip. Queda encima del clip, con transparencia: un texto «detrás» o algo en las pistas 1 y 2 se ve por detrás de él. Pon la zona sobre el objeto al EMPEZAR el clip. Tarda unos 0,4 segundos por cuadro."
+              >
+                <Icon name="seleccion" size={14} />{' '}
+                {separandoPersona?.clip === clipElegido.clip.id
+                  ? `Recortando… ${Math.round(separandoPersona.pct * 100)} %`
+                  : (tl.capas ?? []).some((x) => x.roto?.clip === clipElegido.clip.id)
+                    ? 'Volver a recortar lo marcado'
+                    : 'Recortar lo marcado'}
+              </button>
+            )}
+            {onCambiarCielo && esVideo(clipElegido.clip.fuente) && (
+              <div className="ed-fila">
+                <select value={cieloElegido} onChange={(e) => setCieloElegido(e.target.value)} aria-label="El cielo nuevo">
+                  <option value="atardecer">Atardecer</option>
+                  <option value="azul">Azul</option>
+                  <option value="amanecer">Amanecer</option>
+                  <option value="nublado">Nublado</option>
+                  <option value="noche">Noche</option>
+                </select>
+                <button
+                  className="btn small ghost"
+                  disabled={Boolean(separandoPersona)}
+                  onClick={() => onCambiarCielo(clipElegido.clip.id, cieloElegido)}
+                  title="Busca el cielo de la toma (lo claro o azul que toca el borde de arriba) y lo cambia por otro. Sirve en exteriores con el cielo bien visible. Tarda unos 4 segundos por cada segundo del clip."
+                >
+                  <Icon name="seleccion" size={14} />{' '}
+                  {separandoPersona?.clip === clipElegido.clip.id
+                    ? `Trabajando… ${Math.round(separandoPersona.pct * 100)} %`
+                    : (tl.capas ?? []).some((x) => x.cielo?.clip === clipElegido.clip.id)
+                      ? 'Volver a cambiar el cielo'
+                      : 'Cambiar el cielo'}
+                </button>
+              </div>
+            )}
             {onBorrarObjeto && esVideo(clipElegido.clip.fuente) && clipElegido.clip.zonas?.some((x) => x.modo === 'borrar') && (
               <button
                 className="btn small ghost"
@@ -2497,6 +2543,7 @@ export function TimelineEditor({
                           <option value="desenfoque">Difuminar</option>
                           <option value="negro">Negro</option>
                           <option value="borrar">Borrar (rellenar)</option>
+                          <option value="recortar">Recortar (rotoscopia)</option>
                         </select>
                         <button
                           className="ed-seccion-quitar"

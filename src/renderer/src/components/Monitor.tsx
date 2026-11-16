@@ -361,7 +361,7 @@ export function Monitor({
                   return (
                     <span
                       key={k}
-                      className={`monitor-zona ${z.modo === 'negro' ? 'is-negro' : ''} ${z.modo === 'borrar' ? 'is-borrar' : ''} ${editable ? 'is-editable' : ''}`}
+                      className={`monitor-zona ${z.modo === 'negro' ? 'is-negro' : ''} ${z.modo === 'borrar' ? 'is-borrar' : ''} ${z.modo === 'recortar' ? 'is-recortar' : ''} ${editable ? 'is-editable' : ''}`}
                       title={editable ? `Zona ${k + 1}: arrástrala para moverla; desde la esquina, cambia su tamaño` : undefined}
                       onPointerDown={editable ? (e) => arrastrarZona(e, k, z, 'mover') : undefined}
                       onClick={editable ? (e) => e.stopPropagation() : undefined}
@@ -441,7 +441,7 @@ export function Monitor({
                 key={c.id}
                 className="monitor-capa-grupo"
                 // Los subtítulos animados y la persona recortada ocupan todo el cuadro: no se agarran (se eligen en la timeline).
-                style={{ ...(filtroAjuste ? { filter: filtroAjuste } : {}), ...(c.id === CAPA_SUBTITULOS || c.persona || c.borrado ? { pointerEvents: 'none' } : {}) }}
+                style={{ ...(filtroAjuste ? { filter: filtroAjuste } : {}), ...(c.id === CAPA_SUBTITULOS || c.persona || c.borrado || c.cielo || c.roto ? { pointerEvents: 'none' } : {}) }}
               >
                 {fin && (
                   <>

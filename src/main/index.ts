@@ -69,7 +69,7 @@ import { buscarActualizacion, estadoActualizacion, instalarActualizacion, prepar
 import { activarGustos, agregarGustos, bloqueGustos, cargarGustos, olvidarGustos, quitarGusto, senalGusto, usoCreacion } from './gustos'
 import { aplicarOperaciones, type MensajeChat, type OperacionTL } from '../shared/chat'
 import { buscarPython, rutaScriptPython, transcribir, transcribirArchivo } from './transcribir'
-import { borrarObjetoDeClip, recortarPersonaDeClip, type ZonaObjeto } from './persona'
+import { borrarObjetoDeClip, cambiarCieloDeClip, recortarObjetoDeClip, recortarPersonaDeClip, type ZonaObjeto } from './persona'
 
 // El esquema tiene que declararse antes de que Electron esté listo.
 protocol.registerSchemesAsPrivileged([
@@ -2100,6 +2100,36 @@ app.whenReady().then(() => {
     }
     return { project, medio, inicio: r.inicio, duracion: r.duracion, clip: clipId }
   }
+  /** Recorta un objeto de un clip (rotoscopia por clic): el WebM con transparencia queda en la biblioteca y va encima del clip. */
+  async function recortarObjeto(id: string, tl: Timeline, clipId: string, zona: ZonaObjeto) {
+    const p = proyectos.abrir(id)
+    if (!p) throw new Error('El proyecto ya no existe.')
+    const r = await recortarObjetoDeClip(p, proyectos.carpeta(id), tl, clipId, zona, (pct, texto) => enviarProgreso({ id, fase: 'persona', pct, texto: texto ?? 'Recortando el objeto' }))
+    let project = p
+    let medio = p.medios?.find((m) => m.ruta === r.archivo)?.id
+    if (!medio) {
+      const hecho = await agregarRutas(id, [r.archivo])
+      if (!hecho.agregados.length) throw new Error(hecho.fallos[0] ?? 'No pude agregar el recorte a la biblioteca.')
+      project = hecho.project
+      medio = hecho.agregados[0]
+    }
+    return { project, medio, inicio: r.inicio, duracion: r.duracion, clip: clipId }
+  }
+  /** Cambia el cielo de un clip (tal como se ve) y deja el clip con el cielo nuevo en la biblioteca: va encima del mismo clip. */
+  async function cambiarCielo(id: string, tl: Timeline, clipId: string, cielo: string) {
+    const p = proyectos.abrir(id)
+    if (!p) throw new Error('El proyecto ya no existe.')
+    const r = await cambiarCieloDeClip(p, proyectos.carpeta(id), tl, clipId, cielo, (pct, texto) => enviarProgreso({ id, fase: 'persona', pct, texto: texto ?? 'Cambiando el cielo' }))
+    let project = p
+    let medio = p.medios?.find((m) => m.ruta === r.archivo)?.id
+    if (!medio) {
+      const hecho = await agregarRutas(id, [r.archivo])
+      if (!hecho.agregados.length) throw new Error(hecho.fallos[0] ?? 'No pude agregar el clip a la biblioteca.')
+      project = hecho.project
+      medio = hecho.agregados[0]
+    }
+    return { project, medio, inicio: r.inicio, duracion: r.duracion, clip: clipId }
+  }
   /** Antes de exportar (o de que el agente mire): si los subtítulos animados quedaron atrás, se vuelven a animar. */
   async function subtitulosListos(id: string, tl: Timeline, onProgreso?: (pct: number, texto?: string) => void): Promise<Timeline> {
     if (!tl.subtitulosHF || subtitulosAlDia(tl) || !frasesSubtitulos(tl).frases.length) return tl
@@ -2166,6 +2196,22 @@ app.whenReady().then(() => {
     return animarPieza(id, piezaId, valores as ValoresPieza, duracion)
   })
 
+  // Recorta el objeto de la primera zona «Recortar» del clip (su caja al empezar el clip).
+  ipcMain.handle('objeto:recortar', async (_evento, id: unknown, timeline: unknown, clip: unknown) => {
+    const p = typeof id === 'string' ? proyectos.abrir(id) : null
+    if (!p || !timeline || typeof timeline !== 'object' || typeof clip !== 'string') throw new Error('Datos inválidos.')
+    const tl = normalizarTimeline(timeline, p.source.duration, duracionesDeMedios(p.medios))
+    const tr = tramos(tl).find((t) => t.clip.id === clip)
+    const z = tr?.clip.zonas?.find((x) => x.modo === 'recortar')
+    if (!tr || !z) throw new Error('Marca primero una zona en modo «Recortar» sobre el objeto.')
+    const e = zonaEn(z, tr.clip.entrada)
+    return recortarObjeto(p.id, tl, clip, { x: e.x, y: e.y, ancho: z.ancho, alto: z.alto })
+  })
+  ipcMain.handle('cielo:cambiar', async (_evento, id: unknown, timeline: unknown, clip: unknown, cielo: unknown) => {
+    const p = typeof id === 'string' ? proyectos.abrir(id) : null
+    if (!p || !timeline || typeof timeline !== 'object' || typeof clip !== 'string' || typeof cielo !== 'string' || !cielo.trim() || cielo.length > 400) throw new Error('Datos inválidos.')
+    return cambiarCielo(p.id, normalizarTimeline(timeline, p.source.duration, duracionesDeMedios(p.medios)), clip, cielo.trim())
+  })
   // Borra el objeto de la primera zona «Borrar» del clip (sigue su recorrido si la zona sigue algo que se mueve).
   ipcMain.handle('objeto:borrar', async (_evento, id: unknown, timeline: unknown, clip: unknown) => {
     const p = typeof id === 'string' ? proyectos.abrir(id) : null
@@ -2966,6 +3012,44 @@ No pude separar a la persona: ${e instanceof Error ? e.message : String(e)}`
             }
           }
         }
+        // El objeto que pidió recortar: se hace aquí (SAM 2) y el recorte queda en la biblioteca antes de aplicar.
+        if (turno.ok) {
+          for (const o of turno.operaciones) {
+            if (o.op !== 'rotoscopiar') continue
+            try {
+              const base = normalizarTimeline(timeline, proyecto.source.duration, duracionesDeMedios((proyectos.abrir(id) ?? proyecto).medios))
+              const clip = base.clips[Math.round(o.clip) - 1]
+              if (!clip) continue
+              const r = await recortarObjeto(id, base, clip.id, { x: o.x, y: o.y, ancho: o.ancho, alto: o.alto })
+              o.medio = r.medio
+              o.clipId = clip.id
+              o.duracionReal = r.duracion
+              const { transcript: _t, ...ligero } = r.project
+              for (const w of BrowserWindow.getAllWindows()) w.webContents.send('proyecto:externo', { proyecto: ligero, quien: 'recorte', conTimeline: false })
+            } catch (e) {
+              turno.mensaje = `${turno.mensaje}\n\nNo pude recortar el objeto: ${e instanceof Error ? e.message : String(e)}`
+            }
+          }
+        }
+        // El cielo que pidió cambiar: se hace aquí y el clip con el cielo nuevo queda en la biblioteca antes de aplicar.
+        if (turno.ok) {
+          for (const o of turno.operaciones) {
+            if (o.op !== 'cambiar_cielo') continue
+            try {
+              const base = normalizarTimeline(timeline, proyecto.source.duration, duracionesDeMedios((proyectos.abrir(id) ?? proyecto).medios))
+              const clip = base.clips[Math.round(o.clip) - 1]
+              if (!clip) continue
+              const r = await cambiarCielo(id, base, clip.id, o.cielo)
+              o.medio = r.medio
+              o.clipId = clip.id
+              o.duracionReal = r.duracion
+              const { transcript: _t, ...ligero } = r.project
+              for (const w of BrowserWindow.getAllWindows()) w.webContents.send('proyecto:externo', { proyecto: ligero, quien: 'recorte', conTimeline: false })
+            } catch (e) {
+              turno.mensaje = `${turno.mensaje}\n\nNo pude cambiar el cielo: ${e instanceof Error ? e.message : String(e)}`
+            }
+          }
+        }
         // El objeto que pidió borrar: se rellena aquí y el clip sin él queda en la biblioteca antes de aplicar.
         if (turno.ok) {
           for (const o of turno.operaciones) {
@@ -3189,6 +3273,14 @@ No pude animar los subtítulos (se animan al exportar): ${e instanceof Error ? e
     subtitulos: (id, tl) => subtitulosListos(id, tl),
     persona: async (id, tl, clip) => {
       const r = await recortarPersona(id, tl, clip)
+      return { medio: r.medio, duracion: r.duracion }
+    },
+    recortarObjeto: async (id, tl, clip, zona) => {
+      const r = await recortarObjeto(id, tl, clip, zona)
+      return { medio: r.medio, duracion: r.duracion }
+    },
+    cambiarCielo: async (id, tl, clip, cielo) => {
+      const r = await cambiarCielo(id, tl, clip, cielo)
       return { medio: r.medio, duracion: r.duracion }
     },
     borrarObjeto: async (id, tl, clip, zona, hasta) => {

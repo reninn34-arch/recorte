@@ -24,6 +24,37 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.64',
+    fecha: '2026-11-16',
+    resumen: 'Recorta cualquier objeto con un clic, borra objetos con su forma exacta, cambia el cielo y aguanta videos largos.',
+    novedades: [
+      {
+        icono: 'seleccion',
+        titulo: 'Recortar un objeto (rotoscopia)',
+        texto:
+          'En «Tapar una zona» elige el modo «Recortar (rotoscopia)», pon la zona sobre el objeto al empezar el clip y pulsa «Recortar lo marcado»: Recorte lo recorta con bordes finos (modelo SAM 2, se baja una vez, 156 MB) y lo sigue por todo el clip. Queda encima con transparencia: un texto «detrás» o lo que pongas debajo se ve por detrás de él.'
+      },
+      {
+        icono: 'seleccion',
+        titulo: 'Borrar objetos, ahora con su forma',
+        texto:
+          'El modo «Borrar» ya no rellena toda la caja: saca la forma exacta del objeto y lo sigue solo aunque se mueva, sin trazar su recorrido. Si no lo encuentra en el primer cuadro, te dice que ajustes la caja.'
+      },
+      {
+        icono: 'seleccion',
+        titulo: 'Cambiar el cielo',
+        texto:
+          'Elige un cielo (atardecer, azul, amanecer, nublado o noche) y pulsa «Cambiar el cielo» en un clip de exterior. Funciona mejor con el cielo bien visible arriba; con ramas finas el borde queda imperfecto.'
+      },
+      {
+        icono: 'scissors',
+        titulo: 'Videos largos',
+        texto:
+          'Separar a la persona, borrar objetos, recortar y cambiar el cielo ahora trabajan por tramos de 30 s que se guardan: si se corta o lo paras, al repetirlo sigue desde el último tramo.'
+      }
+    ]
+  },
+  {
     version: '0.1.63',
     fecha: '2026-11-16',
     resumen: 'Borra objetos de un video y quita las tomas repetidas cuando te equivocas al hablar.',

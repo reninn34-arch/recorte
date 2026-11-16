@@ -312,6 +312,53 @@ export function Editor({
       setRecortandoPersona(null)
     }
   }
+  /** Recorta el objeto de la zona «Recortar» del clip (rotoscopia por clic): queda encima del clip, con transparencia. */
+  async function recortarObjeto(clipId: string) {
+    if (recortandoPersona || !timeline.clips.some((x) => x.id === clipId)) return
+    setRecortandoPersona({ clip: clipId, pct: 0 })
+    const dejar = window.recorte.onProgreso((p) => {
+      if (p.id === proyecto.id && p.fase === 'persona') setRecortandoPersona({ clip: clipId, pct: p.pct })
+    })
+    try {
+      const r = await window.recorte.recortarObjeto(proyecto.id, timeline, clipId)
+      onMedios(r.project.medios ?? [])
+      const medios = { principal: proyecto.source.duration, ...duracionesDeMedios(r.project.medios) }
+      const z = timeline.clips.find((x) => x.id === clipId)?.zonas?.find((x) => x.modo === 'recortar')
+      const clave = z ? `${z.x.toFixed(2)},${z.y.toFixed(2)}` : undefined
+      const hecho = anadirCapa(timeline, { fuente: r.medio, inicio: r.inicio, duracion: r.duracion, x: 0.5, y: 0.5, ancho: 1, pista: 3, roto: { clip: clipId, ...(clave ? { clave } : {}) } }, medios)
+      if (hecho.timeline === timeline) throw new Error('No pude poner el objeto recortado en la timeline.')
+      historial.aplicar(hecho.timeline)
+      onAviso('Listo: el objeto quedó recortado encima del clip. Marca «Detrás de la persona» en un texto, o pon algo en las pistas 1 o 2, y se verá por detrás de él.')
+    } catch (error) {
+      onAviso(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error))
+    } finally {
+      dejar()
+      setRecortandoPersona(null)
+    }
+  }
+  /** Cambia el cielo del clip: el clip con el cielo nuevo queda encima del original. */
+  async function cambiarCielo(clipId: string, cielo: string) {
+    if (recortandoPersona || !timeline.clips.some((x) => x.id === clipId)) return
+    setRecortandoPersona({ clip: clipId, pct: 0 })
+    const dejar = window.recorte.onProgreso((p) => {
+      if (p.id === proyecto.id && p.fase === 'persona') setRecortandoPersona({ clip: clipId, pct: p.pct })
+    })
+    try {
+      const r = await window.recorte.cambiarCielo(proyecto.id, timeline, clipId, cielo)
+      onMedios(r.project.medios ?? [])
+      const medios = { principal: proyecto.source.duration, ...duracionesDeMedios(r.project.medios) }
+      const sinVieja = (timeline.capas ?? []).filter((c) => c.cielo?.clip === clipId).reduce((t, c) => borrarCapa(t, c.id), timeline)
+      const hecho = anadirCapa(sinVieja, { fuente: r.medio, inicio: r.inicio, duracion: r.duracion, x: 0.5, y: 0.5, ancho: 1, pista: 3, cielo: { clip: clipId } }, medios)
+      if (hecho.timeline === sinVieja) throw new Error('No pude poner el cielo nuevo en la timeline.')
+      historial.aplicar(hecho.timeline)
+      onAviso('Listo: el cielo ya es otro. Si cambias el recorte o el color del clip, vuelve a pedirlo.')
+    } catch (error) {
+      onAviso(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error))
+    } finally {
+      dejar()
+      setRecortandoPersona(null)
+    }
+  }
   /** Borra el objeto de la zona «Borrar» del clip: el clip sin él queda encima del original. */
   async function borrarObjeto(clipId: string) {
     if (recortandoPersona || !timeline.clips.some((x) => x.id === clipId)) return
@@ -838,6 +885,8 @@ export function Editor({
         onEstabilizar={proyecto.demo ? undefined : (clipId) => void estabilizar(clipId)}
         onSepararPersona={proyecto.demo ? undefined : (clipId) => void separarPersona(clipId)}
         separandoPersona={recortandoPersona}
+        onRecortarObjeto={proyecto.demo ? undefined : (clipId) => void recortarObjeto(clipId)}
+        onCambiarCielo={proyecto.demo ? undefined : (clipId, cielo) => void cambiarCielo(clipId, cielo)}
         onBorrarObjeto={proyecto.demo ? undefined : (clipId) => void borrarObjeto(clipId)}
         estabilizando={estabilizando}
         congelando={congelando}

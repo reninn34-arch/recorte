@@ -129,6 +129,8 @@ export type OperacionTL =
    * de ella. El proceso principal hace el recorte antes de aplicar y deja aquí su medio y el clip; sin medio, no se pudo.
    */
   | { op: 'recortar_persona'; clip: number; medio?: string; clipId?: string; duracionReal?: number }
+  | { op: 'rotoscopiar'; clip: number; x: number; y: number; ancho: number; alto: number; medio?: string; clipId?: string; duracionReal?: number }
+  | { op: 'cambiar_cielo'; clip: number; cielo: string; medio?: string; clipId?: string; duracionReal?: number }
   | { op: 'borrar_objeto'; clip: number; x: number; y: number; ancho: number; alto: number; hasta_x?: number; hasta_y?: number; medio?: string; clipId?: string; duracionReal?: number }
   | { op: 'subtitulos_animados'; estilo: string; valores?: Record<string, string | number | boolean>; render?: SubtitulosHF }
   | ({ op: 'cambiar_capa'; capa_n: number; inicio?: number } & CamposCapa)
@@ -383,6 +385,19 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
       case 'recortar_persona': {
         const n = num(x.clip)
         if (n !== null) ops.push({ op: 'recortar_persona', clip: n })
+        break
+      }
+      case 'rotoscopiar': {
+        const n = num(x.clip)
+        const [cx, cy, an, al] = [num(x.x), num(x.y), num(x.ancho), num(x.alto)]
+        if (n === null || cx === null || cy === null || an === null || al === null || an <= 0 || al <= 0) break
+        const fr = (v: number) => Math.min(Math.max(v, 0), 1)
+        ops.push({ op: 'rotoscopiar', clip: n, x: fr(cx), y: fr(cy), ancho: fr(an), alto: fr(al) })
+        break
+      }
+      case 'cambiar_cielo': {
+        const n = num(x.clip)
+        if (n !== null && typeof x.cielo === 'string' && x.cielo.trim() && x.cielo.length <= 400) ops.push({ op: 'cambiar_cielo', clip: n, cielo: x.cielo.trim() })
         break
       }
       case 'borrar_objeto': {
@@ -739,6 +754,50 @@ export function aplicarOperaciones(
         }
         tl = r.timeline
         cambios.push(`Separé a la persona del clip ${o.clip} y la puse encima (lo que va en las pistas 1 y 2 y los textos «detrás» quedan detrás de ella)`)
+        break
+      }
+      case 'rotoscopiar': {
+        if (!o.medio || !o.clipId || !o.duracionReal) {
+          fallos.push(`No pude recortar el objeto del clip ${o.clip}.`)
+          break
+        }
+        const tr = tramos(tl).find((x) => x.clip.id === o.clipId)
+        if (!tr) {
+          fallos.push(`El clip ${o.clip} ya no está: no recorté su objeto.`)
+          break
+        }
+        medios[o.medio] = o.duracionReal
+        // Un objeto puede recortarse más de uno por clip; el mismo (misma caja) se reemplaza.
+        const clave = `${o.x.toFixed(2)},${o.y.toFixed(2)}`
+        for (const vieja of (tl.capas ?? []).filter((c) => c.roto?.clip === o.clipId && c.roto?.clave === clave)) tl = borrarCapa(tl, vieja.id)
+        const r = anadirCapa(tl, { fuente: o.medio, inicio: tr.inicio, duracion: Math.min(o.duracionReal, tr.fin - tr.inicio), x: 0.5, y: 0.5, ancho: 1, pista: 3, roto: { clip: o.clipId, clave } }, medios)
+        if (r.timeline === tl) {
+          fallos.push(`No pude poner el objeto recortado del clip ${o.clip}.`)
+          break
+        }
+        tl = r.timeline
+        cambios.push(`Recorté el objeto del clip ${o.clip} y lo puse encima (lo que va en las pistas 1 y 2 y los textos «detrás» quedan detrás de él)`)
+        break
+      }
+      case 'cambiar_cielo': {
+        if (!o.medio || !o.clipId || !o.duracionReal) {
+          fallos.push(`No pude cambiar el cielo del clip ${o.clip}.`)
+          break
+        }
+        const tr = tramos(tl).find((x) => x.clip.id === o.clipId)
+        if (!tr) {
+          fallos.push(`El clip ${o.clip} ya no está: no cambié su cielo.`)
+          break
+        }
+        medios[o.medio] = o.duracionReal
+        for (const vieja of (tl.capas ?? []).filter((c) => c.cielo?.clip === o.clipId)) tl = borrarCapa(tl, vieja.id)
+        const r = anadirCapa(tl, { fuente: o.medio, inicio: tr.inicio, duracion: Math.min(o.duracionReal, tr.fin - tr.inicio), x: 0.5, y: 0.5, ancho: 1, pista: 3, cielo: { clip: o.clipId } }, medios)
+        if (r.timeline === tl) {
+          fallos.push(`No pude poner el cielo nuevo del clip ${o.clip}.`)
+          break
+        }
+        tl = r.timeline
+        cambios.push(`Cambié el cielo del clip ${o.clip} por «${o.cielo}»`)
         break
       }
       case 'borrar_objeto': {
@@ -1227,7 +1286,9 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
   barrido-marca (1.1 s: transición; ponla con su centro justo en un corte, inicio = corte − 0.55)
   destellos (2 s: celebrar un momento; "x","y" en % desde dónde salen)
   cierre-logo (2.4 s: el final, con el logo; "texto" eslogan opcional, "conFondo" true para tapar el video)
-- {"op":"borrar_objeto","clip":N,"x":0.85,"y":0.9,"ancho":0.2,"alto":0.1}  BORRA UN OBJETO del clip (un logo, una marca de agua, un cartel, algo que se coló): la caja va en fracciones del cuadro (x,y = el CENTRO del objeto, 0 a 1; ancho y alto, lo que mide). Mira antes un cuadro (ver_cuadro) para medir bien la caja, un poco más grande que el objeto. Si el objeto se mueve a lo largo del clip, agrega "hasta_x" y "hasta_y": dónde está su centro al final del clip. Rellena con lo que lo rodea, así que va bien con objetos chicos sobre fondos parejos; no sirve para quitar a una persona ni algo que ocupa media pantalla. Tarda (unos 3 s por segundo de clip). Después de esto no cambies el recorte ni el color del clip: se vuelve a pedir.
+- {"op":"rotoscopiar","clip":N,"x":0.5,"y":0.5,"ancho":0.3,"alto":0.5}  RECORTA UN OBJETO del clip (una persona, un coche, un producto, una mano: lo que sea) con bordes finos y lo sigue por todo el clip; queda encima del mismo clip, así un texto «detrás» (cambiar_texto con "detras":true) o lo que pongas en las pistas 1 y 2 se ve por detrás del objeto, o le cambias el fondo. La caja va en fracciones del cuadro al EMPEZAR el clip (x,y = el CENTRO del objeto, ancho y alto lo que mide, un poco más grande que él); míralo antes con ver_cuadro. Tarda (unos 0,4 s por cuadro). Con más de un objeto, pídelos uno por uno. Si cambias el recorte o el color del clip después, vuelve a pedirlo.
+- {"op":"cambiar_cielo","clip":N,"cielo":"atardecer"}  CAMBIA EL CIELO del clip: "azul", "atardecer", "amanecer", "nublado", "noche" o la ruta de una imagen de cielo. Busca el cielo (lo claro o azul que toca el borde de arriba, lejos de la cámara) y lo reemplaza; se corre despacio. Sirve en tomas de exterior con el cielo bien visible; no en interiores ni con árboles muy encima del horizonte (el follaje fino queda con orillas). Tarda (unos 4 s por segundo de clip). Si cambias el recorte o el color del clip después, vuelve a pedirlo.
+- {"op":"borrar_objeto","clip":N,"x":0.85,"y":0.9,"ancho":0.2,"alto":0.1}  BORRA UN OBJETO del clip (un logo, una marca de agua, un cartel, algo que se coló): la caja va en fracciones del cuadro (x,y = el CENTRO del objeto, 0 a 1; ancho y alto, lo que mide). Mira antes un cuadro (ver_cuadro) para medir bien la caja, un poco más grande que el objeto. La caja es la del objeto AL EMPEZAR el clip: Recorte saca su forma exacta (SAM 2) y lo sigue solo aunque se mueva, así que no hace falta decir hacia dónde va (si aun así quieres, "hasta_x" y "hasta_y" son su centro al final). Rellena con lo que lo rodea, así que va bien con objetos chicos o medianos sobre fondos parejos; algo muy grande (una persona de cerca) queda borroso. Si no lo encuentra en el primer cuadro, dice que ajustes la caja. Tarda (unos 3 s por segundo de clip). Después de esto no cambies el recorte ni el color del clip: se vuelve a pedir.
 - {"op":"recortar_persona","clip":N}  SEPARA A LA PERSONA DEL FONDO en ese clip (tarda: unos 10 s por segundo de clip) y la pone encima de él, calzada. Con eso: (1) TEXTO DETRÁS DE LA PERSONA: un cambiar_texto o anadir_texto con "detras":true se ve por detrás de su cabeza y su cuerpo (el título grande que la persona tapa: úsalo con letra gruesa y grande, "tamano" 2 o más, sin caja, donde la persona lo tape en parte); (2) lo que pongas en las pistas 1 y 2 (anadir_pieza, anadir_capa) también queda detrás de ella; (3) FONDO DESENFOCADO O CAMBIADO: desenfoca el clip, o pon una imagen a pantalla completa en la pista 1, y la persona sigue nítida encima. Hazlo en clips donde se ve bien a la persona (no de muy lejos ni saliendo del cuadro). Si después cambias el recorte, el zoom o el color del clip, vuelve a pedirlo.
 - {"op":"subtitulos_animados","estilo":"subtitulos-rotulo","valores":{"colorClave":"#72f9fd"}}  SUBTÍTULOS ANIMADOS con HyperFrames: los textos de subtítulo (los que hiciste desde la voz) siguen siendo el guion y el estilo los dibuja encima, frase a frase y al ritmo de cada palabra; las palabras entre *asteriscos* van resaltadas. Estilos: subtitulos-rotulo (bloque oscuro, letra gruesa, la frase crece un poco; "colorCaja","colorTexto","colorClave","mayusculas","y","tamano"), subtitulos-pildora (palabra a palabra con la que suena sobre una píldora; "colorPildora","colorTexto","colorClave","mayusculas","y","tamano"), subtitulos-palabra (de a 1-3 palabras enormes al centro; "colorTexto","colorClave","porGrupo","y","tamano") y los que el usuario creó. "estilo":"ninguno" vuelve al texto simple. Si corriges un subtítulo con cambiar_texto, se vuelven a animar solos. Un texto que va con la voz pero no está marcado como subtítulo se marca con cambiar_texto "subtitulo":true (y anadir_texto acepta "subtitulo":true); "subtitulo":false lo saca.
 - {"op":"crear_pieza","peticion":"…","inicio":T,"duracion":S}  (solo en el chat de Recorte) una animación NUEVA a medida cuando ninguna de las de arriba sirve o el usuario pide algo distinto: describe con detalle cómo debe verse y moverse (estilo, ritmo, colores, qué textos lleva). La crea tu agente con HyperFrames en unos minutos, queda puesta en el segundo T y guardada para reusarla.

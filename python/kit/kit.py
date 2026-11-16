@@ -3378,7 +3378,7 @@ def recortar_video(ruta, salida=None):
     return {'archivo': salida, 'ancho': w, 'alto': h, 'cuadros': n}
 
 
-def recortar_persona(ruta, salida=None, desde=None, hasta=None):
+def recortar_persona(ruta, salida=None, desde=None, hasta=None, tolerante=False):
     """Separa del fondo a la persona (o al sujeto principal) de un video cualquiera, cuadro a cuadro con el modelo, y la
     deja en un WebM con transparencia del mismo tamaño y duración: puesto como capa encima del mismo video, lo que quede
     entre los dos (un título, un logo) se ve DETRÁS de la persona; y desenfocando o cambiando lo de abajo, cambia el fondo.
@@ -3455,13 +3455,13 @@ def recortar_persona(ruta, salida=None, desde=None, hasta=None):
     escribe.stdin.close()
     if escribe.wait() != 0 or not n:
         raise SystemExit('No pude escribir el video de la persona.')
-    if visibles < n * 0.2:
+    if visibles < n * 0.2 and not tolerante:
         os.remove(salida)
         raise SystemExit('No encontré a una persona (ni un sujeto claro) en ese tramo del video.')
     return {'archivo': salida, 'ancho': w, 'alto': h, 'cuadros': n, 'duracion': round(n / fps_n, 3), 'cubre': round(cubre / n, 3)}
 
 
-def borrar_objeto(ruta, zona, salida=None, hasta_zona=None, recorrido=None):
+def borrar_objeto(ruta, zona, salida=None, hasta_zona=None, recorrido=None, desde=None, hasta=None, preciso=True, caja_archivo=None, tolerante=False):
     """Borra un objeto (un logo, una marca de agua, un cartel, algo que se coló) de un video: lo rellena con lo que lo
     rodea, cuadro a cuadro. `zona` es la caja del objeto como x,y,ancho,alto en fracciones del cuadro (x,y = el centro);
     si el objeto se mueve de una punta a otra del clip, `hasta_zona` es donde termina y la caja va de una a otra.
@@ -3493,6 +3493,18 @@ def borrar_objeto(ruta, zona, salida=None, hasta_zona=None, recorrido=None):
         pasos = np.array(json.load(open(recorrido, encoding='utf-8')), dtype=np.float64)
         if pasos.ndim != 2 or pasos.shape[1] != 5 or not len(pasos):
             raise SystemExit('El recorrido va como [[segundo, x, y, ancho, alto], ...].')
+    # Preciso: SAM 2 saca la forma del objeto (y lo sigue) y se rellena solo esa forma, no toda la caja. Si el modelo no
+    # está o no carga, se rellena la caja como antes.
+    seg = None
+    if preciso:
+        try:
+            if caja_archivo and os.path.isfile(caja_archivo):
+                inicio = json.load(open(caja_archivo, encoding='utf-8'))
+            else:
+                inicio = [float(v) for v in pasos[0][1:]] if pasos is not None else z0
+            seg = _SeguidorSam(inicio, w, h)
+        except (Exception, SystemExit):
+            seg = None
     salida = salida or os.path.splitext(ruta)[0] + '-sin-objeto.mp4'
     r = subprocess.run([FFPROBE, '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate', '-of', 'csv=p=0', ruta],
                        capture_output=True, text=True)
@@ -3502,23 +3514,27 @@ def borrar_objeto(ruta, zona, salida=None, hasta_zona=None, recorrido=None):
         fps_n = num / max(den, 1e-6)
     except ValueError:
         fps_n = 30.0
-    total = max(1, round(info['duracion'] * fps_n))
-    lee = subprocess.Popen([FFMPEG, '-v', 'error', '-i', ruta, '-vf', f'scale={w}:{h}', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-'], stdout=subprocess.PIPE)
+    t0 = float(desde or 0)
+    dur = (float(hasta) if hasta else info['duracion']) - t0
+    total = max(1, round(dur * fps_n))
+    tramo_ = (['-ss', f'{t0:.3f}'] if desde else []) + (['-t', f'{dur:.3f}'] if hasta else [])
+    lee = subprocess.Popen([FFMPEG, '-v', 'error', *tramo_, '-i', ruta, '-vf', f'scale={w}:{h}', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-'], stdout=subprocess.PIPE)
     os.makedirs(os.path.dirname(os.path.abspath(salida)), exist_ok=True)
     escribe = subprocess.Popen([FFMPEG, '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{w}x{h}', '-r', fps, '-i', '-',
                                 '-c:v', 'libx264', '-crf', '15', '-preset', 'fast', '-pix_fmt', 'yuv420p', '-an', '-movflags', '+faststart', salida],
                                stdin=subprocess.PIPE)
     rng = np.random.default_rng(7)
-    previo, n = None, 0
+    previo, n, no_hallado = None, 0, False
     try:
         while True:
             datos = lee.stdout.read(w * h * 3)
             if len(datos) < w * h * 3:
                 break
             a = np.frombuffer(datos, np.uint8).reshape(h, w, 3).copy()
-            t = n / max(total - 1, 1)
+            t_abs = t0 + n / fps_n
+            t = t_abs / max(info['duracion'], 1e-6)
             if pasos is not None:
-                cx, cy, cw, ch = (float(np.interp(n / fps_n, pasos[:, 0], pasos[:, 1 + i])) for i in range(4))
+                cx, cy, cw, ch = (float(np.interp(t_abs, pasos[:, 0], pasos[:, 1 + i])) for i in range(4))
             else:
                 cx, cy, cw, ch = (z0[i] + (z1[i] - z0[i]) * t for i in range(4))
             # La caja con un poco de aire (el borde de un logo casi nunca cae justo en su caja).
@@ -3527,13 +3543,35 @@ def borrar_objeto(ruta, zona, salida=None, hasta_zona=None, recorrido=None):
             x1 = min(w, round((cx + cw / 2) * w) + mx)
             y0 = max(0, round((cy - ch / 2) * h) - my)
             y1 = min(h, round((cy + ch / 2) * h) + my)
+            m_full = None
+            if seg is not None:
+                grande, hay = seg.paso(cv2.cvtColor(a, cv2.COLOR_BGR2RGB))
+                if n == 0 and not hay and not tolerante and not (caja_archivo and os.path.isfile(caja_archivo)):
+                    no_hallado = True
+                    break
+                if hay:
+                    m = (grande > 0).astype(np.uint8)
+                    g = max(3, round(min(w, h) / 150)) * 2 + 1
+                    m = cv2.dilate(m, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (g, g)))
+                    ys, xs = np.where(m > 0)
+                    if len(xs) and float(m.sum()) >= 0.15 * max(1.0, (seg.bb[2] - seg.bb[0]) * (seg.bb[3] - seg.bb[1])):
+                        m_full = m
+                        x0, x1, y0, y1 = int(xs.min()), int(xs.max()) + 1, int(ys.min()), int(ys.max()) + 1
+                if m_full is None:
+                    # Sin una forma fiable, la caja donde está ahora el objeto.
+                    bw, bh = seg.bb[2] - seg.bb[0], seg.bb[3] - seg.bb[1]
+                    x0, x1 = max(0, int(seg.bb[0] - bw * 0.1)), min(w, int(seg.bb[2] + bw * 0.1) + 1)
+                    y0, y1 = max(0, int(seg.bb[1] - bh * 0.1)), min(h, int(seg.bb[3] + bh * 0.1) + 1)
             if x1 - x0 >= 2 and y1 - y0 >= 2:
                 # Se trabaja sobre un recorte con contexto alrededor (es mucho más rápido que el cuadro entero).
                 pad = max(16, (x1 - x0) // 2, (y1 - y0) // 2)
                 X0, X1, Y0, Y1 = max(0, x0 - pad), min(w, x1 + pad), max(0, y0 - pad), min(h, y1 + pad)
                 parte = a[Y0:Y1, X0:X1].copy()
                 mascara = np.zeros(parte.shape[:2], np.uint8)
-                mascara[y0 - Y0:y1 - Y0, x0 - X0:x1 - X0] = 255
+                if m_full is not None:
+                    mascara = (m_full[Y0:Y1, X0:X1] * 255).astype(np.uint8)
+                else:
+                    mascara[y0 - Y0:y1 - Y0, x0 - X0:x1 - X0] = 255
                 radio = int(max(3, min(12, min(x1 - x0, y1 - y0) / 4)))
                 lleno = cv2.inpaint(parte, mascara, radio, cv2.INPAINT_TELEA)
                 # El grano de lo que rodea (la caja liso se nota como un parche).
@@ -3559,9 +3597,363 @@ def borrar_objeto(ruta, zona, salida=None, hasta_zona=None, recorrido=None):
     finally:
         lee.kill()
     escribe.stdin.close()
-    if escribe.wait() != 0 or not n:
+    codigo = escribe.wait()
+    if no_hallado:
+        if os.path.exists(salida):
+            os.remove(salida)
+        raise SystemExit(MENSAJE_CAJA)
+    if codigo != 0 or not n:
         raise SystemExit('No pude escribir el video sin el objeto.')
+    if seg is not None:
+        json.dump(seg.caja_final(), open(salida + '.caja.json', 'w', encoding='utf-8'))
     return {'archivo': salida, 'ancho': w, 'alto': h, 'cuadros': n, 'duracion': round(n / fps_n, 3)}
+
+
+CIELOS = {
+    # nombre: [(posición 0 arriba a 1 horizonte, (r, g, b)), ...]
+    'azul': [(0, (38, 110, 208)), (0.55, (96, 170, 234)), (1, (196, 226, 248))],
+    'atardecer': [(0, (46, 52, 120)), (0.35, (182, 92, 120)), (0.7, (250, 140, 84)), (1, (255, 206, 124))],
+    'nublado': [(0, (120, 128, 138)), (0.5, (160, 166, 174)), (1, (206, 210, 214))],
+    'noche': [(0, (6, 10, 30)), (0.6, (16, 24, 58)), (1, (40, 52, 96))],
+    'amanecer': [(0, (92, 118, 190)), (0.45, (244, 170, 170)), (1, (255, 226, 170))],
+}
+
+
+def _cielo_imagen(cielo, w, h):
+    """El cielo nuevo del tamaño del cuadro, algo más ancho (para que se corra despacio): una imagen o un cielo de la lista."""
+    import cv2
+    ancho = int(w * 1.25)
+    if cielo in CIELOS:
+        paso = CIELOS[cielo]
+        ys = np.linspace(0, 1, h)
+        col = np.stack([np.interp(ys, [p for p, _ in paso], [c[i] for _, c in paso]) for i in range(3)], axis=1)
+        im = np.repeat(col[:, None, :], ancho, axis=1)
+        # Nubes suaves: ruido de baja frecuencia, más claro, sin formas duras.
+        rng = np.random.default_rng(11)
+        ruido = cv2.resize(rng.random((max(3, h // 90), max(4, ancho // 90))).astype(np.float32), (ancho, h), interpolation=cv2.INTER_CUBIC)
+        ruido = cv2.GaussianBlur(ruido, (0, 0), 18)
+        nubes = np.clip((ruido - 0.5) * 2.2, 0, 1)[..., None] * (0.25 if cielo != 'noche' else 0.08)
+        im = im * (1 - nubes) + 255 * nubes
+        return np.clip(im, 0, 255).astype(np.uint8)[..., ::-1].copy()
+    a = cv2.imread(cielo)
+    if a is None:
+        raise SystemExit(f'No pude abrir el cielo «{cielo}» (una imagen, o: {", ".join(CIELOS)}).')
+    k = max(ancho / a.shape[1], h / a.shape[0])
+    a = cv2.resize(a, (max(ancho, round(a.shape[1] * k)), max(h, round(a.shape[0] * k))), interpolation=cv2.INTER_CUBIC)
+    return a[:h, :ancho].copy()
+
+
+def _mascara_cielo(bgr, d):
+    """Qué es cielo en un cuadro (0 a 1): lejos (profundidad baja), claro o azulado, liso, y pegado al borde de arriba."""
+    import cv2
+    h, w = d.shape
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV).astype(np.float32)
+    H, S, V = hsv[..., 0], hsv[..., 1] / 255, hsv[..., 2] / 255
+    gris = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    textura = cv2.GaussianBlur(np.abs(gris - cv2.GaussianBlur(gris, (0, 0), 3)), (0, 0), 5)
+    azul = (H > 85) & (H < 135) & (S > 0.12)           # azul (H de OpenCV va de 0 a 180)
+    claro = (V > 0.62) & (S < 0.30)                     # blanco o gris claro: nubes, cielo pálido
+    amanecer = (V > 0.55) & (S > 0.25) & ((H < 25) | (H > 160))   # naranjas y rosas del horizonte
+    color = azul | claro | amanecer
+    candidato = color & (d < 0.5) & (textura < 9)
+    m = cv2.morphologyEx(candidato.astype(np.uint8), cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    # Solo lo que está conectado con el borde de arriba (un techo azul o una camisa clara no son cielo).
+    n, etiquetas, _est, _c = cv2.connectedComponentsWithStats(m, connectivity=4)
+    arriba = max(2, h // 60)
+    sirve = np.zeros(n, bool)
+    sirve[np.unique(etiquetas[:arriba][m[:arriba] > 0])] = True
+    sirve[0] = False
+    cielo = sirve[etiquetas].astype(np.float32)
+    cielo = cv2.morphologyEx(cielo, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
+    # La textura de un borde se desparrama unos píxeles: el cielo crece hacia lo que todavía tiene su color (no entra en lo demás).
+    r = max(5, round(min(h, w) / 30)) * 2 + 1
+    crece = cv2.dilate(cielo, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (r, r)))
+    cielo = np.maximum(cielo, crece * cv2.dilate(color.astype(np.float32), np.ones((3, 3), np.uint8)))
+    # Un poco más grande: el borde del cielo viejo (azul pálido) no debe asomar como un halo.
+    g = max(3, round(min(h, w) / 120)) * 2 + 1
+    return cv2.dilate(cielo, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (g, g)))
+
+
+def cambiar_cielo(ruta, cielo, salida=None, desde=None, hasta=None, tolerante=False):
+    """Cambia el cielo de un video: encuentra el cielo en cada cuadro (modelo de profundidad + color + lo que toca el borde de
+    arriba), pone el nuevo (una imagen o «azul», «atardecer», «nublado», «noche», «amanecer») que se corre despacio y le
+    pasa a la orilla algo del color nuevo para que no quede un halo. Deja un MP4 (sin sonido) del mismo tamaño y duración.
+    Va diciendo «PROGRESO 0.42» por stderr. Si no hay cielo en el video, avisa."""
+    import cv2
+    info = probar(ruta)
+    if not info.get('ancho'):
+        raise SystemExit('Ese archivo no tiene imagen.')
+    w, h = int(info['ancho']), int(info['alto'])
+    if max(w, h) > 1920:
+        k = 1920 / max(w, h)
+        w, h = round(w * k), round(h * k)
+    w -= w % 2
+    h -= h % 2
+    salida = salida or os.path.splitext(ruta)[0] + '-cielo.mp4'
+    r = subprocess.run([FFPROBE, '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate', '-of', 'csv=p=0', ruta],
+                       capture_output=True, text=True)
+    fps = (r.stdout.strip() or '30/1').split(',')[0]
+    try:
+        num, den = (float(x) for x in (fps.split('/') + ['1'])[:2])
+        fps_n = num / max(den, 1e-6)
+    except ValueError:
+        fps_n = 30.0
+    t0 = float(desde or 0)
+    dur = (float(hasta) if hasta else info['duracion']) - t0
+    total = max(1, round(dur * fps_n))
+    tramo_ = (['-ss', f'{t0:.3f}'] if desde else []) + (['-t', f'{dur:.3f}'] if hasta else [])
+    nuevo = _cielo_imagen(cielo, w, h)
+    sobra = nuevo.shape[1] - w
+    sesion = sesion_modelo(MODELO_PROFUNDIDAD, 'para ver la profundidad del video')
+    entrada = sesion.get_inputs()[0].name
+    tw, th = max(14, round(w * (518 / min(w, h)) / 14) * 14), max(14, round(h * (518 / min(w, h)) / 14) * 14)
+    media, desv = np.array([0.485, 0.456, 0.406], np.float32), np.array([0.229, 0.224, 0.225], np.float32)
+    lee = subprocess.Popen([FFMPEG, '-v', 'error', *tramo_, '-i', ruta, '-vf', f'scale={w}:{h}', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-'], stdout=subprocess.PIPE)
+    os.makedirs(os.path.dirname(os.path.abspath(salida)), exist_ok=True)
+    escribe = subprocess.Popen([FFMPEG, '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{w}x{h}', '-r', fps, '-i', '-',
+                                '-c:v', 'libx264', '-crf', '15', '-preset', 'fast', '-pix_fmt', 'yuv420p', '-an', '-movflags', '+faststart', salida],
+                               stdin=subprocess.PIPE)
+    previa, gris_previo, n, con_cielo, d = None, None, 0, 0, None
+    try:
+        while True:
+            datos = lee.stdout.read(w * h * 3)
+            if len(datos) < w * h * 3:
+                break
+            a = np.frombuffer(datos, np.uint8).reshape(h, w, 3).copy()
+            if n % 3 == 0 or d is None:
+                x = (cv2.resize(cv2.cvtColor(a, cv2.COLOR_BGR2RGB), (tw, th), interpolation=cv2.INTER_CUBIC).astype(np.float32) / 255 - media) / desv
+                s = np.asarray(sesion.run(None, {entrada: x.transpose(2, 0, 1)[None].astype(np.float32)})[0], np.float32)
+                d = s.reshape(s.shape[-2], s.shape[-1])
+                lo, hi = np.percentile(d, 1), np.percentile(d, 99)
+                d = cv2.resize(np.clip((d - lo) / max(float(hi - lo), 1e-6), 0, 1), (w, h), interpolation=cv2.INTER_LINEAR)
+            m = _mascara_cielo(a, d)
+            gris = cv2.cvtColor(cv2.resize(a, (w // 4, h // 4), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY).astype(np.float32)
+            if previa is not None:
+                quieto = np.clip(1 - cv2.GaussianBlur(np.abs(gris - gris_previo), (9, 9), 0) / 14, 0, 1) * 0.6
+                quieto = cv2.resize(quieto, (w, h), interpolation=cv2.INTER_LINEAR)
+                m = m * (1 - quieto) + previa * quieto
+            previa, gris_previo = m, gris
+            alfa = cv2.GaussianBlur(m, (0, 0), max(1.5, min(w, h) / 360))[..., None]
+            con_cielo += float(m.mean()) > 0.02
+            # El cielo nuevo se corre despacio de un lado a otro.
+            desp = int(sobra * min(1.0, (t0 + n / fps_n) / max(info['duracion'], 1e-6)))
+            c = nuevo[:, desp:desp + w].astype(np.float32)
+            # Una orilla sin halo: donde la máscara es parcial, lo viejo se tiñe del cielo nuevo.
+            borde = 4 * alfa * (1 - alfa)
+            base = a.astype(np.float32) * (1 - 0.35 * borde) + c * 0.35 * borde
+            fuera = base * (1 - alfa) + c * alfa
+            escribe.stdin.write(np.clip(fuera, 0, 255).astype(np.uint8).tobytes())
+            n += 1
+            if n % 10 == 0:
+                print(f'PROGRESO {min(0.99, n / total):.3f}', file=sys.stderr, flush=True)
+    finally:
+        lee.kill()
+    escribe.stdin.close()
+    if escribe.wait() != 0 or not n:
+        raise SystemExit('No pude escribir el video con el cielo nuevo.')
+    if con_cielo < n * 0.2 and not tolerante:
+        os.remove(salida)
+        raise SystemExit('No encontré un cielo claro en ese tramo del video (tiene que tocar el borde de arriba).')
+    return {'archivo': salida, 'ancho': w, 'alto': h, 'cuadros': n, 'duracion': round(n / fps_n, 3)}
+
+
+SAM2_BASE = 'https://huggingface.co/onnx-community/sam2.1-hiera-tiny-ONNX/resolve/main/onnx/'
+SAM2_ARCHIVOS = [('vision_encoder.onnx', 354238), ('vision_encoder.onnx_data', 134084864),
+                 ('prompt_encoder_mask_decoder.onnx', 213114), ('prompt_encoder_mask_decoder.onnx_data', 20958208)]
+
+
+def sesiones_sam2():
+    """SAM 2 (tiny): el codificador de imagen y el decodificador de máscaras. Los baja la primera vez (156 MB) a la carpeta de
+    modelos y usa la tarjeta gráfica si se puede (si no, el procesador)."""
+    if 'sam2' in _SESIONES:
+        return _SESIONES['sam2']
+    ort = _preparar_onnxruntime()
+    carpeta = os.path.join(carpeta_modelos(), 'sam2-tiny')
+    os.makedirs(carpeta, exist_ok=True)
+    for nombre, tam in SAM2_ARCHIVOS:
+        ruta = os.path.join(carpeta, nombre)
+        if os.path.isfile(ruta) and os.path.getsize(ruta) == tam:
+            continue
+        import urllib.request
+        print(f'Bajando el modelo para recortar objetos (156 MB, una sola vez)…', file=sys.stderr, flush=True)
+        temporal = ruta + '.bajando'
+        with urllib.request.urlopen(SAM2_BASE + nombre, timeout=60) as r, open(temporal, 'wb') as f:
+            while True:
+                trozo = r.read(1 << 20)
+                if not trozo:
+                    break
+                f.write(trozo)
+        if os.path.getsize(temporal) != tam:
+            os.remove(temporal)
+            raise SystemExit('El modelo para recortar objetos no se bajó entero. Revisa la conexión y vuelve a probar.')
+        os.replace(temporal, ruta)
+
+    def abrir(nombre, proveedores):
+        return ort.InferenceSession(os.path.join(carpeta, nombre), providers=proveedores)
+    for proveedores in (proveedores_onnx(ort), ['CPUExecutionProvider']):
+        try:
+            enc = abrir('vision_encoder.onnx', proveedores)
+            dec = abrir('prompt_encoder_mask_decoder.onnx', ['CPUExecutionProvider'])
+            # Una pasada de prueba: algunas tarjetas cargan el modelo pero fallan al correrlo.
+            enc.run(None, {'pixel_values': np.zeros((1, 3, 1024, 1024), np.float32)})
+            _SESIONES['sam2'] = (enc, dec)
+            return _SESIONES['sam2']
+        except Exception:
+            continue
+    raise SystemExit('No pude cargar el modelo para recortar objetos.')
+
+
+def _mascara_sam2(enc, dec, rgb, caja_px, punto_px, area_previa=None):
+    """La máscara (logits, 256×256) del objeto que encierra `caja_px` (x0, y0, x1, y1) en un cuadro RGB, con un punto dentro.
+    Devuelve (logits, puntaje de que hay un objeto, bbox de lo que cubre en fracciones, o None)."""
+    import cv2
+    h, w = rgb.shape[:2]
+    x = cv2.resize(rgb, (1024, 1024), interpolation=cv2.INTER_LINEAR).astype(np.float32) / 255
+    x = (x - np.array([0.485, 0.456, 0.406], np.float32)) / np.array([0.229, 0.224, 0.225], np.float32)
+    e0, e1, e2 = enc.run(None, {'pixel_values': x.transpose(2, 0, 1)[None].astype(np.float32)})
+    sx, sy = 1024 / w, 1024 / h
+    caja = np.array([[[caja_px[0] * sx, caja_px[1] * sy, caja_px[2] * sx, caja_px[3] * sy]]], np.float32)
+    punto = np.array([[[[punto_px[0] * sx, punto_px[1] * sy]]]], np.float32)
+    iou, masks, obj = dec.run(None, {'input_points': punto, 'input_labels': np.array([[[1]]], np.int64), 'input_boxes': caja,
+                                     'image_embeddings.0': e0, 'image_embeddings.1': e1, 'image_embeddings.2': e2})
+    candidatas = [masks[0, 0, k] for k in range(masks.shape[2])]
+    if area_previa:
+        # Con el cuadro anterior de referencia, la máscara que más se le parece en tamaño (no un pedazo ni todo el fondo).
+        areas = [float((c > 0).mean()) for c in candidatas]
+        k = int(np.argmin([abs(np.log((a + 1e-4) / (area_previa + 1e-4))) - 0.5 * float(iou[0, 0, i]) for i, a in enumerate(areas)]))
+    else:
+        k = int(np.argmax(iou[0, 0]))
+    return candidatas[k], float(obj[0, 0, 0]), float(iou[0, 0, k])
+
+
+class _SeguidorSam:
+    """Sigue un objeto con SAM 2 cuadro a cuadro: la máscara de antes (su caja, un poco más grande, y un punto en su centro) es la
+    pista del cuadro siguiente. `caja` = x,y,ancho,alto en fracciones (x,y = el centro) al empezar."""
+
+    def __init__(self, caja, w, h):
+        self.enc, self.dec = sesiones_sam2()
+        self.w, self.h = w, h
+        self.bb = [(caja[0] - caja[2] / 2) * w, (caja[1] - caja[3] / 2) * h, (caja[0] + caja[2] / 2) * w, (caja[1] + caja[3] / 2) * h]
+        self.area_caja = max(1.0, (self.bb[2] - self.bb[0]) * (self.bb[3] - self.bb[1]))
+        self.area = None
+        self.n = 0
+        self.visibles = 0
+        self.ultimo = list(self.bb)
+
+    def paso(self, rgb):
+        """(logits del tamaño del cuadro, hay objeto). Actualiza dónde está el objeto para el cuadro que sigue."""
+        import cv2
+        w, h = self.w, self.h
+        ancho_b, alto_b = self.bb[2] - self.bb[0], self.bb[3] - self.bb[1]
+        g = 0.12 if self.n else 0.0
+        caja_px = [max(0, self.bb[0] - ancho_b * g), max(0, self.bb[1] - alto_b * g), min(w, self.bb[2] + ancho_b * g), min(h, self.bb[3] + alto_b * g)]
+        punto = [(self.bb[0] + self.bb[2]) / 2, (self.bb[1] + self.bb[3]) / 2]
+        logits, objeto, _iou = _mascara_sam2(self.enc, self.dec, rgb, caja_px, punto, self.area)
+        grande = cv2.resize(logits, (w, h), interpolation=cv2.INTER_LINEAR)
+        cubre = float((grande > 0).mean())
+        hay = objeto > -0.5 and cubre > 0.0005
+        # En el primer cuadro: si la máscara es enorme frente a la caja (se llevó el fondo), la caja no rodea bien al objeto.
+        if self.n == 0 and hay and cubre * w * h > 3.5 * self.area_caja:
+            hay = False
+        if hay:
+            ys, xs = np.where(grande > 0)
+            self.bb = [float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max())]
+            self.ultimo = list(self.bb)
+            self.area = cubre
+            self.visibles += 1
+        self.n += 1
+        return grande, hay
+
+    def caja_final(self):
+        x0, y0, x1, y1 = self.ultimo
+        return [round((x0 + x1) / 2 / self.w, 4), round((y0 + y1) / 2 / self.h, 4), round((x1 - x0) / self.w, 4), round((y1 - y0) / self.h, 4)]
+
+
+MENSAJE_CAJA = 'No encontré ese objeto en el primer cuadro: ajusta la caja para que lo rodee bien (un poco más grande que él, sin otras cosas dentro).'
+
+
+def rotoscopia(ruta, caja, salida=None, desde=None, hasta=None, tolerante=False, caja_archivo=None):
+    """Recorta un objeto de un video (rotoscopia por clic): SAM 2 saca su máscara en el primer cuadro a partir de la caja
+    (x,y,ancho,alto en fracciones, x,y = el centro) y lo sigue cuadro a cuadro usando lo que cubría antes como pista. Deja un
+    WebM con transparencia del mismo tamaño y duración (el objeto con bordes suaves y lo demás transparente): puesto encima
+    del mismo video, lo que quede entre los dos se ve detrás del objeto. Escribe al lado (`.caja.json`) dónde terminó el
+    objeto, para seguir en el tramo siguiente de un clip largo. Si no lo encuentra en el primer cuadro, avisa enseguida
+    (que ajustes la caja). Va diciendo «PROGRESO 0.42» por stderr."""
+    import cv2
+    info = probar(ruta)
+    if not info.get('ancho'):
+        raise SystemExit('Ese archivo no tiene imagen.')
+    w, h = int(info['ancho']), int(info['alto'])
+    if max(w, h) > 1920:
+        k = 1920 / max(w, h)
+        w, h = round(w * k), round(h * k)
+    w -= w % 2
+    h -= h % 2
+    seguimos = bool(caja_archivo and os.path.isfile(caja_archivo))
+    if seguimos:
+        caja = json.load(open(caja_archivo, encoding='utf-8'))
+    c = [float(v) for v in (caja.split(',') if isinstance(caja, str) else caja)]
+    if len(c) != 4 or c[2] <= 0 or c[3] <= 0:
+        raise SystemExit('La caja va como x,y,ancho,alto (fracciones del cuadro, x,y = el centro).')
+    salida = salida or os.path.splitext(ruta)[0] + '-objeto.webm'
+    r = subprocess.run([FFPROBE, '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate', '-of', 'csv=p=0', ruta],
+                       capture_output=True, text=True)
+    fps = (r.stdout.strip() or '30/1').split(',')[0]
+    try:
+        num, den = (float(x) for x in (fps.split('/') + ['1'])[:2])
+        fps_n = num / max(den, 1e-6)
+    except ValueError:
+        fps_n = 30.0
+    t0 = float(desde or 0)
+    dur = (float(hasta) if hasta else info['duracion']) - t0
+    total = max(1, round(dur * fps_n))
+    tramo_ = (['-ss', f'{t0:.3f}'] if desde else []) + (['-t', f'{dur:.3f}'] if hasta else [])
+    seg = _SeguidorSam(c, w, h)
+    lee = subprocess.Popen([FFMPEG, '-v', 'error', *tramo_, '-i', ruta, '-vf', f'scale={w}:{h}', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], stdout=subprocess.PIPE)
+    os.makedirs(os.path.dirname(os.path.abspath(salida)), exist_ok=True)
+    escribe = subprocess.Popen([FFMPEG, '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', f'{w}x{h}', '-r', fps, '-i', '-',
+                                '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-b:v', '0', '-crf', '24', '-row-mt', '1', '-cpu-used', '4',
+                                '-auto-alt-ref', '0', salida], stdin=subprocess.PIPE)
+    previa, gris_previo, n, no_hallado = None, None, 0, False
+    try:
+        while True:
+            datos = lee.stdout.read(w * h * 3)
+            if len(datos) < w * h * 3:
+                break
+            a = np.frombuffer(datos, np.uint8).reshape(h, w, 3)
+            grande, hay = seg.paso(a)
+            if n == 0 and not hay and not seguimos and not tolerante:
+                no_hallado = True
+                break
+            # Bordes suaves: el logit llevado a 0-1 (en vez de un corte duro).
+            alfa = (1 / (1 + np.exp(-np.clip(grande * 1.6, -20, 20)))).astype(np.float32)
+            if not hay:
+                alfa = alfa * 0
+            gris = cv2.cvtColor(cv2.resize(a, (w // 4, h // 4), interpolation=cv2.INTER_AREA), cv2.COLOR_RGB2GRAY).astype(np.float32)
+            if previa is not None:
+                quieto = np.clip(1 - cv2.GaussianBlur(np.abs(gris - gris_previo), (9, 9), 0) / 12, 0, 1) * 0.5
+                quieto = cv2.resize(quieto, (w, h), interpolation=cv2.INTER_LINEAR)
+                alfa = alfa * (1 - quieto) + previa * quieto
+            previa, gris_previo = alfa, gris
+            escribe.stdin.write(np.dstack([a, (alfa * 255).astype(np.uint8)]).tobytes())
+            n += 1
+            if n % 5 == 0:
+                print(f'PROGRESO {min(0.99, n / total):.3f}', file=sys.stderr, flush=True)
+    finally:
+        lee.kill()
+    escribe.stdin.close()
+    codigo = escribe.wait()
+    if no_hallado:
+        if os.path.exists(salida):
+            os.remove(salida)
+        raise SystemExit(MENSAJE_CAJA)
+    if codigo != 0 or not n:
+        raise SystemExit('No pude escribir el video del objeto.')
+    if seg.visibles < n * 0.2 and not tolerante:
+        os.remove(salida)
+        raise SystemExit('Perdí el objeto al seguirlo: ajusta la caja para que lo rodee bien.')
+    json.dump(seg.caja_final(), open(salida + '.caja.json', 'w', encoding='utf-8'))
+    return {'archivo': salida, 'ancho': w, 'alto': h, 'cuadros': n, 'duracion': round(n / fps_n, 3), 'visible': round(seg.visibles / max(n, 1), 3)}
 
 
 def recortar_croma(a, fondo, salida):
@@ -4718,12 +5110,32 @@ def main():
     rpe.add_argument('--salida')
     rpe.add_argument('--desde', type=float)
     rpe.add_argument('--hasta', type=float)
+    rpe.add_argument('--tolerante', action='store_true')
     bo = sub.add_parser('borrar-objeto')
     bo.add_argument('video')
     bo.add_argument('--zona', required=True)
     bo.add_argument('--recorrido')
+    bo.add_argument('--desde', type=float)
+    bo.add_argument('--hasta', type=float)
+    bo.add_argument('--caja-archivo', dest='caja_archivo')
+    bo.add_argument('--rapido', action='store_true')
     bo.add_argument('--hasta-zona', dest='hasta_zona')
     bo.add_argument('--salida')
+    ci = sub.add_parser('cambiar-cielo')
+    ci.add_argument('video')
+    ci.add_argument('--cielo', required=True)
+    ci.add_argument('--salida')
+    ci.add_argument('--desde', type=float)
+    ci.add_argument('--hasta', type=float)
+    ci.add_argument('--tolerante', action='store_true')
+    ro = sub.add_parser('rotoscopia')
+    ro.add_argument('video')
+    ro.add_argument('--caja')
+    ro.add_argument('--caja-archivo', dest='caja_archivo')
+    ro.add_argument('--salida')
+    ro.add_argument('--desde', type=float)
+    ro.add_argument('--hasta', type=float)
+    ro.add_argument('--tolerante', action='store_true')
     rv2 = sub.add_parser('revisar')
     rv2.add_argument('video')
     rv2.add_argument('--referencia', help='el video de referencia, para comparar ritmo y estilo')
@@ -4831,9 +5243,13 @@ def main():
     elif x.orden == 'recortar':
         print(json.dumps(recortar(x.imagen, x.salida, x.tolerancia, x.modo), ensure_ascii=False))
     elif x.orden == 'recortar-persona':
-        print(json.dumps(recortar_persona(x.video, x.salida, x.desde, x.hasta), ensure_ascii=False))
+        print(json.dumps(recortar_persona(x.video, x.salida, x.desde, x.hasta, x.tolerante), ensure_ascii=False))
     elif x.orden == 'borrar-objeto':
-        print(json.dumps(borrar_objeto(x.video, x.zona, x.salida, x.hasta_zona, x.recorrido), ensure_ascii=False))
+        print(json.dumps(borrar_objeto(x.video, x.zona, x.salida, x.hasta_zona, x.recorrido, x.desde, x.hasta, preciso=not x.rapido, caja_archivo=x.caja_archivo), ensure_ascii=False))
+    elif x.orden == 'cambiar-cielo':
+        print(json.dumps(cambiar_cielo(x.video, x.cielo, x.salida, x.desde, x.hasta, x.tolerante), ensure_ascii=False))
+    elif x.orden == 'rotoscopia':
+        print(json.dumps(rotoscopia(x.video, x.caja, x.salida, x.desde, x.hasta, x.tolerante, x.caja_archivo), ensure_ascii=False))
     elif x.orden == 'golpes':
         golpes(x.archivo, x.n)
     elif x.orden == 'hoja':

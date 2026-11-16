@@ -407,7 +407,7 @@ export async function exportarTimeline(
     // Las zonas tapadas (una cara, una placa): cada una se recorta, se difumina o se pinta de negro y se pega en su sitio.
     let base = crudo
     // Las de modo «borrar» no se tapan aquí: el clip sin el objeto va encima como otra capa.
-    const zonasT = (t.clip.zonas ?? []).filter((z) => z.modo !== 'borrar')
+    const zonasT = (t.clip.zonas ?? []).filter((z) => z.modo !== 'borrar' && z.modo !== 'recortar')
     if (zonasT.length) {
       partes.push(`${crudo}[zi${i}_0]`)
       zonasT.forEach((z, k) => {

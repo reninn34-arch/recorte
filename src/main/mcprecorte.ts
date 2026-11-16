@@ -46,6 +46,10 @@ export interface ContextoMcp {
   /** Las piezas animadas (HyperFrames) y animar una con sus datos: devuelve su medio para ponerla como capa. */
   /** Separa del fondo a la persona de un clip (tal como se ve): el medio del recorte y lo que dura. */
   persona?: (id: string, tl: Timeline, clip: string) => Promise<{ medio: string; duracion: number }>
+  /** Recorta un objeto de un clip (rotoscopia por clic): el medio del recorte y lo que dura. */
+  recortarObjeto?: (id: string, tl: Timeline, clip: string, zona: { x: number; y: number; ancho: number; alto: number }) => Promise<{ medio: string; duracion: number }>
+  /** Cambia el cielo de un clip (tal como se ve): el medio del clip con el cielo nuevo y lo que dura. */
+  cambiarCielo?: (id: string, tl: Timeline, clip: string, cielo: string) => Promise<{ medio: string; duracion: number }>
   /** Borra un objeto de un clip (tal como se ve): el medio del clip sin él y lo que dura. */
   borrarObjeto?: (id: string, tl: Timeline, clip: string, zona: { x: number; y: number; ancho: number; alto: number }, hasta?: { x: number; y: number; ancho: number; alto: number }) => Promise<{ medio: string; duracion: number }>
   /** Si los subtítulos animados quedaron atrás, los vuelve a animar (y guarda la timeline al día). */
@@ -338,6 +342,36 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
             const clip = base.clips[Math.round(o.clip) - 1]
             if (!clip) continue
             const r = await ctx.persona(p.id, base, clip.id)
+            o.medio = r.medio
+            o.clipId = clip.id
+            o.duracionReal = r.duracion
+          } catch (e) {
+            falloPersona = e instanceof Error ? e.message : String(e)
+          }
+        }
+        // El objeto que se pidió recortar de un clip: se hace antes de aplicar (queda en la biblioteca).
+        for (const o of ops as OperacionTL[]) {
+          if (o.op !== 'rotoscopiar' || !ctx.recortarObjeto) continue
+          try {
+            const base = timelineDe(p)
+            const clip = base.clips[Math.round(o.clip) - 1]
+            if (!clip) continue
+            const r = await ctx.recortarObjeto(p.id, base, clip.id, { x: o.x, y: o.y, ancho: o.ancho, alto: o.alto })
+            o.medio = r.medio
+            o.clipId = clip.id
+            o.duracionReal = r.duracion
+          } catch (e) {
+            falloPersona = e instanceof Error ? e.message : String(e)
+          }
+        }
+        // El cielo que se pidió cambiar en un clip: se hace antes de aplicar (queda en la biblioteca).
+        for (const o of ops as OperacionTL[]) {
+          if (o.op !== 'cambiar_cielo' || !ctx.cambiarCielo) continue
+          try {
+            const base = timelineDe(p)
+            const clip = base.clips[Math.round(o.clip) - 1]
+            if (!clip) continue
+            const r = await ctx.cambiarCielo(p.id, base, clip.id, o.cielo)
             o.medio = r.medio
             o.clipId = clip.id
             o.duracionReal = r.duracion

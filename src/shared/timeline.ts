@@ -209,7 +209,7 @@ export interface ZonaTL {
   ancho: number
   alto: number
   /** desenfoque (difumina), negro (tapa del todo) o borrar (rellena con lo de alrededor, como si no estuviera: no se tapa en el MP4, se hace con «Borrar lo marcado»). */
-  modo: 'desenfoque' | 'negro' | 'borrar'
+  modo: 'desenfoque' | 'negro' | 'borrar' | 'recortar'
   /** Cuánto se difumina, 0.1 a 1. */
   fuerza: number
   /** Si sigue algo que se mueve: su centro en cada segundo de la fuente (lo calcula el seguidor). */
@@ -252,7 +252,7 @@ export function normalizarZonas(entrada: unknown): ZonaTL[] | undefined {
       y: n(zona.y, 0, 1, 0.5),
       ancho: n(zona.ancho, 0.02, 1, 0.3),
       alto: n(zona.alto, 0.02, 1, 0.3),
-      modo: zona.modo === 'negro' ? 'negro' : zona.modo === 'borrar' ? 'borrar' : 'desenfoque',
+      modo: zona.modo === 'negro' ? 'negro' : zona.modo === 'borrar' ? 'borrar' : zona.modo === 'recortar' ? 'recortar' : 'desenfoque',
       fuerza: n(zona.fuerza, 0.1, 1, 0.6),
       ...(Array.isArray(zona.recorrido) && zona.recorrido.length
         ? {
@@ -548,6 +548,10 @@ export interface CapaTL {
   persona?: { clip: string }
   /** El clip tal como se ve pero SIN un objeto (un logo, una marca de agua): va encima del mismo clip. Dónde estaba: la caja, en fracciones. */
   borrado?: { clip: string }
+  /** El clip tal como se ve pero con OTRO cielo: va encima del mismo clip. */
+  cielo?: { clip: string }
+  /** Un objeto del clip recortado (rotoscopia por clic) con transparencia, encima del mismo clip. `clave` = dónde estaba al empezar. */
+  roto?: { clip: string; clave?: string }
   /**
    * Escena 2.5D: a qué distancia está la capa, 0 (pegada al fondo: se mueve con él) a 1 (muy cerca de la
    * cámara: se mueve y crece 2,5 veces más que el fondo). Sin ella, la capa no sigue a la cámara.
@@ -1490,6 +1494,8 @@ export function normalizarCapas(entrada: unknown, total: number, medios: Record<
         : {}),
       ...(c.persona && typeof c.persona.clip === 'string' && c.persona.clip ? { persona: { clip: c.persona.clip.slice(0, 80) } } : {}),
       ...(c.borrado && typeof c.borrado.clip === 'string' && c.borrado.clip ? { borrado: { clip: c.borrado.clip.slice(0, 80) } } : {}),
+      ...(c.cielo && typeof c.cielo.clip === 'string' && c.cielo.clip ? { cielo: { clip: c.cielo.clip.slice(0, 80) } } : {}),
+      ...(c.roto && typeof c.roto.clip === 'string' && c.roto.clip ? { roto: { clip: c.roto.clip.slice(0, 80), ...(typeof c.roto.clave === 'string' && c.roto.clave ? { clave: c.roto.clave.slice(0, 40) } : {}) } } : {}),
       ...(typeof c.profundidad === 'number' && Number.isFinite(c.profundidad) ? { profundidad: Math.round(pinza(c.profundidad, 0, 1) * 100) / 100 } : {}),
       ...(num(c.desenfoque, 0) > 0.005 ? { desenfoque: Math.round(pinza(num(c.desenfoque, 0), 0, 1) * 100) / 100 } : {}),
       ...(normalizarClavesCapa(c.claves, pinza(c.duracion, DURACION_MINIMA, Math.max(DURACION_MINIMA, total - inicio)))
