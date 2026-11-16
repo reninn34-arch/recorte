@@ -32,11 +32,14 @@ jobs:
       - name: Probar las descargas de herramientas
         run: npm run prueba:herramientas
 
-      # Con el FFmpeg que acaba de bajar la app (no el de Homebrew): lo mismo que haría un usuario.
-      - name: Probar la exportación y los medios con ese FFmpeg
+      # Con el FFmpeg y el Python que acaba de bajar la app (no los de Homebrew): lo mismo que haría un usuario, incluido
+      # el botón de Ajustes que instala los paquetes de Python.
+      - name: Probar la exportación y los medios con esas herramientas
         run: |
-          export PATH="$(node -p "require('os').tmpdir()")/herramientas/ffmpeg/bin:$PATH"
+          HERR="$(node -p "require('os').tmpdir()")/herramientas"
+          export PATH="$HERR/ffmpeg/bin:$HERR/python/bin:$PATH"
           which ffmpeg
+          python3 -m pip install --disable-pip-version-check -r python/requirements.txt
           npm run prueba:edicion
           npm run prueba:exportar
           npm run prueba:medios
