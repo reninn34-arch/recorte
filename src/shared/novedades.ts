@@ -24,6 +24,23 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.70',
+    fecha: '2026-11-16',
+    resumen: 'En Mac, Antigravity ya se instala y la búsqueda de actualizaciones funciona.',
+    novedades: [
+      {
+        icono: 'download',
+        titulo: 'Antigravity en Mac',
+        texto: 'Al conectar el agente de Google en Mac salía «No pude descomprimir Antigravity (código 127)». Ya se instala y queda listo.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Buscar actualizaciones en Mac',
+        texto: 'En Ajustes → Versión ya no sale el error de «latest-mac.yml»: Recorte mira la última versión publicada y, si hay una nueva, te avisa con el botón «Descargar».'
+      }
+    ]
+  },
+  {
     version: '0.1.69',
     fecha: '2026-11-16',
     resumen: 'Conectar un agente ya no pide instalar Node.js a mano, también en Mac.',
