@@ -115,7 +115,7 @@ async function trabajarClip(
   if (!dentro.clips.length) throw new Error('Ese clip ya no tiene material.')
   const { id: _id, ...sinId } = dentro.clips[0]
   const huella = createHash('sha1')
-    .update(JSON.stringify({ clip: sinId, fuente: proyecto.source.path, ancho: proyecto.source.width, alto: proyecto.source.height, v: 1, ...(trabajo.tipo === 'borrar' ? { zona: trabajo.zona, hasta: trabajo.hasta, metodo: 'sam2' } : {}), ...(trabajo.tipo === 'cielo' ? { cielo: trabajo.cielo, sello } : {}), ...(trabajo.tipo === 'roto' ? { roto: trabajo.zona } : {}) }))
+    .update(JSON.stringify({ clip: sinId, fuente: proyecto.source.path, ancho: proyecto.source.width, alto: proyecto.source.height, v: 1, ...(trabajo.tipo === 'borrar' ? { zona: trabajo.zona, hasta: trabajo.hasta, metodo: 'sam2-lama' } : {}), ...(trabajo.tipo === 'cielo' ? { cielo: trabajo.cielo, sello } : {}), ...(trabajo.tipo === 'roto' ? { roto: trabajo.zona } : {}) }))
     .digest('hex')
     .slice(0, 12)
   const media = join(carpetaProyecto, 'media')

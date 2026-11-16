@@ -3028,6 +3028,8 @@ def modelo_fondo():
 # Depth Anything V2 (pequeño): cuánto de cerca está cada píxel de una foto, sin gastar créditos.
 MODELO_PROFUNDIDAD = ('depth-anything-v2-small.onnx',
                       'https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main/onnx/model.onnx', 99060839)
+# LaMa (Apache 2.0, de Carve/LaMa-ONNX): rellena zonas grandes con textura de lo que las rodea (el borrado de objetos).
+MODELO_LAMA = ('lama-fp32.onnx', 'https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx', 208044816)
 
 
 _ORT_REVISADO = False
@@ -3461,7 +3463,43 @@ def recortar_persona(ruta, salida=None, desde=None, hasta=None, tolerante=False)
     return {'archivo': salida, 'ancho': w, 'alto': h, 'cuadros': n, 'duracion': round(n / fps_n, 3), 'cubre': round(cubre / n, 3)}
 
 
-def borrar_objeto(ruta, zona, salida=None, hasta_zona=None, recorrido=None, desde=None, hasta=None, preciso=True, caja_archivo=None, tolerante=False):
+def rellenar_lama(parte, mascara):
+    """Rellena con LaMa lo marcado (mascara > 0) de un recorte BGR: textura de lo que lo rodea, también en zonas grandes.
+    Devuelve el recorte relleno, o None si el modelo no está o no se pudo (entonces se usa Telea)."""
+    import cv2
+    try:
+        sesion = _SESIONES.get('lama-cpu')
+        if sesion is None:
+            # Se baja (o se toma) como los demás modelos, pero corre en el procesador: la tarjeta (DirectML) no puede con
+            # una de sus operaciones (la parte de Fourier) y fallaba en cada cuadro.
+            sesion_modelo(MODELO_LAMA, 'para borrar objetos grandes')
+            ort = _preparar_onnxruntime()
+            sesion = ort.InferenceSession(os.path.join(carpeta_modelos(), MODELO_LAMA[0]), providers=['CPUExecutionProvider'])
+            _SESIONES['lama-cpu'] = sesion
+    except (Exception, SystemExit):
+        return None
+    h, w = parte.shape[:2]
+    # Cuadrado (con borde reflejado) para no deformar la imagen al llevarla a 512 × 512.
+    lado = max(h, w)
+    abajo, derecha = lado - h, lado - w
+    img = cv2.copyMakeBorder(parte, 0, abajo, 0, derecha, cv2.BORDER_REFLECT)
+    msk = cv2.copyMakeBorder(mascara, 0, abajo, 0, derecha, cv2.BORDER_CONSTANT, value=0)
+    x = cv2.resize(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), (512, 512), interpolation=cv2.INTER_AREA).astype(np.float32) / 255
+    m = (cv2.resize(msk, (512, 512), interpolation=cv2.INTER_NEAREST) > 0).astype(np.float32)
+    try:
+        y = sesion.run(None, {'image': x.transpose(2, 0, 1)[None], 'mask': m[None, None]})[0][0]
+    except Exception:
+        return None
+    if float(y.max()) <= 1.5:
+        y = y * 255
+    y = np.clip(y.transpose(1, 2, 0), 0, 255).astype(np.uint8)
+    y = cv2.resize(cv2.cvtColor(y, cv2.COLOR_RGB2BGR), (lado, lado), interpolation=cv2.INTER_CUBIC)[:h, :w]
+    # Fuera de lo marcado queda la imagen tal cual (LaMa la toca un poco al pasar por 512).
+    dentro = (mascara > 0)[:, :, None]
+    return np.where(dentro, y, parte)
+
+
+def borrar_objeto(ruta, zona, salida=None, hasta_zona=None, recorrido=None, desde=None, hasta=None, preciso=True, caja_archivo=None, tolerante=False, lama=True):
     """Borra un objeto (un logo, una marca de agua, un cartel, algo que se coló) de un video: lo rellena con lo que lo
     rodea, cuadro a cuadro. `zona` es la caja del objeto como x,y,ancho,alto en fracciones del cuadro (x,y = el centro);
     si el objeto se mueve de una punta a otra del clip, `hasta_zona` es donde termina y la caja va de una a otra.
@@ -3525,6 +3563,9 @@ def borrar_objeto(ruta, zona, salida=None, hasta_zona=None, recorrido=None, desd
                                stdin=subprocess.PIPE)
     rng = np.random.default_rng(7)
     previo, n, no_hallado = None, 0, False
+    # El último relleno de LaMa (su recorte, el relleno y cómo era lo de alrededor): con la cámara y el objeto quietos se
+    # reutiliza (LaMa tarda segundos por cuadro en el procesador).
+    cache_lama = None
     try:
         while True:
             datos = lee.stdout.read(w * h * 3)
@@ -3573,13 +3614,26 @@ def borrar_objeto(ruta, zona, salida=None, hasta_zona=None, recorrido=None, desd
                 else:
                     mascara[y0 - Y0:y1 - Y0, x0 - X0:x1 - X0] = 255
                 radio = int(max(3, min(12, min(x1 - x0, y1 - y0) / 4)))
-                lleno = cv2.inpaint(parte, mascara, radio, cv2.INPAINT_TELEA)
-                # El grano de lo que rodea (la caja liso se nota como un parche).
+                # Un objeto grande se rellena con LaMa (inventa la textura que falta); uno chico, con Telea (más rápido).
+                lleno = None
+                if lama and max(x1 - x0, y1 - y0) >= 48:
+                    caja_lama = (X0, Y0, X1, Y1)
+                    fuera = mascara == 0
+                    if cache_lama is not None and cache_lama[0] == caja_lama and fuera.any() and float(np.abs(parte[fuera].astype(np.float32) - cache_lama[2][fuera]).mean()) < 4:
+                        lleno = np.where((mascara > 0)[:, :, None], cache_lama[1], parte)
+                    else:
+                        lleno = rellenar_lama(parte, mascara)
+                        if lleno is not None:
+                            cache_lama = (caja_lama, lleno, parte.astype(np.float32))
+                con_lama = lleno is not None
+                if lleno is None:
+                    lleno = cv2.inpaint(parte, mascara, radio, cv2.INPAINT_TELEA)
+                # El grano de lo que rodea (la caja liso se nota como un parche; LaMa ya trae su textura).
                 anillo = cv2.dilate(mascara, np.ones((2 * pad // 2 + 1,) * 2, np.uint8)) - mascara
                 gris = cv2.cvtColor(parte, cv2.COLOR_BGR2GRAY).astype(np.float32)
                 fino = gris - cv2.GaussianBlur(gris, (0, 0), 2.0)
                 ruido = float(fino[anillo > 0].std()) if (anillo > 0).any() else 0.0
-                if ruido > 0.4:
+                if ruido > 0.4 and not con_lama:
                     lleno = np.clip(lleno.astype(np.float32) + rng.normal(0, ruido, lleno.shape[:2])[:, :, None] * 0.9, 0, 255).astype(np.uint8)
                 # Orilla suave: el parche se funde con lo de alrededor.
                 suave = cv2.GaussianBlur(mascara.astype(np.float32) / 255, (0, 0), max(1.5, radio / 3))[:, :, None]
@@ -5119,6 +5173,7 @@ def main():
     bo.add_argument('--hasta', type=float)
     bo.add_argument('--caja-archivo', dest='caja_archivo')
     bo.add_argument('--rapido', action='store_true')
+    bo.add_argument('--sin-lama', dest='sin_lama', action='store_true')
     bo.add_argument('--hasta-zona', dest='hasta_zona')
     bo.add_argument('--salida')
     ci = sub.add_parser('cambiar-cielo')
@@ -5245,7 +5300,7 @@ def main():
     elif x.orden == 'recortar-persona':
         print(json.dumps(recortar_persona(x.video, x.salida, x.desde, x.hasta, x.tolerante), ensure_ascii=False))
     elif x.orden == 'borrar-objeto':
-        print(json.dumps(borrar_objeto(x.video, x.zona, x.salida, x.hasta_zona, x.recorrido, x.desde, x.hasta, preciso=not x.rapido, caja_archivo=x.caja_archivo), ensure_ascii=False))
+        print(json.dumps(borrar_objeto(x.video, x.zona, x.salida, x.hasta_zona, x.recorrido, x.desde, x.hasta, preciso=not x.rapido, caja_archivo=x.caja_archivo, lama=not x.sin_lama), ensure_ascii=False))
     elif x.orden == 'cambiar-cielo':
         print(json.dumps(cambiar_cielo(x.video, x.cielo, x.salida, x.desde, x.hasta, x.tolerante), ensure_ascii=False))
     elif x.orden == 'rotoscopia':
