@@ -24,6 +24,19 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.71',
+    fecha: '2026-11-16',
+    resumen: 'Flow y las voces de Google ya se conectan en Mac, con Edge o con Chrome.',
+    novedades: [
+      {
+        icono: 'check',
+        titulo: 'Flow y las voces de Google en Mac',
+        texto:
+          'Para entrar con tu cuenta de Google, Recorte abre Microsoft Edge o, si no lo tienes, Google Chrome. Antes solo buscaba Edge en Windows, y en Mac los botones de Flow salían desactivados.'
+      }
+    ]
+  },
+  {
     version: '0.1.70',
     fecha: '2026-11-16',
     resumen: 'En Mac, Antigravity ya se instala y la búsqueda de actualizaciones funciona.',
