@@ -2723,7 +2723,7 @@ export function TimelineEditor({
                   <span className="ed-seccion">
                     Sonido
                     {clipElegido.clip.sonido && (
-                      <button className="btn small ghost" title="Deja el sonido como viene" onClick={() => historial.aplicar(ajustarSonidoClip(timeline, clipElegido.clip.id, { volumen: 1, entra: 0, sale: 0, limpio: 0, realce: 0 }))}>
+                      <button className="btn small ghost" title="Deja el sonido como viene" onClick={() => historial.aplicar(ajustarSonidoClip(timeline, clipElegido.clip.id, { volumen: 1, entra: 0, sale: 0, limpio: 0, realce: 0, graves: 0, medios: 0, agudos: 0, comprimir: 0 }))}>
                         Restablecer
                       </button>
                     )}
@@ -2734,7 +2734,11 @@ export function TimelineEditor({
                       ['entra', 'Entra fundiéndose', 0, Math.min(5, clipElegido.fin - clipElegido.inicio), 0.05, (v: number) => (v ? `${v.toFixed(1)} s` : 'no'), 'El sonido sube desde el silencio al empezar el clip'],
                       ['sale', 'Sale fundiéndose', 0, Math.min(5, clipElegido.fin - clipElegido.inicio), 0.05, (v: number) => (v ? `${v.toFixed(1)} s` : 'no'), 'El sonido baja al silencio al acabar el clip'],
                       ['limpio', 'Quitar ruido de fondo', 0, 1, 0.05, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no'), 'Quita el zumbido, el aire o el siseo. Se oye en el video exportado, no en el monitor'],
-                      ['realce', 'Mejorar voz', 0, 1, 0.05, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no'), 'Más clara y pareja: quita los graves que retumban, empareja lo fuerte y lo suave y le da presencia. Se oye en el video exportado, no en el monitor']
+                      ['realce', 'Mejorar voz', 0, 1, 0.05, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no'), 'Más clara y pareja: quita los graves que retumban, empareja lo fuerte y lo suave y le da presencia. Se oye en el monitor y en el video exportado'],
+                      ['graves', 'Graves', -12, 12, 0.5, (v: number) => (v ? `${v > 0 ? '+' : '−'}${Math.abs(v).toFixed(1)} dB` : '0'), 'Ecualizador · los sonidos bajos (120 Hz): el cuerpo de la voz, el retumbe'],
+                      ['medios', 'Medios', -12, 12, 0.5, (v: number) => (v ? `${v > 0 ? '+' : '−'}${Math.abs(v).toFixed(1)} dB` : '0'), 'Ecualizador · la parte central (1 kHz): la voz más presente, o menos nasal si se baja'],
+                      ['agudos', 'Agudos', -12, 12, 0.5, (v: number) => (v ? `${v > 0 ? '+' : '−'}${Math.abs(v).toFixed(1)} dB` : '0'), 'Ecualizador · los sonidos altos (8 kHz): el brillo; si silba en las eses, bájalo'],
+                      ['comprimir', 'Compresor', 0, 1, 0.05, (v: number) => (v ? `${Math.round(v * 100)} %` : 'no'), 'Empareja lo fuerte y lo suave: la voz se entiende igual en todo el clip. Se oye en el monitor y en el video exportado']
                     ] as const
                   ).map(([clave, nombre, min, max, paso, formato, ayuda]) => {
                     // El volumen se anima con fotogramas clave (◆), como el de Premiere.

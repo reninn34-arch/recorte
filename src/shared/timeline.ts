@@ -67,8 +67,24 @@ export interface SonidoClip {
   limpio?: number
   /** Mejorar la voz (como «Diálogo» de Premiere): quita graves que retumban, la empareja y la aclara. 0 a 1. */
   realce?: number
+  /** Ecualizador: graves (120 Hz), medios (1 kHz) y agudos (8 kHz), en dB (−12 a +12). */
+  graves?: number
+  medios?: number
+  agudos?: number
+  /** Compresor: empareja lo fuerte y lo suave (0 nada, 1 mucho). */
+  comprimir?: number
 }
-export const LIMITES_SONIDO_CLIP = { volumen: [0, 1.5, 1], entra: [0, 5, 0], sale: [0, 5, 0], limpio: [0, 1, 0], realce: [0, 1, 0] } as const satisfies Record<keyof SonidoClip, readonly [number, number, number]>
+export const LIMITES_SONIDO_CLIP = {
+  volumen: [0, 1.5, 1],
+  entra: [0, 5, 0],
+  sale: [0, 5, 0],
+  limpio: [0, 1, 0],
+  realce: [0, 1, 0],
+  graves: [-12, 12, 0],
+  medios: [-12, 12, 0],
+  agudos: [-12, 12, 0],
+  comprimir: [0, 1, 0]
+} as const satisfies Record<keyof SonidoClip, readonly [number, number, number]>
 
 /** Cómo entra un clip sobre el anterior (con `fundido` = lo que dura). Sin tipo, un fundido cruzado. */
 export type TransicionClip =
@@ -2788,8 +2804,60 @@ export function sonidoDe(c: Pick<ClipTL, 'sonido'> | undefined): Required<Sonido
     entra: c?.sonido?.entra ?? 0,
     sale: c?.sonido?.sale ?? 0,
     limpio: c?.sonido?.limpio ?? 0,
-    realce: c?.sonido?.realce ?? 0
+    realce: c?.sonido?.realce ?? 0,
+    graves: c?.sonido?.graves ?? 0,
+    medios: c?.sonido?.medios ?? 0,
+    agudos: c?.sonido?.agudos ?? 0,
+    comprimir: c?.sonido?.comprimir ?? 0
   }
+}
+
+/** Un compresor: umbral (dB), razón, ataque y suelta (segundos), rodilla (dB) y la ganancia de después (veces). */
+export interface CompresorSonido {
+  umbral: number
+  razon: number
+  ataque: number
+  suelta: number
+  rodilla: number
+  maquillaje: number
+}
+
+/**
+ * La cadena de sonido de un clip (mejorar voz, ecualizador de 3 bandas y compresor) con sus números: la misma en el
+ * monitor (filtros del navegador) y en el MP4 (FFmpeg), con las mismas fórmulas de filtro (las del «cookbook» de RBJ).
+ */
+export function cadenaSonido(s: Required<SonidoClip>): {
+  realce: { pasoAlto: number; compresor: CompresorSonido; presencia: number; presenciaQ: number } | null
+  eq: { graves: number; fGraves: number; medios: number; fMedios: number; qMedios: number; agudos: number; fAgudos: number }
+  compresor: CompresorSonido | null
+} {
+  return {
+    realce:
+      s.realce > 0.005
+        ? {
+            pasoAlto: Math.round(60 + 40 * s.realce),
+            compresor: { umbral: -14 - 10 * s.realce, razon: 2 + 2 * s.realce, ataque: 0.008, suelta: 0.12, rodilla: 2.828, maquillaje: 1 + 1.5 * s.realce },
+            presencia: 4 * s.realce,
+            presenciaQ: 1.2
+          }
+        : null,
+    eq: { graves: s.graves, fGraves: 120, medios: s.medios, fMedios: 1000, qMedios: 1, agudos: s.agudos, fAgudos: 8000 },
+    compresor: s.comprimir > 0.005 ? { umbral: -10 - 20 * s.comprimir, razon: 2 + 4 * s.comprimir, ataque: 0.01, suelta: 0.15, rodilla: 2.828, maquillaje: 1 + 1.2 * s.comprimir } : null
+  }
+}
+
+/** La cadena de sonido como filtros de FFmpeg (empiezan con coma), en el mismo orden que el monitor. */
+export function filtrosSonido(s: Required<SonidoClip>): string {
+  const p = cadenaSonido(s)
+  const comp = (c: CompresorSonido) =>
+    `acompressor=threshold=${c.umbral.toFixed(1)}dB:ratio=${c.razon.toFixed(2)}:attack=${Math.round(c.ataque * 1000)}:release=${Math.round(c.suelta * 1000)}:knee=${c.rodilla.toFixed(3)}:makeup=${c.maquillaje.toFixed(2)}`
+  let f = ''
+  if (p.realce) f += `,highpass=f=${p.realce.pasoAlto},${comp(p.realce.compresor)},equalizer=f=3000:t=q:w=${p.realce.presenciaQ}:g=${p.realce.presencia.toFixed(2)}`
+  if (Math.abs(p.eq.graves) > 0.05) f += `,bass=g=${p.eq.graves.toFixed(1)}:f=${p.eq.fGraves}:t=s:w=0.5`
+  if (Math.abs(p.eq.medios) > 0.05) f += `,equalizer=f=${p.eq.fMedios}:t=q:w=${p.eq.qMedios}:g=${p.eq.medios.toFixed(1)}`
+  if (Math.abs(p.eq.agudos) > 0.05) f += `,treble=g=${p.eq.agudos.toFixed(1)}:f=${p.eq.fAgudos}:t=s:w=0.5`
+  if (p.compresor) f += `,${comp(p.compresor)}`
+  return f
 }
 
 /** Deja el sonido de un clip dentro de sus límites; los fundidos caben en lo que dura (`largo`, en la timeline). */
@@ -2797,7 +2865,7 @@ export function normalizarSonidoClip(entrada: unknown, largo: number): SonidoCli
   if (!entrada || typeof entrada !== 'object') return undefined
   const x = entrada as Record<string, unknown>
   const salida: SonidoClip = {}
-  for (const clave of ['volumen', 'entra', 'sale', 'limpio', 'realce'] as const) {
+  for (const clave of ['volumen', 'entra', 'sale', 'limpio', 'realce', 'graves', 'medios', 'agudos', 'comprimir'] as const) {
     const v = x[clave]
     if (typeof v !== 'number' || !Number.isFinite(v)) continue
     const [min, max, neutro] = LIMITES_SONIDO_CLIP[clave]

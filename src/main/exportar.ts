@@ -45,6 +45,7 @@ import {
   soloTramo,
   curvasColor,
   cuboDeZona,
+  filtrosSonido,
   zonaColorActiva,
   ajustesDeCapa,
   CLAVES_CURVA_COLOR,
@@ -502,10 +503,9 @@ async function exportarTimelineAhora(
         const so = sonidoDe(t.clip)
         const sonido =
           (so.limpio > 0.005 ? `,afftdn=nr=${(10 + 20 * so.limpio).toFixed(1)}:nf=${(-50 + 25 * so.limpio).toFixed(1)}` : '') +
-          // Mejorar la voz: fuera los graves que retumban, una compresión suave que la empareja y presencia en 3 kHz.
-          (so.realce > 0.005
-            ? `,highpass=f=${Math.round(60 + 40 * so.realce)},acompressor=threshold=${(-14 - 10 * so.realce).toFixed(1)}dB:ratio=${(2 + 2 * so.realce).toFixed(2)}:attack=8:release=120:makeup=${(1 + 1.5 * so.realce).toFixed(2)},equalizer=f=3000:t=q:w=1.2:g=${(4 * so.realce).toFixed(2)}`
-            : '') +
+          // Mejorar la voz (graves que retumban fuera, compresión suave, presencia en 3 kHz), el ecualizador de 3 bandas
+          // y el compresor: la misma cadena que oye el monitor (shared/timeline: cadenaSonido).
+          filtrosSonido(so) +
           // Con fotogramas clave, el volumen sigue su curva (en el segundo de la fuente de cada muestra).
           (t.clip.clavesVolumen?.length
             ? `,volume=volume='${exprClave(t.clip.clavesVolumen, `(${t.clip.entrada.toFixed(3)}+t*${vel})`)}':eval=frame`

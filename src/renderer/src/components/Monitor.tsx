@@ -3,6 +3,7 @@ import type { Project } from '../../../shared/types'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
 import { Medidores } from './Medidores'
+import { aplicarCadena } from '../audio'
 import type { VistaPrevia } from '../hooks/vistaprevia'
 import type { TramoVista } from '../../../shared/vistaprevia'
 import {
@@ -22,6 +23,7 @@ import {
   DESENFOQUE_MAX,
   desenfoqueCapaEn,
   volumenClipEn,
+  sonidoDe,
   desenfoqueDeCampo,
   TIPO_ARRASTRE_MEDIO,
   cambiarCapa,
@@ -113,6 +115,22 @@ export function Monitor({
   useEffect(() => {
     if (reproductor.videoRef.current) reproductor.videoRef.current.volume = volumenClip
   }, [volumenClip, reproductor.videoRef])
+  // La cadena de sonido del clip (mejorar voz, ecualizador, compresor) en el video que suena: la misma del MP4. El
+  // contexto de audio solo arranca con un clic (al reproducir): si aún no está, se reintenta un momento después.
+  const sonidoClip = clipActual ? sonidoDe(clipActual) : null
+  const firmaSonido = sonidoClip ? JSON.stringify(sonidoClip) : ''
+  useEffect(() => {
+    const el = reproductor.videoRef.current
+    if (!el || !sonidoClip) return
+    let intentos = 0
+    let id = 0
+    const probar = () => {
+      if (!aplicarCadena(el, sonidoClip) && intentos++ < 5) id = window.setTimeout(probar, 300)
+    }
+    probar()
+    return () => clearTimeout(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firmaSonido, reproductor.activo, reproductor.reproduciendo, reproductor.videoRef])
   // Zoom, encuadre, acercamiento y color del clip bajo el cabezal; en el render son crop,
   // zoompan y eq de FFmpeg.
   // Con fotogramas clave, los ajustes son los de este instante.

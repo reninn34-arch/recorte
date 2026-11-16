@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { cambiarPista, MAX_VOLUMEN_PISTA, PISTAS, type PistaId, type Timeline } from '../../../shared/timeline'
 import type { Historial } from '../hooks/timeline'
 import { Icon } from '../Icons'
+import { grafoDe } from '../audio'
 
 /**
  * El mezclador de audio (como el de pistas de Premiere): un fader por pista de audio, con su medidor de nivel, y el
@@ -26,34 +27,14 @@ export function textoDb(v: number): string {
   return `${db > 0.05 ? '+' : db < -0.05 ? '−' : ''}${Math.abs(db).toFixed(1)}`
 }
 
-let contexto: AudioContext | null = null
-const fuentes = new WeakMap<HTMLMediaElement, AnalyserNode>()
 const buffer = new Float32Array(1024)
 
 /**
  * El analizador de un elemento: su sonido pasa por el contexto de audio (y sigue a la salida, así que se oye igual) y
- * por un analizador que lo mide después de su volumen. Solo se conecta con el contexto en marcha: conectado a uno
- * pausado, el elemento se quedaría mudo.
+ * por un analizador que lo mide después de su volumen y de su cadena (ver audio.ts).
  */
 function analizadorDe(el: HTMLMediaElement): AnalyserNode | null {
-  const hecho = fuentes.get(el)
-  if (hecho) return hecho
-  try {
-    contexto ??= new AudioContext()
-    if (contexto.state !== 'running') {
-      void contexto.resume()
-      return null
-    }
-    const analizador = contexto.createAnalyser()
-    analizador.fftSize = 1024
-    const fuente = contexto.createMediaElementSource(el)
-    fuente.connect(contexto.destination)
-    fuente.connect(analizador)
-    fuentes.set(el, analizador)
-    return analizador
-  } catch {
-    return null
-  }
+  return grafoDe(el)?.analizador ?? null
 }
 
 /** Los niveles (lineales, de pico) de cada pista y el general, mientras `activo`. */
