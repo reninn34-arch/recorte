@@ -126,12 +126,11 @@ export class Manos {
   private terminales = new Map<string, Terminal>()
   private siguiente = 0
   private raiz: string
+  private onLinea: (t: string) => void
 
-  constructor(
-    raiz: string,
-    private onLinea: (t: string) => void
-  ) {
+  constructor(raiz: string, onLinea: (t: string) => void) {
     this.raiz = resolve(raiz)
+    this.onLinea = onLinea
   }
 
   /** La ruta, si está dentro de la carpeta de trabajo; si no, error. */
@@ -254,16 +253,20 @@ class Rpc {
   private siguiente = 0
   private pendientes = new Map<number, { ok: (v: unknown) => void; mal: (e: Error) => void }>()
   private resto = ''
+  private hijo: ChildProcess
+  private manos?: Manos
 
   constructor(
-    private hijo: ChildProcess,
+    hijo: ChildProcess,
     eventos: {
       alAvisar: (metodo: string, params: Record<string, unknown>) => void
       alTexto: (linea: string) => void
       alCerrar: (error: Error) => void
     },
-    private manos?: Manos
+    manos?: Manos
   ) {
+    this.hijo = hijo
+    this.manos = manos
     hijo.stdout!.setEncoding('utf8')
     hijo.stdout!.on('data', (trozo: string) => {
       this.resto += trozo
