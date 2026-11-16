@@ -71,7 +71,7 @@ export function SeccionFlow({ onAviso }: { onAviso: (t: string) => void }) {
           </div>
           <div className="op-fila-lado">
             <button className="btn small" onClick={async () => setE(await window.recorte.flowAgregarCuenta())} disabled={e.agregando || !e.navegador}>
-              {e.agregando ? 'Entra en la ventana de Edge…' : 'Agregar cuenta'}
+              {e.agregando ? 'Entra en la ventana del navegador…' : 'Agregar cuenta'}
             </button>
           </div>
         </div>

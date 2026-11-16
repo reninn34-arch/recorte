@@ -9,6 +9,7 @@ import { pathAmpliado, resolverBinario } from './binarios'
 import { rutaFfmpeg } from './ffmpeg'
 import { buscarPython, rutaScriptPython } from './transcribir'
 import { edgeExe } from './vozgoogle'
+import { navegadorGoogle } from './edgeperfil'
 import { descargarHerramienta, PUEDE_BAJAR } from './herramientas'
 import { matarArbol } from './ia'
 
@@ -130,10 +131,10 @@ async function herramientas(): Promise<Herramienta[]> {
     },
     {
       id: 'edge',
-      nombre: 'Microsoft Edge',
-      descripcion: 'Opcional: para entrar con tu cuenta de Google en la voz de AI Studio.',
+      nombre: 'Microsoft Edge o Google Chrome',
+      descripcion: 'Opcional: para entrar con tu cuenta de Google (la voz de AI Studio y Flow).',
       estado: edgeExe() ? 'ok' : 'opcional',
-      version: edgeExe() ? 'instalado' : null
+      version: edgeExe() ? (navegadorGoogle()?.nombre ?? 'instalado') : null
     }
   ]
 }

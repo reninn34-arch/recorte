@@ -365,7 +365,7 @@ export function Opciones({
                   </button>
                 </>
               ) : voz?.google?.conectando ? (
-                <span className="ag-estado"><span className="agente-punto medio" /> Entra en la ventana de Edge…</span>
+                <span className="ag-estado"><span className="agente-punto medio" /> Entra en la ventana del navegador…</span>
               ) : (
                 <button className="btn small primary" onClick={() => void conectarGoogle()} disabled={!voz?.google?.navegador}>
                   Conectar cuenta
@@ -423,7 +423,7 @@ export function Opciones({
             </div>
           </div>
           {!voz?.google?.navegador && voz && (
-            <p className="op-nota op-dentro">Para entrar con tu cuenta de Google hace falta Microsoft Edge; con la llave no.</p>
+            <p className="op-nota op-dentro">Para entrar con tu cuenta de Google hace falta Microsoft Edge o Google Chrome; con la llave no.</p>
           )}
         </Seccion>
 

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer, type AddressInfo } from 'node:net'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { app } from 'electron'
@@ -18,15 +19,37 @@ import { chromium, type Browser } from 'playwright-core'
 
 const espera = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-/** El Edge del sistema (en Windows viene con él). */
-export function edgeExe(): string | null {
-  if (process.platform !== 'win32') return null
-  for (const base of [process.env['ProgramFiles(x86)'], process.env.ProgramFiles]) {
-    if (!base) continue
-    const exe = join(base, 'Microsoft', 'Edge', 'Application', 'msedge.exe')
-    if (existsSync(exe)) return exe
+/** Dónde puede estar el navegador en cada sistema: primero Microsoft Edge y, si no, Google Chrome (se manejan igual). */
+function candidatosNavegador(): { exe: string; nombre: 'Edge' | 'Chrome' }[] {
+  if (process.platform === 'win32') {
+    const bases = [process.env['ProgramFiles(x86)'], process.env.ProgramFiles].filter((b): b is string => Boolean(b))
+    return [
+      ...bases.map((b) => ({ exe: join(b, 'Microsoft', 'Edge', 'Application', 'msedge.exe'), nombre: 'Edge' as const })),
+      ...[...bases, process.env.LOCALAPPDATA ?? ''].filter(Boolean).map((b) => ({ exe: join(b, 'Google', 'Chrome', 'Application', 'chrome.exe'), nombre: 'Chrome' as const }))
+    ]
   }
-  return null
+  if (process.platform === 'darwin') {
+    const apps = ['/Applications', join(homedir(), 'Applications')]
+    return [
+      ...apps.map((a) => ({ exe: join(a, 'Microsoft Edge.app', 'Contents', 'MacOS', 'Microsoft Edge'), nombre: 'Edge' as const })),
+      ...apps.map((a) => ({ exe: join(a, 'Google Chrome.app', 'Contents', 'MacOS', 'Google Chrome'), nombre: 'Chrome' as const }))
+    ]
+  }
+  return [
+    { exe: '/usr/bin/microsoft-edge', nombre: 'Edge' },
+    { exe: '/usr/bin/google-chrome', nombre: 'Chrome' },
+    { exe: '/usr/bin/chromium', nombre: 'Chrome' }
+  ]
+}
+
+/** El navegador para entrar con Google (Edge o Chrome) y su nombre, o null si no hay ninguno. */
+export function navegadorGoogle(): { exe: string; nombre: 'Edge' | 'Chrome' } | null {
+  return candidatosNavegador().find((c) => existsSync(c.exe)) ?? null
+}
+
+/** El programa del navegador para entrar con Google: Edge o, si no está, Chrome. (El nombre viene de cuando era solo Edge.) */
+export function edgeExe(): string | null {
+  return navegadorGoogle()?.exe ?? null
 }
 
 /** El puerto fijo del Edge de la voz (`vozgoogle.ts`). */
@@ -107,7 +130,7 @@ export function edgePerfil(perfil: string, puertoFijo?: number): EdgePerfil {
       await cerrar()
     }
     const exe = edgeExe()
-    if (!exe) throw new Error('No encuentro Microsoft Edge en este equipo: hace falta para entrar con Google.')
+    if (!exe) throw new Error('No encuentro Microsoft Edge ni Google Chrome en este equipo: hace falta uno de los dos para entrar con Google.')
     mkdirSync(perfil, { recursive: true })
     const nuevo = puertoFijo ?? (await puertoLibre())
     if (!puertoFijo) writeFileSync(archivoPuerto, String(nuevo))
@@ -120,7 +143,7 @@ export function edgePerfil(perfil: string, puertoFijo?: number): EdgePerfil {
     ]
     spawn(exe, args, { detached: true, stdio: 'ignore', windowsHide: !ventana }).unref()
     for (let i = 0; i < 40 && !(await responde()); i++) await espera(500)
-    if (!(await responde())) throw new Error('Edge no abrió.')
+    if (!(await responde())) throw new Error(`${navegadorGoogle()?.nombre ?? 'El navegador'} no abrió.`)
   }
 
   let turno: Promise<unknown> = Promise.resolve()

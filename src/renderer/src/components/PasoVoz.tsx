@@ -249,7 +249,7 @@ export function PasoVoz({ creacion, ocupado, control }: { creacion: Creacion; oc
           <div className="voz-clave">
             <div className="voz-google">
               <p>
-                Entra con tu cuenta de Google y Recorte usa AI Studio por ti, sin llaves. Se abre Edge para que inicies
+                Entra con tu cuenta de Google y Recorte usa AI Studio por ti, sin llaves. Se abre Edge o Chrome para que inicies
                 sesión: Google no deja entrar desde dentro de las apps.
               </p>
               <button
@@ -258,7 +258,7 @@ export function PasoVoz({ creacion, ocupado, control }: { creacion: Creacion; oc
                 onClick={() => void control.conectarGoogle()}
               >
                 <Icon name="sparkles" size={14} />{' '}
-                {control.google?.conectando ? 'Se abrió Edge: entra con tu cuenta de Google…' : 'Conectar con Google'}
+                {control.google?.conectando ? 'Se abrió el navegador: entra con tu cuenta de Google…' : 'Conectar con Google'}
               </button>
               {control.google?.error && <p className="crear-error">{control.google.error}</p>}
             </div>

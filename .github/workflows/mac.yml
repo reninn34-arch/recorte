@@ -58,6 +58,10 @@ jobs:
         if: github.ref == 'refs/heads/mac-prueba'
         run: npm run prueba:antigravity
 
+      # El navegador para entrar con Google (Flow y la voz): Edge o Chrome, encontrado y abierto como en la app.
+      - name: Probar el navegador para Google
+        run: npm run prueba:navegador
+
       - run: node scripts/licencia-instalador.mjs
       - name: Compilar los .dmg
         run: npx electron-builder --mac --publish never
