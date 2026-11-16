@@ -24,6 +24,49 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.68',
+    fecha: '2026-11-16',
+    resumen: 'El monitor reproduce sin trabarse los tramos pesados, y llegan los medidores de color, el color por zonas, el ecualizador y el borrado de objetos grandes.',
+    novedades: [
+      {
+        icono: 'play',
+        titulo: 'Vista previa renderizada',
+        texto:
+          'Los tramos con capas, piezas animadas o efectos se preparan solos en segundo plano mientras no reproduces, y el monitor los reproduce sin trabarse. En la regla de la línea de tiempo, una franja verde marca lo que ya está listo y una ámbar lo que se está preparando.'
+      },
+      {
+        icono: 'sliders',
+        titulo: 'Medidores de color',
+        texto:
+          'Con el botón de arriba a la derecha del monitor: forma de onda, vectorscopio (con la línea del tono de piel) e histograma, del cuadro que ves y con tu color aplicado.'
+      },
+      {
+        icono: 'palette',
+        titulo: 'Color por zonas',
+        texto:
+          'En el panel del clip: elige un color (los rojos, la piel, el cielo…) y cámbiale el tono, la saturación o la luz sin tocar el resto. En pausa el monitor te enseña el cuadro ya pintado.'
+      },
+      {
+        icono: 'volumen',
+        titulo: 'Ecualizador y compresor',
+        texto:
+          'En el sonido de cada clip: graves, medios y agudos, y un compresor que empareja lo fuerte y lo suave. Se oyen igual en el monitor y en el video exportado, y «Mejorar voz» ahora también se oye en el monitor.'
+      },
+      {
+        icono: 'seleccion',
+        titulo: 'Borrar objetos grandes',
+        texto:
+          'Al borrar un objeto grande, Recorte lo rellena con LaMa (se baja una vez, 208 MB): continúa lo que hay alrededor en vez de dejar una mancha. Con la cámara quieta va rápido; con la cámara en movimiento tarda unos segundos por cuadro.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Arreglos',
+        texto:
+          'Exportar solo un tramo ya no repite las entradas de las capas ni reinicia los textos animados o los videos de encima, y sacar un cuadro en un proyecto de 60 fps ya no exporta la timeline entera.'
+      }
+    ]
+  },
+  {
     version: '0.1.67',
     fecha: '2026-11-16',
     resumen: 'Arregla el monitor que se veía negro en un clip sí y otro no, y llega Recorte para Mac.',
