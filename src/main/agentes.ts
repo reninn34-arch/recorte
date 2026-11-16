@@ -6,6 +6,7 @@ import { app, shell } from 'electron'
 import type { ConexionResultado, EstadoAgente } from '../shared/api'
 import { anadirCarpetaBinarios, pathAmpliado, resolverBinario } from './binarios'
 import { guardar } from './disco'
+import { descargarHerramienta, PUEDE_BAJAR } from './herramientas'
 import { conectadoAntigravity, exeAntigravity, instalarAntigravity, loginAntigravity, rutaTokenAntigravity } from './antigravity'
 
 /**
@@ -288,6 +289,14 @@ export function correr(orden: string, limite: number): Promise<{ codigo: number 
 }
 
 async function instalar(agente: DefAgente): Promise<ConexionResultado> {
+  // Sin npm, Recorte baja Node.js por su cuenta (como en Ajustes → Herramientas), sin instalar nada en el sistema.
+  if (!(await versionResponde('npm')) && PUEDE_BAJAR) {
+    try {
+      await descargarHerramienta('node', () => {})
+    } catch {
+      // Sin conexión o sin permiso: abajo se explica cómo hacerlo a mano.
+    }
+  }
   if (!(await versionResponde('npm'))) {
     return {
       ok: false,
@@ -318,7 +327,11 @@ function abrirVentana(agente: DefAgente): boolean {
       return true
     }
     if (process.platform === 'darwin') {
-      spawn('osascript', ['-e', `tell application "Terminal" to do script "${orden}"`, '-e', 'tell application "Terminal" to activate'], {
+      // La Terminal abre su propio shell, sin el PATH de Recorte: se le pasa (Node y los agentes que bajó Recorte están ahí).
+      const conPath = `export PATH='${pathAmpliado().replace(/'/g, "'\\''")}'; ${orden}`
+      // Dentro del texto de AppleScript, las barras invertidas y las comillas van escapadas.
+      const applescript = conPath.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+      spawn('osascript', ['-e', `tell application "Terminal" to do script "${applescript}"`, '-e', 'tell application "Terminal" to activate'], {
         detached: true,
         stdio: 'ignore'
       }).unref()
