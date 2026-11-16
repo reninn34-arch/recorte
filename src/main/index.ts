@@ -35,6 +35,7 @@ import { recetaLocal } from './receta'
 import { crearVideo, ejecutar } from './crear'
 import { renderClip, renderReceta } from './render'
 import { exportarTimeline } from './exportar'
+import { VistaPrevia } from './vistaprevia'
 import { iniciarMcpRecorte } from './mcpapp'
 import { resolverBinario } from './binarios'
 import { bloqueRetoques, describirRetoques } from '../shared/retoques'
@@ -3182,6 +3183,13 @@ No pude animar los subtítulos (se animan al exportar): ${e instanceof Error ? e
   ipcMain.handle('agente:parar', (_evento, id: unknown) => typeof id === 'string' && pararTrabajo(`chat:${id}`))
 
   ipcMain.handle('chatgpt:estado', () => estadoChatGPT())
+  // La vista previa renderizada del monitor (ver main/vistaprevia.ts).
+  const vistaPrevia = new VistaPrevia(proyectos, (id, clave) => {
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('vista:lista', { id, clave })
+  })
+  ipcMain.handle('vista:existentes', (_e, id: string, claves: string[]) => vistaPrevia.existentes(id, Array.isArray(claves) ? claves : []))
+  ipcMain.handle('vista:preparar', (_e, id: string, timeline: Timeline, desde: number) => timeline && Array.isArray(timeline.clips) ? vistaPrevia.preparar(id, timeline, Number(desde) || 0) : undefined)
+  ipcMain.handle('vista:pausar', (_e, id: string) => vistaPrevia.pausar(id))
   ipcMain.handle('actualizacion:estado', () => estadoActualizacion())
   ipcMain.handle('actualizacion:buscar', () => buscarActualizacion())
   ipcMain.handle('actualizacion:instalar', () => instalarActualizacion())

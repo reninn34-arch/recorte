@@ -2,6 +2,8 @@ import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } fr
 import type { Project } from '../../../shared/types'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
+import type { VistaPrevia } from '../hooks/vistaprevia'
+import type { TramoVista } from '../../../shared/vistaprevia'
 import {
   ajustesDe,
   APARECER_S,
@@ -69,7 +71,8 @@ export function Monitor({
   medios,
   historial,
   elegido,
-  onElegir
+  onElegir,
+  vistaPrevia
 }: {
   proyecto: Project
   timeline: Timeline
@@ -80,12 +83,20 @@ export function Monitor({
   historial: Historial
   elegido: Elegido
   onElegir: (e: Elegido) => void
+  /** Los tramos ya renderizados: al reproducir, se ve ese video en vez de componer las capas en vivo. */
+  vistaPrevia?: VistaPrevia | null
 }) {
+  // El tramo de vista previa bajo el cabezal (si ya está hecho) y el siguiente (cargado y quieto, para seguir sin pausa).
+  const listo = (t?: TramoVista) => (t && t.pesado && vistaPrevia?.listas.has(t.clave) ? t : undefined)
+  const iTramo = reproductor.reproduciendo && vistaPrevia ? vistaPrevia.tramos.findIndex((t) => reproductor.tiempo >= t.desde && reproductor.tiempo < t.hasta) : -1
+  const vistaAhora = iTramo >= 0 ? listo(vistaPrevia!.tramos[iTramo]) : undefined
+  const vistaLuego = iTramo >= 0 ? listo(vistaPrevia!.tramos[iTramo + 1]) : undefined
   const src = proyecto.demo ? undefined : mediaUrl(proyecto.id, proyecto.proxy ?? 'fuente')
   const enImagen = Boolean(reproductor.imagen)
   // Lo que se ve y suena: sin las pistas ocultas o silenciadas (lo que se edita es `timeline`, entera).
   const vista = useMemo(() => timelineActiva(timeline), [timeline])
-  const rotulos = textosEn(vista, reproductor.tiempo)
+  // Con el tramo ya renderizado, lo de encima viene en ese video: no se compone en vivo.
+  const rotulos = vistaAhora ? [] : textosEn(vista, reproductor.tiempo)
   const vacia = timeline.clips.length === 0
   const musicaRef = useMusica(vista, reproductor, proyecto.transcript)
   const urlDe = useCallback((archivo: string) => mediaUrl(proyecto.id, archivo), [proyecto.id])
@@ -210,7 +221,7 @@ export function Monitor({
     window.addEventListener('pointerup', soltar)
   }
   const [guia, setGuia] = useState<{ v: boolean; h: boolean }>({ v: false, h: false })
-  const capas = capasEn(vista, reproductor.tiempo)
+  const capas = vistaAhora ? [] : capasEn(vista, reproductor.tiempo)
   const [soltando, setSoltando] = useState(false)
 
   /** Un medio de la biblioteca soltado sobre el monitor: queda encima, donde se soltó. */
@@ -499,7 +510,7 @@ export function Monitor({
             )
           })}
           {tr && tr.blanco > 0 && <div className="monitor-filtros" style={{ background: '#fff', opacity: tr.blanco }} aria-hidden />}
-          {timeline.filtros && <FiltrosVista filtros={timeline.filtros} tiempo={reproductor.tiempo} reproduciendo={reproductor.reproduciendo} ancho={cw} alto={ch} />}
+          {timeline.filtros && !vistaAhora && <FiltrosVista filtros={timeline.filtros} tiempo={reproductor.tiempo} reproduciendo={reproductor.reproduciendo} ancho={cw} alto={ch} />}
           {rotulos.map((r) => {
             const b = borrador?.tipo === 'texto' && borrador.id === r.id ? borrador : null
             const libre = b ?? (typeof r.x === 'number' && typeof r.y === 'number' ? { x: r.x, y: r.y } : null)
@@ -541,11 +552,33 @@ export function Monitor({
           {guia.h && <span className="monitor-guia h" />}
         </div>
       )}
+      {cw > 0 && (vistaAhora || vistaLuego) && (
+        <div className="monitor-cuadro monitor-vista" style={{ width: cw, height: ch }} aria-hidden>
+          {[vistaAhora, vistaLuego].map((t) =>
+            t ? (
+              <VideoVista
+                key={t.clave}
+                url={mediaUrl(proyecto.id, `vista-previa/${t.clave}.mp4`)}
+                esperado={t === vistaAhora ? reproductor.tiempo - t.desde : 0}
+                activo={t === vistaAhora}
+                reproduciendo={reproductor.reproduciendo && t === vistaAhora}
+              />
+            ) : null
+          )}
+        </div>
+      )}
       {!reproductor.reproduciendo && src && !vacia && (
         <span className="monitor-play"><Icon name="play" size={26} /></span>
       )}
     </div>
   )
+}
+
+/** Un tramo ya renderizado: mudo (el sonido sigue saliendo de las pistas) y al compás del cabezal. */
+function VideoVista({ url, esperado, activo, reproduciendo }: { url: string; esperado: number; activo: boolean; reproduciendo: boolean }) {
+  const ref = useRef<HTMLVideoElement>(null)
+  useSincronizar(ref, esperado, reproduciendo, 0)
+  return <video ref={ref} src={url} muted preload="auto" className={activo ? undefined : 'is-oculto'} />
 }
 
 /** Una toma de apoyo encima: un video mudo que sigue al cabezal. */

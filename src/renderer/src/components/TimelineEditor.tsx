@@ -1,5 +1,6 @@
 import React, { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import type { VistaPrevia } from '../hooks/vistaprevia'
 import {
   ajustarClip,
   claveCapaEn,
@@ -247,8 +248,11 @@ export function TimelineEditor({
   onPalabrasDeVoces,
   separando,
   seguirZona,
-  fps = 30
+  fps = 30,
+  vistaPrevia
 }: {
+  /** La vista previa renderizada: se marca en la regla qué tramos pesados ya están listos. */
+  vistaPrevia?: VistaPrevia | null
   /** Sigue una zona tapada por el video (una cara que se mueve). */
   seguirZona?: (
     fuente: string,
@@ -1931,6 +1935,19 @@ export function TimelineEditor({
         >
           <div className="tl-lienzo" ref={lienzoRef} style={{ width: ancho }} data-pps={pps} onContextMenu={menuHueco}>
             <div className="tl-regla" onPointerDown={arrastrarCabezal}>
+              {vistaPrevia?.tramos
+                .filter((t) => t.pesado)
+                .map((t) => {
+                  const lista = vistaPrevia.listas.has(t.clave)
+                  return (
+                    <span
+                      key={`v${t.desde}`}
+                      className={`tl-vista ${lista ? 'is-lista' : 'is-falta'}`}
+                      style={{ left: t.desde * pps, width: Math.max(1, (t.hasta - t.desde) * pps) }}
+                      title={lista ? 'Vista previa lista: se reproduce sin trabarse' : 'Preparando la vista previa de este tramo (en pausa, en segundo plano)'}
+                    />
+                  )
+                })}
               {marcas.map((t) => (
                 <span key={t} className="tl-marca" style={{ left: t * pps }}>
                   {tc(t, paso < 1)}

@@ -458,6 +458,13 @@ export interface RecorteApi {
   /** Cierra, instala la versión ya bajada y vuelve a abrir Recorte. */
   actualizacionInstalar: () => Promise<void>
   onActualizacion: (cb: (e: EstadoActualizacion) => void) => () => void
+  /** La vista previa renderizada del monitor: cuáles de estos tramos ya tienen su video. */
+  vistaExistentes: (id: string, claves: string[]) => Promise<string[]>
+  /** Renderiza en segundo plano los tramos pesados que faltan, empezando por el del cabezal. */
+  vistaPreparar: (id: string, timeline: Timeline, desde: number) => Promise<void>
+  /** Deja de empezar tramos nuevos (se está reproduciendo). */
+  vistaPausar: (id: string) => Promise<void>
+  onVistaLista: (cb: (e: { id: string; clave: string }) => void) => () => void
   /** Progreso de una herramienta que se baja o se instala desde Ajustes. */
   onHerramienta: (cb: (p: { id: string; pct: number; texto: string }) => void) => () => void
   /** La sesión de un agente se cayó mientras trabajaba: hay que volver a conectarlo. */

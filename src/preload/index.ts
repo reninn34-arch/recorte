@@ -171,6 +171,14 @@ const api: RecorteApi = {
     ipcRenderer.on('interfaz:escala', listener)
     return () => ipcRenderer.removeListener('interfaz:escala', listener)
   },
+  vistaExistentes: (id, claves) => ipcRenderer.invoke('vista:existentes', id, claves),
+  vistaPreparar: (id, timeline, desde) => ipcRenderer.invoke('vista:preparar', id, timeline, desde),
+  vistaPausar: (id) => ipcRenderer.invoke('vista:pausar', id),
+  onVistaLista: (cb) => {
+    const listener = (_evento: Electron.IpcRendererEvent, e: { id: string; clave: string }) => cb(e)
+    ipcRenderer.on('vista:lista', listener)
+    return () => ipcRenderer.removeListener('vista:lista', listener)
+  },
   onActualizacion: (cb) => {
     const listener = (_evento: Electron.IpcRendererEvent, e: EstadoActualizacion) => cb(e)
     ipcRenderer.on('actualizacion', listener)

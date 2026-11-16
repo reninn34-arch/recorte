@@ -222,7 +222,19 @@ ${eventos}
   return nombre
 }
 
-export async function exportarTimeline(
+let colaExport: Promise<unknown> = Promise.resolve()
+
+/**
+ * Exporta la timeline. Los renders van de uno en uno: escriben archivos de trabajo con nombre fijo en la carpeta del
+ * proyecto (rótulos, filtros, curvas), y dos a la vez (una exportación y la vista previa del monitor) se pisarían.
+ */
+export function exportarTimeline(...args: Parameters<typeof exportarTimelineAhora>): ReturnType<typeof exportarTimelineAhora> {
+  const turno = colaExport.then(() => exportarTimelineAhora(...args))
+  colaExport = turno.catch(() => {})
+  return turno
+}
+
+async function exportarTimelineAhora(
   proyecto: Project,
   timeline: Timeline,
   carpeta: string,

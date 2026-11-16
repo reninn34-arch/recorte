@@ -1432,6 +1432,14 @@ button { cursor: pointer; }
 .monitor video { width: 100%; height: 100%; object-fit: contain; display: block; }
 /* Los dos <video> del monitor van uno encima del otro (se ve el activo): sin esto, el segundo queda debajo del cuadro. */
 .monitor-movimiento > video.monitor-video { position: absolute; inset: 0; }
+/* La vista previa renderizada: encima de todo el cuadro, sin agarrar el ratón. El tramo siguiente espera cargado y oculto. */
+.monitor-vista { z-index: 3; }
+.monitor-vista > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.monitor-vista > video.is-oculto { opacity: 0; }
+/* En la regla: los tramos pesados con la vista previa lista (verde) y los que aún se preparan (ámbar). */
+.tl-vista { position: absolute; top: 0; height: 3px; pointer-events: none; z-index: 2; }
+.tl-vista.is-lista { background: #4ade80; }
+.tl-vista.is-falta { background: #f59e0b; opacity: 0.7; }
 .monitor-lienzo { position: absolute; inset: 0; margin: auto; width: 100%; height: 100%; overflow: hidden; }
 .monitor-play {
   position: absolute;

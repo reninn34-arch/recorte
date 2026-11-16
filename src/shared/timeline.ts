@@ -905,7 +905,7 @@ export function extraerRango(tl: Timeline, a: number, b: number): Timeline {
   )
   if (!dentro.size || dentro.size === cortada.clips.length) return tl
   type ConTramo = { inicio: number; duracion: number }
-  const correr = <T extends ConTramo>(x: T, acortable: boolean): T | null => {
+  const correr = <T extends ConTramo>(x: T, acortable: boolean, sinCabeza?: (x: T, corte: number) => T): T | null => {
     const i = x.inicio
     const f = x.inicio + x.duracion
     if (f <= a + EPSILON) return x
@@ -913,10 +913,21 @@ export function extraerRango(tl: Timeline, a: number, b: number): Timeline {
     if (!acortable) return null
     const ni = Math.min(i, a)
     const nf = f > b ? f - L : a
-    return nf - ni < DURACION_MINIMA ? null : { ...x, inicio: ni, duracion: nf - ni }
+    if (nf - ni < DURACION_MINIMA) return null
+    const r = { ...x, inicio: ni, duracion: nf - ni }
+    // Empezaba dentro de lo quitado: se le fue el principio, y lo que queda sigue mostrando lo que mostraba ahí.
+    return sinCabeza && i >= a - EPSILON ? sinCabeza(r, b - i) : r
   }
-  const lista = <T extends ConTramo>(xs: T[] | undefined, acortable: boolean): T[] =>
-    (xs ?? []).map((x) => correr(x, acortable)).filter((x): x is T => x !== null)
+  const lista = <T extends ConTramo>(xs: T[] | undefined, acortable: boolean, sinCabeza?: (x: T, corte: number) => T): T[] =>
+    (xs ?? []).map((x) => correr(x, acortable, sinCabeza)).filter((x): x is T => x !== null)
+  // A una capa sin su principio, el medio se le corre (sigue en el mismo cuadro) y sus fotogramas clave, también.
+  const capaSinCabeza = (c: CapaTL, corte: number): CapaTL => ({
+    ...c,
+    desde: (c.desde ?? 0) + corte,
+    ...(c.claves
+      ? { claves: Object.fromEntries(Object.entries(c.claves).map(([k, v]) => [k, (v ?? []).map((cl) => ({ ...cl, f: cl.f - corte }))])) as ClavesCapa }
+      : {})
+  })
   // Las marcas de dentro se van; las de después se corren. Dos que quedan en el mismo punto (la de la entrada y la de
   // la salida) se juntan en una.
   const marcadores = (tl.marcadores ?? [])
@@ -925,7 +936,7 @@ export function extraerRango(tl: Timeline, a: number, b: number): Timeline {
     .filter((m, i, todas) => !todas.slice(0, i).some((o) => Math.abs(o.t - m.t) < 1 / 60))
   const { voces: _v, capas: _c, sonidos: _s, marcadores: _m, ...resto } = cortada
   const voces = lista(cortada.voces, false)
-  const capas = lista(cortada.capas, true)
+  const capas = lista(cortada.capas, true, capaSinCabeza)
   const sonidos = lista(cortada.sonidos, false)
   return conClips(
     {

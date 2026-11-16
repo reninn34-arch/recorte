@@ -18,6 +18,7 @@ import { SubtitulosAnimados } from './SubtitulosAnimados'
 
 const CLAVE_ALTO_TL = 'recorte.altoLineaDeTiempo'
 import { mediaUrl } from '../media'
+import { useVistaPrevia } from '../hooks/vistaprevia'
 import { ajustarClip, anadirCapa, borrarCapa, duracionesDeMedios, ponerMusica, anadirSonido, sobrescribirClip, separarAudio, sonidoUnicoMulticam, inicioEscenaMulticam, anidarClips, clipsSeguidos, cambiarATramo, ubicar, capaNueva, cambiarCapa, cambiarFuente, escalaAnimada, type TipoAnimar, duracionTimeline, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, timelineActiva, type Timeline } from '../../../shared/timeline'
 import { useHistorial, useReproductor, type FuentesVista } from '../hooks/timeline'
 import { Monitor } from './Monitor'
@@ -120,6 +121,8 @@ export function Editor({
   // Lo que suena y se ve es la timeline sin las pistas silenciadas (los clips no cambian de sitio).
   const activa = useMemo(() => timelineActiva(timeline), [timeline])
   const reproductor = useReproductor(activa, proyecto.id, fuentes)
+  // Los tramos pesados ya renderizados: el monitor los reproduce sin componerlos en vivo.
+  const vistaPrevia = useVistaPrevia(proyecto, timeline, reproductor.reproduciendo, reproductor.tiempo)
   const [agregando, setAgregando] = useState(false)
 
   // Una versión nueva del agente llega como timeline pendiente: entra como un paso más, así
@@ -659,6 +662,7 @@ export function Editor({
               historial={historial}
               elegido={elegido}
               onElegir={elegir}
+              vistaPrevia={vistaPrevia}
             />
           </div>
           <div className="ed-transporte" ref={setPanelTransporte} />
@@ -683,6 +687,7 @@ export function Editor({
       />
       <TimelineEditor
         key={proyecto.id}
+        vistaPrevia={vistaPrevia}
         fps={proyecto.source.fps > 0 && proyecto.source.fps <= 60 ? proyecto.source.fps : 30}
         paneles={{ biblioteca: panelBiblioteca, inspector: panelInspector, transporte: panelTransporte }}
         miniaturaDe={miniaturaDe}
