@@ -688,6 +688,7 @@ class Marioneta:
         masc = cv2.dilate(masc, np.ones((3, 3), np.uint8))
         crucero = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], np.uint8)
         dists = []
+        rectas = []
         yy, xx = np.mgrid[0:ch, 0:cw].astype(np.float32)
         for nombre, a, b, _ in self.huesos:
             sem = np.zeros((ch, cw), np.uint8)
@@ -715,8 +716,15 @@ class Marioneta:
                 recta = np.minimum(recta, np.hypot(xx - (pa[0] + t * v[0]), yy - (pa[1] + t * v[1])))
             d = np.where(np.isfinite(d), d, recta * 1.5 + 4)
             dists.append(d)
+            rectas.append(recta)
         s = self.ancho_hombros * k
         w = np.stack([(d / max(1.0, s) + 0.05) ** -7 for d in dists])
+        # El brazo se lleva solo lo que es brazo: lo que queda a su grosor de su hueso. Lo de más allá (el borde de una
+        # falda ancha junto a la mano) es del cuerpo; si no, al moverse el brazo lo arrastra como una raya.
+        grosor = self._grosor_brazo() * k
+        for i, (n, *_r) in enumerate(self.huesos):
+            if n.startswith(('brazo', 'antebrazo', 'mano')):
+                w[i] *= np.clip((1.1 * grosor - rectas[i]) / max(1.0, 0.2 * grosor), 0, 1)
         # Dentro del tronco (entre hombros y caderas) los brazos no se llevan nada: si un brazo se roza con el
         # costado, al levantarlo deja el saco entero en vez de un hueco.
         # El tronco: de hombro a hombro y hacia abajo, recto, hasta un poco más allá de las caderas (el saco cuelga
@@ -735,6 +743,22 @@ class Marioneta:
                 if n.startswith(('brazo', 'antebrazo', 'mano')):
                     w[i] *= 1 - dentro
         w /= w.sum(0, keepdims=True)
+        # Lejos del hombro, cada píxel es del brazo o del cuerpo, no un poco de cada uno: si no, el borde de la falda
+        # junto a la mano se reparte entre los dos y al moverse el brazo se estira como una raya. En el hombro sí se
+        # mezclan (la unión se dobla sin abrirse).
+        for l in ('i', 'd'):
+            idx = [i for i, (n, *_r) in enumerate(self.huesos) if n.startswith(('brazo', 'antebrazo', 'mano')) and n.endswith('_' + l)]
+            if not idx or f'hombro_{l}' not in self.P:
+                continue
+            A = w[idx].sum(0)
+            hx, hy = self.P[f'hombro_{l}'] * k
+            lejos = np.clip((np.hypot(xx - hx, yy - hy) - grosor) / max(1.0, grosor), 0, 1)
+            duro = np.clip((A - 0.4) / 0.2, 0, 1)
+            duro = duro * duro * (3 - 2 * duro)
+            nuevo = A * (1 - lejos) + duro * lejos
+            w[idx] *= (nuevo / np.maximum(A, 1e-6))[None]
+            otros = [i for i in range(len(w)) if i not in idx]
+            w[otros] *= ((1 - nuevo) / np.maximum(1 - A, 1e-6))[None]
         return w
 
     def _pesos(self):
@@ -743,7 +767,71 @@ class Marioneta:
         w = self._pesos_suaves()
         # A tamaño completo, y por la transparencia: lo que cada hueso «lleva» de la imagen.
         self.peso = [cv2.resize(x.astype(np.float32), (self.W, self.H), interpolation=cv2.INTER_LINEAR) * self.alfa for x in w]
+        self._detras_de_brazos()
         self._cajas()
+
+    def _grosor_brazo(self):
+        """Hasta dónde llega el brazo desde su hueso (píxeles del lienzo): la mitad de su ancho, medida a lo largo del
+        antebrazo y del brazo (lo más fino, que es donde no toca el cuerpo), con holgura para la manga y la mano."""
+        cv2 = self.cv2
+        dt = cv2.distanceTransform((self.alfa > 0.5).astype(np.uint8), cv2.DIST_L2, 5)
+        medidas = []
+        for l in ('i', 'd'):
+            for a, b in ((f'codo_{l}', f'muneca_{l}'), (f'hombro_{l}', f'codo_{l}')):
+                if a in self.P and b in self.P:
+                    for t in (0.3, 0.5, 0.7):
+                        x, y = self.P[a] + t * (self.P[b] - self.P[a])
+                        xi, yi = int(round(min(self.W - 1, max(0, x)))), int(round(min(self.H - 1, max(0, y))))
+                        if dt[yi, xi] > 0:
+                            medidas.append(float(dt[yi, xi]))
+        r = float(np.median(medidas)) if medidas else 0.1 * self.ancho_hombros
+        return 1.15 * min(max(r, 0.04 * self.ancho_hombros), 0.14 * self.ancho_hombros) + 2
+
+    def _detras_de_brazos(self):
+        """Lo que tapan los brazos sobre el cuerpo (la falda o el saco junto a la mano): se rellena con lo que lo rodea
+        y se lo queda el cuerpo, debajo del brazo. Quieto se ve igual (el brazo lo tapa); al moverse el brazo, asoma
+        la tela en vez de un hueco. Solo cuenta lo del brazo que tiene cuerpo a los dos lados en su fila: el brazo
+        que cuelga por fuera del cuerpo (con fondo al otro lado) no deja nada que rellenar."""
+        cv2 = self.cv2
+        self.rgb_lleno = self.rgb
+        es_brazo = [n.startswith(('brazo_', 'antebrazo_', 'mano_')) for n, *_r in self.huesos]
+        if not any(es_brazo) or all(es_brazo):
+            return
+        pesos = np.stack(self.peso)
+        etiqueta = pesos.argmax(0)
+        solido = self.alfa > 0.5
+        brazo = np.isin(etiqueta, [i for i, b in enumerate(es_brazo) if b]) & solido
+        cuerpo = solido & ~brazo
+        izq = np.maximum.accumulate(cuerpo, axis=1)
+        der = np.maximum.accumulate(cuerpo[:, ::-1], axis=1)[:, ::-1]
+        hueco = brazo & izq & der
+        # Lo que queda entre el brazo y el cuerpo en esas filas tampoco es un hueco de verdad si es muy poco.
+        if hueco.sum() < 0.002 * solido.sum():
+            return
+        hueco = cv2.dilate(hueco.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool) & solido
+        # El relleno: se tapa el brazo entero (su color no se cuela) y se pinta con la tela de alrededor.
+        ys, xs = np.nonzero(hueco)
+        pad = round(0.15 * self.ancho_hombros)
+        x0, y0 = max(0, xs.min() - pad), max(0, ys.min() - pad)
+        x1, y1 = min(self.W, xs.max() + pad + 1), min(self.H, ys.max() + pad + 1)
+        parte = np.clip(self.rgb[y0:y1, x0:x1], 0, 255).astype(np.uint8)
+        tapar = (cv2.dilate(brazo[y0:y1, x0:x1].astype(np.uint8), np.ones((5, 5), np.uint8)) * 255)
+        lleno = None
+        if os.path.exists(os.path.join(carpeta_modelos(), MODELO_LAMA[0])):
+            lleno = rellenar_lama(cv2.cvtColor(parte, cv2.COLOR_RGB2BGR), tapar)
+            lleno = cv2.cvtColor(lleno, cv2.COLOR_BGR2RGB) if lleno is not None else None
+        if lleno is None:
+            lleno = cv2.inpaint(parte, tapar, max(5, round(0.03 * self.ancho_hombros)), cv2.INPAINT_TELEA)
+        self.rgb_lleno = self.rgb.copy()
+        self.rgb_lleno[y0:y1, x0:x1] = np.where(tapar[..., None] > 0, lleno.astype(np.float32), self.rgb[y0:y1, x0:x1])
+        # El hueco es del hueso del cuerpo que más pesa ahí (el tronco, o el muslo si la falda va con la pierna).
+        otros = pesos.copy()
+        otros[[i for i, b in enumerate(es_brazo) if b]] = -1
+        dueno = otros.argmax(0)
+        suave = cv2.GaussianBlur(hueco.astype(np.float32), (0, 0), 0.8) * self.alfa
+        for i, b in enumerate(es_brazo):
+            if not b:
+                self.peso[i] = np.maximum(self.peso[i], np.where(dueno == i, suave, 0).astype(np.float32))
 
     def _cajas(self):
         # La zona que ocupa cada hueso (donde pesa algo): al dibujar, cada uno se calcula solo ahí.
@@ -871,12 +959,16 @@ class Marioneta:
         a_acc = np.zeros((self.H, self.W), np.float32)
         total = np.zeros((self.H, self.W), np.float32)
         capas = []
+        # El cuerpo se pinta con lo que hay detrás de los brazos ya relleno (el brazo, encima, lo tapa si no se movió).
+        brazo = lambda n: n.startswith(('brazo_', 'antebrazo_', 'mano_'))
+        lleno = getattr(self, 'rgb_lleno', self.rgb)
         # Los huesos quietos, juntos y en su sitio (sin deformar): solo la zona que ocupan.
         cq = [self.cajas[i] for i, _ in quietos if self.cajas[i]]
         if cq:
             x0, y0, x1, y1 = min(c[0] for c in cq), min(c[1] for c in cq), max(c[2] for c in cq), max(c[3] for c in cq)
             p = np.minimum(sum(self.peso[i][y0:y1, x0:x1] for i, _ in quietos), self.alfa[y0:y1, x0:x1])
-            capas.append((min(self._rango(i) for i, _ in quietos), (x0, y0, x1, y1), self.rgb[y0:y1, x0:x1], p))
+            fuente = self.rgb if any(brazo(n) for _, n in quietos) else lleno
+            capas.append((min(self._rango(i) for i, _ in quietos), (x0, y0, x1, y1), fuente[y0:y1, x0:x1], p))
         for i, nombre in moviles:
             caja = self.cajas[i]
             if not caja:
@@ -890,7 +982,7 @@ class Marioneta:
             inv = np.linalg.inv(T[nombre])
             M = np.float32([[inv[0, 0], inv[0, 1], inv[0, 0] * x0 + inv[0, 1] * y0 + inv[0, 2]],
                             [inv[1, 0], inv[1, 1], inv[1, 0] * x0 + inv[1, 1] * y0 + inv[1, 2]]])
-            col = cv2.warpAffine(self.rgb, M, (x1 - x0, y1 - y0), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_REPLICATE)
+            col = cv2.warpAffine(self.rgb if brazo(nombre) else lleno, M, (x1 - x0, y1 - y0), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_REPLICATE)
             p = cv2.warpAffine(self.peso[i], M, (x1 - x0, y1 - y0), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
                                borderMode=cv2.BORDER_CONSTANT, borderValue=0)
             capas.append((self._rango(i), (x0, y0, x1, y1), col, p))
@@ -1037,6 +1129,7 @@ class Muneco(Marioneta):
         self.peso = [cv2.GaussianBlur(m, (0, 0), 0.7) * self.alfa for m in masc]
         # Dónde están los pies en reposo (para mantenerlos en el suelo).
         self.suelo_reposo = max([P[f'{q}_{l}'][1] for l in ('i', 'd') for q in ('tobillo', 'punta', 'talon') if f'{q}_{l}' in P] or [0])
+        self._detras_de_brazos()
         self._cajas()
 
     def _rango(self, i):
