@@ -47,12 +47,16 @@ export function iniciarMcpRecorte(ctx: ContextoMcp) {
   }
   let servidor: ServidorMcp | null = null
   let error: string | undefined
+  const url = () => `http://127.0.0.1:${config.puerto}/mcp`
 
   const arrancar = async () => {
     servidor?.detener()
+    // Si Claude Code ya lo tenía registrado con esta dirección y contraseña, se mantiene al día solo.
+    const antes = { url: url(), contrasena: config.contrasena }
+    const estabaConectado = claudeConectado(antes.url, antes.contrasena)
     servidor = new ServidorMcp(herramientasRecorte(ctx), config.contrasena, { nombre: NOMBRE, version: app.getVersion(), instrucciones: INSTRUCCIONES_MCP })
     try {
-      // Primero el puerto que ya conocen los agentes; si se ocupó, otro (y hay que volver a conectarlos).
+      // Primero el puerto que ya conocen los agentes (esperándolo si la versión anterior aún lo suelta); si no, otro.
       config.puerto = await servidor.iniciar(config.puerto)
       error = undefined
     } catch (e) {
@@ -60,10 +64,14 @@ export function iniciarMcpRecorte(ctx: ContextoMcp) {
       error = e instanceof Error ? e.message : String(e)
     }
     guardar(archivo, JSON.stringify(config, null, 2))
+    // Cambió el puerto y Claude Code apuntaba al de antes: se vuelve a registrar con el nuevo (las sesiones ya abiertas
+    // tienen que reconectarse; las nuevas lo toman solas).
+    if (servidor && estabaConectado && url() !== antes.url && resolverBinario('claude')) {
+      await correr(`claude mcp remove ${NOMBRE} -s user`, 30_000)
+      await correr(`claude mcp add --scope user --transport http ${NOMBRE} ${url()} --header "Authorization: Bearer ${config.contrasena}"`, 30_000)
+    }
   }
   void arrancar()
-
-  const url = () => `http://127.0.0.1:${config.puerto}/mcp`
 
   return {
     estado(): EstadoMcp {

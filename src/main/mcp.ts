@@ -50,7 +50,19 @@ export class ServidorMcp {
 
   /** Escucha en `puerto` (o en el siguiente libre, hasta 20 más). Devuelve el puerto usado. */
   async iniciar(puerto: number): Promise<number> {
-    for (let p = puerto; p < puerto + 20; p++) {
+    // Al actualizar, la app nueva arranca mientras la vieja aún suelta el puerto: se espera un poco a que quede libre antes
+    // de cambiar de puerto (cambiarlo deja a los agentes conectados apuntando al de antes).
+    for (let i = 0; i < 24; i++) {
+      try {
+        await this.escuchar(puerto)
+        this.puerto = puerto
+        return puerto
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error
+        await new Promise((r) => setTimeout(r, 500))
+      }
+    }
+    for (let p = puerto + 1; p < puerto + 20; p++) {
       try {
         await this.escuchar(p)
         this.puerto = p
