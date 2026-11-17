@@ -41,7 +41,7 @@ import { exportarTimeline } from './exportar'
 import { VistaPrevia } from './vistaprevia'
 import { iniciarMcpRecorte } from './mcpapp'
 import { resolverBinario } from './binarios'
-import { apuntarAgotado, apuntarClaudeDeSalida, apuntarVoz, avisoAntesDeHacer, estadoUso, iniciarUso } from './uso'
+import { apuntarAgotado, apuntarClaudeDeSalida, apuntarVoz, avisoAntesDeHacer, claudeLeido, estadoUso, iniciarUso } from './uso'
 import { bloqueRetoques, describirRetoques } from '../shared/retoques'
 import { Creaciones, EXTENSIONES_ADJUNTOS, pasoGuion, pasoVideo, type ConfigAgente } from './creaciones'
 import { convertirAVoz, generarVozGemini, prepararVoz } from './voz'
@@ -532,11 +532,18 @@ app.whenReady().then(() => {
   /** Vuelve a leer el uso de uno: Claude con una consulta mínima (el modelo más barato), Flow sus créditos. */
   const usoActualizar = async (id: string): Promise<EstadoUso> => {
     if (id === 'claude' && resolverBinario('claude')) {
-      const r = await correr('claude -p "Responde solo: ok" --model haiku --output-format stream-json --verbose', 90_000)
+      const r = await correr('claude -p "Responde solo: ok" --model haiku --output-format stream-json --verbose', 90_000, 2_000_000)
       apuntarClaudeDeSalida(r.salida)
     } else if (id === 'flow') await leerSaldosFlow()
     return usoAhora()
   }
+  // Claude no dice su uso hasta que trabaja: al abrir Recorte (y cada hora, si en ese rato el agente no trabajó, que
+  // lo cuenta gratis en cada turno) se le hace la consulta mínima, para que el panel no espere a un video.
+  const leerClaudeSiHaceFalta = () => {
+    if (Date.now() - claudeLeido() > 55 * 60_000) void usoActualizar('claude').catch(() => {})
+  }
+  setTimeout(leerClaudeSiHaceFalta, 15_000)
+  setInterval(leerClaudeSiHaceFalta, 60 * 60_000)
   ipcMain.handle('uso:estado', () => usoAhora())
   ipcMain.handle('uso:actualizar', (_e, id: unknown) => usoActualizar(String(id)))
   /**

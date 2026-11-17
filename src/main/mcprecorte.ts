@@ -137,7 +137,7 @@ export function textoUso(e: EstadoUso): string {
         ...(s.nota ? [s.nota] : []),
         ...(s.leido ? [`leído ${fecha(s.leido)}`] : [])
       ]
-      return `- ${s.nombre} [${nivel[s.nivel]}]: ${partes.join(' · ') || 'sin datos'}`
+      return `- ${s.nombre}${s.cuenta ? ` (cuenta ${s.cuenta})` : ''} [${nivel[s.nivel]}]: ${partes.join(' · ') || 'sin datos'}`
     })
     .join('\n')
 }

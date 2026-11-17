@@ -250,6 +250,8 @@ export interface ServicioUso {
   creditos?: number
   /** Una línea más: el plan, las frases de hoy, que no informa su uso… */
   nota?: string
+  /** Con qué cuenta trabaja (un agente puede estar en otra cuenta que la que usas en su app). */
+  cuenta?: string
   /** Cuándo se leyó (ms). */
   leido?: number
   /** Se quedó sin cuota hasta entonces (ms). */

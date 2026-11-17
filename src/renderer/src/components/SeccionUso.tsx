@@ -36,6 +36,7 @@ function Fila({ s, actualizando, onActualizar }: { s: ServicioUso; actualizando:
       <div className="op-fila-texto">
         <strong>
           <span className={`agente-punto ${PUNTO[s.nivel]}`} /> {s.nombre}
+          {s.cuenta && <span className="uso-cuenta">· cuenta {s.cuenta}</span>}
         </strong>
         {s.ventanas.map((v) => (
           <div key={v.nombre} className="uso-ventana">

@@ -263,7 +263,8 @@ export async function estadoAgentes(): Promise<EstadoAgente[]> {
 }
 
 /** Corre un comando con shell y devuelve el código y lo último que dijo. */
-export function correr(orden: string, limite: number): Promise<{ codigo: number | null; salida: string }> {
+/** Corre una orden y devuelve su salida: los últimos `guardar` caracteres (lo que hace falta para un error; más para leerla). */
+export function correr(orden: string, limite: number, guardar = 2000): Promise<{ codigo: number | null; salida: string }> {
   return new Promise((resolver) => {
     let salida = ''
     let hecho = false
@@ -273,8 +274,8 @@ export function correr(orden: string, limite: number): Promise<{ codigo: number 
       hijo.kill()
       resolver({ codigo: null, salida: 'Tardó demasiado.' })
     }, limite)
-    hijo.stdout.on('data', (b: Buffer) => (salida = (salida + b.toString('utf8')).slice(-2000)))
-    hijo.stderr.on('data', (b: Buffer) => (salida = (salida + b.toString('utf8')).slice(-2000)))
+    hijo.stdout.on('data', (b: Buffer) => (salida = (salida + b.toString('utf8')).slice(-guardar)))
+    hijo.stderr.on('data', (b: Buffer) => (salida = (salida + b.toString('utf8')).slice(-guardar)))
     hijo.on('error', (e) => {
       hecho = true
       clearTimeout(reloj)

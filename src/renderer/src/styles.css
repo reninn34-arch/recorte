@@ -3450,3 +3450,17 @@ button { cursor: pointer; }
 .conv-entrega-texto > span { font-size: 12.5px; color: var(--muted); }
 .conv-entrega-botones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .conv-entrega-nota { margin-top: auto; font-size: 12px !important; color: var(--dim) !important; line-height: 1.5; }
+
+.bc-uso-titulo { display: flex; flex-direction: column; gap: 1px; margin-bottom: 2px; }
+.bc-uso-titulo b { font-size: 12.5px; }
+.bc-uso-titulo span { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bc-uso-ventana { display: flex; flex-direction: column; gap: 4px; }
+.uso-cuenta { font-size: 11.5px; color: var(--dim); font-weight: 400; }
+
+.bc-uso-voz { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--muted); }
+.bc-uso-voz b { font-weight: 600; }
+.bc-uso-voz b.is-ok { color: #7dd069; }
+.bc-uso-voz b.is-agotado { color: var(--danger); }
+.bc-uso-reinicio { font-size: 10.5px; color: var(--dim); }
+.bc-uso-fila b { white-space: nowrap; }
+.bc-uso-ventana + .bc-uso-ventana { margin-top: 4px; }

@@ -23,6 +23,18 @@ function grupoDe(fecha: number, ahora = Date.now()): string {
   return 'Antes'
 }
 
+/** Cuándo se restablece, como lo dice la app de Claude: «3:20 p. m.» hoy, «mañana 10:00», «vie 1:00». */
+function reinicio(ms: number): string {
+  const d = new Date(ms)
+  const hoy = new Date()
+  const hora = d.toLocaleTimeString('es', { hour: 'numeric', minute: '2-digit' })
+  if (d.toDateString() === hoy.toDateString()) return `se restablece a las ${hora}`
+  const manana = new Date(hoy)
+  manana.setDate(hoy.getDate() + 1)
+  if (d.toDateString() === manana.toDateString()) return `se restablece mañana ${hora}`
+  return `se restablece el ${d.toLocaleDateString('es', { weekday: 'short' })} ${hora}`
+}
+
 /** Cómo va una conversación, en pocas palabras. */
 export function estadoDeCreacion(c: Creacion, trabajando: boolean): string {
   if (trabajando) return c.fase === 'video' ? 'Haciendo el video…' : 'El agente está pensando…'
@@ -45,7 +57,8 @@ export function BarraChats({
   onAbrirCreacion,
   onAbrirProyecto,
   onBorrar,
-  onAjustes
+  onAjustes,
+  agenteActivo
 }: {
   creaciones: Creacion[]
   proyectos: Project[]
@@ -60,6 +73,8 @@ export function BarraChats({
   onAbrirProyecto: (id: string) => void
   onBorrar: (tipo: 'proyecto' | 'creacion', id: string) => Promise<void>
   onAjustes: () => void
+  /** El agente con el que trabajas: su uso es el que se ve abajo. */
+  agenteActivo?: string
 }) {
   const [borrando, setBorrando] = useState<{ tipo: 'proyecto' | 'creacion'; id: string; nombre: string } | null>(null)
   const [enCursoBorrar, setEnCursoBorrar] = useState(false)
@@ -69,8 +84,8 @@ export function BarraChats({
     let vivo = true
     const leer = () => void window.recorte.usoEstado?.().then((u) => vivo && setUso(u)).catch(() => {})
     leer()
-    // Cambia mientras el agente trabaja: se vuelve a mirar cada minuto.
-    const reloj = setInterval(leer, 60_000)
+    // Cambia mientras el agente trabaja (y Recorte lee Claude al abrirse): se vuelve a mirar cada 30 s.
+    const reloj = setInterval(leer, 30_000)
     return () => {
       vivo = false
       clearInterval(reloj)
@@ -90,11 +105,8 @@ export function BarraChats({
   const deChats = new Set(creaciones.map((c) => c.proyectoEditor).filter(Boolean))
   const aMano = [...proyectos].filter((p) => !deChats.has(p.id)).sort((a, b) => b.updatedAt - a.updatedAt)
 
-  // Lo que más importa del uso: el agente que más lleva y la voz.
-  const agente = uso?.servicios
-    .filter((s) => s.ventanas.length && s.id !== 'voz' && s.id !== 'flow')
-    .map((s) => ({ s, v: [...s.ventanas].sort((a, b) => b.usado - a.usado)[0] }))
-    .sort((a, b) => b.v.usado - a.v.usado)[0]
+  // Lo que más importa del uso: el agente con el que trabajas (sus ventanas, como en su app) y la voz.
+  const agente = uso?.servicios.find((s) => s.id === agenteActivo) ?? uso?.servicios.find((s) => s.ventanas.length && s.id !== 'voz' && s.id !== 'flow')
   const voz = uso?.servicios.find((s) => s.id === 'voz')
 
   return (
@@ -192,24 +204,38 @@ export function BarraChats({
       </div>
 
       {(agente || voz) && (
-        <button className="bc-uso" onClick={onAjustes} title="Ver el uso de todo en Ajustes">
+        <button className="bc-uso" onClick={onAjustes} title={`Ver el uso de todo en Ajustes${agente?.cuenta ? ` · ${agente.nombre} usa la cuenta ${agente.cuenta}` : ''}`}>
           {agente && (
             <>
-              <span className="bc-uso-fila">
-                <span>
-                  {agente.s.nombre.replace(/ Code$/, '')} · {agente.v.nombre}
+              <span className="bc-uso-titulo">
+                <b>{agente.nombre.replace(/ Code$/, '')}</b>
+                {agente.cuenta && <span>{agente.cuenta}</span>}
+              </span>
+              {agente.ventanas.length ? (
+                agente.ventanas.map((v) => (
+                  <span key={v.nombre} className="bc-uso-ventana">
+                    <span className="bc-uso-fila">
+                      <span>{v.nombre === '5 horas' ? 'Límite de 5 horas' : v.nombre === 'semana' ? 'Semanal' : v.nombre[0].toUpperCase() + v.nombre.slice(1)}</span>
+                      <b className={v.usado >= 0.9 ? 'is-alto' : ''}>{Math.round(v.usado * 100)} %</b>
+                    </span>
+                    <span className="bc-uso-barra">
+                      <i className={v.usado >= 0.9 ? 'is-alto' : ''} style={{ width: `${Math.round(v.usado * 100)}%` }} />
+                    </span>
+                    {v.renueva && <span className="bc-uso-reinicio">{reinicio(v.renueva)[0].toUpperCase() + reinicio(v.renueva).slice(1)}</span>}
+                  </span>
+                ))
+              ) : (
+                <span className="bc-uso-fila">
+                  <span>{agente.agotadoHasta ? `Sin plan hasta ${reinicio(agente.agotadoHasta)}` : agente.nota ?? 'Leyendo su uso…'}</span>
                 </span>
-                <b className={agente.v.usado >= 0.9 ? 'is-alto' : ''}>{Math.round(agente.v.usado * 100)} %</b>
-              </span>
-              <span className="bc-uso-barra">
-                <i className={agente.v.usado >= 0.9 ? 'is-alto' : ''} style={{ width: `${Math.round(agente.v.usado * 100)}%` }} />
-              </span>
+              )}
             </>
           )}
           {voz && (
-            <span className="bc-uso-fila">
-              <span>Voz de Google hoy</span>
-              <b className={voz.agotadoHasta ? 'is-agotado' : 'is-ok'}>{voz.agotadoHasta ? 'agotada' : 'disponible'}</b>
+            // Aparte, con su raya: no es parte del agente de arriba.
+            <span className="bc-uso-voz">
+              <span>Voz de Google · hoy</span>
+              <b className={voz.agotadoHasta ? 'is-agotado' : 'is-ok'}>{voz.agotadoHasta ? `agotada, ${reinicio(voz.agotadoHasta)}` : 'disponible'}</b>
             </span>
           )}
         </button>

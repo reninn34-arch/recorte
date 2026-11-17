@@ -73,7 +73,13 @@ try {
 
   // Para el MCP, en texto.
   const texto = textoUso(e)
-  assert.match(texto, /Claude Code \[queda poco\]: 5 horas: 0 % usado.*semana: 95 % usado/)
+  // Con la cuenta de Claude Code, si tiene una (puede no ser la de la app de Claude).
+  assert.match(texto, /Claude Code( \(cuenta [^)]+\))? \[queda poco\]: 5 horas: 0 % usado.*semana: 95 % usado/)
+  const { cuentaClaude } = await import('../src/main/uso.ts')
+  const cfg = join(dir, 'claude.json')
+  writeFileSync(cfg, JSON.stringify({ oauthAccount: { emailAddress: 'alguien@ejemplo.com' } }))
+  assert.equal(cuentaClaude(cfg), 'alguien@ejemplo.com')
+  assert.equal(cuentaClaude(join(dir, 'no-existe.json')), undefined)
   assert.match(texto, /Voz de Google \[AGOTADO\]/)
   console.log('uso de agentes, voz y Flow: se lee, se guarda y avisa antes de hacer ✓')
 } finally {

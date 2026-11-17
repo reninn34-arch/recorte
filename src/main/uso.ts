@@ -172,6 +172,21 @@ export function vozAgotadaHasta(ahora = Date.now()): number | null {
   return h && h > ahora ? h : null
 }
 
+/** La cuenta con la que está conectado Claude Code (puede no ser la de la app de Claude del usuario). */
+export function cuentaClaude(ruta = join(homedir(), '.claude.json')): string | undefined {
+  try {
+    const c = JSON.parse(readFileSync(ruta, 'utf8')) as { oauthAccount?: { emailAddress?: unknown } }
+    return typeof c.oauthAccount?.emailAddress === 'string' ? c.oauthAccount.emailAddress : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Cuándo se leyó por última vez el uso de Claude (ms), o 0. */
+export function claudeLeido(): number {
+  return datos.claude?.leido ?? 0
+}
+
 const NIVEL_ALTO = 0.9
 
 function nivelDe(ventanas: VentanaUso[], agotadoHasta: number | undefined, ahora: number): ServicioUso['nivel'] {
@@ -198,7 +213,17 @@ export function estadoUso(op: { agentes: string[]; flow?: { correo: string; cred
       const c = datos.claude
       // Las ventanas que ya se renovaron vuelven a cero.
       const ventanas = (c?.ventanas ?? []).map((v) => (v.renueva && v.renueva <= ahora ? { ...v, usado: 0, renueva: undefined } : v))
-      servicios.push({ id, nombre: NOMBRES[id], ventanas, ...(c ? { leido: c.leido } : {}), ...(hasta ? { agotadoHasta: hasta } : {}), nivel: nivelDe(ventanas, hasta, ahora), actualizable: true })
+      const cuenta = cuentaClaude()
+      servicios.push({
+        id,
+        nombre: NOMBRES[id],
+        ventanas,
+        ...(cuenta ? { cuenta } : {}),
+        ...(c ? { leido: c.leido } : {}),
+        ...(hasta ? { agotadoHasta: hasta } : {}),
+        nivel: nivelDe(ventanas, hasta, ahora),
+        actualizable: true
+      })
       continue
     }
     if (id === 'codex') {

@@ -901,6 +901,7 @@ export default function App() {
       onAbrirProyecto={abrirDesdeLista}
       onBorrar={borrarDeLista}
       onAjustes={() => setVista('ajustes')}
+      agenteActivo={agentes.activo?.id}
     />
   )
   const avisos = (
