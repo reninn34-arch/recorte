@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { unlinkSync, writeFileSync } from 'node:fs'
+import { readdirSync, statSync, unlinkSync, writeFileSync, type Dirent } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ADAPTADORES, type EventoAgente } from './adaptadoresagente'
@@ -18,6 +18,34 @@ import { entornoParaAgente, falloDeAgente, matarArbol, Parado } from './ia'
  * Los agentes con sesión (Claude Code y Codex) devuelven su id: el turno siguiente la
  * retoma, así el agente recuerda lo que vio e hizo y no lo vuelve a leer ni a medir.
  */
+
+/** Cuánto puede pasar un trabajo largo sin decir nada ni tocar archivos antes de darlo por trabado. */
+export const SIN_AVANCE = 20 * 60_000
+
+/**
+ * Lo último que cambió en la carpeta de trabajo (y hasta dos niveles dentro, sin node_modules), en ms: así se sabe que
+ * el agente sigue avanzando aunque esté esperando en silencio (la voz, Flow, un render).
+ */
+export function ultimoArchivo(carpeta: string, nivel = 0): number {
+  let ultimo = 0
+  let entradas: Dirent[]
+  try {
+    entradas = readdirSync(carpeta, { withFileTypes: true })
+  } catch {
+    return 0
+  }
+  for (const e of entradas) {
+    if (e.name === 'node_modules' || e.name === '.git') continue
+    const ruta = join(carpeta, e.name)
+    try {
+      ultimo = Math.max(ultimo, statSync(ruta).mtimeMs)
+    } catch {
+      continue
+    }
+    if (e.isDirectory() && nivel < 2) ultimo = Math.max(ultimo, ultimoArchivo(ruta, nivel + 1))
+  }
+  return ultimo
+}
 
 /** Qué agente corre la orden y si sabe trabajar con herramientas (null si no: una API, o desconocido). */
 export function agenteConHerramientas(base: string): { agente: string; conSesion: boolean } | null {
@@ -117,6 +145,7 @@ export async function turnoAgente(p: PeticionTurno): Promise<ResultadoTurno> {
       if (cerrado) return
       cerrado = true
       clearTimeout(reloj)
+      if (sinAvance) clearInterval(sinAvance)
       clearInterval(vigia)
       if (graciaFinal) clearTimeout(graciaFinal)
       p.senal?.removeEventListener('abort', alParar)
@@ -180,10 +209,25 @@ export async function turnoAgente(p: PeticionTurno): Promise<ResultadoTurno> {
       }
     }
 
+    // Un trabajo largo (un video entero) no se corta por reloj mientras avance: solo si lleva SIN_AVANCE sin decir nada
+    // ni tocar archivos en su carpeta (esperar a la voz o a Flow también crea archivos), o si pasa el tope de seguridad.
+    // Un turno corto (una pregunta) sí tiene su tiempo fijo.
+    const largo = p.timeoutMs >= 30 * 60_000
+    const tope = largo ? Math.max(p.timeoutMs * 3, 2 * 60 * 60_000) : p.timeoutMs
     const reloj = setTimeout(() => {
       matarArbol(hijo)
-      fin(new Error(`El agente tardó demasiado (${Math.round(p.timeoutMs / 60_000)} min).`))
-    }, p.timeoutMs)
+      fin(new Error(largo ? `El agente lleva ${Math.round(tope / 60_000)} min trabajando: lo paré por si se quedó dando vueltas.` : `El agente tardó demasiado (${Math.round(p.timeoutMs / 60_000)} min).`))
+    }, tope)
+    const sinAvance = largo
+      ? setInterval(() => {
+          if (cerrado) return
+          const ultimo = Math.max(ultimaSalida, ultimoArchivo(p.cwd))
+          if (Date.now() - ultimo > SIN_AVANCE) {
+            matarArbol(hijo)
+            fin(new Error(`El agente lleva ${Math.round(SIN_AVANCE / 60_000)} min sin avanzar (sin decir nada ni crear archivos).`))
+          }
+        }, 60_000)
+      : null
     const alParar = () => {
       matarArbol(hijo)
       fin(new Parado())

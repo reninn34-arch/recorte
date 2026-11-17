@@ -491,7 +491,16 @@ app.whenReady().then(() => {
     const clave = await ajustes.claveVoz()
     if (clave) return generarVozGemini(texto, voz, clave, salida)
     if (!estadoVozGoogle().correo) throw new Error('no hay una cuenta de Google ni una clave de AI Studio conectada (Ajustes → Voz)')
-    return generarVozGoogle(texto, voz, salida)
+    // Con la cuenta, AI Studio responde 429 tanto por el límite por minuto como por el del día: se espera un minuto y se
+    // vuelve a pedir unas veces; si sigue, es la cuota del día.
+    for (let intento = 0; ; intento++) {
+      try {
+        return await generarVozGoogle(texto, voz, salida)
+      } catch (e) {
+        if (intento >= 4 || !/\(429\)/.test(e instanceof Error ? e.message : String(e))) throw e
+        await new Promise((r) => setTimeout(r, 60_000))
+      }
+    }
   }
   /**
    * Mientras el agente trabaja (en la charla del plan o haciendo el video), Recorte atiende sus

@@ -62,54 +62,102 @@ function audioDe(respuesta: unknown): { datos: string; mime?: string } | null {
   return null
 }
 
-export async function generarVozGemini(texto: string, voz: string, clave: string, salida: string): Promise<void> {
+/**
+ * Un 429 de Google: si es el límite por minuto (no el del día), cuántos segundos esperar (lo que pide Google, o 40);
+ * null si es la cuota del día y no vale la pena esperar.
+ */
+export function esperaPorLimite(detalle: string): number | null {
+  if (/per ?day|PerDay|daily/i.test(detalle)) return null
+  const pide = Number(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/.exec(detalle)?.[1] ?? NaN)
+  return Number.isFinite(pide) ? Math.min(90, Math.max(5, Math.ceil(pide))) : 40
+}
+
+/** Cuántas veces se espera el límite por minuto de una misma frase antes de darse por vencido. */
+const REINTENTOS_POR_MINUTO = 6
+
+/** Un pedido de voz a un modelo: el audio quedó en `salida`, hay que esperar (límite por minuto) o pasar al otro modelo. */
+type IntentoVoz = { hecho: true } | { esperar: number } | { error: string; seguir: boolean }
+
+async function pedirVoz(modelo: string, texto: string, voz: string, clave: string, salida: string): Promise<IntentoVoz> {
+  const controlador = new AbortController()
+  const reloj = setTimeout(() => controlador.abort(), 180_000)
+  try {
+    const r = await fetch(API, {
+      method: 'POST',
+      signal: controlador.signal,
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': clave },
+      body: JSON.stringify({
+        model: modelo,
+        input: [
+          {
+            type: 'user_input',
+            content: [{ type: 'text', text: texto, annotations: [{ type: 'speech_metadata', style: ESTILO }] }]
+          }
+        ],
+        response_format: { type: 'audio' },
+        generation_config: { speech_config: [{ voice: voz }] }
+      })
+    })
+    if (!r.ok) {
+      const completo = await r.text()
+      const detalle = completo.slice(0, 300)
+      if (r.status === 400 || r.status === 401 || r.status === 403) {
+        throw new Error(
+          r.status === 400 && /api key/i.test(detalle)
+            ? 'La clave de AI Studio no es válida. Revísala en el paso Voz.'
+            : `Google rechazó la petición (${r.status}): ${detalle}`
+        )
+      }
+      if (r.status === 429) {
+        // El límite por minuto se espera; el del día no (se prueba el otro modelo).
+        const espera = esperaPorLimite(completo)
+        return espera !== null ? { esperar: espera } : { error: 'Se acabó la cuota de voz de tu clave por hoy.', seguir: true }
+      }
+      // 404 (modelo no disponible): se prueba el siguiente.
+      return { error: `Google respondió ${r.status}: ${detalle}`, seguir: true }
+    }
+    const audio = audioDe(await r.json())
+    if (!audio) return { error: 'La respuesta de Google no trajo audio.', seguir: true }
+    const bytes = Buffer.from(audio.datos, 'base64')
+    writeFileSync(salida, bytes.subarray(0, 4).toString('ascii') === 'RIFF' ? bytes : wavDesdePcm(bytes))
+    return { hecho: true }
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') return { error: 'Google tardó demasiado en generar la voz.', seguir: true }
+    throw error
+  } finally {
+    clearTimeout(reloj)
+  }
+}
+
+/**
+ * Una frase con la voz de Gemini (la clave de AI Studio del usuario). Si Google pide esperar por el límite de voces por
+ * minuto, se espera lo que dice y se vuelve a pedir (hasta REINTENTOS_POR_MINUTO veces); con la cuota del día, el modelo
+ * ligero; si tampoco, el error.
+ */
+export async function generarVozGemini(
+  texto: string,
+  voz: string,
+  clave: string,
+  salida: string,
+  alEsperar: (segundos: number) => void = () => {},
+  dormir: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms))
+): Promise<void> {
   let ultimoError = ''
   for (const modelo of MODELOS_VOZ) {
-    const controlador = new AbortController()
-    const reloj = setTimeout(() => controlador.abort(), 180_000)
-    try {
-      const r = await fetch(API, {
-        method: 'POST',
-        signal: controlador.signal,
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': clave },
-        body: JSON.stringify({
-          model: modelo,
-          input: [
-            {
-              type: 'user_input',
-              content: [{ type: 'text', text: texto, annotations: [{ type: 'speech_metadata', style: ESTILO }] }]
-            }
-          ],
-          response_format: { type: 'audio' },
-          generation_config: { speech_config: [{ voice: voz }] }
-        })
-      })
-      if (!r.ok) {
-        const detalle = (await r.text()).slice(0, 300)
-        if (r.status === 400 || r.status === 401 || r.status === 403) {
-          throw new Error(
-            r.status === 400 && /api key/i.test(detalle)
-              ? 'La clave de AI Studio no es válida. Revísala en el paso Voz.'
-              : `Google rechazó la petición (${r.status}): ${detalle}`
-          )
+    for (let intento = 0; ; intento++) {
+      const r = await pedirVoz(modelo, texto, voz, clave, salida)
+      if ('hecho' in r) return
+      if ('esperar' in r) {
+        if (intento >= REINTENTOS_POR_MINUTO) {
+          ultimoError = 'Google sigue pidiendo esperar (límite de voces por minuto). Prueba en unos minutos.'
+          break
         }
-        // 404 (modelo no disponible) o 429 (cuota): se prueba el siguiente modelo.
-        ultimoError = r.status === 429 ? 'Se acabó la cuota de voz de tu clave por hoy.' : `Google respondió ${r.status}: ${detalle}`
+        alEsperar(r.esperar)
+        await dormir(r.esperar * 1000)
         continue
       }
-      const audio = audioDe(await r.json())
-      if (!audio) {
-        ultimoError = 'La respuesta de Google no trajo audio.'
-        continue
-      }
-      const bytes = Buffer.from(audio.datos, 'base64')
-      writeFileSync(salida, bytes.subarray(0, 4).toString('ascii') === 'RIFF' ? bytes : wavDesdePcm(bytes))
-      return
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') ultimoError = 'Google tardó demasiado en generar la voz.'
-      else throw error
-    } finally {
-      clearTimeout(reloj)
+      ultimoError = r.error
+      break
     }
   }
   throw new Error(ultimoError || 'No pude generar la voz.')
