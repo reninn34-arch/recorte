@@ -24,6 +24,19 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.73',
+    fecha: '2026-11-16',
+    resumen: 'Los modelos de ChatGPT aparecen desde el primer momento, también en una instalación nueva.',
+    novedades: [
+      {
+        icono: 'check',
+        titulo: 'Modelos de ChatGPT en una instalación nueva',
+        texto:
+          'Antes, la lista de modelos de ChatGPT (Codex) salía vacía hasta haber usado Codex una vez. Ahora Recorte se la pide a Codex sin gastar nada, y en cuanto lo usas aparecen los de tu cuenta.'
+      }
+    ]
+  },
+  {
     version: '0.1.72',
     fecha: '2026-11-16',
     resumen: 'En Mac, las versiones nuevas se bajan solas y se instalan con «Reiniciar y actualizar», como en Windows.',
