@@ -80,6 +80,11 @@ try {
   writeFileSync(cfg, JSON.stringify({ oauthAccount: { emailAddress: 'alguien@ejemplo.com' } }))
   assert.equal(cuentaClaude(cfg), 'alguien@ejemplo.com')
   assert.equal(cuentaClaude(join(dir, 'no-existe.json')), undefined)
+  // Si el usuario cambia de cuenta en Claude Code, la lectura de la anterior no vale (se vuelve a leer).
+  const { claudeVigente } = await import('../src/main/uso.ts')
+  apuntarClaude({ unifiedWindows: { five_hour: { utilization: 0.58, resetsAt: 1795000000 } } }, ahora, 'antes@ejemplo.com')
+  assert.equal(claudeVigente('antes@ejemplo.com'), true)
+  assert.equal(claudeVigente('ahora@ejemplo.com'), false, 'otra cuenta: no vale')
   assert.match(texto, /Voz de Google \[AGOTADO\]/)
   console.log('uso de agentes, voz y Flow: se lee, se guarda y avisa antes de hacer ✓')
 } finally {

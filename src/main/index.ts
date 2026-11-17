@@ -41,7 +41,7 @@ import { exportarTimeline } from './exportar'
 import { VistaPrevia } from './vistaprevia'
 import { iniciarMcpRecorte } from './mcpapp'
 import { resolverBinario } from './binarios'
-import { apuntarAgotado, apuntarClaudeDeSalida, apuntarVoz, avisoAntesDeHacer, claudeLeido, estadoUso, iniciarUso } from './uso'
+import { apuntarAgotado, apuntarClaudeDeSalida, apuntarVoz, avisoAntesDeHacer, claudeLeido, claudeVigente, estadoUso, iniciarUso } from './uso'
 import { bloqueRetoques, describirRetoques } from '../shared/retoques'
 import { Creaciones, EXTENSIONES_ADJUNTOS, pasoGuion, pasoVideo, type ConfigAgente } from './creaciones'
 import { convertirAVoz, generarVozGemini, prepararVoz } from './voz'
@@ -526,15 +526,25 @@ app.whenReady().then(() => {
   /** El uso de todo lo que tiene cuota (los agentes instalados, la voz si está conectada, Flow si tiene cuentas). */
   const usoAhora = async (): Promise<EstadoUso> => {
     const agentes = (await estadoAgentes()).filter((a) => a.instalado && a.conectado).map((a) => a.id)
+    // Cambió la cuenta de Claude Code (o nunca se leyó con esta): se lee ya, de fondo; el panel la ve en su siguiente vistazo.
+    if (agentes.includes('claude') && !claudeVigente()) leerClaude()
     const voz = Boolean(estadoVozGoogle().correo || (await ajustes.claveVoz()))
     return estadoUso({ agentes, voz, flow: estadoFlow().cuentas.map((c) => ({ correo: c.correo, creditos: c.creditos, leido: c.leido })) })
   }
-  /** Vuelve a leer el uso de uno: Claude con una consulta mínima (el modelo más barato), Flow sus créditos. */
+  /** Una lectura de Claude a la vez (con la consulta mínima, el modelo más barato). */
+  let leyendoClaude: Promise<void> | null = null
+  const leerClaude = (): Promise<void> => {
+    if (!leyendoClaude && resolverBinario('claude')) {
+      leyendoClaude = correr('claude -p "Responde solo: ok" --model haiku --output-format stream-json --verbose', 90_000, 2_000_000)
+        .then((r) => void apuntarClaudeDeSalida(r.salida))
+        .finally(() => (leyendoClaude = null))
+    }
+    return leyendoClaude ?? Promise.resolve()
+  }
+  /** Vuelve a leer el uso de uno: Claude con una consulta mínima, Flow sus créditos. */
   const usoActualizar = async (id: string): Promise<EstadoUso> => {
-    if (id === 'claude' && resolverBinario('claude')) {
-      const r = await correr('claude -p "Responde solo: ok" --model haiku --output-format stream-json --verbose', 90_000, 2_000_000)
-      apuntarClaudeDeSalida(r.salida)
-    } else if (id === 'flow') await leerSaldosFlow()
+    if (id === 'claude') await leerClaude()
+    else if (id === 'flow') await leerSaldosFlow()
     return usoAhora()
   }
   // Claude no dice su uso hasta que trabaja: al abrir Recorte (y cada hora, si en ese rato el agente no trabajó, que

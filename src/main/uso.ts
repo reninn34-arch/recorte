@@ -15,7 +15,8 @@ import { guardar } from './disco'
  */
 
 interface Datos {
-  claude?: { ventanas: VentanaUso[]; leido: number }
+  /** La última lectura de Claude y de qué cuenta era (si el usuario cambia de cuenta, no vale). */
+  claude?: { ventanas: VentanaUso[]; leido: number; cuenta?: string }
   /** Hasta cuándo se quedó sin plan cada agente (ms), si lo dijo. */
   agotados: Record<string, { hasta?: number; leido: number }>
   voz?: { dia: string; frases: number; agotadaHasta?: number }
@@ -41,7 +42,7 @@ const grabar = () => {
 const NOMBRE_VENTANA: Record<string, string> = { five_hour: '5 horas', seven_day: 'semana', seven_day_opus: 'semana (Opus)', seven_day_sonnet: 'semana (Sonnet)' }
 
 /** Un `rate_limit_event` de Claude Code: el uso de cada ventana (0 a 1) y cuándo se renueva. */
-export function apuntarClaude(info: unknown, ahora = Date.now()): void {
+export function apuntarClaude(info: unknown, ahora = Date.now(), cuenta: string | undefined = cuentaClaude()): void {
   if (!info || typeof info !== 'object') return
   const i = info as Record<string, unknown>
   const ventanas: VentanaUso[] = []
@@ -59,7 +60,7 @@ export function apuntarClaude(info: unknown, ahora = Date.now()): void {
     })
   }
   if (!ventanas.length) return
-  datos.claude = { ventanas, leido: ahora }
+  datos.claude = { ventanas, leido: ahora, ...(cuenta ? { cuenta } : {}) }
   grabar()
 }
 
@@ -182,9 +183,15 @@ export function cuentaClaude(ruta = join(homedir(), '.claude.json')): string | u
   }
 }
 
-/** Cuándo se leyó por última vez el uso de Claude (ms), o 0. */
+/** Si la última lectura de Claude es de la cuenta con la que está conectado ahora. */
+export function claudeVigente(cuenta: string | undefined = cuentaClaude()): boolean {
+  const c = datos.claude
+  return Boolean(c && c.cuenta === cuenta)
+}
+
+/** Cuándo se leyó por última vez el uso de Claude con la cuenta de ahora (ms), o 0 (nunca, o era de otra cuenta). */
 export function claudeLeido(): number {
-  return datos.claude?.leido ?? 0
+  return claudeVigente() ? (datos.claude?.leido ?? 0) : 0
 }
 
 const NIVEL_ALTO = 0.9
@@ -210,7 +217,8 @@ export function estadoUso(op: { agentes: string[]; flow?: { correo: string; cred
     const agotado = datos.agotados[id]
     const hasta = agotado?.hasta && agotado.hasta > ahora ? agotado.hasta : undefined
     if (id === 'claude') {
-      const c = datos.claude
+      // Una lectura de otra cuenta (el usuario cambió de cuenta en Claude Code) no vale: se vuelve a leer.
+      const c = claudeVigente() ? datos.claude : undefined
       // Las ventanas que ya se renovaron vuelven a cero.
       const ventanas = (c?.ventanas ?? []).map((v) => (v.renueva && v.renueva <= ahora ? { ...v, usado: 0, renueva: undefined } : v))
       const cuenta = cuentaClaude()
