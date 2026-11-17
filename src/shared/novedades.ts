@@ -24,6 +24,25 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.80',
+    fecha: '2026-11-17',
+    resumen: 'El uso de tu agente se ve como en su propia app: sus dos límites, cuándo se restablecen y con qué cuenta trabaja.',
+    novedades: [
+      {
+        icono: 'sliders',
+        titulo: 'El uso, claro y al día',
+        texto:
+          'Abajo a la izquierda ves el agente con el que trabajas, con su límite de 5 horas y el semanal, y cuándo se restablece cada uno. La voz de Google va aparte. Claude se lee solo al abrir Recorte.'
+      },
+      {
+        icono: 'key',
+        titulo: 'Con qué cuenta trabaja',
+        texto:
+          'Si tu agente está conectado con otra cuenta que la que usas en su app, ahora lo ves: aparece el correo de la cuenta debajo de su nombre.'
+      }
+    ]
+  },
+  {
     version: '0.1.79',
     fecha: '2026-11-17',
     resumen: 'Recorte se ve como un chat con tu agente: tus conversaciones a la izquierda y la caja para pedir el video al centro.',
