@@ -24,6 +24,31 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.76',
+    fecha: '2026-11-17',
+    resumen: 'Los personajes animados mueven los brazos sin cortar la ropa, y los textos letra a letra ya no desaparecen en el monitor.',
+    novedades: [
+      {
+        icono: 'sparkles',
+        titulo: 'Brazos que se mueven sin cortar la ropa',
+        texto:
+          'Cuando un personaje recortado abre los brazos (explicar, saludar, señalar), lo que tapaban sus manos, como el borde de una falda o de un saco, ahora se rellena con la tela de alrededor. Ya no queda un hueco ni unas rayas que se van con el brazo.'
+      },
+      {
+        icono: 'type',
+        titulo: 'Los textos letra a letra no se borran en el monitor',
+        texto:
+          'Un texto que se escribe letra a letra (una carta, un telegrama) podía verse en blanco en la vista previa o al mirar un cuadro suelto, porque volvía a escribirse desde cero. Ahora, si ya se escribió, se ve entero.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Claude Code sigue conectado al actualizar',
+        texto:
+          'Al actualizar Recorte, su conexión con Claude Code (MCP) espera a que la versión anterior suelte su puerto y se queda en el mismo. Si tiene que cambiarlo, se vuelve a registrar sola en Claude Code.'
+      }
+    ]
+  },
+  {
     version: '0.1.75',
     fecha: '2026-11-16',
     resumen: 'Los videos largos con IA ya no se cortan a los 40 minutos, y la voz espera el límite de Google en vez de rendirse.',
