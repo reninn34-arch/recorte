@@ -24,6 +24,31 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.78',
+    fecha: '2026-11-17',
+    resumen: 'Recorte te dice cuánto le queda a cada agente y a la voz, y te avisa antes de que algo se quede a medias.',
+    novedades: [
+      {
+        icono: 'sliders',
+        titulo: 'Cuánto te queda de cada cosa',
+        texto:
+          'En Ajustes › Uso ves cuánto llevas de Claude (en estas 5 horas y en la semana), de tu plan de ChatGPT, de la voz de Google de hoy y de los créditos de Flow, con cuándo se renueva cada uno.'
+      },
+      {
+        icono: 'alerta',
+        titulo: 'Aviso antes de hacer el video',
+        texto:
+          'Si al agente le queda poco de su plan, o la voz de Google ya se acabó por hoy, Recorte te lo dice en el plan, antes de empezar, y no a mitad del video.'
+      },
+      {
+        icono: 'volumen',
+        titulo: 'Si la voz se acaba, sabes por qué',
+        texto:
+          'Si se acaba la cuota diaria de voz a mitad del video, el video se entrega igual, y Recorte te dice cuántas frases quedaron sin voz, por qué y cómo completarlas.'
+      }
+    ]
+  },
+  {
     version: '0.1.77',
     fecha: '2026-11-17',
     resumen: 'Los títulos se ven igual en el monitor, en el MP4 y en el video del agente: mismo tamaño, con grano y sin manchas.',
