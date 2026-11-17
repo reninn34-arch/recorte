@@ -8,6 +8,7 @@ import { AvisoActualizacion } from './components/AvisoActualizacion'
 import { Novedades } from './components/Novedades'
 import { Inicio } from './components/Inicio'
 import { BarraChats, Escritorio } from './components/BarraChats'
+import { MisVideos } from './components/MisVideos'
 import { EstudioCreacion } from './components/EstudioCreacion'
 import { EstudioAgente, type ExtrasChat } from './components/EstudioAgente'
 import { ChatCreacion } from './components/ChatCreacion'
@@ -475,11 +476,8 @@ export default function App() {
       setCreacion((c) => (c && c.id === id ? nueva : c))
       const ultimo = nueva.mensajes[nueva.mensajes.length - 1]
       avisarFin(ultimo?.error ? 'El agente no pudo terminar: mira el estudio.' : nueva.fase === 'listo' ? 'Tu video con IA está listo.' : (ultimo?.texto ?? 'Listo.'))
-      // El agente entregó una versión nueva y el usuario sigue en su estudio: directo al editor,
-      // con cada recurso en su pista para retocarlo a mano. Si se fue a otra cosa, no se le mueve.
-      const versionNueva = nueva.modo === 'agente' && nueva.fase === 'listo' && nueva.agente?.resultado?.tipo === 'video' && nueva.editorSalida !== nueva.salida
-      const mirando = viendo.current.creacion === id && (viendo.current.vista === 'estudio' || viendo.current.vista === 'proyectos')
-      if (versionNueva && !ultimo?.error && mirando) await abrirEnEditor(id)
+      // El video entregado se queda en la conversación como una tarjeta: al editor se entra con «Abrir en el editor».
+      setCreaciones(await window.recorte.creacionesListar().catch(() => creaciones))
     } catch (error) {
       setAviso(mensajeDe(error))
     } finally {
@@ -531,9 +529,9 @@ export default function App() {
       setAviso('No encontré esa creación.')
       return
     }
+    // Siempre la conversación (como en un chat): sus videos están en ella, cada uno con «Abrir en el editor».
     setCreacion(c)
     setVista('estudio')
-    if (c.modo === 'agente' && c.salida && c.agente?.resultado?.tipo === 'video' && trabajos[id] === undefined) await abrirEnEditor(id)
   }
 
   // ===== El chat de una creación del agente (en su pantalla y en el editor) =====
@@ -563,8 +561,6 @@ export default function App() {
       setCreacion((c) => (c && c.id === id ? nueva : c))
       setCreaciones(await window.recorte.creacionesListar().catch(() => creaciones))
       avisarFin(nueva.fase === 'listo' ? 'Tu video con IA está listo.' : (nueva.mensajes.at(-1)?.texto ?? 'Listo.'))
-      const mirando = viendo.current.creacion === id && (viendo.current.vista === 'estudio' || viendo.current.vista === 'proyectos')
-      if (mirando && nueva.agente?.resultado?.tipo === 'video' && nueva.editorSalida !== nueva.salida) await abrirEnEditor(id)
     })()
   }
 
@@ -630,8 +626,35 @@ export default function App() {
         onAnotar={anotarEnCreacion}
         onConectar={() => setVista('inicio')}
         editor={editor}
+        onNuevoVideo={c.modo === 'agente' ? (texto) => void otroVideoAsi(c, texto) : undefined}
       />
     )
+  }
+
+  /** Los videos de una conversación (la creación con la que empezó y las de «Otro video así»), del primero al último. */
+  const hiloDe = (c: Creacion) => c.hilo ?? c.id
+  const delHilo = (c: Creacion) => creaciones.filter((x) => hiloDe(x) === hiloDe(c)).sort((a, b) => a.createdAt - b.createdAt)
+
+  /** «Otro video así» en la misma conversación: una creación nueva con el mismo estilo (y lo hablado), y su plan. */
+  async function otroVideoAsi(c: Creacion, texto: string) {
+    if (trabajandoCreacion) return
+    try {
+      const nueva = await window.recorte.creacionOtroAsi(c.id, texto)
+      setCreaciones(await window.recorte.creacionesListar().catch(() => creaciones))
+      setCreacion(nueva)
+      setVista('estudio')
+      void pasoCreacion(nueva.id, () => window.recorte.agentePlan(nueva.id))
+    } catch (error) {
+      setAviso(`No pude empezar el video nuevo: ${mensajeDe(error)}`)
+    }
+  }
+
+  /** Abre en el editor un video de la conversación (también uno anterior): su chat va con él. */
+  async function abrirVideoDeConversacion(id: string) {
+    const c = await window.recorte.creacionAbrir(id).catch(() => null)
+    if (!c) return setAviso('No encontré ese video.')
+    setCreacion(c)
+    await abrirEnEditor(id)
   }
 
   function conPedido(c: Creacion, pedido?: string): Creacion {
@@ -893,7 +916,9 @@ export default function App() {
       creaciones={creaciones}
       proyectos={proyectos}
       enCurso={enCurso}
-      activa={vista === 'estudio' ? creacion?.id : undefined}
+      activa={vista === 'estudio' && creacion ? hiloDe(creacion) : undefined}
+      viendoVideos={vista === 'videos'}
+      onMisVideos={() => setVista('videos')}
       importando={importando}
       onNueva={() => setVista('inicio')}
       onEditarAMano={() => void importar()}
@@ -923,14 +948,38 @@ export default function App() {
     )
   }
 
+  if (vista === 'videos') {
+    return (
+      <>
+        <Escritorio barra={barra}>
+          <MisVideos
+            creaciones={creaciones}
+            proyectos={proyectos}
+            onAbrirVideo={(id) => void abrirVideoDeConversacion(id)}
+            onVerConversacion={(id) => {
+              // La conversación entera: se abre por su último video (los anteriores quedan arriba).
+              const c = creaciones.find((x) => x.id === id)
+              const videos = c ? delHilo(c) : []
+              void abrirCreacionIA(videos[videos.length - 1]?.id ?? id)
+            }}
+            onAbrirProyecto={abrirDesdeLista}
+          />
+        </Escritorio>
+        {avisos}
+      </>
+    )
+  }
+
   if (vista === 'estudio' && creacion && creacion.modo === 'agente') {
     return (
       <>
         <Escritorio barra={barra}>
           <EstudioAgente
             creacion={creacion}
+            anteriores={delHilo(creacion).filter((x) => x.id !== creacion.id && x.createdAt < creacion.createdAt)}
             trabajando={trabajandoCreacion}
             onEditor={() => void creacionAlEditor()}
+            onAbrirVideo={(id) => void abrirVideoDeConversacion(id)}
             chat={(extras) => chatDeCreacion(creacion, undefined, extras)}
           />
         </Escritorio>

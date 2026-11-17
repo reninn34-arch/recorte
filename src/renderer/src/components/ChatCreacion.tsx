@@ -163,7 +163,7 @@ function cuandoEs(ms: number): string {
 }
 
 /** Cambio rápido (timeline, sin render) o que el agente lo rehaga. */
-type Via = 'rapido' | 'agente'
+type Via = 'rapido' | 'agente' | 'nuevo'
 
 export function ChatCreacion({
   creacion,
@@ -182,7 +182,9 @@ export function ChatCreacion({
   editor,
   centro,
   material,
-  entrega
+  entrega,
+  antes,
+  onNuevoVideo
 }: {
   creacion: Creacion
   agentes: Agentes
@@ -209,6 +211,10 @@ export function ChatCreacion({
   material?: React.ReactNode
   /** El video entregado, como una tarjeta al final de la conversación. */
   entrega?: React.ReactNode
+  /** Los videos anteriores de esta conversación, arriba de todo (como lo ya hablado en un chat). */
+  antes?: React.ReactNode
+  /** «Otro video así»: un video nuevo en esta conversación, con el mismo estilo (el de ahora queda intacto). */
+  onNuevoVideo?: (texto: string) => void
 }) {
   const c = creacion
   const lista = useRef<HTMLDivElement | null>(null)
@@ -292,7 +298,10 @@ export function ChatCreacion({
 
   function enviar(texto: string) {
     if (ocupado) return
-    if (hayVideo && editor && via === 'rapido') void cambioRapido(texto)
+    if (hayVideo && via === 'nuevo' && onNuevoVideo) {
+      setVia(editor ? 'rapido' : 'agente')
+      onNuevoVideo(texto)
+    } else if (hayVideo && editor && via === 'rapido') void cambioRapido(texto)
     else onPedir(texto)
   }
 
@@ -328,6 +337,7 @@ export function ChatCreacion({
       )}
 
       <div className="chat-lista" ref={lista}>
+        {antes}
         <div className="chat-msg usuario">
           <p>{c.peticion}</p>
           {c.adjuntos.length > 0 && !material && <span className="chat-ref">{c.adjuntos.length} {c.adjuntos.length === 1 ? 'archivo' : 'archivos'}</span>}
@@ -465,14 +475,21 @@ export function ChatCreacion({
       </div>
 
       <div className="chat-redactar">
-        {hayVideo && editor && (
-          <div className="cr-via" role="radiogroup" aria-label="Cómo hacer el cambio">
-            <button className={via === 'rapido' ? 'is-on' : ''} onClick={() => setVia('rapido')} title="Cambia la timeline al momento: textos, cortes, orden, voz… sin rehacer el video">
-              <Icon name="scissors" size={12} /> Cambio rápido
+        {hayVideo && (editor || onNuevoVideo) && (
+          <div className="cr-via" role="radiogroup" aria-label="Qué hacer con tu mensaje">
+            {editor && (
+              <button className={via === 'rapido' ? 'is-on' : ''} onClick={() => setVia('rapido')} title="Cambia la timeline al momento: textos, cortes, orden, voz… sin rehacer el video">
+                <Icon name="scissors" size={12} /> Cambio rápido
+              </button>
+            )}
+            <button className={via === 'agente' || (!editor && via === 'rapido') ? 'is-on' : ''} onClick={() => setVia('agente')} title="El agente rehace este video con su método (tarda y gasta más)">
+              <Icon name="sparkles" size={12} /> {editor ? 'Que lo rehaga el agente' : 'Cambiar este video'}
             </button>
-            <button className={via === 'agente' ? 'is-on' : ''} onClick={() => setVia('agente')} title="El agente rehace el video con su método (tarda y gasta más)">
-              <Icon name="sparkles" size={12} /> Que lo rehaga el agente
-            </button>
+            {onNuevoVideo && (
+              <button className={via === 'nuevo' ? 'is-on' : ''} onClick={() => setVia('nuevo')} title="Un video nuevo en esta conversación con el mismo estilo: el agente ya sabe cómo lo editaron y qué corregiste. Este video queda intacto.">
+                <Icon name="plus" size={12} /> Otro video así
+              </button>
+            )}
           </div>
         )}
         <CajaCrear
@@ -488,7 +505,9 @@ export function ChatCreacion({
             onAjustar,
             onAdjuntar,
             placeholder: hayVideo
-              ? via === 'rapido' && editor
+              ? via === 'nuevo'
+                ? 'De qué trata el video nuevo… (mismo estilo que este)'
+                : via === 'rapido' && editor
                 ? 'Cambia el título del inicio, quita el clip 3…'
                 : 'Qué cambiar del video…'
               : c.agente?.plan

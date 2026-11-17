@@ -290,6 +290,11 @@ export interface Creacion {
   aprobada?: number
   /** El estilo del que parte este video (otro video tuyo o uno de «Mis estilos»), en `trabajo/base-estilo/`. */
   base?: BaseEstilo
+  /**
+   * La conversación a la que pertenece: la creación con la que empezó («Otro video así» dentro de una conversación
+   * hace otro video en ella, con el mismo estilo). Sin él, la conversación es solo esta creación.
+   */
+  hilo?: string
   createdAt: number
   updatedAt: number
 }

@@ -1157,6 +1157,8 @@ app.whenReady().then(() => {
       ...(o.vozElegida ? { vozElegida: o.vozElegida } : {}),
       ...(o.directo ? { directo: true } : {})
     })
+    // En la misma conversación que aquella (la de la primera creación).
+    nueva.hilo = o.hilo ?? o.id
     return conBase(nueva, { creacion: o.id, version: v })
   })
   ipcMain.handle('estilos-propios:listar', () => propios.listar())

@@ -58,7 +58,9 @@ export function BarraChats({
   onAbrirProyecto,
   onBorrar,
   onAjustes,
-  agenteActivo
+  agenteActivo,
+  viendoVideos,
+  onMisVideos
 }: {
   creaciones: Creacion[]
   proyectos: Project[]
@@ -75,8 +77,11 @@ export function BarraChats({
   onAjustes: () => void
   /** El agente con el que trabajas: su uso es el que se ve abajo. */
   agenteActivo?: string
+  /** Si se está viendo «Mis videos». */
+  viendoVideos?: boolean
+  onMisVideos: () => void
 }) {
-  const [borrando, setBorrando] = useState<{ tipo: 'proyecto' | 'creacion'; id: string; nombre: string } | null>(null)
+  const [borrando, setBorrando] = useState<{ tipo: 'proyecto' | 'creacion'; id: string; nombre: string; ids?: string[] } | null>(null)
   const [enCursoBorrar, setEnCursoBorrar] = useState(false)
   const [uso, setUso] = useState<EstadoUso | null>(null)
 
@@ -93,10 +98,22 @@ export function BarraChats({
   }, [])
 
   // Las conversaciones, de la más reciente a la más vieja, en grupos por fecha.
-  const orden = [...creaciones].sort((a, b) => b.updatedAt - a.updatedAt)
-  const grupos: { nombre: string; lista: Creacion[] }[] = []
-  for (const c of orden) {
-    const g = grupoDe(c.updatedAt)
+  // Cada conversación, una vez: la creación con la que empezó y las de «Otro video así» (del primer video al último).
+  const porHilo = new Map<string, Creacion[]>()
+  for (const c of creaciones) {
+    const h = c.hilo ?? c.id
+    porHilo.set(h, [...(porHilo.get(h) ?? []), c])
+  }
+  const conversaciones = [...porHilo.entries()]
+    .map(([hilo, videos]) => {
+      const lista = videos.sort((a, b) => a.createdAt - b.createdAt)
+      return { hilo, primera: lista[0], ultima: lista[lista.length - 1], videos: lista, fecha: Math.max(...lista.map((v) => v.updatedAt)) }
+    })
+    .sort((a, b) => b.fecha - a.fecha)
+  type Conversacion = (typeof conversaciones)[number]
+  const grupos: { nombre: string; lista: Conversacion[] }[] = []
+  for (const c of conversaciones) {
+    const g = grupoDe(c.fecha)
     const ultimo = grupos[grupos.length - 1]
     if (ultimo?.nombre === g) ultimo.lista.push(c)
     else grupos.push({ nombre: g, lista: [c] })
@@ -118,7 +135,7 @@ export function BarraChats({
             <p>
               {borrando.tipo === 'proyecto'
                 ? 'Se va a la Papelera con su timeline, transcripción y proxys. Tu video original y lo que ya exportaste a tu carpeta no se tocan.'
-                : 'Se va a la Papelera con la conversación, su guion, voz y versiones. Las copias que ya están en tu carpeta de videos no se tocan.'}
+                : `Se va a la Papelera con la conversación${borrando.ids && borrando.ids.length > 1 ? ` y sus ${borrando.ids.length} videos` : ''}: guion, voz y versiones. Las copias que ya están en tu carpeta de videos no se tocan.`}
             </p>
             <div className="confirmar-botones">
               <button className="btn small ghost" onClick={() => setBorrando(null)} disabled={enCursoBorrar}>
@@ -130,7 +147,8 @@ export function BarraChats({
                 onClick={async () => {
                   setEnCursoBorrar(true)
                   try {
-                    await onBorrar(borrando.tipo, borrando.id)
+                    // Una conversación con varios videos: se van todos.
+                    for (const id of borrando.ids ?? [borrando.id]) await onBorrar(borrando.tipo, id)
                     setBorrando(null)
                   } finally {
                     setEnCursoBorrar(false)
@@ -155,24 +173,34 @@ export function BarraChats({
       <button className="bc-accion" onClick={onEditarAMano} disabled={importando}>
         <Icon name="film" size={16} /> {importando ? 'Importando…' : 'Editar un video a mano'}
       </button>
+      <button className={`bc-accion ${viendoVideos ? 'is-activa' : ''}`} onClick={onMisVideos}>
+        <Icon name="layers" size={16} /> Mis videos
+      </button>
 
       <div className="bc-lista">
         {grupos.map((g) => (
           <div key={g.nombre} className="bc-grupo">
             <span className="bc-grupo-nombre">{g.nombre}</span>
-            {g.lista.map((c) => {
-              const nombre = c.guion?.titulo ?? c.nombre
-              const trabajando = Boolean(enCurso[c.id])
+            {g.lista.map((conv) => {
+              const nombre = conv.primera.guion?.titulo ?? conv.primera.nombre
+              const trabajando = conv.videos.some((v) => enCurso[v.id])
+              const n = conv.videos.length
               return (
-                <div key={c.id} className={`bc-item ${activa === c.id ? 'is-activa' : ''}`}>
-                  <button className="bc-item-abrir" onClick={() => onAbrirCreacion(c.id)} title={c.peticion}>
+                <div key={conv.hilo} className={`bc-item ${activa === conv.hilo ? 'is-activa' : ''}`}>
+                  <button className="bc-item-abrir" onClick={() => onAbrirCreacion(conv.ultima.id)} title={conv.primera.peticion}>
                     <span className="bc-item-nombre">{nombre}</span>
                     <span className={`bc-item-estado ${trabajando ? 'is-trabajando' : ''}`}>
                       {trabajando && <span className="bc-latido" aria-hidden />}
-                      {estadoDeCreacion(c, trabajando)}
+                      {n > 1 ? `${n} videos · ` : ''}
+                      {estadoDeCreacion(conv.ultima, trabajando)}
                     </span>
                   </button>
-                  <button className="bc-item-borrar" aria-label={`Borrar ${nombre}`} title="Borrar" onClick={() => setBorrando({ tipo: 'creacion', id: c.id, nombre })}>
+                  <button
+                    className="bc-item-borrar"
+                    aria-label={`Borrar ${nombre}`}
+                    title="Borrar"
+                    onClick={() => setBorrando({ tipo: 'creacion', id: conv.hilo, nombre, ids: conv.videos.map((v) => v.id) })}
+                  >
                     <Icon name="trash" size={13} />
                   </button>
                 </div>
@@ -204,40 +232,41 @@ export function BarraChats({
       </div>
 
       {(agente || voz) && (
-        <button className="bc-uso" onClick={onAjustes} title={`Ver el uso de todo en Ajustes${agente?.cuenta ? ` · ${agente.nombre} usa la cuenta ${agente.cuenta}` : ''}`}>
-          {agente && (
-            <>
-              <span className="bc-uso-titulo">
-                <b>{agente.nombre.replace(/ Code$/, '')}</b>
-                {agente.cuenta && <span>{agente.cuenta}</span>}
-              </span>
-              {agente.ventanas.length ? (
-                agente.ventanas.map((v) => (
-                  <span key={v.nombre} className="bc-uso-ventana">
-                    <span className="bc-uso-fila">
-                      <span>{v.nombre === '5 horas' ? 'Límite de 5 horas' : v.nombre === 'semana' ? 'Semanal' : v.nombre[0].toUpperCase() + v.nombre.slice(1)}</span>
-                      <b className={v.usado >= 0.9 ? 'is-alto' : ''}>{Math.round(v.usado * 100)} %</b>
-                    </span>
-                    <span className="bc-uso-barra">
-                      <i className={v.usado >= 0.9 ? 'is-alto' : ''} style={{ width: `${Math.round(v.usado * 100)}%` }} />
-                    </span>
-                    {v.renueva && <span className="bc-uso-reinicio">{reinicio(v.renueva)[0].toUpperCase() + reinicio(v.renueva).slice(1)}</span>}
-                  </span>
-                ))
-              ) : (
-                <span className="bc-uso-fila">
-                  <span>{agente.agotadoHasta ? `Sin plan hasta ${reinicio(agente.agotadoHasta)}` : agente.nota ?? 'Leyendo su uso…'}</span>
+        // Una sola línea: el agente con sus dos límites en chiquito y la voz como un punto. El detalle (la cuenta, cuándo
+        // se restablece cada uno) al pasar el ratón, y todo en Ajustes al tocarlo.
+        <button
+          className="bc-uso"
+          onClick={onAjustes}
+          title={[
+            agente &&
+              `${agente.nombre}${agente.cuenta ? ` (${agente.cuenta})` : ''}: ${
+                agente.ventanas.length
+                  ? agente.ventanas.map((v) => `${v.nombre} ${Math.round(v.usado * 100)} %${v.renueva ? `, ${reinicio(v.renueva)}` : ''}`).join(' · ')
+                  : agente.agotadoHasta
+                    ? `sin plan, ${reinicio(agente.agotadoHasta)}`
+                    : (agente.nota ?? 'leyendo su uso')
+              }`,
+            voz && `Voz de Google hoy: ${voz.agotadoHasta ? `agotada, ${reinicio(voz.agotadoHasta)}` : 'disponible'}`,
+            'Toca para ver todo en Ajustes'
+          ]
+            .filter(Boolean)
+            .join('\n')}
+        >
+          {agente && <b className="bc-uso-nombre">{agente.nombre.replace(/ Code$/, '').replace(/^ChatGPT · /, '')}</b>}
+          {agente?.ventanas.length ? (
+            agente.ventanas.slice(0, 2).map((v) => (
+              <span key={v.nombre} className="bc-uso-mini">
+                <span>{v.nombre === '5 horas' ? '5 h' : v.nombre === 'semana' ? 'Sem' : v.nombre}</span>
+                <span className="bc-uso-barra">
+                  <i className={v.usado >= 0.9 ? 'is-alto' : ''} style={{ width: `${Math.round(v.usado * 100)}%` }} />
                 </span>
-              )}
-            </>
-          )}
-          {voz && (
-            // Aparte, con su raya: no es parte del agente de arriba.
-            <span className="bc-uso-voz">
-              <span>Voz de Google · hoy</span>
-              <b className={voz.agotadoHasta ? 'is-agotado' : 'is-ok'}>{voz.agotadoHasta ? `agotada, ${reinicio(voz.agotadoHasta)}` : 'disponible'}</b>
-            </span>
-          )}
+                <b className={v.usado >= 0.9 ? 'is-alto' : ''}>{Math.round(v.usado * 100)}%</b>
+              </span>
+            ))
+          ) : agente ? (
+            <span className="bc-uso-mini">{agente.agotadoHasta ? 'sin plan' : '…'}</span>
+          ) : null}
+          {voz && <span className={`bc-uso-voz-punto ${voz.agotadoHasta ? 'is-agotada' : ''}`} aria-label={voz.agotadoHasta ? 'Voz agotada hoy' : 'Voz disponible'} />}
         </button>
       )}
 
