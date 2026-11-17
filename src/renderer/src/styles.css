@@ -3347,3 +3347,14 @@ button { cursor: pointer; }
 .sub-hf-estado.is-ok { color: #4cc38a; }
 .pz-taller-curso .tl-dim { overflow-wrap: anywhere; }
 .pz-taller-puntos { display: flex; align-items: center; gap: 6px; color: var(--accent); font-weight: 600; }
+
+/* Ajustes › Uso: cuánto le queda a cada agente y servicio con cuota */
+.agente-punto.error { background: var(--danger); }
+.uso-fila { align-items: flex-start; }
+.uso-fila .op-fila-texto strong { display: flex; align-items: center; gap: 7px; }
+.uso-ventana { display: flex; flex-direction: column; gap: 3px; margin-top: 5px; }
+.uso-barra { height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.uso-barra i { display: block; height: 100%; border-radius: 99px; background: #7dd069; }
+.uso-barra i.alto { background: var(--accent-2); }
+.uso-barra i.agotado { background: var(--danger); }
+.uso-agotado { color: var(--danger) !important; }

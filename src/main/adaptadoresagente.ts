@@ -15,6 +15,8 @@ export type EventoAgente =
   | { t: 'respuesta'; texto: string }
   /** Terminó el turno. */
   | { t: 'fin'; ok: boolean; respuesta?: string; error?: string; costoUsd?: number }
+  /** Cuánto lleva usado de su plan (Claude Code lo cuenta en cada turno). */
+  | { t: 'uso'; info: unknown }
 
 export interface Adaptador {
   /** Con sesión: si el turno puede retomar una conversación anterior. */
@@ -85,6 +87,8 @@ const CLAUDE: Adaptador = {
       const fallo = ev.is_error === true || String(ev.subtype ?? '').startsWith('error')
       // Claude marca los fallos (sesión caducada, límite del plan…) con is_error en el evento final.
       fuera.push(fallo ? { t: 'fin', ok: false, error: [res, errores].filter(Boolean).join(' ') || 'El agente terminó con un error.', costoUsd } : { t: 'fin', ok: true, respuesta: res, costoUsd })
+    } else if (ev.type === 'rate_limit_event') {
+      fuera.push({ t: 'uso', info: ev.rate_limit_info })
     } else if (ev.type === 'assistant') {
       const l = lineaDeClaude(ev)
       if (l) fuera.push({ t: 'linea', texto: l })

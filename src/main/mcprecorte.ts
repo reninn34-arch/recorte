@@ -4,7 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { tmpdir } from 'node:os'
 import { basename, extname, join } from 'node:path'
 import { aplicarOperaciones, describirTimelineParaAgente, OPERACIONES_DOC, validarOperaciones, type OperacionTL } from '../shared/chat'
-import type { RenderResultado, TranscripcionResultado } from '../shared/api'
+import type { EstadoUso, RenderResultado, TranscripcionResultado } from '../shared/api'
 import { COSTO_CLIP, ID_SEGURO, MAX_CLIPS_VEO, textoMuestra, VOCES_GEMINI, type Creacion, type PeticionCreacion } from '../shared/creacion'
 import { MODELOS_IMAGEN, modelosVideoVigentes, type PedidoFlow, type ResultadoFlow } from '../shared/flow'
 import { anadirCapa, anadirVoz, ANIMAR_CAPA, cambiarCapa, duracionesDeMedios, duracionTimeline, escalaAnimada, conSubtitulosAnimados, normalizarTimeline, ponerMusica, timelineInicial, ventanaTimeline, type Timeline, type TipoAnimar } from '../shared/timeline'
@@ -30,6 +30,8 @@ import type { Proyectos } from './proyectos'
 
 export interface ContextoMcp {
   proyectos: Proyectos
+  /** Cuánto le queda a cada agente y servicio con cuota (lo que ya se sabe, sin gastar). */
+  uso?: () => Promise<EstadoUso>
   listarCreaciones: () => Creacion[]
   ingerir: (ruta: string) => Promise<{ project: Project }>
   agregarRutas: (id: string, rutas: string[]) => Promise<{ project: Project; agregados: string[]; fallos: string[] }>
@@ -120,6 +122,25 @@ function nombresDe(p: Project): Record<string, string> {
 
 const ok = (texto: string): ResultadoHerramienta => ({ texto })
 const fallo = (texto: string): ResultadoHerramienta => ({ texto, error: true })
+
+/** El uso de cada cosa con cuota, en texto para un agente. */
+export function textoUso(e: EstadoUso): string {
+  const fecha = (ms: number) => new Date(ms).toLocaleString('es', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+  const nivel = { ok: 'bien', alto: 'queda poco', agotado: 'AGOTADO', 'sin-datos': 'sin datos' } as const
+  if (!e.servicios.length) return 'No hay agentes ni servicios con cuota conectados.'
+  return e.servicios
+    .map((s) => {
+      const ventanas = s.ventanas.map((v) => `${v.nombre}: ${Math.round(v.usado * 100)} % usado${v.renueva ? ` (se renueva ${fecha(v.renueva)})` : ''}`)
+      const partes = [
+        ...ventanas,
+        ...(s.agotadoHasta ? [`sin cuota hasta ${fecha(s.agotadoHasta)}`] : []),
+        ...(s.nota ? [s.nota] : []),
+        ...(s.leido ? [`leído ${fecha(s.leido)}`] : [])
+      ]
+      return `- ${s.nombre} [${nivel[s.nivel]}]: ${partes.join(' · ') || 'sin datos'}`
+    })
+    .join('\n')
+}
 const texto = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
 
 export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
@@ -244,6 +265,18 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
           }
         }
         return ok(lineas.join('\n'))
+      }
+    },
+    {
+      nombre: 'ver_uso',
+      descripcion:
+        'Cuánto le queda a cada agente (Claude Code, Codex…) de su plan, a la voz de Google por hoy y a los créditos de Flow, ' +
+        'con cuándo se renueva cada uno. Míralo antes de pedir un video largo o voz nueva.',
+      esquema: { type: 'object', properties: {} },
+      soloLee: true,
+      correr: async () => {
+        if (!ctx.uso) return fallo('Esta versión de Recorte no lee el uso.')
+        return ok(textoUso(await ctx.uso()))
       }
     },
     {

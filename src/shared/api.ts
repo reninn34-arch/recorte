@@ -234,6 +234,35 @@ export interface TurnoChat {
   aprendido?: string[]
 }
 
+/** Una ventana de uso de un plan (las 5 horas, la semana, el mes): cuánto se usó (0 a 1) y cuándo se renueva (ms). */
+export interface VentanaUso {
+  nombre: string
+  usado: number
+  renueva?: number
+}
+
+/** Cuánto le queda a algo con cuota: un agente, la voz de Google, los créditos de Flow. */
+export interface ServicioUso {
+  id: string
+  nombre: string
+  ventanas: VentanaUso[]
+  /** Los créditos que quedan (Flow). */
+  creditos?: number
+  /** Una línea más: el plan, las frases de hoy, que no informa su uso… */
+  nota?: string
+  /** Cuándo se leyó (ms). */
+  leido?: number
+  /** Se quedó sin cuota hasta entonces (ms). */
+  agotadoHasta?: number
+  nivel: 'ok' | 'alto' | 'agotado' | 'sin-datos'
+  /** Se puede volver a leer con «Actualizar» (Claude: una consulta mínima; Flow: abre sus páginas). */
+  actualizable?: boolean
+}
+
+export interface EstadoUso {
+  servicios: ServicioUso[]
+}
+
 /** El servidor MCP de Recorte (para que un agente de fuera maneje la app). */
 export interface EstadoMcp {
   activo: boolean
@@ -357,6 +386,10 @@ export interface RecorteApi {
   vozMuestra: (voz: string) => Promise<string>
   importarMusica: (id: string) => Promise<{ ok: boolean; musica?: MusicaTL; error?: string } | null>
   /** Copia un efecto de sonido al proyecto: uno incluido (su id) o, sin id, uno que elija el usuario. */
+  /** Cuánto le queda a cada agente y servicio con cuota (lo que ya se sabe, sin gastar). */
+  usoEstado: () => Promise<EstadoUso>
+  /** Vuelve a leer el uso de uno (Claude: una consulta mínima con el modelo más barato; Flow: sus créditos). */
+  usoActualizar: (id: string) => Promise<EstadoUso>
   mcpEstado: () => Promise<EstadoMcp>
   mcpConectarClaude: () => Promise<{ ok: boolean; error?: string }>
   mcpNuevaContrasena: () => Promise<EstadoMcp>

@@ -7,6 +7,7 @@ import { ListaAgentes } from './ListaAgentes'
 import { LogoAgente, LogoHerramienta } from './Logos'
 import { SeccionFlow } from './SeccionFlow'
 import { SeccionMcp } from './SeccionMcp'
+import { SeccionUso } from './SeccionUso'
 import { SeccionCriterio } from './SeccionCriterio'
 import { FilaVersion } from './AvisoActualizacion'
 import { CarpetaVideos } from './CarpetaVideos'
@@ -339,6 +340,8 @@ export function Opciones({
             OpenCode, solo tu cuenta, que es gratis. Los demás, la cuenta o la llave de cada uno.
           </p>
         </section>
+
+        <SeccionUso onAviso={onAviso} />
 
         <Seccion
           titulo="Voz"

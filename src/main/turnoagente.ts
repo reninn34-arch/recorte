@@ -7,6 +7,7 @@ import { agenteDeOrden } from './agentes'
 import { pathAmpliado } from './binarios'
 import { trabajoDeFondo } from './procesos'
 import { entornoParaAgente, falloDeAgente, matarArbol, Parado } from './ia'
+import { apuntarClaude } from './uso'
 
 /**
  * Un turno de un agente que trabaja con herramientas en una carpeta, con los mismos
@@ -179,6 +180,7 @@ export async function turnoAgente(p: PeticionTurno): Promise<ResultadoTurno> {
       for (const ev of ad.leer(linea)) {
         if (ev.t === 'linea') p.onLinea(ev.texto)
         else if (ev.t === 'sesion') idSesion = ev.id
+        else if (ev.t === 'uso') apuntarClaude(ev.info)
         else if (ev.t === 'respuesta') respuesta = ad.conSesion ? ev.texto : respuesta + ev.texto
         else if (ev.t === 'fin') {
           final = ev

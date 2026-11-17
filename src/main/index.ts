@@ -5,6 +5,7 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync,
 import { basename, extname, join, resolve, sep } from 'node:path'
 import type {
   AnalisisResultado,
+  EstadoUso,
   IngestaResultado,
   OpcionesExport,
   Progreso,
@@ -14,7 +15,7 @@ import type {
 } from '../shared/api'
 import type { AjustesIA, MedioProyecto, Project } from '../shared/types'
 import { Ajustes } from './ajustes'
-import { conectarAgente, desconectarAgente, estadoAgentes, prepararAgentes, versionesAgentes, agenteDeOrden, marcarSesionCaida, VARIABLE_LLAVE } from './agentes'
+import { conectarAgente, correr, desconectarAgente, estadoAgentes, prepararAgentes, versionesAgentes, agenteDeOrden, marcarSesionCaida, VARIABLE_LLAVE } from './agentes'
 import { estadoSistema, instalarHerramienta } from './sistema'
 import { activarHerramientas } from './herramientas'
 import { carpetaPorDefecto, copiarAVideos, carpetaDelProyecto, nombreArchivo, rutaLibre } from './carpetas'
@@ -40,6 +41,7 @@ import { exportarTimeline } from './exportar'
 import { VistaPrevia } from './vistaprevia'
 import { iniciarMcpRecorte } from './mcpapp'
 import { resolverBinario } from './binarios'
+import { apuntarAgotado, apuntarClaudeDeSalida, apuntarVoz, avisoAntesDeHacer, estadoUso, iniciarUso } from './uso'
 import { bloqueRetoques, describirRetoques } from '../shared/retoques'
 import { Creaciones, EXTENSIONES_ADJUNTOS, pasoGuion, pasoVideo, type ConfigAgente } from './creaciones'
 import { convertirAVoz, generarVozGemini, prepararVoz } from './voz'
@@ -155,6 +157,7 @@ app.whenReady().then(() => {
   const proyectos = new Proyectos()
   const ajustes = new Ajustes()
   const creaciones = new Creaciones()
+  iniciarUso(join(app.getPath('userData'), 'uso.json'))
   const carpetaMuestras = join(app.getPath('userData'), 'muestras-voz')
   registrarMedia(proyectos, creaciones, carpetaMuestras)
 
@@ -287,6 +290,10 @@ app.whenReady().then(() => {
     }
     return configAgente()
   }
+
+  /** El agente que hace el video de esta creación (el elegido para la tarea o el de siempre). */
+  const agenteDeLaTarea = async (c: Creacion): Promise<string | null> =>
+    c.tareas?.video?.agente ?? (c.tareas?.video ? null : agenteDeOrden((await configParaTarea()).comandoCli ?? ''))
 
   const AGENTE_IDS = ['kimi', 'claude', 'codex', 'gemini', 'opencode', 'antigravity'] as const
   const NIVELES_MODELO = ['rapido', 'equilibrado', 'maximo'] as const
@@ -489,19 +496,49 @@ app.whenReady().then(() => {
   /** Una frase con la voz de Gemini del usuario (su clave de AI Studio o su cuenta de Google). */
   const generarFraseVoz = async (texto: string, voz: string, salida: string): Promise<void> => {
     const clave = await ajustes.claveVoz()
-    if (clave) return generarVozGemini(texto, voz, clave, salida)
+    if (clave) {
+      try {
+        await generarVozGemini(texto, voz, clave, salida)
+        apuntarVoz('hecha')
+        return
+      } catch (e) {
+        // La cuota del día de la clave: se recuerda hasta cuándo (para el panel de uso y el aviso antes de hacer).
+        if (/cuota de voz de tu clave por hoy/i.test(e instanceof Error ? e.message : String(e))) apuntarVoz('cuota-dia')
+        throw e
+      }
+    }
     if (!estadoVozGoogle().correo) throw new Error('no hay una cuenta de Google ni una clave de AI Studio conectada (Ajustes → Voz)')
     // Con la cuenta, AI Studio responde 429 tanto por el límite por minuto como por el del día: se espera un minuto y se
     // vuelve a pedir unas veces; si sigue, es la cuota del día.
     for (let intento = 0; ; intento++) {
       try {
-        return await generarVozGoogle(texto, voz, salida)
+        await generarVozGoogle(texto, voz, salida)
+        apuntarVoz('hecha')
+        return
       } catch (e) {
-        if (intento >= 4 || !/\(429\)/.test(e instanceof Error ? e.message : String(e))) throw e
+        const es429 = /\(429\)/.test(e instanceof Error ? e.message : String(e))
+        if (es429 && intento >= 4) apuntarVoz('cuota-dia')
+        if (intento >= 4 || !es429) throw e
         await new Promise((r) => setTimeout(r, 60_000))
       }
     }
   }
+  /** El uso de todo lo que tiene cuota (los agentes instalados, la voz si está conectada, Flow si tiene cuentas). */
+  const usoAhora = async (): Promise<EstadoUso> => {
+    const agentes = (await estadoAgentes()).filter((a) => a.instalado && a.conectado).map((a) => a.id)
+    const voz = Boolean(estadoVozGoogle().correo || (await ajustes.claveVoz()))
+    return estadoUso({ agentes, voz, flow: estadoFlow().cuentas.map((c) => ({ correo: c.correo, creditos: c.creditos, leido: c.leido })) })
+  }
+  /** Vuelve a leer el uso de uno: Claude con una consulta mínima (el modelo más barato), Flow sus créditos. */
+  const usoActualizar = async (id: string): Promise<EstadoUso> => {
+    if (id === 'claude' && resolverBinario('claude')) {
+      const r = await correr('claude -p "Responde solo: ok" --model haiku --output-format stream-json --verbose', 90_000)
+      apuntarClaudeDeSalida(r.salida)
+    } else if (id === 'flow') await leerSaldosFlow()
+    return usoAhora()
+  }
+  ipcMain.handle('uso:estado', () => usoAhora())
+  ipcMain.handle('uso:actualizar', (_e, id: unknown) => usoActualizar(String(id)))
   /**
    * Mientras el agente trabaja (en la charla del plan o haciendo el video), Recorte atiende sus
    * pedidos de voz (con la voz elegida en la caja) y de imágenes y clips (Flow o ChatGPT).
@@ -617,6 +654,16 @@ app.whenReady().then(() => {
         const propuestas = directo ? [] : charla.propuestas.length ? charla.propuestas : plan && !plan.preguntas.length ? ['Hazlo'] : []
         const generados = mediosNuevos(c, desde)
         c.mensajes.push({ ...mensaje('agente', texto), propuestas, ...(charla.plan ? { plan: charla.plan } : {}), ...(generados.length ? { medios: generados } : {}) })
+        // Con el plan listo, antes de hacer el video: si al agente le queda poco o la voz ya se acabó por hoy, se dice ya
+        // (no a mitad del video).
+        if (plan) {
+          try {
+            const aviso = avisoAntesDeHacer(await usoAhora(), await agenteDeLaTarea(c), Boolean(c.vozElegida))
+            if (aviso) c.mensajes.push(mensaje('agente', aviso, true))
+          } catch {
+            // Sin leer el uso, se sigue sin aviso.
+          }
+        }
         dejarDeAtender()
         if (directo) {
           creaciones.guardar(c)
@@ -765,6 +812,8 @@ app.whenReady().then(() => {
     if (!c.agente) c.agente = { registro: [], rondas: 0 }
     const agente = c.tareas?.video?.agente
     c.agente.pausa = { motivo: 'limite', etapa, desde, ...(e.reanudar ? { reanudar: e.reanudar } : {}), ...(agente ? { agente } : {}) }
+    // Para el panel de uso: este agente quedó sin plan hasta entonces.
+    void agenteDeLaTarea(c).then((id) => id && apuntarAgotado(id, e.reanudar))
     const cuando = e.reanudar
       ? `Se renueva ${horaCorta(e.reanudar)}: a esa hora sigo solo desde donde iba, con la app abierta.`
       : 'Cuando se renueve, dale a «Seguir donde iba».'
@@ -3300,6 +3349,7 @@ No pude animar los subtítulos (se animan al exportar): ${e instanceof Error ? e
   }
   const mcp = iniciarMcpRecorte({
     proyectos,
+    uso: () => usoAhora(),
     listarCreaciones: () => creaciones.listar(),
     ingerir: (ruta) => ingerir(ruta),
     agregarRutas,

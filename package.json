@@ -40,6 +40,7 @@
     "prueba:navegador": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-navegador.mjs",
     "prueba:actualizar-mac": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs scripts/prueba-actualizar-mac.mjs",
     "prueba:niveles": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-niveles.mjs",
+    "prueba:uso": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-uso.mjs",
     "prueba:voz-limite": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-voz-limite.mjs",
     "prueba:mcp-puerto": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-mcp-puerto.mjs",
     "prueba:proxys": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-proxys.mjs",
