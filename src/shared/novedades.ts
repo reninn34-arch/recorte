@@ -24,6 +24,35 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.82',
+    fecha: '2026-11-17',
+    resumen: 'Una conversación puede tener varios videos con el mismo estilo, y «Mis videos» los reúne todos.',
+    novedades: [
+      {
+        icono: 'plus',
+        titulo: 'Otro video así, en la misma conversación',
+        texto:
+          'Cuando un video te gusta, elige «Otro video así» encima de la caja y cuenta de qué trata el siguiente. El agente lo hace con el mismo estilo y sabe lo que ya hablaron; el video anterior queda intacto, arriba, con su tarjeta.'
+      },
+      {
+        icono: 'enviar',
+        titulo: 'Entras a la conversación, no al editor',
+        texto:
+          'Al abrir una conversación la ves entera, con cada video como una tarjeta para verlo o abrirlo en el editor cuando quieras.'
+      },
+      {
+        icono: 'layers',
+        titulo: 'Mis videos',
+        texto: 'A la izquierda, «Mis videos» reúne todos tus videos, de las conversaciones y los editados a mano, con buscador.'
+      },
+      {
+        icono: 'sliders',
+        titulo: 'El uso, en una línea',
+        texto: 'El uso de tu agente ocupa una sola línea abajo a la izquierda; el detalle, al pasar el ratón.'
+      }
+    ]
+  },
+  {
     version: '0.1.81',
     fecha: '2026-11-17',
     resumen: 'Si cambias de cuenta en Claude, el uso que ves es el de tu cuenta nueva.',
