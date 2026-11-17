@@ -24,6 +24,30 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.79',
+    fecha: '2026-11-17',
+    resumen: 'Recorte se ve como un chat con tu agente: tus conversaciones a la izquierda y la caja para pedir el video al centro.',
+    novedades: [
+      {
+        icono: 'sparkles',
+        titulo: 'Un inicio más limpio',
+        texto:
+          'Al abrir Recorte ves «¿Qué video hacemos hoy?» y la caja para pedirlo, con el «+» para tu material, los tipos de video y tus últimos videos. Todo lo que hacía la caja sigue igual.'
+      },
+      {
+        icono: 'enviar',
+        titulo: 'Cada video es una conversación',
+        texto:
+          'A la izquierda están tus conversaciones por fecha, con cómo va cada una (esperando tu respuesta, haciendo el video, video listo). Al abrir una, la ves al centro con su plan y sus pasos, y con el video hecho entras al editor con el mismo chat al lado.'
+      },
+      {
+        icono: 'film',
+        titulo: 'Editar a mano, a un clic',
+        texto: '«Editar un video a mano» está siempre a la izquierda, y tus proyectos editados a mano aparecen debajo de las conversaciones.'
+      }
+    ]
+  },
+  {
     version: '0.1.78',
     fecha: '2026-11-17',
     resumen: 'Recorte te dice cuánto le queda a cada agente y a la voz, y te avisa antes de que algo se quede a medias.',
