@@ -182,9 +182,17 @@ const DESCRIPCION_CODEX: [RegExp, string][] = [
  * niveles de razonamiento. Los baja Codex mismo; Recorte solo los lee (no gasta nada).
  */
 function modelosCodex(): ModeloAgente[] {
-  const archivo = join(homedir(), '.codex', 'models_cache.json')
   try {
-    const d = JSON.parse(readFileSync(archivo, 'utf8')) as { models?: Record<string, unknown>[] }
+    return deCatalogoCodex(readFileSync(join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'models_cache.json'), 'utf8'))
+  } catch {
+    return []
+  }
+}
+
+/** Los modelos de la lista de Codex (su caché o lo que dice `codex debug models`, con la misma forma). */
+export function deCatalogoCodex(texto: string): ModeloAgente[] {
+  try {
+    const d = JSON.parse(texto) as { models?: Record<string, unknown>[] }
     const modelos: ModeloAgente[] = []
     for (const x of d.models ?? []) {
       const id = typeof x.slug === 'string' ? x.slug : ''
@@ -321,7 +329,16 @@ export function eleccionVigente<T extends { agente: AgenteId; modelo?: string; e
 
 export async function catalogoAgente(id: AgenteId, forzar = false): Promise<ModeloAgente[]> {
   // Kimi, Gemini CLI y Codex guardan su lista al día en archivos locales: se leen cada vez.
-  if (id === 'kimi' || id === 'gemini' || id === 'codex') return anotar(id, catalogoRecordado(id))
+  if (id === 'kimi' || id === 'gemini') return anotar(id, catalogoRecordado(id))
+  if (id === 'codex') {
+    // Codex guarda su lista al usarse por primera vez; antes de eso (una instalación nueva) se le pide con
+    // `codex debug models`, que la da sin mandar nada al modelo.
+    const guardados = modelosCodex()
+    if (guardados.length) return anotar(id, guardados)
+    const codex = resolverBinario('codex')
+    const salida = codex ? await salidaDe(`"${codex}" debug models`, null, 30_000) : null
+    return anotar(id, salida ? deCatalogoCodex(salida) : [])
+  }
   const guardado = leer()[id]
   if (!forzar && guardado?.modelos.length) {
     // Lo recordado al instante; si es de hace más de una hora, se pregunta de fondo para la próxima.
