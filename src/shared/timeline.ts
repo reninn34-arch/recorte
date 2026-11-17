@@ -493,16 +493,26 @@ function normalizarTiempos(tiempos: unknown, texto: string, duracion: number): n
  * Las letras de los rótulos. Son fuentes que trae Windows: el monitor (CSS) y el render
  * (libass) usan la misma, así lo que se ve es lo que se exporta.
  */
-export const FUENTES_TEXTO: Record<string, { nombre: string; familia: string; negrita: boolean; cursiva?: boolean }> = {
-  normal: { nombre: 'Normal', familia: 'Arial', negrita: true },
-  fina: { nombre: 'Fina', familia: 'Segoe UI', negrita: false },
-  gruesa: { nombre: 'Gruesa', familia: 'Arial Black', negrita: false },
-  negra: { nombre: 'Negra', familia: 'Segoe UI Black', negrita: false },
-  impacto: { nombre: 'Impacto', familia: 'Impact', negrita: false },
-  elegante: { nombre: 'Elegante', familia: 'Playfair Display', negrita: true },
-  cursiva: { nombre: 'Cursiva', familia: 'Playfair Display', negrita: true, cursiva: true },
-  titular: { nombre: 'Titular', familia: 'Anton', negrita: false },
-  maquina: { nombre: 'Máquina', familia: 'Courier New', negrita: true }
+export const FUENTES_TEXTO: Record<string, { nombre: string; familia: string; negrita: boolean; cursiva?: boolean; linea: number }> = {
+  normal: { nombre: 'Normal', familia: 'Arial', negrita: true, linea: 1.117 },
+  fina: { nombre: 'Fina', familia: 'Segoe UI', negrita: false, linea: 1.33 },
+  gruesa: { nombre: 'Gruesa', familia: 'Arial Black', negrita: false, linea: 1.41 },
+  negra: { nombre: 'Negra', familia: 'Segoe UI Black', negrita: false, linea: 1.33 },
+  impacto: { nombre: 'Impacto', familia: 'Impact', negrita: false, linea: 1.22 },
+  elegante: { nombre: 'Elegante', familia: 'Playfair Display', negrita: true, linea: 1.41 },
+  cursiva: { nombre: 'Cursiva', familia: 'Playfair Display', negrita: true, cursiva: true, linea: 1.41 },
+  titular: { nombre: 'Titular', familia: 'Anton', negrita: false, linea: 1.733 },
+  maquina: { nombre: 'Máquina', familia: 'Courier New', negrita: true, linea: 1.133 }
+}
+
+/**
+ * Cuánto más grande va el tamaño del MP4 con esta letra para que se vea igual que en el monitor. El MP4 (libass) toma
+ * el tamaño como la altura de línea de la letra (de su parte más alta a la más baja, «linea» en ems) y el monitor como
+ * su eme; el tamaño de los rótulos está medido con Arial (1,117). Con Anton (1,733) el MP4 la dejaba a un 65 %.
+ */
+export function escalaLetraAss(fuente: string | undefined): number {
+  const f = fuente ? FUENTES_TEXTO[fuente] : undefined
+  return f ? f.linea / FUENTES_TEXTO.normal.linea : 1
 }
 
 export const LIMITES_TAMANO = [0.5, 6] as const

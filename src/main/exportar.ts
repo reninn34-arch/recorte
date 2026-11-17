@@ -31,6 +31,7 @@ import {
   pasoAnimacion,
   tiemposPalabras,
   letraOscura,
+  escalaLetraAss,
   COLOR_PINTADO,
   type CapaTL,
   type TextoTL,
@@ -146,10 +147,18 @@ function escribirAss(
   voz: Bloque[],
   ancho: number,
   alto: number,
-  /** true: solo los textos «detrás» (se pintan antes de las capas); false: los demás y la voz. */
-  detras = false
+  /**
+   * Qué textos: «detras» (se pintan antes de las capas), «rotulos» (los que no son subtítulos: van debajo de los
+   * filtros, que también los gastan, como en el kit), «subtitulos» (los subtítulos y la voz, encima y limpios) o
+   * «todos» (los que no van detrás, y la voz).
+   */
+  grupo: 'detras' | 'rotulos' | 'subtitulos' | 'todos' = 'todos'
 ): string | null {
-  const textos = timeline.textos.filter((t) => t.texto.trim() && (t.detras === true) === detras)
+  const textos = timeline.textos.filter(
+    (t) =>
+      t.texto.trim() &&
+      (grupo === 'detras' ? t.detras === true : t.detras !== true && (grupo === 'todos' || (grupo === 'subtitulos') === (t.subtitulo === true)))
+  )
   if (textos.length === 0 && voz.length === 0) return null
 
   const corto = Math.min(ancho, alto)
@@ -181,7 +190,8 @@ function escribirAss(
       const libre = typeof t.x === 'number' && typeof t.y === 'number'
       const etiquetas = [
         libre ? `\\an5\\pos(${Math.round(t.x! * ancho)},${Math.round(t.y! * alto)})` : `\\an${ALINEACION[t.posicion]}`,
-        ...(t.tamano ? [`\\fs${Math.round(tamRotulo * t.tamano)}`] : []),
+        // Con la letra de cada rótulo, el mismo tamaño que en el monitor (cada letra mide su altura de línea distinto).
+        ...(t.tamano || escalaLetraAss(t.fuente) !== 1 ? [`\\fs${Math.round(tamRotulo * (t.tamano ?? 1) * escalaLetraAss(t.fuente))}`] : []),
         ...(t.color ? [`\\1c${colorAss(t.color).replace('&H00', '&H')}&`] : []),
         // La caja de su color (con caja, el borde del estilo es la caja), opaca como en el monitor.
         ...(t.caja && !t.sinCaja ? [`\\3c${colorAss(t.caja).replace('&H00', '&H')}&`, '\\3a&H00&'] : []),
@@ -223,7 +233,7 @@ ${estilos.join('\n')}
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 ${eventos}
 `
-  const nombre = detras ? 'rotulos-detras.ass' : 'rotulos-timeline.ass'
+  const nombre = { detras: 'rotulos-detras.ass', rotulos: 'rotulos-bajo-filtros.ass', subtitulos: 'rotulos-timeline.ass', todos: 'rotulos-timeline.ass' }[grupo]
   writeFileSync(join(carpeta, nombre), contenido, 'utf8')
   return nombre
 }
@@ -302,10 +312,15 @@ async function exportarTimelineAhora(
   const voz = opciones.subtitulos ? bloquesDeVoz(proyecto, timeline) : []
   let ass: string | null
   let assDetras: string | null
+  let assBajoFiltros: string | null = null
   try {
-    ass = escribirAss(carpeta, proyecto, timeline, voz, ancho, alto)
+    // Con filtros (grano, polvo…), los rótulos van debajo de ellos y los subtítulos encima, limpios: como el kit.
+    if (timeline.filtros) {
+      ass = escribirAss(carpeta, proyecto, timeline, voz, ancho, alto, 'subtitulos')
+      assBajoFiltros = escribirAss(carpeta, proyecto, timeline, [], ancho, alto, 'rotulos')
+    } else ass = escribirAss(carpeta, proyecto, timeline, voz, ancho, alto)
     // Los textos «detrás» van por debajo de las capas (de la persona recortada): se pintan antes que ellas.
-    assDetras = escribirAss(carpeta, proyecto, timeline, [], ancho, alto, true)
+    assDetras = escribirAss(carpeta, proyecto, timeline, [], ancho, alto, 'detras')
     if (voz.length) writeFileSync(join(salidas, `${base}.srt`), construirSrt(voz), 'utf8')
   } catch (error) {
     return { ok: false, error: `No pude preparar los rótulos: ${error instanceof Error ? error.message : String(error)}` }
@@ -641,9 +656,13 @@ async function exportarTimelineAhora(
     partes.push(`${capaBase}${cadena}format=yuv420p[ajuste${k}]`)
     capaBase = `[ajuste${k}]`
   }
-  // Los filtros de todo el video (grano, polvo, trama, viñeta, parpadeo): por debajo de los rótulos,
-  // para que el texto se siga leyendo nítido.
+  // Los filtros de todo el video (grano, polvo, trama, viñeta, parpadeo): por encima de los rótulos (también los
+  // gastan, como en el kit) y por debajo de los subtítulos, que se siguen leyendo nítidos.
   if (timeline.filtros) {
+    if (assBajoFiltros) {
+      partes.push(`${capaBase}subtitles=${assBajoFiltros}${letrasEn(carpeta) ? ':fontsdir=fuentes' : ''}[conRotulos]`)
+      capaBase = '[conRotulos]'
+    }
     partes.push(...filtrosFfmpeg(timeline.filtros, capaBase, '[filtrado]', ancho, alto, fps, duracion))
     capaBase = '[filtrado]'
   }
