@@ -24,6 +24,19 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.72',
+    fecha: '2026-11-16',
+    resumen: 'En Mac, las versiones nuevas se bajan solas y se instalan con «Reiniciar y actualizar», como en Windows.',
+    novedades: [
+      {
+        icono: 'download',
+        titulo: 'Actualizaciones automáticas en Mac',
+        texto:
+          'Recorte baja solo la versión nueva y, cuando está lista, te avisa: «Reiniciar y actualizar» cambia la app en Aplicaciones y la vuelve a abrir. Ya no hay que ir a la página a bajarla. Si la app está en una carpeta donde no se puede escribir, sigue el aviso de bajarla a mano.'
+      }
+    ]
+  },
+  {
     version: '0.1.71',
     fecha: '2026-11-16',
     resumen: 'Flow y las voces de Google ya se conectan en Mac, con Edge o con Chrome.',
