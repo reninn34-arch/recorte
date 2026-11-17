@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { guardar } from './disco'
 import { duracionMedio } from './ffmpeg'
@@ -28,6 +28,71 @@ export interface RespuestaVoz {
   frases?: FraseVoz[]
   total?: number
   error?: string
+}
+
+/** La narración que pidió el agente en una ronda y no se pudo generar. */
+export interface VozFaltante {
+  /** Frases distintas que pidió el agente en la ronda. */
+  pedidas: number
+  /** Las que quedaron sin voz (pedidas que fallaron y no salieron después en otro pedido). */
+  faltan: number
+  /** cuota: se acabó la cuota del día (de la cuenta de Google o de la clave); otro: cualquier otro fallo. */
+  motivo: 'cuota-cuenta' | 'cuota-clave' | 'otro'
+  /** El error tal cual (para el «otro»). */
+  error: string
+}
+
+/**
+ * Lo que faltó de la narración en la ronda que empezó en `desde`, mirando los pedidos y respuestas de `trabajo/voz/`:
+ * una frase falta si falló y no salió en ningún pedido posterior. null si no faltó nada.
+ */
+export function vozQueFalto(trabajo: string, desde: number): VozFaltante | null {
+  const dir = join(trabajo, 'voz')
+  if (!existsSync(dir)) return null
+  const leer = (n: string): Record<string, unknown> | null => {
+    try {
+      return JSON.parse(readFileSync(join(dir, n), 'utf8').replace(/^﻿/, '')) as Record<string, unknown>
+    } catch {
+      return null
+    }
+  }
+  const limpia = (t: unknown) => (typeof t === 'string' ? t.replace(/\s+/g, ' ').trim() : '')
+  const pedidas = new Set<string>()
+  const hechas = new Set<string>()
+  const fallidas = new Set<string>()
+  const errores: string[] = []
+  for (const n of readdirSync(dir)) {
+    const id = /^respuesta-([\w-]{1,40})\.json$/.exec(n)?.[1]
+    if (!id || statSync(join(dir, n)).mtimeMs < desde) continue
+    const r = leer(n)
+    const pedido = leer(`pedido-${id}.json`)
+    const frases = (Array.isArray(pedido?.frases) ? pedido.frases : []).map(limpia).filter(Boolean)
+    for (const f of frases) pedidas.add(f)
+    for (const f of Array.isArray(r?.frases) ? (r.frases as { texto?: unknown }[]) : []) hechas.add(limpia(f.texto))
+    if (r && r.ok === false && typeof r.error === 'string' && !/SIN voz/.test(r.error)) {
+      errores.push(r.error)
+      for (const f of frases) fallidas.add(f)
+    }
+  }
+  const faltan = [...fallidas].filter((f) => !hechas.has(f)).length
+  if (!faltan) return null
+  const error = errores[errores.length - 1] ?? ''
+  const motivo = /cuota de voz de tu clave/i.test(error) ? 'cuota-clave' : /\(429\)|cuota/i.test(error) ? 'cuota-cuenta' : 'otro'
+  return { pedidas: pedidas.size, faltan, motivo, error }
+}
+
+/** El aviso para el usuario: cuánto quedó sin voz, por qué y qué hacer. */
+export function avisoVozFaltante(v: VozFaltante): string {
+  const cuanto =
+    v.faltan >= v.pedidas
+      ? 'La narración quedó sin voz: el video va en silencio donde debía hablar.'
+      : `${v.faltan} de ${v.pedidas} frases de la narración quedaron sin voz: en esas partes el video va en silencio.`
+  if (v.motivo === 'cuota-cuenta')
+    return `${cuanto} Se acabó la cuota diaria de voz de tu cuenta de Google (AI Studio). Se renueva mañana: entonces pídeme «genera la voz que faltó» y hago solo esas frases. Si no quieres esperar, pon una clave de AI Studio en Ajustes → Voz.`
+  if (v.motivo === 'cuota-clave')
+    return `${cuanto} Se acabó la cuota diaria de voz de tu clave de AI Studio. Se renueva mañana: entonces pídeme «genera la voz que faltó» y hago solo esas frases.`
+  const detalle = v.error.replace(/^Recorte no pudo generar la voz: /, '').replace(/\. Sigue sin esa narración y dilo en el resumen\.$/, '')
+  return `${cuanto} La voz falló: ${detalle.slice(0, 240)}. Cuando lo resuelvas, pídeme «genera la voz que faltó».`
 }
 
 /** Genera una frase con la voz dada y la deja en `salida` (un WAV). Lo pone index.ts. */

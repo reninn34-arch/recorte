@@ -59,7 +59,7 @@ import { arreglarVoz, revisarAudio } from './revisaraudio'
 import { listarPiezas, renderizarPieza } from './piezas'
 import { borrarPiezaPropia, crearPiezaConAgente } from './tallerpiezas'
 import { valoresConMarca, type PiezaAnimada, type ValoresPieza } from '../shared/piezas'
-import { atenderVoz } from './vozagente'
+import { atenderVoz, avisoVozFaltante, vozQueFalto } from './vozagente'
 import { proyectoDesdeReceta } from './recetaeditor'
 import { medirReferencia } from './estilo/referencia'
 import { analizarConGeminiVideo, interpretarEstilo } from './estilo/ficha'
@@ -735,6 +735,10 @@ app.whenReady().then(() => {
           ...mensaje('agente', `${revisado.resultado.resumen}${comprobado}${copia ? ` Guardado en ${copia}.` : ''}`),
           propuestas: []
         })
+        // Si parte de la narración no se pudo generar (casi siempre, la cuota diaria de voz), el video se entrega igual,
+        // pero Recorte lo dice claro: cuánto faltó, por qué y qué hacer (el agente no siempre lo cuenta en su resumen).
+        const faltante = vozQueFalto(join(carpeta, 'trabajo'), desde)
+        if (faltante) c.mensajes.push(mensaje('agente', avisoVozFaltante(faltante), true))
       } catch (e) {
         c.fase = c.agente?.resultado ? 'listo' : faseAntes === 'video' ? 'plan' : faseAntes
         if (esParado(e)) c.mensajes.push(mensaje('agente', c.agente?.resultado ? 'Lo paraste. La versión anterior sigue intacta.' : 'Lo paraste. El plan sigue aquí.'))

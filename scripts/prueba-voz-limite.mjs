@@ -66,6 +66,22 @@ try {
   assert.ok(Date.now() - antes > 3000_000, 'todo viejo: sin avance reciente')
   writeFileSync(join(trabajo, 'voz', 'frase-09.wav'), 'audio')
   assert.ok(Date.now() - ultimoArchivo(trabajo) < 60_000, 'una frase nueva dentro de voz/ cuenta como avance')
+  // Se acabó la cuota del día a mitad: el video se entrega igual, pero Recorte avisa cuánto faltó, por qué y qué hacer.
+  const { vozQueFalto, avisoVozFaltante } = await import('../src/main/vozagente.ts')
+  const vozDir = join(trabajo, 'voz')
+  const desde = Date.now() - 1000
+  writeFileSync(join(vozDir, 'pedido-a.json'), JSON.stringify({ frases: ['Uno.', 'Dos.', 'Tres.'] }))
+  writeFileSync(join(vozDir, 'respuesta-a.json'), JSON.stringify({ ok: false, frases: [{ texto: 'Uno.', archivo: 'voz/a-01.wav', duracion: 1 }], error: 'Recorte no pudo generar la voz: AI Studio no generó la voz (429). Si es la cuota del día, prueba mañana o usa la llave de AI Studio.. Sigue sin esa narración y dilo en el resumen.' }))
+  // «Dos.» salió después en otro pedido: no falta.
+  writeFileSync(join(vozDir, 'pedido-b.json'), JSON.stringify({ frases: ['Dos.', 'Cuatro.'] }))
+  writeFileSync(join(vozDir, 'respuesta-b.json'), JSON.stringify({ ok: false, frases: [{ texto: 'Dos.', archivo: 'voz/b-01.wav', duracion: 1 }], error: 'Recorte no pudo generar la voz: AI Studio no generó la voz (429).. Sigue sin esa narración y dilo en el resumen.' }))
+  const falta = vozQueFalto(trabajo, desde)
+  assert.deepEqual(falta && [falta.pedidas, falta.faltan, falta.motivo], [4, 2, 'cuota-cuenta'], JSON.stringify(falta))
+  assert.match(avisoVozFaltante(falta), /2 de 4 frases.*cuota diaria de voz de tu cuenta de Google.*mañana/)
+  assert.equal(vozQueFalto(trabajo, Date.now() + 60_000), null, 'lo de una ronda anterior no cuenta')
+  writeFileSync(join(vozDir, 'respuesta-b.json'), JSON.stringify({ ok: true, frases: [{ texto: 'Dos.' }, { texto: 'Tres.' }, { texto: 'Cuatro.' }] }))
+  assert.equal(vozQueFalto(trabajo, desde), null, 'si después salió todo, no se avisa nada')
+  console.log('voz que faltó: se avisa cuánto, por qué y qué hacer ✓')
   console.log('voz con el límite de Google y avance del agente: todo bien')
 } finally {
   globalThis.fetch = fetchReal
