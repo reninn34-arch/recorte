@@ -24,6 +24,25 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.74',
+    fecha: '2026-11-16',
+    resumen: 'Los modelos de Gemini aparecen al día y los niveles siguen solos a los modelos nuevos.',
+    novedades: [
+      {
+        icono: 'check',
+        titulo: 'Modelos de Gemini al día',
+        texto:
+          'La lista de modelos de Gemini se lee del Gemini CLI instalado (antes, cuando lo instalaba Recorte, solo salían Gemini 2.5 Flash y 2.5 Pro). Ahora aparecen los nuevos, como Gemini 3.1 Pro y 3.8 Flash.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Niveles que siguen a los modelos nuevos',
+        texto:
+          'Rápido, equilibrado y máximo ya no apuntan a modelos fijos: en Kimi salen de los modelos de tu cuenta y en Gemini usan «pro» y «flash», que Google mantiene en el mejor al que llega tu cuenta. Cuando sale un modelo nuevo, el nivel lo usa solo.'
+      }
+    ]
+  },
+  {
     version: '0.1.73',
     fecha: '2026-11-16',
     resumen: 'Los modelos de ChatGPT aparecen desde el primer momento, también en una instalación nueva.',
