@@ -18,6 +18,7 @@ import {
   type PosicionTexto,
   type SonidoTL,
   type TextoTL,
+  type CapaAjusteTL,
   type Timeline,
   type VozTL
 } from '../shared/timeline'
@@ -216,6 +217,13 @@ export async function proyectoDesdeReceta(
   const tamEditor = (fraccion: number) => Math.round(pinza((fraccion * anchoK) / (Math.min(anchoK, altoK) * 0.06), 0.5, 6) * 100) / 100
   const hexDe = (v: unknown) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : undefined)
   const letra = (v: unknown, defecto: string) => LETRA_EDITOR[String(v ?? defecto)] ?? LETRA_EDITOR[defecto] ?? 'normal'
+  // Lo que el kit oscurece debajo de un título o una frase («oscurecer» 0 a 1): en el editor, una capa de ajuste en su
+  // tramo (oscurece el video y las capas, no los textos). Si no, el título quedaba sobre la imagen clara.
+  const oscurecidos: CapaAjusteTL[] = []
+  for (const m of encima) {
+    const o = pinza(num(m.oscurecer, 0), 0, 0.95)
+    if (o > 0.02) oscurecidos.push({ id: nuevoId('ajuste'), inicio: m.desde, duracion: m.hasta - m.desde, ajustes: { exposicion: Math.max(-2, Math.log2(1 - o)), brillo: -0.24 * o, saturacion: 1 - 0.27 * o } })
+  }
   for (const m of encima) {
     const visible = { inicio: m.desde, duracion: m.hasta - m.desde }
     if (m.tipo === 'titulo') {
@@ -486,6 +494,7 @@ export async function proyectoDesdeReceta(
       ...(musica ? { musica } : {}),
       ...(capas.length ? { capas } : {}),
       ...(sonidos.length ? { sonidos } : {}),
+      ...(oscurecidos.length ? { ajustesCapa: oscurecidos } : {}),
       // Los filtros del kit (grano, polvo, trama, viñeta, parpadeo) siguen siendo filtros en el editor.
       ...(receta.filtros && typeof receta.filtros === 'object' ? { filtros: receta.filtros as Timeline['filtros'] } : {})
     },
