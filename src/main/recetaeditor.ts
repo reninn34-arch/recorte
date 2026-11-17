@@ -51,6 +51,21 @@ const MIN = 0.1
 
 type Momento = Record<string, unknown> & { tipo: string; desde: number; hasta: number }
 
+/**
+ * El «oscurecer» del kit (un negro encima con opacidad o: cada color × (1 − o)) con los ajustes del editor: la
+ * exposición (en luz lineal, hasta −2 pasos) y lo que falta con el contraste y el brillo (v·c + (1 − c)/2 + b, con
+ * b = −(1 − c)/2 queda v·c). El contraste y el brillo del MP4 (eq) solo tocan la luz: el color se baja igual con la
+ * saturación, o el papel quedaba amarillo en vez de oscuro.
+ */
+export function ajustesOscurecer(o: number): CapaAjusteTL['ajustes'] {
+  const queda = Math.max(0.05, 1 - o)
+  const exposicion = Math.max(-2, Math.log2(queda) * 2.2)
+  const porExposicion = Math.pow(Math.pow(2, exposicion), 1 / 2.2)
+  const contraste = Math.max(0.5, Math.min(1, queda / porExposicion))
+  const r = (x: number) => Math.round(x * 1000) / 1000
+  return { exposicion: r(exposicion), ...(contraste < 0.999 ? { contraste: r(contraste), brillo: r(-(1 - contraste) / 2), saturacion: r(contraste) } : {}) }
+}
+
 const num = (x: unknown, defecto: number): number => (typeof x === 'number' && Number.isFinite(x) ? x : defecto)
 const pinza = (v: number, min: number, max: number): number => Math.min(max, Math.max(min, v))
 
@@ -214,7 +229,8 @@ export async function proyectoDesdeReceta(
   // El tamaño del kit es una fracción del ancho; el del editor, relativo a su rótulo (6 % del lado corto).
   const anchoK = num(receta.ancho, 1080)
   const altoK = num(receta.alto, 1920)
-  const tamEditor = (fraccion: number) => Math.round(pinza((fraccion * anchoK) / (Math.min(anchoK, altoK) * 0.06), 0.5, 6) * 100) / 100
+  // El kit mide la eme de la letra; el monitor dibuja la eme del rótulo al 93 % de ese 6 % (y el MP4 lo iguala).
+  const tamEditor = (fraccion: number) => Math.round(pinza((fraccion * anchoK) / (Math.min(anchoK, altoK) * 0.06 * 0.93), 0.5, 6) * 100) / 100
   const hexDe = (v: unknown) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : undefined)
   const letra = (v: unknown, defecto: string) => LETRA_EDITOR[String(v ?? defecto)] ?? LETRA_EDITOR[defecto] ?? 'normal'
   // Lo que el kit oscurece debajo de un título o una frase («oscurecer» 0 a 1): en el editor, una capa de ajuste en su
@@ -222,7 +238,7 @@ export async function proyectoDesdeReceta(
   const oscurecidos: CapaAjusteTL[] = []
   for (const m of encima) {
     const o = pinza(num(m.oscurecer, 0), 0, 0.95)
-    if (o > 0.02) oscurecidos.push({ id: nuevoId('ajuste'), inicio: m.desde, duracion: m.hasta - m.desde, ajustes: { exposicion: Math.max(-2, Math.log2(1 - o)), brillo: -0.24 * o, saturacion: 1 - 0.27 * o } })
+    if (o > 0.02) oscurecidos.push({ id: nuevoId('ajuste'), inicio: m.desde, duracion: m.hasta - m.desde, ajustes: ajustesOscurecer(o) })
   }
   for (const m of encima) {
     const visible = { inicio: m.desde, duracion: m.hasta - m.desde }
@@ -332,7 +348,8 @@ export async function proyectoDesdeReceta(
     const b = pinza(num(x.hasta, -1), 0, total)
     if (!texto || b - a < 0.05) continue
     // A la altura exacta del kit (no a la de «abajo» del editor, que es otra y tapaba lo de debajo).
-    textos.push({ id: nuevoId('texto'), inicio: a, duracion: b - a, texto, posicion: posSub, x: 0.5, y: pinza(num(subs.pos, 0.78), 0.05, 0.95), ...estiloSub })
+    // Marcados como subtítulos: van encima de los filtros, limpios (los demás rótulos, debajo, como en el kit).
+    textos.push({ id: nuevoId('texto'), inicio: a, duracion: b - a, texto, posicion: posSub, x: 0.5, y: pinza(num(subs.pos, 0.78), 0.05, 0.95), ...estiloSub, subtitulo: true })
   }
   if (!editables) return null
 

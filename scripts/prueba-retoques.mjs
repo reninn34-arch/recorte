@@ -85,9 +85,9 @@ try {
   assert.ok(rot('Marte').tamano > 3 && rot('Una pregunta').tamano < 1, 'cada línea con su tamaño')
   assert.deepEqual([rot('ELON MUSK').caja, rot('ELON MUSK').color, rot('ELON MUSK').x], ['#ffd60a', '#111111', 0.6], 'la etiqueta es un rótulo con su caja amarilla')
   assert.ok(rot('Fracaso').inicio > rot('Riesgo').inicio && rot('Fracaso').color === '#d62828', 'las palabras entran escalonadas y la destacada en el acento')
-  assert.equal(rot('PLAN').tamano, 5.67, 'una palabra que llena la pantalla (0,34 del ancho)')
-  // El título que oscurece lo de debajo: una capa de ajuste en su tramo (−2 pasos con 0,75), no la imagen clara.
-  assert.deepEqual(docu.timeline.ajustesCapa?.map((x) => [x.inicio, x.duracion, x.ajustes.exposicion]), [[3, 1, -2]], 'el oscurecido del título')
+  assert.equal(rot('PLAN').tamano, 6, 'una palabra que llena la pantalla (0,34 del ancho: el tope)')
+  // El título que oscurece lo de debajo: una capa de ajuste en su tramo (con 0,75, cada color queda a ≈ ¼, como el negro encima del kit), no la imagen clara.
+  assert.deepEqual(docu.timeline.ajustesCapa?.map((x) => [x.inicio, x.duracion, x.ajustes.exposicion, x.ajustes.contraste, x.ajustes.brillo]), [[3, 1, -2, 0.5, -0.25]], 'el oscurecido del título')
   console.log('receta → editor: títulos, etiqueta y palabras como rótulos editables ✓')
 
   // Los retoques: el usuario cambia el rótulo, mueve la capa, quita el sonido, regenera una frase y añade un rótulo.
