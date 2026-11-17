@@ -7,9 +7,9 @@ import { Editor } from './components/Editor'
 import { AvisoActualizacion } from './components/AvisoActualizacion'
 import { Novedades } from './components/Novedades'
 import { Inicio } from './components/Inicio'
-import { CrearIA } from './components/CrearIA'
+import { BarraChats, Escritorio } from './components/BarraChats'
 import { EstudioCreacion } from './components/EstudioCreacion'
-import { EstudioAgente } from './components/EstudioAgente'
+import { EstudioAgente, type ExtrasChat } from './components/EstudioAgente'
 import { ChatCreacion } from './components/ChatCreacion'
 import type { AjustesCreacion, Creacion, MensajeCreacion, PeticionCreacion } from '../../shared/creacion'
 import { esAprobacion } from '../../shared/modoagente'
@@ -612,9 +612,10 @@ export default function App() {
   }
 
   /** El chat de la creación; con `editor`, los cambios rápidos van a su timeline. */
-  function chatDeCreacion(c: Creacion, editor?: { proyecto: Project; puente: typeof puente }) {
+  function chatDeCreacion(c: Creacion, editor?: { proyecto: Project; puente: typeof puente }, extras?: ExtrasChat) {
     return (
       <ChatCreacion
+        {...extras}
         creacion={c}
         agentes={agentes}
         trabajando={Boolean(enCurso[c.id])}
@@ -865,30 +866,58 @@ export default function App() {
     )
   }
 
+  /** Borra una conversación o un proyecto desde la barra (a la Papelera). */
+  async function borrarDeLista(tipo: 'proyecto' | 'creacion', id: string) {
+    try {
+      if (tipo === 'proyecto') {
+        await window.recorte.borrarProyecto(id)
+        if (proyecto?.id === id) setProyecto(null)
+        await recargarProyectos()
+      } else {
+        await window.recorte.borrarCreacion(id)
+        if (creacion?.id === id) {
+          setCreacion(null)
+          if (vista === 'estudio') setVista('inicio')
+        }
+        setCreaciones(await window.recorte.creacionesListar())
+      }
+      setAviso('Se fue a la Papelera. Si te equivocaste, lo recuperas desde ahí.')
+    } catch (error) {
+      setAviso(`No pude borrarlo: ${mensajeDe(error)}`)
+    }
+  }
+
+  // La barra de conversaciones de la izquierda (en el inicio, las conversaciones y Ajustes).
+  const barra = (
+    <BarraChats
+      creaciones={creaciones}
+      proyectos={proyectos}
+      enCurso={enCurso}
+      activa={vista === 'estudio' ? creacion?.id : undefined}
+      importando={importando}
+      onNueva={() => setVista('inicio')}
+      onEditarAMano={() => void importar()}
+      onAbrirCreacion={(id) => void abrirCreacionIA(id)}
+      onAbrirProyecto={abrirDesdeLista}
+      onBorrar={borrarDeLista}
+      onAjustes={() => setVista('ajustes')}
+    />
+  )
+  const avisos = (
+    <>
+      {aviso && <Toast text={aviso} />}
+      <AvisoActualizacion />
+      <Novedades forzar={verNovedades} onCerrar={() => setVerNovedades(false)} />
+    </>
+  )
+
   if (vista === 'ajustes' && !proyecto) {
     return (
       <>
-        <Opciones agentes={agentes} onAviso={setAviso} onVolver={() => setVista('inicio')} onNovedades={() => setVerNovedades(true)} />
-        {aviso && <Toast text={aviso} />}
-        <AvisoActualizacion />
-        <Novedades forzar={verNovedades} onCerrar={() => setVerNovedades(false)} />
-      </>
-    )
-  }
-
-  if (vista === 'crear') {
-    return (
-      <>
-        <CrearIA
-          agentes={agentes}
-          creando={creando}
-          onCrear={(p) => void crearConIA(p)}
-          onVolver={() => setVista('inicio')}
-          onConectar={() => setVista('inicio')}
-        />
-        {aviso && <Toast text={aviso} />}
-        <AvisoActualizacion />
-        <Novedades forzar={verNovedades} onCerrar={() => setVerNovedades(false)} />
+        <Escritorio barra={barra}>
+          <Opciones agentes={agentes} onAviso={setAviso} onVolver={() => setVista('inicio')} onNovedades={() => setVerNovedades(true)} />
+        </Escritorio>
+        {avisos}
       </>
     )
   }
@@ -896,16 +925,15 @@ export default function App() {
   if (vista === 'estudio' && creacion && creacion.modo === 'agente') {
     return (
       <>
-        <EstudioAgente
-          creacion={creacion}
-          trabajando={trabajandoCreacion}
-          onVolver={() => setVista('inicio')}
-          onEditor={() => void creacionAlEditor()}
-          chat={chatDeCreacion(creacion)}
-        />
-        {aviso && <Toast text={aviso} />}
-        <AvisoActualizacion />
-        <Novedades forzar={verNovedades} onCerrar={() => setVerNovedades(false)} />
+        <Escritorio barra={barra}>
+          <EstudioAgente
+            creacion={creacion}
+            trabajando={trabajandoCreacion}
+            onEditor={() => void creacionAlEditor()}
+            chat={(extras) => chatDeCreacion(creacion, undefined, extras)}
+          />
+        </Escritorio>
+        {avisos}
       </>
     )
   }
@@ -913,6 +941,7 @@ export default function App() {
   if (vista === 'estudio' && creacion) {
     return (
       <>
+        <Escritorio barra={barra}>
         <EstudioCreacion
           creacion={creacion}
           trabajando={trabajandoCreacion}
@@ -981,47 +1010,29 @@ export default function App() {
             irAAjustes: () => setVista('ajustes')
           }}
         />
-        {aviso && <Toast text={aviso} />}
-        <AvisoActualizacion />
-        <Novedades forzar={verNovedades} onCerrar={() => setVerNovedades(false)} />
+        </Escritorio>
+        {avisos}
       </>
     )
   }
 
-  if (!proyecto || vista === 'inicio' || vista === 'estudio') {
+  // El inicio (y «crear», que ya es el mismo): la caja para pedir el video, con la barra de conversaciones.
+  if (!proyecto || vista === 'inicio' || vista === 'crear' || vista === 'estudio') {
     return (
       <>
-        <Inicio
-          creaciones={creaciones}
-          onCrearIA={() => setVista('crear')}
-          onAjustes={() => setVista('ajustes')}
-          onBorrar={async (tipo, id) => {
-            try {
-              if (tipo === 'proyecto') {
-                await window.recorte.borrarProyecto(id)
-                if (proyecto?.id === id) setProyecto(null)
-                await recargarProyectos()
-              } else {
-                await window.recorte.borrarCreacion(id)
-                if (creacion?.id === id) setCreacion(null)
-                setCreaciones(await window.recorte.creacionesListar())
-              }
-              setAviso('Se fue a la Papelera. Si te equivocaste, lo recuperas desde ahí.')
-            } catch (error) {
-              setAviso(`No pude borrarlo: ${mensajeDe(error)}`)
-            }
-          }}
-          onAbrirCreacion={(id) => void abrirCreacionIA(id)}
-          proyectos={proyectos}
-          agentes={agentes}
-          onAbrir={abrirDesdeLista}
-          onNuevo={importar}
-          importando={importando}
-          abierto={proyecto?.id}
-        />
-        {aviso && <Toast text={aviso} />}
-        <AvisoActualizacion />
-        <Novedades forzar={verNovedades} onCerrar={() => setVerNovedades(false)} />
+        <Escritorio barra={barra}>
+          <Inicio
+            creaciones={creaciones}
+            proyectos={proyectos}
+            agentes={agentes}
+            creando={creando}
+            onCrear={(p) => void crearConIA(p)}
+            onAbrir={abrirDesdeLista}
+            onAbrirCreacion={(id) => void abrirCreacionIA(id)}
+            onAjustes={() => setVista('ajustes')}
+          />
+        </Escritorio>
+        {avisos}
       </>
     )
   }

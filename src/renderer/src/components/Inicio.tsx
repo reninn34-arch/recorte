@@ -1,223 +1,156 @@
-import { useState } from 'react'
-import type { Creacion } from '../../../shared/creacion'
+import { useEffect, useState } from 'react'
+import type { Creacion, EstiloPropio, PeticionCreacion } from '../../../shared/creacion'
+import { ESTILOS } from '../../../shared/estilos'
 import type { Project } from '../../../shared/types'
 import type { Agentes } from '../hooks/agentes'
-import { Icon } from '../Icons'
+import { Icon, type IconName } from '../Icons'
 import { mediaUrl } from '../media'
-import { ListaAgentes } from './ListaAgentes'
+import { CajaCrear } from './CajaCrear'
 import { CarpetaVideos } from './CarpetaVideos'
+import { ListaAgentes } from './ListaAgentes'
 
 /**
- * La pantalla de inicio, como al abrir cualquier editor de video: crear un proyecto o
- * abrir uno reciente. A la derecha, el agente que edita contigo; si no hay ninguno
- * conectado, la conexión es lo primero que se ve, con un clic y sin comandos.
+ * El inicio, como al abrir un chat con un agente: «¿Qué video hacemos hoy?» y la caja para pedirlo (con su «+»,
+ * formato, voz, agente y «Pregúntame antes»), los tipos de video y tus estilos para orientar al agente, y tus últimos
+ * videos. Si no hay agente conectado, conectarlo es lo primero que se ve, con un clic y sin comandos.
  */
 
 function duracion(segundos: number): string {
   const s = Math.max(0, Math.round(segundos))
-  const h = Math.floor(s / 3600)
-  const m = Math.floor((s % 3600) / 60)
-  const r = s % 60
-  return h ? `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}` : `${m}:${String(r).padStart(2, '0')}`
-}
-
-function hace(fecha: number): string {
-  const min = Math.round((Date.now() - fecha) / 60_000)
-  if (min < 1) return 'ahora'
-  if (min < 60) return `hace ${min} min`
-  const horas = Math.round(min / 60)
-  if (horas < 24) return `hace ${horas} h`
-  const dias = Math.round(horas / 24)
-  if (dias < 30) return dias === 1 ? 'ayer' : `hace ${dias} días`
-  return new Date(fecha).toLocaleDateString('es')
+  const m = Math.floor(s / 60)
+  return `${m}:${String(s % 60).padStart(2, '0')}`
 }
 
 export function Inicio({
   proyectos,
   agentes,
-  onAbrir,
-  onNuevo,
-  importando,
-  abierto,
   creaciones,
-  onCrearIA,
+  creando,
+  onCrear,
+  onAbrir,
   onAbrirCreacion,
-  onAjustes,
-  onBorrar
+  onAjustes
 }: {
-  onAjustes: () => void
-  onBorrar: (tipo: 'proyecto' | 'creacion', id: string) => Promise<void>
-  creaciones: Creacion[]
-  onCrearIA: () => void
-  onAbrirCreacion: (id: string) => void
   proyectos: Project[]
   agentes: Agentes
+  creaciones: Creacion[]
+  creando: boolean
+  onCrear: (p: PeticionCreacion) => void
   onAbrir: (id: string) => void
-  onNuevo: () => void
-  importando: boolean
-  abierto?: string
+  onAbrirCreacion: (id: string) => void
+  onAjustes: () => void
 }) {
   const sinAgente = agentes.cargado && !agentes.listo
-  const [borrando, setBorrando] = useState<{ tipo: 'proyecto' | 'creacion'; id: string; nombre: string } | null>(null)
-  const [enCurso, setEnCurso] = useState(false)
+  const [estilo, setEstilo] = useState('libre')
+  const elegido = ESTILOS.find((e) => e.id === estilo)
+  // «Mis estilos»: los guardados desde videos que salieron bien.
+  const [propios, setPropios] = useState<EstiloPropio[]>([])
+  const [propio, setPropio] = useState<string | null>(null)
+  const miEstilo = propios.find((p) => p.id === propio)
+  useEffect(() => {
+    window.recorte.estilosPropios().then(setPropios).catch(() => setPropios([]))
+  }, [])
+
+  // Tus últimos videos: los de las conversaciones (con su portada) y los que editas a mano.
+  const deChats = new Set(creaciones.map((c) => c.proyectoEditor).filter(Boolean))
+  const recientes = [
+    ...creaciones.filter((c) => c.portada || c.salida).map((c) => ({ tipo: 'creacion' as const, id: c.id, fecha: c.updatedAt, c })),
+    ...proyectos.filter((p) => !deChats.has(p.id)).map((p) => ({ tipo: 'proyecto' as const, id: p.id, fecha: p.updatedAt, p }))
+  ]
+    .sort((a, b) => b.fecha - a.fecha)
+    .slice(0, 5)
 
   return (
-    <div className="inicio">
-      {borrando && (
-        <div className="confirmar-fondo" onClick={() => !enCurso && setBorrando(null)}>
-          <div className="confirmar" onClick={(ev) => ev.stopPropagation()} role="dialog" aria-modal="true">
-            <h3>¿Borrar «{borrando.nombre}»?</h3>
-            <p>
-              {borrando.tipo === 'proyecto'
-                ? 'Se va a la Papelera con su timeline, transcripción y proxys. Tu video original y lo que ya exportaste a tu carpeta no se tocan.'
-                : 'Se va a la Papelera con su guion, voz y versiones. Las copias que ya están en tu carpeta de videos no se tocan.'}
-            </p>
-            <div className="confirmar-botones">
-              <button className="btn small ghost" onClick={() => setBorrando(null)} disabled={enCurso}>
-                Cancelar
+    <div className="ini">
+      <div className="ini-centro">
+        <h1>{miEstilo ? `Con tu estilo «${miEstilo.nombre}»` : elegido && elegido.id !== 'libre' ? elegido.nombre : '¿Qué video hacemos hoy?'}</h1>
+        <p className="ini-sub">
+          {miEstilo
+            ? 'Cuenta de qué trata el video nuevo: el agente usa las mismas letras, colores, ritmo, cámara y música de aquel.'
+            : elegido && elegido.id !== 'libre'
+              ? elegido.descripcion
+              : 'Cuéntamelo como a una persona. Con el «+» me das tu audio, fotos o un video para editar.'}
+        </p>
+
+        <CarpetaVideos modo="aviso" />
+
+        <div className="ini-caja">
+          <CajaCrear
+            agentes={agentes}
+            creando={creando}
+            estilo={miEstilo ? miEstilo.estilo : estilo}
+            base={miEstilo ? { propio: miEstilo.id } : undefined}
+            onCrear={onCrear}
+            onConectar={onAjustes}
+          />
+        </div>
+
+        {sinAgente && (
+          <section className="ini-agente" aria-label="Conecta tu agente">
+            <h2>Conecta tu agente</h2>
+            <p>Elige con qué cuenta trabaja la IA. Recorte lo instala y abre el inicio de sesión: sin comandos ni claves.</p>
+            <ListaAgentes agentes={agentes} compacta />
+          </section>
+        )}
+
+        <div className="ini-estilos" role="group" aria-label="Tipo de video">
+          {ESTILOS.filter((e) => e.id !== 'libre').map((e) => (
+            <button
+              key={e.id}
+              className={`ini-chip ${estilo === e.id && !propio ? 'is-on' : ''}`}
+              onClick={() => (setPropio(null), setEstilo(estilo === e.id ? 'libre' : e.id))}
+              title={e.descripcion}
+            >
+              <Icon name={e.icono as IconName} size={13} /> {e.nombre}
+            </button>
+          ))}
+          {propios.map((p) => (
+            <span key={p.id} className={`ini-chip is-propio ${propio === p.id ? 'is-on' : ''}`}>
+              <button className="ini-chip-boton" onClick={() => setPropio(propio === p.id ? null : p.id)} title={`Tu estilo, de: ${p.descripcion}`}>
+                <Icon name="layers" size={13} /> {p.nombre}
               </button>
               <button
-                className="btn small peligro"
-                disabled={enCurso}
-                onClick={async () => {
-                  setEnCurso(true)
-                  try {
-                    await onBorrar(borrando.tipo, borrando.id)
-                    setBorrando(null)
-                  } finally {
-                    setEnCurso(false)
-                  }
+                className="ini-chip-quitar"
+                aria-label={`Borrar el estilo ${p.nombre}`}
+                title="Borrar este estilo (el video del que salió no se toca)"
+                onClick={() => {
+                  if (!window.confirm(`¿Borrar el estilo «${p.nombre}»? El video del que salió no se toca.`)) return
+                  if (propio === p.id) setPropio(null)
+                  window.recorte.borrarEstiloPropio(p.id).then(setPropios).catch(() => undefined)
                 }}
               >
-                <Icon name="trash" size={14} /> {enCurso ? 'Borrando…' : 'Borrar'}
+                <Icon name="x" size={10} />
               </button>
-            </div>
-          </div>
+            </span>
+          ))}
         </div>
-      )}
-      <header className="inicio-cabeza">
-        <div className="brand">
-          <span className="brand-mark"><Icon name="scissors" size={17} /></span>
-          <span className="brand-name">recorte</span>
-        </div>
-        <div className="inicio-cabeza-lado">
-          <span className="pill"><span className="dot" /> Todo en tu equipo</span>
-          <button className="btn small ghost" onClick={onAjustes}>
-            <Icon name="settings" size={15} /> Ajustes
-          </button>
-        </div>
-      </header>
-
-      <div className="inicio-cuerpo">
-        <section className="inicio-proyectos">
-          <CarpetaVideos modo="aviso" />
-
-          <div className="inicio-puertas">
-            <button className="inicio-puerta" onClick={onNuevo} disabled={importando}>
-              <span className="inicio-puerta-icono"><Icon name="film" size={22} /></span>
-              <strong>{importando ? 'Importando…' : 'Editar un video'}</strong>
-              <span>Importa tu grabación y edítala en la timeline, a mano o con el agente.</span>
-            </button>
-            <button className="inicio-puerta is-ia" onClick={onCrearIA}>
-              <span className="inicio-puerta-icono"><Icon name="sparkles" size={22} /></span>
-              <strong>Crear con IA</strong>
-              <span>Cuéntale la idea: el agente escribe el guion y hace el video. Sin grabar nada.</span>
-            </button>
-          </div>
-
-          <div className="inicio-titulo">
-            <h2>Recientes</h2>
-          </div>
-
-          <div className="inicio-grid">
-            {creaciones.map((c) => (
-              <div
-                key={c.id}
-                className="inicio-tarjeta"
-                role="button"
-                tabIndex={0}
-                onClick={() => onAbrirCreacion(c.id)}
-                onKeyDown={(ev) => ev.key === 'Enter' && onAbrirCreacion(c.id)}
-                title={c.peticion}
-              >
-                <button
-                  className="inicio-borrar"
-                  title="Borrar"
-                  aria-label="Borrar"
-                  onClick={(ev) => {
-                    ev.stopPropagation()
-                    setBorrando({ tipo: 'creacion', id: c.id, nombre: c.guion?.titulo ?? c.nombre })
-                  }}
-                >
-                  <Icon name="trash" size={14} />
-                </button>
-                <span className={`inicio-miniatura ${c.formato}`}>
-                  {c.portada ? <img src={mediaUrl(`c-${c.id}`, c.portada)} alt="" /> : <Icon name="sparkles" size={24} />}
-                  <span className="inicio-tipo"><Icon name="sparkles" size={11} /> IA</span>
-                </span>
-                <span className="inicio-nombre">{c.guion?.titulo ?? c.nombre}</span>
-                <span className="inicio-meta">
-                  {hace(c.updatedAt)} · {c.fase === 'listo' ? `versión ${c.version}` : c.fase === 'video' ? 'haciendo el video' : c.guion ? 'guion listo' : 'empezando'}
-                </span>
-              </div>
-            ))}
-            {proyectos.map((p) => (
-              <div
-                key={p.id}
-                className={`inicio-tarjeta ${p.id === abierto ? 'is-abierto' : ''}`}
-                role="button"
-                tabIndex={0}
-                onClick={() => onAbrir(p.id)}
-                onKeyDown={(ev) => ev.key === 'Enter' && onAbrir(p.id)}
-                title={p.source.path}
-              >
-                <button
-                  className="inicio-borrar"
-                  title="Borrar"
-                  aria-label="Borrar"
-                  onClick={(ev) => {
-                    ev.stopPropagation()
-                    setBorrando({ tipo: 'proyecto', id: p.id, nombre: p.name })
-                  }}
-                >
-                  <Icon name="trash" size={14} />
-                </button>
-                <span className="inicio-miniatura">
-                  {p.thumbnail ? <img src={mediaUrl(p.id, p.thumbnail)} alt="" /> : <Icon name="film" size={24} />}
-                  <span className="inicio-duracion">{duracion(p.source.duration)}</span>
-                </span>
-                <span className="inicio-nombre">{p.name}</span>
-                <span className="inicio-meta">
-                  {hace(p.updatedAt)}
-                  {p.timeline ? ` · ${p.timeline.clips.length} ${p.timeline.clips.length === 1 ? 'clip' : 'clips'}` : ''}
-                  {p.transcription === 'lista' ? ' · transcrito' : ''}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          {proyectos.length === 0 && creaciones.length === 0 && (
-            <p className="inicio-vacio">Todavía no hay nada aquí. Empieza por una de las dos puertas: todo se queda en tu equipo.</p>
-          )}
-        </section>
-
-        <aside className={`inicio-agente ${sinAgente ? 'is-pide' : ''}`}>
-          <h2>{agentes.activo ? 'Tu agente' : 'Conecta tu agente'}</h2>
-          <p>
-            {agentes.activo
-              ? `${agentes.activo.nombre} edita contigo con tu propia cuenta.`
-              : 'Elige con qué cuenta trabaja la IA. Recorte lo instala y abre el inicio de sesión: sin comandos ni claves.'}
-          </p>
-
-          <div className="inicio-agentes">
-            <ListaAgentes agentes={agentes} compacta />
-          </div>
-
-          <button className="op-enlace" onClick={onAjustes}>
-            Ver todo en Ajustes: forma de pago, voz y herramientas
-          </button>
-        </aside>
       </div>
+
+      {recientes.length > 0 && (
+        <section className="ini-recientes" aria-label="Tus últimos videos">
+          <h2>Tus últimos videos</h2>
+          <div className="ini-recientes-fila">
+            {recientes.map((r) =>
+              r.tipo === 'creacion' ? (
+                <button key={r.id} className="ini-video" onClick={() => onAbrirCreacion(r.id)} title={r.c.peticion}>
+                  <span className={`ini-video-miniatura ${r.c.formato}`}>
+                    {r.c.portada ? <img src={mediaUrl(`c-${r.c.id}`, r.c.portada)} alt="" loading="lazy" /> : <Icon name="sparkles" size={22} />}
+                  </span>
+                  <span className="ini-video-nombre">{r.c.guion?.titulo ?? r.c.nombre}</span>
+                </button>
+              ) : (
+                <button key={r.id} className="ini-video" onClick={() => onAbrir(r.id)} title={r.p.source.path}>
+                  <span className="ini-video-miniatura">
+                    {r.p.thumbnail ? <img src={mediaUrl(r.p.id, r.p.thumbnail)} alt="" loading="lazy" /> : <Icon name="film" size={22} />}
+                    <span className="ini-video-duracion">{duracion(r.p.source.duration)}</span>
+                  </span>
+                  <span className="ini-video-nombre">{r.p.name}</span>
+                </button>
+              )
+            )}
+          </div>
+        </section>
+      )}
     </div>
   )
 }

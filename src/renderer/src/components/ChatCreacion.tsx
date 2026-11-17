@@ -179,7 +179,10 @@ export function ChatCreacion({
   onAdjuntar,
   onAnotar,
   onConectar,
-  editor
+  editor,
+  centro,
+  material,
+  entrega
 }: {
   creacion: Creacion
   agentes: Agentes
@@ -200,6 +203,12 @@ export function ChatCreacion({
   onConectar: () => void
   /** Si el video ya está en el editor: el proyecto y su timeline, para los cambios rápidos. */
   editor?: { proyecto: Project; puente: React.RefObject<PuenteEditor | null> }
+  /** La conversación en el centro de la pantalla (sin el editor): más ancha, sin la cabecera del panel. */
+  centro?: boolean
+  /** Tu material, junto a tu pedido (en la conversación del centro). */
+  material?: React.ReactNode
+  /** El video entregado, como una tarjeta al final de la conversación. */
+  entrega?: React.ReactNode
 }) {
   const c = creacion
   const lista = useRef<HTMLDivElement | null>(null)
@@ -305,7 +314,8 @@ export function ChatCreacion({
   const activo = agentes.lista.find((a) => a.id === c.tareas?.video?.agente) ?? agentes.activo
 
   return (
-    <aside className="agente-panel chat-creacion">
+    <aside className={`agente-panel chat-creacion ${centro ? 'is-centro' : ''}`}>
+      {!centro && (
       <div className="panel-head">
         <button className="agente-actual" onClick={onConectar} title="Cambiar de agente">
           {activo && <LogoAgente id={activo.id} size={26} />}
@@ -315,12 +325,14 @@ export function ChatCreacion({
           </span>
         </button>
       </div>
+      )}
 
       <div className="chat-lista" ref={lista}>
         <div className="chat-msg usuario">
           <p>{c.peticion}</p>
-          {c.adjuntos.length > 0 && <span className="chat-ref">{c.adjuntos.length} {c.adjuntos.length === 1 ? 'archivo' : 'archivos'}</span>}
+          {c.adjuntos.length > 0 && !material && <span className="chat-ref">{c.adjuntos.length} {c.adjuntos.length === 1 ? 'archivo' : 'archivos'}</span>}
         </div>
+        {material}
         {c.mensajes.map((m) => {
           const ultimo = m.id === c.mensajes.at(-1)?.id
           return (
@@ -397,6 +409,8 @@ export function ChatCreacion({
             </div>
           )
         })}
+
+        {entrega}
 
         {c.agente?.pausa && !ocupado && (
           <div className="cr-pausa">

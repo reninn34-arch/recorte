@@ -51,6 +51,12 @@ export function iniciarMcpRecorte(ctx: ContextoMcp) {
 
   const arrancar = async () => {
     servidor?.detener()
+    // Para probar una copia de la app junto a la instalada: sin servidor (no le quita el puerto ni el registro en Claude Code).
+    if (process.env.RECORTE_SIN_MCP === '1') {
+      servidor = null
+      error = 'Desactivado en esta copia de prueba.'
+      return
+    }
     // Si Claude Code ya lo tenía registrado con esta dirección y contraseña, se mantiene al día solo.
     const antes = { url: url(), contrasena: config.contrasena }
     const estabaConectado = claudeConectado(antes.url, antes.contrasena)
