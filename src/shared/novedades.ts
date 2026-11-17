@@ -24,6 +24,37 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.77',
+    fecha: '2026-11-17',
+    resumen: 'Los títulos se ven igual en el monitor, en el MP4 y en el video del agente: mismo tamaño, con grano y sin manchas.',
+    novedades: [
+      {
+        icono: 'type',
+        titulo: 'Las letras salen del mismo tamaño en el MP4',
+        texto:
+          'Algunas letras (como la Titular, la de los títulos grandes) salían más chicas en el MP4 que en el monitor. Ahora cada letra sale igual en los dos.'
+      },
+      {
+        icono: 'sliders',
+        titulo: 'El grano y el polvo también gastan los títulos',
+        texto:
+          'Los filtros (grano, polvo, viñeta) ahora pasan por encima de los títulos, como en los videos del agente, y los subtítulos de la voz siguen limpios encima.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Tinta limpia sobre papel',
+        texto:
+          'Un texto oscuro sin caja (una carta, un telegrama) ya no lleva el halo negro que lo emborronaba: se ve como tinta sobre el papel.'
+      },
+      {
+        icono: 'film',
+        titulo: 'Del agente al editor, igual que se veía',
+        texto:
+          'Al pasar un video del agente al editor, el fondo oscurecido debajo de un título y el tamaño de sus letras llegan como estaban, y los subtítulos quedan marcados como subtítulos.'
+      }
+    ]
+  },
+  {
     version: '0.1.76',
     fecha: '2026-11-17',
     resumen: 'Los personajes animados mueven los brazos sin cortar la ropa, y los textos letra a letra ya no desaparecen en el monitor.',
