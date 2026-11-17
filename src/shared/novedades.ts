@@ -24,6 +24,19 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.81',
+    fecha: '2026-11-17',
+    resumen: 'Si cambias de cuenta en Claude, el uso que ves es el de tu cuenta nueva.',
+    novedades: [
+      {
+        icono: 'key',
+        titulo: 'El uso de la cuenta correcta',
+        texto:
+          'Si sales de una cuenta de Claude y entras con otra, Recorte deja de mostrar los números de la anterior y lee los de la nueva al momento.'
+      }
+    ]
+  },
+  {
     version: '0.1.80',
     fecha: '2026-11-17',
     resumen: 'El uso de tu agente se ve como en su propia app: sus dos límites, cuándo se restablecen y con qué cuenta trabaja.',
