@@ -549,8 +549,11 @@ export function Monitor({
             )
           })}
           {tr && tr.blanco > 0 && <div className="monitor-filtros" style={{ background: '#fff', opacity: tr.blanco }} aria-hidden />}
-          {timeline.filtros && !vistaAhora && <FiltrosVista filtros={timeline.filtros} tiempo={reproductor.tiempo} reproduciendo={reproductor.reproduciendo} ancho={cw} alto={ch} />}
-          {rotulos.map((r) => {
+          {/* Los rótulos van debajo de los filtros (el grano y el polvo también los gastan, como en el kit); los
+              subtítulos, encima y limpios. Igual que el MP4. */}
+          {[...rotulos.filter((r) => !r.subtitulo), 'filtros' as const, ...rotulos.filter((r) => r.subtitulo)].map((r) => {
+            if (r === 'filtros')
+              return timeline.filtros && !vistaAhora ? <FiltrosVista key="filtros" filtros={timeline.filtros} tiempo={reproductor.tiempo} reproduciendo={reproductor.reproduciendo} ancho={cw} alto={ch} /> : null
             const b = borrador?.tipo === 'texto' && borrador.id === r.id ? borrador : null
             const libre = b ?? (typeof r.x === 'number' && typeof r.y === 'number' ? { x: r.x, y: r.y } : null)
             const elegida = elegido?.tipo === 'texto' && elegido.id === r.id
