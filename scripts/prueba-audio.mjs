@@ -111,6 +111,12 @@ try {
   assert.equal(ventana2(conCarta, 1.2, 1.6).textos[0].animacion, 'maquina', 'a medio escribir: sigue la animación')
   assert.equal(ventana2(conCarta, 0.5, 1.6).textos[0].animacion, 'maquina', 'empieza dentro: con su animación')
   console.log('texto letra a letra en un cuadro suelto: no se borra ni vuelve a escribirse ✓')
+  // Letra oscura sin caja (tinta en un papel): sin el borde ni la sombra negros, que la emborronan. La clara los lleva.
+  const { letraOscura } = await import('../src/shared/timeline.ts')
+  assert.equal(letraOscura({ color: '#2a1e14' }), true)
+  assert.equal(letraOscura({ color: '#efe3c8' }), false)
+  assert.equal(letraOscura({}), false)
+  console.log('letra oscura sin caja: limpia, sin halo negro ✓')
   // Rótulo: entra fundiéndose y creciendo; las palabras entre *asteriscos* en su color (y no cuentan como palabra aparte).
   const { palabrasDe, partesClave } = await import('../src/shared/timeline.ts')
   const rot2 = { id: 'r', inicio: 0, duracion: 2, texto: 'No es *timidez*,', posicion: 'abajo', animacion: 'rotulo', colorClave: '#5fb4f0' }

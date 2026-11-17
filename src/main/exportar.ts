@@ -30,6 +30,7 @@ import {
   APARECER_S,
   pasoAnimacion,
   tiemposPalabras,
+  letraOscura,
   COLOR_PINTADO,
   type CapaTL,
   type TextoTL,
@@ -184,6 +185,8 @@ function escribirAss(
         ...(t.color ? [`\\1c${colorAss(t.color).replace('&H00', '&H')}&`] : []),
         // La caja de su color (con caja, el borde del estilo es la caja), opaca como en el monitor.
         ...(t.caja && !t.sinCaja ? [`\\3c${colorAss(t.caja).replace('&H00', '&H')}&`, '\\3a&H00&'] : []),
+        // Letra oscura sin caja (tinta sobre papel): sin el borde ni la sombra negros, que la emborronan.
+        ...(t.sinCaja && letraOscura(t) ? ['\\bord0\\shad0'] : []),
         // La letra: una fuente de Windows, la misma que dibuja el monitor.
         ...(t.fuente && FUENTES_TEXTO[t.fuente]
           ? [`\\fn${FUENTES_TEXTO[t.fuente].familia}`, FUENTES_TEXTO[t.fuente].negrita ? '\\b1' : '\\b0', FUENTES_TEXTO[t.fuente].cursiva ? '\\i1' : '\\i0']

@@ -416,6 +416,17 @@ export const ANIMACIONES_TEXTO: { id: AnimacionTexto; nombre: string }[] = [
   { id: 'subir', nombre: 'Subiendo' }
 ]
 
+/**
+ * Si la letra de un rótulo es oscura (tinta sobre un papel, un cartel claro). Sin caja, la letra clara lleva un halo
+ * negro para leerse sobre cualquier video; a la oscura ese halo la emborrona: va limpia, en el monitor y en el MP4.
+ */
+export function letraOscura(t: Pick<TextoTL, 'color'>): boolean {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(t.color ?? '')
+  if (!m) return false
+  const [r, g, b] = [m[1], m[2], m[3]].map((x) => parseInt(x, 16) / 255)
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.35
+}
+
 /** Segundos entre palabra y palabra (o letra y letra) de un rótulo animado: lo mismo en el monitor y en el MP4. */
 export function pasoAnimacion(t: Pick<TextoTL, 'texto' | 'animacion'>): number {
   if (t.animacion === 'palabras') return Math.min(0.22, 1.4 / Math.max(1, t.texto.split(/\s+/).filter(Boolean).length))

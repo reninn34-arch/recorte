@@ -51,6 +51,7 @@ import {
   ajustesEn,
   ponerClaveCapa,
   CAPA_SUBTITULOS,
+  letraOscura,
 } from '../../../shared/timeline'
 import { useMusica, useSincronizar, useTamano, useVoces, type FuentesVista, type Historial, type Reproductor } from '../hooks/timeline'
 import type { Elegido } from './TimelineEditor'
@@ -556,7 +557,7 @@ export function Monitor({
             return (
               <span
                 key={r.id}
-                className={`monitor-rotulo ${libre ? 'libre' : r.posicion} ${r.sinCaja ? 'sin-caja' : ''} ${elegida ? 'is-elegida' : ''} ${r.detras ? 'detras' : ''}`}
+                className={`monitor-rotulo ${libre ? 'libre' : r.posicion} ${r.sinCaja ? 'sin-caja' : ''} ${r.sinCaja && letraOscura(r) ? 'tinta' : ''} ${elegida ? 'is-elegida' : ''} ${r.detras ? 'detras' : ''}`}
                 style={{
                   ...(libre ? { left: `${libre.x * 100}%`, top: `${libre.y * 100}%` } : {}),
                   ...(r.tamano ? { fontSize: `calc(var(--rotulo) * ${r.tamano})` } : {}),
