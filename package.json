@@ -39,6 +39,7 @@
     "prueba:antigravity": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-antigravity.mjs",
     "prueba:navegador": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-navegador.mjs",
     "prueba:actualizar-mac": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs scripts/prueba-actualizar-mac.mjs",
+    "prueba:niveles": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-niveles.mjs",
     "prueba:proxys": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-proxys.mjs",
     "prueba:roto": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-roto.mjs",
     "prueba:cielo": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-cielo.mjs",

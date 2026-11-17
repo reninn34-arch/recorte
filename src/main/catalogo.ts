@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { app } from 'electron'
 import { ID_SEGURO, type AgenteId, type ModeloAgente } from '../shared/creacion'
 import { pathAmpliado, resolverBinario } from './binarios'
@@ -245,43 +245,78 @@ function modelosKimi(): ModeloAgente[] {
   return FIJOS.kimi ?? []
 }
 
+/** La carpeta del paquete de Gemini CLI, se haya instalado como se haya instalado (por Recorte, global, en Mac o Windows). */
+function raizGemini(): string | null {
+  const bin = resolverBinario('gemini')
+  if (!bin) return null
+  const candidatos: string[] = []
+  try {
+    // En Mac y Linux el programa es un enlace al paquete: se sube desde el archivo real.
+    let d = dirname(realpathSync(bin))
+    for (let i = 0; i < 6; i++, d = dirname(d)) candidatos.push(d)
+  } catch {
+    // Sin enlace: quedan los sitios de siempre.
+  }
+  candidatos.push(
+    join(bin, '..', '..', '@google', 'gemini-cli'), // instalado por Recorte (node_modules/.bin)
+    join(bin, '..', 'node_modules', '@google', 'gemini-cli'), // npm global en Windows
+    join(bin, '..', '..', 'lib', 'node_modules', '@google', 'gemini-cli') // npm global en Mac y Linux
+  )
+  return (
+    candidatos.find((d) => {
+      try {
+        return (JSON.parse(readFileSync(join(d, 'package.json'), 'utf8')) as { name?: string }).name === '@google/gemini-cli'
+      } catch {
+        return false
+      }
+    }) ?? null
+  )
+}
+
 /**
- * Los modelos de Gemini CLI: los nombres que trae el paquete instalado (cuando Gemini CLI se
- * actualiza y suma un modelo, aparece). Si no se encuentra el paquete, los conocidos.
+ * Los modelos de Gemini CLI: los que el paquete instalado declara en sus constantes (`DEFAULT_GEMINI_MODEL`,
+ * `LATEST_GEMINI_FLASH_MODEL`, `PREVIEW_GEMINI_MODEL`…), así un Gemini nuevo trae su lista. Si no se encuentran, los
+ * conocidos.
  */
 function modelosGemini(): ModeloAgente[] {
-  const bin = resolverBinario('gemini')
-  if (!bin) return FIJOS.gemini ?? []
-  const base = join(bin, '..', 'node_modules', '@google')
-  const archivos = [
-    join(base, 'gemini-cli', 'node_modules', '@google', 'gemini-cli-core', 'dist', 'src', 'config', 'models.js'),
-    join(base, 'gemini-cli-core', 'dist', 'src', 'config', 'models.js')
-  ]
-  for (const archivo of archivos) {
-    let texto: string
-    try {
-      texto = readFileSync(archivo, 'utf8')
-    } catch {
-      continue
-    }
-    const ids = [...new Set(texto.match(/\bgemini-\d+(?:\.\d+)?-(?:pro|flash(?:-lite)?)(?:-preview(?:-\d\d-\d\d)?)?\b/g) ?? [])]
-    if (!ids.length) continue
-    const nombre = (id: string) =>
-      id
-        .replace(/^gemini-/, 'Gemini ')
-        .replace(/-flash-lite/, ' Flash-Lite')
-        .replace(/-flash/, ' Flash')
-        .replace(/-pro/, ' Pro')
-        .replace(/-preview.*/, ' (preview)')
-    const modelos = ids.map((id) => ({ id, nombre: nombre(id), esfuerzos: [] as string[] }))
-    // La versión más nueva primero; dentro de una versión, Pro, Flash y Flash-Lite.
-    const orden = (id: string) => (/-pro/.test(id) ? 0 : /-lite/.test(id) ? 2 : 1)
-    const version = (id: string) => Number(/gemini-(\d+(?:\.\d+)?)/.exec(id)?.[1] ?? 0)
-    modelos.sort((a, b) => version(b.id) - version(a.id) || orden(a.id) - orden(b.id))
-    const mayor = version(modelos[0].id)
-    return modelos.map((m) => (version(m.id) < mayor ? { ...m, anterior: true } : m))
+  const raiz = raizGemini()
+  if (!raiz) return FIJOS.gemini ?? []
+  const textos: string[] = []
+  const viejo = join(raiz, 'node_modules', '@google', 'gemini-cli-core', 'dist', 'src', 'config', 'models.js')
+  try {
+    textos.push(readFileSync(viejo, 'utf8'))
+  } catch {
+    // Las versiones nuevas vienen empaquetadas en bundle/.
   }
-  return FIJOS.gemini ?? []
+  try {
+    for (const f of readdirSync(join(raiz, 'bundle'))) if (f.endsWith('.js')) textos.push(readFileSync(join(raiz, 'bundle', f), 'utf8'))
+  } catch {
+    // Sin bundle: lo de arriba.
+  }
+  const ids = new Set<string>()
+  for (const t of textos) {
+    for (const m of t.matchAll(/\b[A-Z0-9_]*GEMINI[A-Z0-9_]*MODEL[A-Z0-9_]*\s*=\s*["'](gemini-\d[\w.-]*)["']/g)) {
+      const id = m[1]
+      if (/embedding|customtools/.test(id) || !ID_SEGURO.test(id)) continue
+      ids.add(id)
+    }
+  }
+  if (!ids.size) return FIJOS.gemini ?? []
+  const nombre = (id: string) =>
+    id
+      .replace(/^gemini-/, 'Gemini ')
+      .replace(/-flash-lite/, ' Flash-Lite')
+      .replace(/-flash/, ' Flash')
+      .replace(/-pro/, ' Pro')
+      .replace(/-preview.*/, ' (preview)')
+  const familia = (id: string) => (/-pro/.test(id) ? 0 : /-lite/.test(id) ? 2 : 1)
+  const version = (id: string) => Number(/gemini-(\d+(?:\.\d+)?)/.exec(id)?.[1] ?? 0)
+  const modelos = [...ids].map((id) => ({ id, nombre: nombre(id), esfuerzos: [] as string[] }))
+  // Por familia (Pro, Flash, Flash-Lite) y, dentro, la versión más nueva primero. Anterior: una versión vieja de su familia.
+  modelos.sort((a, b) => familia(a.id) - familia(b.id) || version(b.id) - version(a.id))
+  const mayor = new Map<number, number>()
+  for (const m of modelos) mayor.set(familia(m.id), Math.max(mayor.get(familia(m.id)) ?? 0, version(m.id)))
+  return modelos.map((m) => (version(m.id) < (mayor.get(familia(m.id)) ?? 0) ? { ...m, anterior: true } : m))
 }
 
 const enCurso = new Map<AgenteId, Promise<ModeloAgente[]>>()

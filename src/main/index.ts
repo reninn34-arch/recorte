@@ -23,8 +23,10 @@ import { MODELO_CHATGPT, MODELOS_IMAGEN, modelosVideoVigentes, type PedidoFlow }
 import { estadoChatGPT, generarImagenChatGPT } from './imagenchatgpt'
 import { atenderMedios } from './mediosagente'
 import { avisarSesionCaida, definirEntornoAgentes, empezarTrabajo, esParado, pararTrabajo, terminarTrabajo } from './ia'
-import { comandoConEleccion } from './modelos'
-import { alCambiarCatalogo, catalogoAgente, eleccionVigente } from './catalogo'
+import { comandoConEleccion, usarListaDeModelos } from './modelos'
+// Los niveles (rápido, equilibrado, máximo) salen de la lista que se lee de cada agente: no hay nombres que envejezcan.
+usarListaDeModelos(catalogoRecordado)
+import { alCambiarCatalogo, catalogoAgente, catalogoRecordado, eleccionVigente } from './catalogo'
 import { crearMiniatura, crearProxy, duracionMedio, probeVideo } from './ffmpeg'
 import { prepararProxysDeMedios } from './proxysmedios'
 import { proponerClipsConAgente, proponerClipsConIA, proponerRecetaConAgente, proponerRecetaConIA } from './ia'
