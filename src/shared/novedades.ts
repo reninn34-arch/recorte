@@ -24,6 +24,25 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.75',
+    fecha: '2026-11-16',
+    resumen: 'Los videos largos con IA ya no se cortan a los 40 minutos, y la voz espera el límite de Google en vez de rendirse.',
+    novedades: [
+      {
+        icono: 'clock',
+        titulo: 'Videos largos sin cortes',
+        texto:
+          'Antes Recorte paraba al agente a los 40 minutos aunque siguiera trabajando. Ahora solo lo para si lleva 20 minutos sin avanzar (sin decir nada ni crear archivos), con un tope de 2 horas por seguridad.'
+      },
+      {
+        icono: 'volumen',
+        titulo: 'La voz espera el límite de Google',
+        texto:
+          'Cuando Google pide esperar por el límite de voces por minuto, Recorte espera y sigue con la misma frase. Si es la cuota del día, prueba con el modelo ligero o te lo dice claro.'
+      }
+    ]
+  },
+  {
     version: '0.1.74',
     fecha: '2026-11-16',
     resumen: 'Los modelos de Gemini aparecen al día y los niveles siguen solos a los modelos nuevos.',
