@@ -66,6 +66,10 @@ jobs:
       - name: Compilar los .dmg
         run: npx electron-builder --mac --publish never
 
+      # La actualización propia de Mac con el .dmg recién hecho: bajar, comprobar, sacar la app y cambiarla.
+      - name: Probar la actualización en Mac
+        run: npm run prueba:actualizar-mac -- release/Recorte-Mac-arm64.dmg
+
       - name: Mirar lo que salió
         run: |
           ls -la release
