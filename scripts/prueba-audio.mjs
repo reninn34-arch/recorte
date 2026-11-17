@@ -103,6 +103,14 @@ try {
   const t2 = tiemposPalabras(w2)
   assert.ok(t2[0].inicio < 0 && t2[0].inicio + t2[0].dura <= 0.001, JSON.stringify(t2))
   console.log('pintar palabras: karaoke al ritmo de la voz en el MP4 ✓')
+  // Un cuadro (o un tramo de la vista previa) a mitad de un texto «letra a letra» que ya se escribió: se ve entero, no
+  // vuelve a escribirse desde cero (antes quedaba oculto al empezar el tramo). Si aún se está escribiendo, sigue animado.
+  const carta = { id: 'c', inicio: 1, duracion: 3, texto: 'ha vuelto la tranquilidad', posicion: 'centro', animacion: 'maquina' }
+  const conCarta = { version: 1, clips: [{ id: 'a', fuente: 'principal', entrada: 0, salida: 5 }], textos: [carta] }
+  assert.equal(ventana2(conCarta, 3, 3.4).textos[0].animacion, undefined, 'ya escrita: sin volver a escribirse')
+  assert.equal(ventana2(conCarta, 1.2, 1.6).textos[0].animacion, 'maquina', 'a medio escribir: sigue la animación')
+  assert.equal(ventana2(conCarta, 0.5, 1.6).textos[0].animacion, 'maquina', 'empieza dentro: con su animación')
+  console.log('texto letra a letra en un cuadro suelto: no se borra ni vuelve a escribirse ✓')
   // Rótulo: entra fundiéndose y creciendo; las palabras entre *asteriscos* en su color (y no cuentan como palabra aparte).
   const { palabrasDe, partesClave } = await import('../src/shared/timeline.ts')
   const rot2 = { id: 'r', inicio: 0, duracion: 2, texto: 'No es *timidez*,', posicion: 'abajo', animacion: 'rotulo', colorClave: '#5fb4f0' }

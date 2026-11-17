@@ -913,6 +913,22 @@ export function borrarMarcador(tl: Timeline, id: string): Timeline {
 }
 
 /** Solo el tramo de `a` a `b` (para exportar entre la entrada y la salida): lo de antes y lo de después se quita. */
+/**
+ * Un rótulo que empezó `corte` segundos antes (lo que queda de él al cortarle el principio): las palabras ya dichas
+ * quedan dichas y una entrada que ya pasó (letra a letra, pop, subir…) no se repite. Si no, al sacar un trozo de la
+ * timeline (la vista previa, un cuadro, exportar entre la entrada y la salida) volvía a escribirse desde cero.
+ */
+export function textoYaEmpezado(r: TextoTL, corte: number, original: TextoTL = r): TextoTL {
+  if (!r.animacion || corte <= 0) return r
+  if (r.animacion === 'palabras' || r.animacion === 'pintar') {
+    return { ...r, tiempos: tiemposPalabras(original).map((w) => Math.round((w.inicio - corte) * 1000) / 1000) }
+  }
+  const entra = r.animacion === 'maquina' ? pasoAnimacion(r) * r.texto.replace(/\s/g, '').length + APARECER_S : 0.35
+  if (corte < entra) return r
+  const { animacion: _a, ...sin } = r
+  return sin
+}
+
 export function soloTramo(tl: Timeline, a: number, b: number): Timeline {
   const total = duracionTimeline(tl)
   let r = tl
@@ -973,16 +989,7 @@ export function extraerRango(tl: Timeline, a: number, b: number): Timeline {
   }
   // A un texto sin su principio: las palabras ya dichas quedan dichas (como al dividirlo) y una entrada que ya pasó no se
   // repite.
-  const textoSinCabeza = (r: TextoTL, corte: number, original: TextoTL): TextoTL => {
-    if (!r.animacion) return r
-    if (r.animacion === 'palabras' || r.animacion === 'pintar') {
-      return { ...r, tiempos: tiemposPalabras(original).map((w) => Math.round((w.inicio - corte) * 1000) / 1000) }
-    }
-    const entra = r.animacion === 'maquina' ? pasoAnimacion(r) * r.texto.replace(/s/g, '').length + APARECER_S : 0.35
-    if (corte < entra) return r
-    const { animacion: _a, ...sin } = r
-    return sin
-  }
+  const textoSinCabeza = (r: TextoTL, corte: number, original: TextoTL): TextoTL => textoYaEmpezado(r, corte, original)
   // Las marcas de dentro se van; las de después se corren. Dos que quedan en el mismo punto (la de la entrada y la de
   // la salida) se juntan en una.
   const marcadores = (tl.marcadores ?? [])
@@ -3353,12 +3360,12 @@ export function ventanaTimeline(tl: Timeline, desde: number, hasta: number): Tim
   const { musica: _m, ...resto } = corta
   return {
     ...resto,
-    // Un rótulo que ya venía de antes: sus palabras siguen donde iban (no vuelven a aparecer ni a pintarse desde cero).
+    // Un rótulo que ya venía de antes: sus palabras siguen donde iban y su entrada (letra a letra, pop…) no se repite.
     textos: tl.textos
       .map((x) => {
         const d = dentro(x)
-        if (!d || x.inicio >= a || !x.tiempos) return d
-        return { ...d, tiempos: x.tiempos.map((s) => Math.round((s - (a - x.inicio)) * 1000) / 1000) }
+        if (!d || x.inicio >= a) return d
+        return textoYaEmpezado(d, a - x.inicio, x)
       })
       .filter((x): x is TextoTL => x !== null),
     ...(tl.voces?.length ? { voces: tl.voces.map(dentro).filter((x): x is VozTL => x !== null) } : {}),
