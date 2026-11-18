@@ -52,6 +52,7 @@
     "prueba:medios": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs scripts/prueba-medios.mjs",
     "prueba:flow-real": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-flow-real.mjs",
     "prueba:flow-referencias": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-flow-referencias.mjs",
+    "prueba:subtitulos-audio": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs scripts/prueba-subtitulos-audio.mjs",
     "prueba:antigravity-reserva": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-antigravity-reserva.mjs"
   },
   "dependencies": {

@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from 'node:path'
 import { COSTO_CLIP, MAX_CLIPS_VEO, VOCES_GEMINI, type Creacion } from '../shared/creacion'
+import { audiosSubidos, clasificarAudio, subtitulosQueFaltan } from './subtitulosreceta'
 import { MODELO_CHATGPT, MODELOS_IMAGEN, modelosVideoVigentes } from '../shared/flow'
 import { estiloPorId } from '../shared/estilos'
 import {
@@ -265,18 +266,8 @@ No hay duración por defecto: NO recortes a 30 s (ni a ninguna cifra) si el usua
 Video ${ancho}×${alto} (${c.formato === 'horizontal' ? '16:9' : '9:16 vertical'}), 30 fps, H.264 (libx264, yuv420p, \`-movflags +faststart\`), audio AAC si hay audio.
 Con croma en H.264 4:2:0, alinea los bordes del croma a píxeles pares (el color se guarda en bloques de 2×2).
 
-## La narración que trajo el usuario
-${
-    c.adjuntos.some((a) => a.tipo === 'audio')
-      ? `El usuario subió su narración grabada (vistazo/narracion-NN.wav, con lo que dice frase por frase y sus segundos en
-vistazo/narracion-NN.txt y cada palabra en el .json). ESA es la voz del video: no generes otra voz ni la cambies, y el video
-dura lo que ella (más el cierre). Recorta solo el silencio del principio y del final.
-- Cada escena dura lo que su frase: usa los tiempos de la transcripción para poner cada imagen, clip y texto en su segundo.
-- Corrige lo que la transcripción entendió mal según el sentido (p. ej. «para tu casa» → «para tu caso»).
-- En la receta del kit va como una sola entrada de voz: \`"voz": [{ "archivo": "vistazo/narracion-01.wav", "en": 0 }]\`.
-- Los subtítulos (en \`"subtitulos"\` de la receta) con los tiempos de las palabras del .json, restando lo que recortes del principio.`
-      : 'No trajo narración grabada.'
-  }
+## El audio que trajo el usuario
+${seccionAudioSubido(c, carpeta)}
 
 ## La voz
 ${
@@ -356,6 +347,42 @@ export class LimiteUso extends Error {
 }
 
 /**
+ * Qué es cada audio que subió el usuario, según su transcripción: una narración (el video se arma sobre ella y lleva
+ * subtítulos) o música (la banda sonora: sin subtítulos salvo que los pida). Lo decide Recorte, no el agente, para que
+ * no le ponga subtítulos a una canción ni trate como música lo que es una voz.
+ */
+function seccionAudioSubido(c: Creacion, carpeta: string): string {
+  const subidos = c.adjuntos.filter((a) => a.tipo === 'audio').length
+  if (!subidos) return 'No trajo audio.'
+  const audios = audiosSubidos(carpeta)
+  const musicas = audios.filter((a) => a.musica)
+  // Los que no se pudieron transcribir se tratan como narración (como siempre).
+  const hayNarracion = audios.length < subidos || audios.some((a) => !a.musica)
+  const partes: string[] = []
+  if (musicas.length) {
+    const cuales = musicas
+      .map((a) => `vistazo/narracion-${a.n}.wav (${a.duracion.toFixed(1)} s${a.habla > 0 ? `; solo se oye hablar ${a.habla.toFixed(1)} s: «${a.texto.slice(0, 80)}»` : ', sin voz'})`)
+      .join(', ')
+    partes.push(`El usuario subió MÚSICA: ${cuales}. Es la BANDA SONORA del video, no una narración:
+- Va en \`"musica"\` de la receta (a su volumen, no de fondo bajito, salvo que también haya narración), y los cortes y las
+  animaciones siguen su ritmo (sus golpes; \`kit.py ritmo\` o medirlos). Las palabras que trae (un «You ready?», un coro) son
+  parte de la música: aprovéchalas para el momento del video que les toque.
+- NO le pongas subtítulos a la música (ni a la letra si es una canción), salvo que el usuario los pida.
+- No le generes una voz encima salvo que el usuario lo pida.`)
+  }
+  if (hayNarracion) {
+    partes.push(`El usuario subió su narración grabada (vistazo/narracion-NN.wav${musicas.length ? ', la que no es música' : ''}, con lo que dice frase por
+frase y sus segundos en vistazo/narracion-NN.txt y cada palabra en el .json). ESA es la voz del video: no generes otra voz
+ni la cambies, y el video dura lo que ella (más el cierre). Recorta solo el silencio del principio y del final.
+- Cada escena dura lo que su frase: usa los tiempos de la transcripción para poner cada imagen, clip y texto en su segundo.
+- Corrige lo que la transcripción entendió mal según el sentido (p. ej. «para tu casa» → «para tu caso»).
+- En la receta del kit va como una sola entrada de voz: \`"voz": [{ "archivo": "vistazo/narracion-01.wav", "en": 0 }]\`.
+- Los subtítulos (en \`"subtitulos"\` de la receta) con los tiempos de las palabras del .json, restando lo que recortes del principio.`)
+  }
+  return partes.join('\n\n')
+}
+
+/**
  * La plantilla del tipo de video (las tarjetas con estilo propio, como «Explicativo 3D»): si ya hay una
  * de videos anteriores, se parte de ella; si no, el agente la arma reutilizable y Recorte la guarda.
  */
@@ -370,7 +397,10 @@ function seccionPlantilla(c: Creacion, trabajo: string): string {
   } catch {
     // Sin biblioteca, el agente modela lo que necesite.
   }
-  const narracion = c.adjuntos.some((a) => a.tipo === 'audio')
+  // El ritmo de la voz, solo con una narración subida (la música no se toca). Sin transcribir, cuenta como narración.
+  const subidos = c.adjuntos.filter((a) => a.tipo === 'audio').length
+  const clasificados = audiosSubidos(dirname(trabajo))
+  const narracion = subidos > 0 && (clasificados.length < subidos || clasificados.some((a) => !a.musica))
   return `## La plantilla de «${estilo.nombre}»
 Este tipo de video tiene su estilo visual propio y NO se hace con el kit (el kit no hace 3D): se hace con código
 (HyperFrames con Three.js) dentro de \`plantilla/\`, en esta carpeta.
@@ -587,10 +617,12 @@ export async function prepararVistazo(c: Creacion, carpeta: string): Promise<str
     const r = existsSync(wav) ? await transcribirArchivo(wav, json, () => {}) : { ok: false as const }
     let frases = ''
     let dura = ''
+    let clase: ReturnType<typeof clasificarAudio> | null = null
     if (r.ok && existsSync(json)) {
       try {
         const t = JSON.parse(readFileSync(json, 'utf8').replace(/^\uFEFF/, '')) as { duration?: number; segments?: { start: number; end: number; text: string }[] }
         dura = t.duration ? `, dura ${t.duration.toFixed(2)} s` : ''
+        clase = clasificarAudio(n, t)
         frases = (t.segments ?? []).map((s) => `  [${s.start.toFixed(2)}–${s.end.toFixed(2)}] ${s.text.trim()}`).join('\n')
         writeFileSync(join(dir, `narracion-${n}.txt`), frases + '\n', 'utf8')
       } catch {
@@ -598,7 +630,9 @@ export async function prepararVistazo(c: Creacion, carpeta: string): Promise<str
       }
     }
     lineas.push(
-      `narracion-${n}.wav: la NARRACIÓN que grabó el usuario (${a.archivo.replace(/^trabajo\//, '')}, «${a.nombre}»${dura}). El video se arma sobre ella.`,
+      clase?.musica
+        ? `narracion-${n}.wav: MÚSICA que subió el usuario (${a.archivo.replace(/^trabajo\//, '')}, «${a.nombre}»${dura}; solo se habla ${clase.habla.toFixed(1)} s). Es la banda sonora, no una narración: sin subtítulos salvo que los pida.`
+        : `narracion-${n}.wav: la NARRACIÓN que grabó el usuario (${a.archivo.replace(/^trabajo\//, '')}, «${a.nombre}»${dura}). El video se arma sobre ella.`,
       ...(frases
         ? [`narracion-${n}.txt y .json: lo que dice, frase por frase con sus segundos (el .json trae cada palabra con su tiempo). Corrige lo que la transcripción entendió mal según el sentido.`, frases]
         : ['(No pude transcribirla: transcríbela tú o escúchala con el audio en WAV.)']),
@@ -788,9 +822,10 @@ export async function pasoPlan(
   const trabajo = carpetaTrabajo(carpeta)
   const cmd = config.activa && config.proveedor === 'cli' ? comandoAgentico(config.comandoCli) : null
   if (!cmd) throw new Error('El modo agente necesita un agente que trabaje con herramientas (Claude Code, Antigravity, Kimi, Codex u OpenCode). Conéctalo en Inicio.')
-  await escribirManual(carpeta, c)
   onLinea('Recorte prepara un vistazo de tus archivos')
+  // Antes que el manual: el manual dice qué es cada audio subido (narración o música) según su transcripción.
   await prepararVistazo(c, carpeta)
+  await escribirManual(carpeta, c)
   const completo = `Lee AGENTS.md (tu manual). Esto es SOLO LA CHARLA DEL PLAN: un vistazo rápido, de pocos minutos.
 Mira vistazo/LEEME.txt y las hojas de vistazo/ (miniaturas y fotogramas), entiende el pedido y propón cómo lo harás.
 TODAVÍA NO HAGAS EL VIDEO: no midas el audio a fondo, no hagas pruebas ni renders y no crees nada en salida/.
@@ -838,13 +873,13 @@ export async function pasoHacer(
   const trabajo = carpetaTrabajo(carpeta)
   const cmd = config.activa && config.proveedor === 'cli' ? comandoAgentico(config.comandoCli) : null
   if (!cmd) throw new Error('El modo agente necesita un agente que trabaje con herramientas (Claude Code, Antigravity, Kimi, Codex u OpenCode). Conéctalo en Inicio.')
+  await prepararVistazo(c, carpeta)
   await escribirManual(carpeta, c)
   const resultadoJson = join(trabajo, 'resultado.json')
   // Al seguir, su resultado.json (si alcanzó a escribirlo) vale: no se borra.
   if (!seguir && existsSync(resultadoJson)) rmSync(resultadoJson, { force: true })
   const plan = c.agente?.plan
   const hay = c.agente?.resultado
-  await prepararVistazo(c, carpeta)
   // Al seguir tras el límite, lo que dejó desde que empezó la ronda cortada también cuenta.
   const desde = seguir ? (c.agente?.pausa?.desde ?? Date.now()) : Date.now()
   const versionAnterior = hay ? hay.archivo.replace(/^salidas\//, '') : ''
@@ -1071,7 +1106,7 @@ export async function revisarYPublicar(
   const rutaReceta = tipo === 'video' ? recetaEntregada(carpeta, hallado.entrega.receta) : null
   if (rutaReceta) {
     // Con voz, los subtítulos van en la receta (editables) y de principio a fin.
-    const faltan = subtitulosQueFaltan(rutaReceta, c, info.duracion)
+    const faltan = subtitulosQueFaltan(rutaReceta, c, info.duracion, audiosSubidos(carpeta))
     if (faltan) return { problemas: [faltan] }
     try {
       copyFileSync(rutaReceta, join(salidas, `agente-v${version}.receta.json`))
@@ -1097,31 +1132,6 @@ export async function revisarYPublicar(
       ...info
     }
   }
-}
-
-/**
- * Si el video lleva voz, la receta tiene que traer sus subtítulos (en `"subtitulos"`, editables) y
- * llegar hasta el final de lo que se dice. Devuelve el problema para que el agente lo corrija, o null.
- */
-function subtitulosQueFaltan(rutaReceta: string, c: Creacion, duracion?: number): string | null {
-  let r: { voz?: unknown[]; subtitulos?: { frases?: { hasta?: unknown }[] } }
-  try {
-    r = JSON.parse(readFileSync(rutaReceta, 'utf8').replace(/^\uFEFF/, ''))
-  } catch {
-    return null
-  }
-  const conVoz = (Array.isArray(r.voz) && r.voz.length > 0) || Boolean(c.vozElegida) || c.adjuntos.some((a) => a.tipo === 'audio')
-  if (!conVoz) return null
-  const frases = Array.isArray(r.subtitulos?.frases) ? r.subtitulos!.frases! : []
-  if (!frases.length) {
-    return 'El video lleva voz pero la receta no trae "subtitulos": ponlos EN LA RECETA (ver «Subtítulos» en kit/RECETA.md), de principio a fin, y NO los quemes con un script propio (el usuario los edita en su editor). Vuelve a armar con el kit.'
-  }
-  const ultimo = Math.max(...frases.map((f) => (typeof f.hasta === 'number' ? f.hasta : 0)))
-  // Lo que queda sin subtítulo al final, sin contar un cierre con logo (unos segundos).
-  if (duracion && ultimo < duracion - 12) {
-    return `Los subtítulos de la receta acaban en el segundo ${ultimo.toFixed(1)} y el video dura ${duracion.toFixed(1)} s: faltan los del final. Cubre todo lo que se dice y vuelve a armar con el kit.`
-  }
-  return null
 }
 
 /**
