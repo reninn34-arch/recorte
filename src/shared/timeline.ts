@@ -1943,8 +1943,13 @@ export const PARAMETROS_CLAVE = [
   'blancos',
   'negros',
   'temperatura',
-  'tinte'
+  'tinte',
+  'desenfoque',
+  'sepia',
+  'tono'
 ] as const
+/** Los efectos que, con claves, el MP4 cambia cuadro a cuadro con órdenes (sendcmd), no con expresiones. */
+export const CLAVES_EFECTO = ['desenfoque', 'sepia', 'tono'] as const
 /** Los ajustes de color que van en la curva (lut1d): con claves, el MP4 cambia de curva por tramos. */
 export const CLAVES_CURVA_COLOR = ['exposicion', 'altas', 'sombras', 'blancos', 'negros', 'temperatura', 'tinte'] as const
 export type ParametroClave = (typeof PARAMETROS_CLAVE)[number]

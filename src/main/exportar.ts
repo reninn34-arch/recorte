@@ -397,10 +397,45 @@ async function exportarTimelineAhora(
           : ''
     // Efectos del clip: sepia y tono (la misma matriz que el monitor), negativo y desenfoque.
     const M = matrizColor(a)
+    const CANALES = ['rr', 'rg', 'rb', 'gr', 'gg', 'gb', 'br', 'bg', 'bb']
+    // Con fotogramas clave en el desenfoque, la sepia o el tono: FFmpeg recibe sus valores en cada cuadro (sendcmd), los
+    // mismos que el monitor saca de ajustesEn en el segundo de la fuente que se ve.
+    const animaColor = Boolean(cl?.sepia?.length || cl?.tono?.length)
+    const animaBorroso = Boolean(cl?.desenfoque?.length)
+    let ordenes = ''
+    const inicial = ajustesEn(t.clip, t.clip.entrada)
+    let sigmaInicial = 0
+    if (animaColor || animaBorroso) {
+      const lineas: string[] = []
+      let antes = ''
+      const sigma = (aj: Required<AjustesClip>) => Math.max(0.01, aj.desenfoque * DESENFOQUE_CLIP * ancho)
+      for (let j = 0; j <= cuadros; j++) {
+        const aj = ajustesEn(t.clip, t.clip.entrada + (j / fps) * vel)
+        const cosas: string[] = []
+        if (animaColor) {
+          const m = matrizColor(aj) ?? [1, 0, 0, 0, 1, 0, 0, 0, 1]
+          CANALES.forEach((n, q) => cosas.push(`colorchannelmixer@ef${i} ${n} ${m[q].toFixed(4)}`))
+        }
+        if (animaBorroso) cosas.push(`gblur@ef${i} sigma ${sigma(aj).toFixed(2)}`, `gblur@ef${i} sigmaV ${sigma(aj).toFixed(2)}`)
+        const orden = cosas.join(', ')
+        if (orden !== antes) lineas.push(`${(j / fps).toFixed(4)} ${orden};`)
+        antes = orden
+      }
+      const archivo = `ordenes-clip-${i}.txt`
+      writeFileSync(join(carpeta, archivo), lineas.join(String.fromCharCode(10)), 'utf8')
+      ordenes = `,sendcmd=f=${archivo}`
+      sigmaInicial = sigma(inicial)
+    }
+    const m0 = animaColor ? (matrizColor(inicial) ?? [1, 0, 0, 0, 1, 0, 0, 0, 1]) : M
     const efectos =
-      (M ? `,format=gbrp,colorchannelmixer=${['rr', 'rg', 'rb', 'gr', 'gg', 'gb', 'br', 'bg', 'bb'].map((n, j) => `${n}=${M[j].toFixed(4)}`).join(':')}` : '') +
+      ordenes +
+      (m0 ? `,format=gbrp,colorchannelmixer${animaColor ? `@ef${i}` : ''}=${CANALES.map((n, j) => `${n}=${m0[j].toFixed(4)}`).join(':')}` : '') +
       (a.invertir >= 0.5 ? ',format=gbrp,negate' : '') +
-      (a.desenfoque > 0.005 ? `,gblur=sigma=${(a.desenfoque * DESENFOQUE_CLIP * ancho).toFixed(2)}` : '')
+      (animaBorroso
+        ? `,gblur@ef${i}=sigma=${sigmaInicial.toFixed(2)}`
+        : a.desenfoque > 0.005
+          ? `,gblur=sigma=${(a.desenfoque * DESENFOQUE_CLIP * ancho).toFixed(2)}`
+          : '')
     // Profundidad de campo: el fondo (profundidad 0) desenfocado si el foco está más cerca.
     const borroso = desenfoqueDeCampo(a, 0)
     const fondoBorroso = borroso > 0.005 ? `,gblur=sigma=${(borroso * DESENFOQUE_MAX * ancho).toFixed(2)}` : ''

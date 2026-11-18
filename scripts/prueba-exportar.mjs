@@ -830,5 +830,33 @@ assert.ok(Math.abs(centro6(1.7) - centro6(1.4)) > 40, 'en el corte la capa salta
   console.log('modos de fusión (6 medidos) y capa que sigue algo iguales en el MP4; el agente pone la fusión ✓')
 }
 
+// Efectos animados en un clip: la sepia que entra y el desenfoque que sube salen en el MP4 cuadro a cuadro.
+{
+  const { ponerClave, ajustesEn, matrizColor } = await import('../src/shared/timeline.ts')
+  const rojo2 = join(dir, 'rojo2.mp4')
+  ff(['-f', 'lavfi', '-i', 'color=c=0xC83232:s=320x360:d=2:r=30', '-f', 'lavfi', '-i', 'color=c=0x3232C8:s=320x360:d=2:r=30', '-filter_complex', 'hstack', '-c:v', 'libx264', '-pix_fmt', 'yuv444p', rojo2])
+  const p15 = { ...proyecto, source: { ...proyecto.source, path: rojo2, duration: 2 }, medios: [] }
+  let tl = normalizarTimeline({ clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 2 }], textos: [] }, 2, {})
+  tl = ponerClave(ponerClave(tl, 'c1', 'sepia', 0, 0), 'c1', 'sepia', 2, 1)
+  tl = ponerClave(ponerClave(tl, 'c1', 'desenfoque', 0, 0), 'c1', 'desenfoque', 2, 1)
+  const r = await exportarTimeline(p15, tl, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-efectos'))
+  assert.ok(r.ok, r.error)
+  const mp4 = join(dir, 'salidas-efectos', 'timeline-prueba-original.mp4')
+  const color = (t, x) => {
+    const o = spawnSync('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', mp4, '-frames:v', '1', '-vf', `crop=30:30:${x}:160,scale=1:1:flags=area`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { encoding: 'buffer' }).stdout
+    return [...o.subarray(0, 3)]
+  }
+  for (const t of [0.1, 1.0, 1.9]) {
+    const M = matrizColor(ajustesEn(tl.clips[0], t))
+    const quiero = M ? [0, 1, 2].map((q) => Math.min(255, M[q * 3] * 200 + M[q * 3 + 1] * 50 + M[q * 3 + 2] * 50)) : [200, 50, 50]
+    const visto = color(t, 40)
+    assert.ok(visto.every((v, q) => Math.abs(v - quiero[q]) < 12), `sepia animada a los ${t} s: el MP4 da ${visto} y el monitor ${quiero.map(Math.round)}`)
+  }
+  // El desenfoque sube: junto al borde rojo/azul, al principio nítido y al final mezclado.
+  const borde = (t) => color(t, 296)
+  assert.ok(borde(0.1)[2] < 80 && borde(1.9)[2] > 70, `el desenfoque animado sube (azul junto al borde ${borde(0.1)[2]} → ${borde(1.9)[2]})`)
+  console.log('efectos animados (sepia y desenfoque) cuadro a cuadro en el MP4 ✓')
+}
+
 rmSync(dir, { recursive: true, force: true })
 console.log('exportar: ok')
