@@ -24,6 +24,36 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.83',
+    fecha: '2026-11-18',
+    resumen: 'Antigravity termina los videos largos y muestra sus pasos, y Recorte acepta audios y videos en más formatos.',
+    novedades: [
+      {
+        icono: 'check',
+        titulo: 'Antigravity: sus pasos se marcan',
+        texto:
+          'Lo que va escribiendo Antigravity ahora se ve en el chat, y los pasos del plan se marcan mientras avanza, como con los demás agentes.'
+      },
+      {
+        icono: 'clock',
+        titulo: 'Antigravity ya no se corta al final',
+        texto:
+          'Antes se detenía a los 40 minutos aunque estuviera por terminar. Ahora sigue mientras avance (solo se detiene si pasa 20 minutos sin hacer nada) y, si ya entregó el video, lo da por terminado.'
+      },
+      {
+        icono: 'music',
+        titulo: 'Más formatos de audio y video',
+        texto:
+          'Un audio .mpeg (como «mi audio.mp3.mpeg»), .wma, .amr o un video .mpg, .avi, .wmv o .3gp ya no se rechazan: Recorte los convierte al subirlos.'
+      },
+      {
+        icono: 'alerta',
+        titulo: 'Errores que se entienden',
+        texto: 'Si un agente falla, el mensaje muestra sus últimas líneas útiles en vez de un símbolo suelto.'
+      }
+    ]
+  },
+  {
     version: '0.1.82',
     fecha: '2026-11-17',
     resumen: 'Una conversación puede tener varios videos con el mismo estilo, y «Mis videos» los reúne todos.',
