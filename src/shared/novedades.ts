@@ -24,6 +24,31 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.85',
+    fecha: '2026-11-18',
+    resumen: 'Las imágenes de Flow se hacen todas a la vez: los videos con muchas escenas tardan mucho menos, con la misma calidad.',
+    novedades: [
+      {
+        icono: 'sparkles',
+        titulo: 'Imágenes de Flow a la vez',
+        texto:
+          'Antes Recorte esperaba a que Flow terminara una imagen para pedir la siguiente. Ahora las manda seguidas en la misma pestaña y Flow las genera juntas: 8 imágenes tardan casi lo mismo que una. Mismos modelos, misma calidad y los mismos créditos.'
+      },
+      {
+        icono: 'clock',
+        titulo: 'El agente pide todo junto y sigue trabajando',
+        texto:
+          'El agente puede pedir todas las imágenes y clips de un video de una vez y seguir con la voz y el montaje mientras se generan, en vez de quedarse esperando cada una.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Voz y Flow sin esperarse',
+        texto:
+          'El navegador de tu cuenta de Google se queda abierto mientras hay trabajo (ya no se abre y cierra por cada imagen o frase), y la voz y Flow trabajan a la vez, cada uno en su pestaña. Se cierra solo al terminar o al cerrar Recorte.'
+      }
+    ]
+  },
+  {
     version: '0.1.84',
     fecha: '2026-11-18',
     resumen: 'ChatGPT (Codex) ya no se traba si su configuración se daña.',
