@@ -619,6 +619,85 @@ export interface CapaTL {
   claves?: ClavesCapa
   /** En qué pista de «Encima» va, 1 a 3 (sin ella, la 1). Las de una pista más alta tapan a las de las de abajo. */
   pista?: number
+  /** Cómo se mezcla con lo de debajo (como los modos de fusión de Premiere); sin él, normal. */
+  fusion?: ModoFusion
+  /**
+   * Sigue algo que se mueve en el video (una cara, un coche): su camino en cada segundo desde que aparece la capa (lo
+   * calcula el seguidor) más la distancia a la que va la capa de ese algo. Manda sobre x, y, `fin` y sus claves de x e y.
+   */
+  sigue?: { puntos: PuntoRecorrido[]; dx: number; dy: number }
+}
+
+/** Los modos de fusión de una capa: el nombre en el monitor (CSS) y en el MP4 (blend de FFmpeg). */
+export type ModoFusion = 'multiplicar' | 'pantalla' | 'superponer' | 'aclarar' | 'oscurecer' | 'diferencia' | 'sumar'
+export const MODOS_FUSION: { id: ModoFusion; nombre: string; para: string; css: string; ffmpeg: string }[] = [
+  { id: 'multiplicar', nombre: 'Multiplicar', para: 'oscurece: lo blanco desaparece (una textura de papel, una sombra)', css: 'multiply', ffmpeg: 'multiply' },
+  { id: 'pantalla', nombre: 'Trama', para: 'aclara: lo negro desaparece (luz, fuego, destellos, polvo sobre negro)', css: 'screen', ffmpeg: 'screen' },
+  { id: 'superponer', nombre: 'Superponer', para: 'más contraste: una textura que se funde con la imagen', css: 'overlay', ffmpeg: 'overlay' },
+  { id: 'aclarar', nombre: 'Aclarar', para: 'se queda lo más claro de las dos', css: 'lighten', ffmpeg: 'lighten' },
+  { id: 'oscurecer', nombre: 'Oscurecer', para: 'se queda lo más oscuro de las dos', css: 'darken', ffmpeg: 'darken' },
+  { id: 'diferencia', nombre: 'Diferencia', para: 'invierte donde hay luz: un efecto llamativo', css: 'difference', ffmpeg: 'difference' },
+  { id: 'sumar', nombre: 'Sumar', para: 'suma la luz: brillos muy intensos', css: 'plus-lighter', ffmpeg: 'addition' }
+]
+
+/** El punto de un camino en el segundo `t` (recto entre dos puntos; quieto antes del primero y después del último). */
+export function puntoEn(puntos: PuntoRecorrido[], t: number): { x: number; y: number } {
+  if (t <= puntos[0].f) return puntos[0]
+  for (let i = 0; i < puntos.length - 1; i++) {
+    const a = puntos[i]
+    const b = puntos[i + 1]
+    if (t < b.f) {
+      const k = (t - a.f) / Math.max(1e-6, b.f - a.f)
+      return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k }
+    }
+  }
+  return puntos[puntos.length - 1]
+}
+
+/** Lo más que se guarda del camino que sigue una capa (unos 6 por segundo bastan: es recto entre puntos). */
+export const MAX_PUNTOS_SIGUE = 240
+
+/**
+ * Pone una capa a seguir un camino del video: `recorrido` en segundos de la FUENTE del clip de debajo (el del
+ * seguidor), que se pasa a segundos de la capa. La capa conserva la distancia que tenía al objeto en el cabezal.
+ */
+export function seguirConCapa(
+  tl: Timeline,
+  id: string,
+  recorrido: PuntoRecorrido[],
+  clip: { entrada: number; inicio: number; velocidad?: number },
+  enCapa: number,
+  medios: Record<string, number>
+): Timeline {
+  const c = tl.capas?.find((x) => x.id === id)
+  if (!c || !recorrido.length) return tl
+  const vel = clip.velocidad ?? 1
+  // Segundo de la timeline de cada punto → segundo de la capa.
+  const crudos = recorrido
+    .map((p) => ({ f: clip.inicio + (p.f - clip.entrada) / vel - c.inicio, x: p.x, y: p.y }))
+    .filter((p) => p.f >= -0.2 && p.f <= c.duracion + 0.2)
+    .sort((a, b) => a.f - b.f)
+  if (!crudos.length) return tl
+  // Uno cada ~0,16 s (y siempre el primero y el último).
+  const paso = Math.max(1, Math.ceil(crudos.length / MAX_PUNTOS_SIGUE), Math.round(crudos.length / Math.max(1, c.duracion * 6)))
+  const puntos = crudos.filter((_, i) => i % paso === 0 || i === crudos.length - 1).map((p) => ({ f: Math.round(p.f * 1000) / 1000, x: Math.round(p.x * 10000) / 10000, y: Math.round(p.y * 10000) / 10000 }))
+  const donde = estadoCapa({ ...c, sigue: undefined }, enCapa, false)
+  const objeto = puntoEn(puntos, enCapa)
+  return cambiarCapa(tl, id, { sigue: { puntos, dx: Math.round((donde.x - objeto.x) * 10000) / 10000, dy: Math.round((donde.y - objeto.y) * 10000) / 10000 } }, medios)
+}
+
+function normalizarSigue(entrada: unknown): CapaTL['sigue'] | undefined {
+  if (!entrada || typeof entrada !== 'object') return undefined
+  const e = entrada as { puntos?: unknown; dx?: unknown; dy?: unknown }
+  if (!Array.isArray(e.puntos)) return undefined
+  const ok = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+  const puntos = (e.puntos as Partial<PuntoRecorrido>[])
+    .filter((p) => p && ok(p.f) && ok(p.x) && ok(p.y))
+    .map((p) => ({ f: p.f!, x: pinza(p.x!, -0.5, 1.5), y: pinza(p.y!, -0.5, 1.5) }))
+    .sort((a, b) => a.f - b.f)
+    .slice(0, MAX_PUNTOS_SIGUE)
+  if (!puntos.length) return undefined
+  return { puntos, dx: ok(e.dx) ? pinza(e.dx, -2, 2) : 0, dy: ok(e.dy) ? pinza(e.dy, -2, 2) : 0 }
 }
 
 /** Cuántas pistas de video hay encima de la principal. */
@@ -1592,6 +1671,8 @@ export function normalizarCapas(entrada: unknown, total: number, medios: Record<
       ...(c.roto && typeof c.roto.clip === 'string' && c.roto.clip ? { roto: { clip: c.roto.clip.slice(0, 80), ...(typeof c.roto.clave === 'string' && c.roto.clave ? { clave: c.roto.clave.slice(0, 40) } : {}) } } : {}),
       ...(typeof c.profundidad === 'number' && Number.isFinite(c.profundidad) ? { profundidad: Math.round(pinza(c.profundidad, 0, 1) * 100) / 100 } : {}),
       ...(num(c.desenfoque, 0) > 0.005 ? { desenfoque: Math.round(pinza(num(c.desenfoque, 0), 0, 1) * 100) / 100 } : {}),
+      ...(c.fusion && MODOS_FUSION.some((m) => m.id === c.fusion) ? { fusion: c.fusion } : {}),
+      ...(normalizarSigue(c.sigue) ? { sigue: normalizarSigue(c.sigue) } : {}),
       ...(normalizarClavesCapa(c.claves, pinza(c.duracion, DURACION_MINIMA, Math.max(DURACION_MINIMA, total - inicio)))
         ? { claves: normalizarClavesCapa(c.claves, pinza(c.duracion, DURACION_MINIMA, Math.max(DURACION_MINIMA, total - inicio))) }
         : {})
@@ -3043,6 +3124,8 @@ export function cambiarCapa(tl: Timeline, id: string, cambio: Partial<Omit<CapaT
       if ('animada' in cambio && !cambio.animada) delete nueva.animada
       if ('profundidad' in cambio && cambio.profundidad == null) delete nueva.profundidad
       if ('claves' in cambio && !cambio.claves) delete nueva.claves
+      if ('fusion' in cambio && !cambio.fusion) delete nueva.fusion
+      if ('sigue' in cambio && !cambio.sigue) delete nueva.sigue
       return nueva
     }),
     duracionTimeline(tl),
@@ -3080,8 +3163,10 @@ export function estadoCapa(c: CapaTL, dt: number, conEntrada = true): { x: numbe
   const p = c.fin ? suave(pinza(dt / Math.max(DURACION_MINIMA, c.duracion), 0, 1)) : 0
   const f = c.fin
   const k = c.claves
-  let x = k?.x ? valorClave(k.x, dt) : f ? c.x + (f.x - c.x) * p : c.x
-  let y = k?.y ? valorClave(k.y, dt) : f ? c.y + (f.y - c.y) * p : c.y
+  // Si sigue algo del video, su sitio es el de ese algo (más la distancia que tenía).
+  const s = c.sigue ? puntoEn(c.sigue.puntos, dt) : null
+  let x = s ? s.x + c.sigue!.dx : k?.x ? valorClave(k.x, dt) : f ? c.x + (f.x - c.x) * p : c.x
+  let y = s ? s.y + c.sigue!.dy : k?.y ? valorClave(k.y, dt) : f ? c.y + (f.y - c.y) * p : c.y
   const ancho = k?.ancho ? valorClave(k.ancho, dt) : f ? c.ancho + (f.ancho - c.ancho) * p : c.ancho
   const giro = k?.giro ? valorClave(k.giro, dt) : f ? (c.giro ?? 0) + (f.giro - (c.giro ?? 0)) * p : (c.giro ?? 0)
   // La opacidad de sus claves (se suma a la de la entrada).

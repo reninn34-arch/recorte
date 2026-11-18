@@ -59,7 +59,10 @@ import {
   PARAMETROS_CLAVE_CAPA,
   ponerClaveCapa,
   quitarClaveCapa,
-  type ParametroClaveCapa, anadirCapa, huellaSubtitulos, subtitulosAlDia, type SubtitulosHF } from './timeline'
+  type ParametroClaveCapa, anadirCapa, huellaSubtitulos, subtitulosAlDia, type SubtitulosHF,
+  MODOS_FUSION,
+  type ModoFusion
+} from './timeline'
 import { INSTRUCCIONES_CRITERIO } from './gustos'
 import type { TranscriptSegment } from './types'
 
@@ -245,6 +248,8 @@ type CamposCapa = {
   profundidad?: number | null
   /** En qué pista de «Encima» va (1 a 3). */
   pista?: number
+  /** Cómo se mezcla con lo de debajo; null vuelve a normal. */
+  fusion?: ModoFusion | null
   desenfoque?: number
 }
 
@@ -264,6 +269,7 @@ function camposCapa(x: Record<string, unknown>): CamposCapa {
     ...(num(x.giro) !== null ? { giro: num(x.giro)! } : {}),
     ...(x.profundidad === null || x.profundidad === 'fija' ? { profundidad: null } : num(x.profundidad) !== null ? { profundidad: num(x.profundidad)! } : {}),
     ...(num(x.pista) !== null ? { pista: num(x.pista)! } : {}),
+    ...(x.fusion === null || x.fusion === 'normal' ? { fusion: null } : typeof x.fusion === 'string' && MODOS_FUSION.some((m) => m.id === x.fusion) ? { fusion: x.fusion as ModoFusion } : {}),
     ...(num(x.desenfoque) !== null ? { desenfoque: num(x.desenfoque)! } : {}),
     ...(x.entrada === 'corte' || (typeof x.entrada === 'string' && ENTRADAS_CAPA.includes(x.entrada as EntradaCapa)) ? { entrada: x.entrada as EntradaCapa | 'corte' } : {}),
     ...(x.fin === null || x.quieta === true
@@ -1121,6 +1127,7 @@ function cambioDeCapa(o: CamposCapa, actual?: CapaTL): Partial<Omit<CapaTL, 'id'
     ...(o.giro !== undefined ? { giro: o.giro } : {}),
     ...(o.profundidad !== undefined ? { profundidad: o.profundidad ?? undefined } : {}),
     ...(o.pista !== undefined ? { pista: o.pista } : {}),
+    ...(o.fusion !== undefined ? { fusion: o.fusion ?? undefined } : {}),
     ...(o.desenfoque !== undefined ? { desenfoque: o.desenfoque } : {}),
     ...(o.entrada !== undefined ? { entrada: o.entrada === 'corte' ? undefined : o.entrada } : {}),
     ...(o.fin === null ? { fin: undefined } : o.fin ? { fin: { ...base, ...o.fin } } : {})
@@ -1274,6 +1281,7 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
 - {"op":"anadir_capa","medio":"ID","inicio":T,"duracion":S,"x":0.5,"y":0.5,"ancho":0.25,"giro":0,"entrada":"pop|fundido|izquierda|derecha|arriba|abajo|corte"}  pone encima del video un medio de la biblioteca (un logo, un ícono, una foto, una toma de apoyo), por su id. x, y = su centro y ancho = su ancho, en fracción del cuadro; giro en grados. "pop" (por defecto) entra rebotando; úsalo para logos e íconos que aparecen cuando se nombran. "izquierda/derecha/arriba/abajo" entra deslizándose desde fuera. No tapes caras ni manos que importan.
   Para que SE MUEVA mientras está, di dónde termina: "fin_x","fin_y","fin_ancho","fin_giro" (lo que no pongas, igual que al empezar; se puede terminar fuera del cuadro, de -0.5 a 1.5). Va suave de un sitio al otro durante toda su duración. Ejemplos: un avión que cruza ("x":-0.2 → "fin_x":1.2), paralaje (un fondo que se desliza 0.04 y crece 1.05), una foto que se acerca ("fin_ancho" 1.3 veces el ancho), algo que gira ("fin_giro":15). Con "quieta":true deja de moverse.
   ESCENA 2.5D: "profundidad" de 0 a 1 hace que la capa siga a la cámara del clip de debajo (su zoom, acercamiento y paneo): 0 se mueve pegada al fondo, 1 (muy cerca) se mueve y crece 2,5 veces más. Así un paisaje armado con recortes (montañas 0.2, una casa 0.5, una bandera 0.6, la persona 0.4) se siente con distancia cuando la cámara se mueve. "profundidad":"fija" la vuelve a pegar a la pantalla (para logos y textos). "desenfoque" de 0 a 1: fuera de foco, para lo que está muy cerca (un primer plano) o muy lejos.
+  FUSIÓN: "fusion" mezcla la capa con lo de debajo, como en Premiere: ${MODOS_FUSION.map((m) => `${m.id} (${m.para})`).join(', ')}; "normal" lo quita. Así una textura de papel con multiplicar, o luz, fuego y polvo sobre fondo negro con pantalla, se funden sin recortarlos.
   PISTAS: "pista" 1 a 3 es en qué pista de video de «Encima» va la capa (sin ella, la 1): las de una pista más alta tapan a las de abajo. Úsalo para apilar varias cosas a la vez (una toma de apoyo en la 1, un marco en la 2 y el logo en la 3).
 - {"op":"anadir_pieza","pieza":"ID","inicio":T,"duracion":S,"valores":{…}}  pone una PIEZA ANIMADA de diseño en movimiento (con los colores y el logo de la marca; se anima sola en unos segundos). Es lo que hace que un video se vea hecho por un editor de motion: úsalas con criterio, una por momento importante. "valores" cambia sus datos (colores #rrggbb, "marca" o "marca2"; sin ellos, los de la marca). Las piezas:
   titulo-impacto (2.6 s: abrir o cambiar de tema; "texto", "etiqueta" arriba opcional, "conFondo" true/false)

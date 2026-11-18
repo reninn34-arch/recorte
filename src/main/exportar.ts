@@ -57,7 +57,8 @@ import {
   zonaEnPixeles,
   zonaEn,
   DESENFOQUE_CLIP,
-  exprClave
+  exprClave,
+  MODOS_FUSION
 } from '../shared/timeline'
 import type { OpcionesExport } from '../shared/api'
 import type { ClipSuggestion, Project } from '../shared/types'
@@ -629,9 +630,22 @@ async function exportarTimelineAhora(
     )
     const salida = `[conCapa${i}]`
     const T = `(t-${c.inicio.toFixed(3)})`
-    partes.push(
-      `${capaBase}[capa${i}]overlay=x='${anchoC}*${en(ex.x, T)}-w/2':y='${altoC}*${en(ex.y, T)}-h/2':eval=frame:eof_action=pass:enable='between(t,${c.inicio.toFixed(3)},${(c.inicio + c.duracion).toFixed(3)})'${salida}`
-    )
+    const donde = `x='${anchoC}*${en(ex.x, T)}-w/2':y='${altoC}*${en(ex.y, T)}-h/2':eval=frame:eof_action=pass:enable='between(t,${c.inicio.toFixed(3)},${(c.inicio + c.duracion).toFixed(3)})'`
+    const modo = c.fusion ? MODOS_FUSION.find((m) => m.id === c.fusion) : undefined
+    if (!modo) partes.push(`${capaBase}[capa${i}]overlay=${donde}${salida}`)
+    else {
+      // Modo de fusión: la capa en un lienzo transparente del tamaño del cuadro, mezclada con lo de debajo (blend) y
+      // puesta encima solo donde está la capa (su transparencia), como mix-blend-mode en el monitor.
+      partes.push(`color=c=black@0:s=${anchoC}x${altoC}:r=${fps}:d=${duracion.toFixed(3)},format=rgba[lz${i}]`)
+      partes.push(`[lz${i}][capa${i}]overlay=${donde}:format=auto,format=rgba,split[ca${i}][cb${i}]`)
+      partes.push(`[cb${i}]alphaextract[cm${i}]`)
+      partes.push(`${capaBase}split[ba${i}][bb${i}]`)
+      partes.push(`[ba${i}]format=gbrp[bg${i}]`)
+      partes.push(`[ca${i}]format=gbrp[tg${i}]`)
+      partes.push(`[bg${i}][tg${i}]blend=all_mode=${modo.ffmpeg}:shortest=1,format=rgba[bl${i}]`)
+      partes.push(`[bl${i}][cm${i}]alphamerge[bm${i}]`)
+      partes.push(`[bb${i}][bm${i}]overlay=eof_action=pass:format=auto${salida}`)
+    }
     capaBase = salida
   })
   if (sup > 1) {
@@ -851,8 +865,19 @@ export function expresionesCapa(
   const lerp = (a: number, b: number) => (f && Math.abs(b - a) > 1e-4 ? `(${n3(a)}+(${n3(b - a)})*${E})` : `(${n3(a)})`)
   // Con fotogramas clave, cada ajuste sigue su curva (la misma de estadoCapa).
   const k = c.claves
-  let x = k?.x ? `(${exprClave(k.x, 'T')})` : lerp(c.x, f?.x ?? c.x)
-  let y = k?.y ? `(${exprClave(k.y, 'T')})` : lerp(c.y, f?.y ?? c.y)
+  // Si sigue algo del video: su camino, recto entre puntos (lo mismo que puntoEn), más la distancia que tenía.
+  const camino = (eje: 'x' | 'y', d: number) => {
+    const p = c.sigue!.puntos
+    let e = n3(p[p.length - 1][eje] + d)
+    for (let i = p.length - 2; i >= 0; i--) {
+      const a = p[i]
+      const b = p[i + 1]
+      e = `if(lt(T,${n3(b.f)}),${n3(a[eje] + d)}+(${n3(b[eje] - a[eje])})*(T-${n3(a.f)})/${n3(Math.max(1e-3, b.f - a.f))},${e})`
+    }
+    return `(if(lt(T,${n3(p[0].f)}),${n3(p[0][eje] + d)},${e}))`
+  }
+  let x = c.sigue ? camino('x', c.sigue.dx) : k?.x ? `(${exprClave(k.x, 'T')})` : lerp(c.x, f?.x ?? c.x)
+  let y = c.sigue ? camino('y', c.sigue.dy) : k?.y ? `(${exprClave(k.y, 'T')})` : lerp(c.y, f?.y ?? c.y)
   const lado = origenLado(c)
   const K = `(1-pow(1-clip(T/${ENTRADA_LADO_S},0,1),3))`
   if (lado.x !== undefined) x = `(${n3(lado.x)}+(${x}-(${n3(lado.x)}))*${K})`

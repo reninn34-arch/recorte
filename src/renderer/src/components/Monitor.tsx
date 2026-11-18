@@ -52,6 +52,7 @@ import {
   ponerClaveCapa,
   CAPA_SUBTITULOS,
   letraOscura,
+  MODOS_FUSION
 } from '../../../shared/timeline'
 import { useMusica, useSincronizar, useTamano, useVoces, type FuentesVista, type Historial, type Reproductor } from '../hooks/timeline'
 import type { Elegido } from './TimelineEditor'
@@ -339,7 +340,10 @@ export function Monitor({
         const capa = tipo === 'capa' ? timeline.capas?.find((c) => c.id === id) : undefined
         historial.aplicar(
           tipo === 'capa'
-            ? capa?.claves
+            ? capa?.sigue && !b.fin
+              ? // Una capa que sigue algo: arrastrarla cambia a qué distancia va de eso (el arrastre parte de su x, y).
+                cambiarCapa(timeline, id, { sigue: { ...capa.sigue, dx: capa.sigue.dx + (b.x - capa.x), dy: capa.sigue.dy + (b.y - capa.y) }, ...(b.ancho !== undefined ? { ancho: b.ancho } : {}) }, medios)
+              : capa?.claves
               ? moverConClaves(capa, b)
               : b.fin && capa?.fin
               ? cambiarCapa(timeline, id, { fin: { ...capa.fin, x: b.x, y: b.y, ...(b.ancho !== undefined ? { ancho: b.ancho } : {}) } }, medios)
@@ -527,6 +531,7 @@ export function Monitor({
                   width: `${ancho * 100}%`,
                   transform: `translate(-50%, -50%) rotate(${e.giro}deg) scale(${e.escala})`,
                   opacity: e.opacidad,
+                  mixBlendMode: (MODOS_FUSION.find((m) => m.id === c.fusion)?.css ?? undefined) as React.CSSProperties['mixBlendMode'],
                   filter: desenfoqueCapaEn(timeline, c, reproductor.tiempo - c.inicio) > 0.005 ? `blur(${(desenfoqueCapaEn(timeline, c, reproductor.tiempo - c.inicio) * DESENFOQUE_MAX * cw).toFixed(2)}px)` : undefined
                 }}
                 onClick={(ev) => ev.stopPropagation()}

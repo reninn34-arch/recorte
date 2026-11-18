@@ -3,6 +3,10 @@ import { createPortal } from 'react-dom'
 import type { VistaPrevia } from '../hooks/vistaprevia'
 import {
   ajustarClip,
+  ubicar,
+  MODOS_FUSION,
+  seguirConCapa,
+  type ModoFusion,
   claveCapaEn,
   estadoCapa,
   ponerClaveCapa,
@@ -439,6 +443,9 @@ export function TimelineEditor({
   /** La zona que se está siguiendo (clip y número) y el aviso del seguimiento. */
   const [siguiendo, setSiguiendo] = useState<{ clip: string; k: number } | null>(null)
   const [avisoSeguir, setAvisoSeguir] = useState('')
+  // Una capa que se pone a seguir algo del video: cuál, mientras el seguidor trabaja, y lo que dijo.
+  const [capaSiguiendo, setCapaSiguiendo] = useState<string | null>(null)
+  const [avisoCapa, setAvisoCapa] = useState('')
   const niveles = useNiveles(reproduciendo || mezclador)
   const cuadro = 1 / Math.max(1, Math.round(fps))
   const [, forzar] = useState(0)
@@ -3048,6 +3055,76 @@ export function TimelineEditor({
               <option value="abajo">Sube desde abajo</option>
               <option value="corte">Aparece de golpe</option>
             </select></label>
+            <label className="ed-campo">
+              <span>Fusión</span>
+              <select
+                value={capaElegida.fusion ?? 'normal'}
+                title="Cómo se mezcla con lo de debajo, como los modos de fusión de Premiere"
+                onChange={(e) => historial.aplicar(cambiarCapa(timeline, capaElegida.id, { fusion: e.target.value === 'normal' ? undefined : (e.target.value as ModoFusion) }, medidas))}
+              >
+                <option value="normal">Normal</option>
+                {MODOS_FUSION.map((m) => (
+                  <option key={m.id} value={m.id} title={`Para ${m.para}`}>
+                    {m.nombre}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {seguirZona && (
+              <div className="ed-seguir">
+                <span className="ed-seccion">Seguir algo del video</span>
+                {capaElegida.sigue ? (
+                  <>
+                    <p className="tl-dim">La capa sigue lo que tenía debajo. Para que vaya más arriba o más abajo, arrástrala en el monitor.</p>
+                    <button className="btn small ghost" onClick={() => historial.aplicar(cambiarCapa(timeline, capaElegida.id, { sigue: undefined }, medidas))}>
+                      Dejar de seguir
+                    </button>
+                  </>
+                ) : (
+                  <p className="tl-dim">Pon el cabezal donde se ve bien lo que quieres seguir, coloca la capa encima y toca el botón: irá pegada a eso aunque se mueva.</p>
+                )}
+                <button
+                  className="btn small"
+                  disabled={capaSiguiendo !== null}
+                  onClick={async () => {
+                    const c = capaElegida
+                    const bajo = ubicar(timeline, Math.min(c.inicio + c.duracion, Math.max(c.inicio, tiempo)))
+                    if (!bajo || !esVideo(bajo.clip.fuente)) {
+                      setAvisoCapa('Debajo de la capa, en el cabezal, tiene que haber un clip de video.')
+                      return
+                    }
+                    const dt = Math.min(c.duracion, Math.max(0, tiempo - c.inicio))
+                    const donde = estadoCapa({ ...c, sigue: undefined }, dt, false)
+                    setCapaSiguiendo(c.id)
+                    setAvisoCapa('')
+                    try {
+                      const r = await seguirZona(bajo.clip.fuente, {
+                        desde: bajo.clip.entrada,
+                        hasta: bajo.clip.salida,
+                        en: bajo.tFuente,
+                        x: Math.min(0.95, Math.max(0.05, donde.x)),
+                        y: Math.min(0.95, Math.max(0.05, donde.y)),
+                        ancho: 0.12,
+                        alto: 0.12
+                      })
+                      const nueva = seguirConCapa(timeline, c.id, r.recorrido, { entrada: bajo.clip.entrada, inicio: bajo.inicio, velocidad: bajo.clip.velocidad }, dt, medidas)
+                      if (nueva === timeline) setAvisoCapa('No encontré qué seguir en el tramo de la capa.')
+                      else {
+                        historial.aplicar(nueva)
+                        setAvisoCapa(r.perdido > 0.2 ? `Lo perdí en el ${Math.round(r.perdido * 100)} % del clip: ahí se queda quieta. Revísala.` : 'Listo: la capa sigue lo que tenía debajo.')
+                      }
+                    } catch (error) {
+                      setAvisoCapa(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error))
+                    } finally {
+                      setCapaSiguiendo(null)
+                    }
+                  }}
+                >
+                  {capaSiguiendo === capaElegida.id ? 'Siguiendo…' : capaElegida.sigue ? 'Seguir de nuevo' : 'Seguir lo que tiene debajo'}
+                </button>
+                {avisoCapa && capaSiguiendo === null && <span className="tl-dim">{avisoCapa}</span>}
+              </div>
+            )}
             <label className="ed-campo"><span>Movimiento</span><select
               value={capaElegida.fin ? (MOVIMIENTOS_CAPA.find((m) => sinCambios(m.fin(capaElegida), capaElegida.fin!))?.id ?? 'propio') : 'quieta'}
               title="Cómo se mueve mientras está (paralaje, cruzar, subir…). Para afinar, arrastra en el monitor su silueta punteada: es dónde termina."

@@ -754,5 +754,81 @@ assert.ok(Math.abs(centro6(1.7) - centro6(1.4)) > 40, 'en el corte la capa salta
   console.log(`exportar solo el sonido: WAV de ${Number(info.format.duration).toFixed(2)} s, sin video ✓`)
 }
 
+// Modos de fusión y capas que siguen algo: el MP4 mezcla y mueve la capa como el monitor.
+{
+  const { seguirConCapa, estadoCapa, MODOS_FUSION } = await import('../src/shared/timeline.ts')
+  const { aplicarOperaciones, validarOperaciones } = await import('../src/shared/chat.ts')
+  // Fondo: mitad izquierda gris medio (128), mitad derecha blanca. Capa: un cuadrado gris 100 que cubre el centro.
+  const fondoF = join(dir, 'fondo-fusion.mp4')
+  ff(['-f', 'lavfi', '-i', 'color=c=0x808080:s=320x360:d=1:r=30', '-f', 'lavfi', '-i', 'color=c=white:s=320x360:d=1:r=30', '-filter_complex', 'hstack', '-c:v', 'libx264', '-pix_fmt', 'yuv444p', fondoF])
+  const gris = join(dir, 'media', 'gris.png')
+  ff(['-f', 'lavfi', '-i', 'color=c=0x646464:s=400x400', '-frames:v', '1', gris])
+  const p13 = { ...proyecto, source: { ...proyecto.source, path: fondoF, duration: 1 }, medios: [{ id: 'g', ruta: gris, tipo: 'imagen', conAudio: false, nombre: 'gris.png', duracion: 0 }] }
+  const medios13 = { g: 0 }
+  const leer = (ruta, x) => {
+    const r = spawnSync('ffmpeg', ['-v', 'error', '-ss', '0.5', '-i', ruta, '-frames:v', '1', '-vf', `crop=20:20:${x}:170,scale=1:1:flags=area`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { encoding: 'buffer' })
+    return r.stdout[0]
+  }
+  // Lo que da cada modo con capa 100 sobre fondo 128 (izquierda) y 255 (derecha).
+  const esperado = {
+    multiplicar: (a, b) => (a * b) / 255,
+    pantalla: (a, b) => 255 - ((255 - a) * (255 - b)) / 255,
+    aclarar: (a, b) => Math.max(a, b),
+    oscurecer: (a, b) => Math.min(a, b),
+    diferencia: (a, b) => Math.abs(a - b),
+    sumar: (a, b) => Math.min(255, a + b)
+  }
+  for (const [modo, f] of Object.entries(esperado)) {
+    const tl = normalizarTimeline(
+      { clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 1 }], textos: [], capas: [{ id: 'k', fuente: 'g', inicio: 0, duracion: 1, x: 0.5, y: 0.5, ancho: 0.5, entrada: 'ninguna', fusion: modo }] },
+      1,
+      medios13
+    )
+    assert.equal(tl.capas[0].fusion, modo, `el modo ${modo} sobrevive a guardar y abrir`)
+    const carpeta = `salidas-fusion-${modo}`
+    const r = await exportarTimeline(p13, tl, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, carpeta))
+    assert.ok(r.ok, r.error)
+    const mp4 = join(dir, carpeta, 'timeline-prueba-original.mp4')
+    const izq = leer(mp4, 260)
+    const der = leer(mp4, 360)
+    const fuera = leer(mp4, 20)
+    assert.ok(Math.abs(izq - f(100, 128)) < 10 && Math.abs(der - f(100, 255)) < 10, `${modo}: el MP4 da ${izq} y ${der}; el monitor ${Math.round(f(100, 128))} y ${Math.round(f(100, 255))}`)
+    assert.ok(Math.abs(fuera - 128) < 6, `${modo}: fuera de la capa el fondo no cambia (${fuera})`)
+  }
+  assert.equal(MODOS_FUSION.length, 7)
+  // Una capa que sigue algo: va por el camino del seguidor (en segundos de la fuente) con la distancia que tenía.
+  const camino = [{ f: 0, x: 0.2, y: 0.5 }, { f: 0.5, x: 0.5, y: 0.5 }, { f: 1, x: 0.8, y: 0.5 }]
+  let tl = normalizarTimeline(
+    { clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 1 }], textos: [], capas: [{ id: 'k', fuente: 'g', inicio: 0, duracion: 1, x: 0.2, y: 0.3, ancho: 0.1, entrada: 'ninguna' }] },
+    1,
+    medios13
+  )
+  tl = seguirConCapa(tl, 'k', camino, { entrada: 0, inicio: 0 }, 0, medios13)
+  const c = tl.capas[0]
+  assert.ok(c.sigue && Math.abs(c.sigue.dy + 0.2) < 1e-3, 'conserva la distancia que tenía al objeto (0,2 más arriba)')
+  assert.ok(Math.abs(estadoCapa(c, 0.75, false).x - 0.65) < 1e-3 && Math.abs(estadoCapa(c, 0.75, false).y - 0.3) < 1e-3, 'a los 0,75 s va entre dos puntos del camino')
+  const negro3 = join(dir, 'negro3.mp4')
+  ff(['-f', 'lavfi', '-i', 'color=c=black:s=640x360:d=1:r=30', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', negro3])
+  const p14 = { ...p13, source: { ...p13.source, path: negro3 } }
+  const r = await exportarTimeline(p14, tl, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-sigue'))
+  assert.ok(r.ok, r.error)
+  const mp4 = join(dir, 'salidas-sigue', 'timeline-prueba-original.mp4')
+  const centroX = (t) => {
+    const s = spawnSync('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', mp4, '-frames:v', '1', '-vf', 'crop=640:2:0:108', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { encoding: 'buffer' }).stdout
+    let suma = 0
+    let n = 0
+    for (let x = 0; x < 640; x++) if (s[x * 3] > 50) (suma += x), n++
+    return n ? suma / n / 640 : NaN
+  }
+  for (const t of [0.25, 0.75]) {
+    const quiero = estadoCapa(c, t, false).x
+    assert.ok(Math.abs(centroX(t) - quiero) < 0.03, `a los ${t} s el MP4 pone la capa que sigue en ${centroX(t).toFixed(3)} y el monitor en ${quiero.toFixed(3)}`)
+  }
+  // El agente pone el modo de fusión.
+  const hecho = aplicarOperaciones(tl, validarOperaciones([{ op: 'cambiar_capa', capa_n: 1, fusion: 'pantalla' }]), { duracionFuente: 1, medios: medios13 })
+  assert.equal(hecho.timeline.capas[0].fusion, 'pantalla', `la op no puso la fusión: ${JSON.stringify(hecho.fallos)}`)
+  console.log('modos de fusión (6 medidos) y capa que sigue algo iguales en el MP4; el agente pone la fusión ✓')
+}
+
 rmSync(dir, { recursive: true, force: true })
 console.log('exportar: ok')
