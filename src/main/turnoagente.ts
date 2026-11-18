@@ -3,7 +3,8 @@ import { readdirSync, statSync, unlinkSync, writeFileSync, type Dirent } from 'n
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ADAPTADORES, colaUtil, type EventoAgente } from './adaptadoresagente'
-import { agenteDeOrden } from './agentes'
+import { agenteDeOrden, sanearCodex } from './agentes'
+import { apartarConfigDanada } from './configcodex'
 import { pathAmpliado } from './binarios'
 import { trabajoDeFondo } from './procesos'
 import { entornoParaAgente, falloDeAgente, matarArbol, Parado } from './ia'
@@ -115,6 +116,10 @@ export async function turnoAgente(p: PeticionTurno): Promise<ResultadoTurno> {
     writeFileSync(archivoPrompt, p.prompt, 'utf8')
     comando = comando.replaceAll('{prompt}', archivoPrompt)
   }
+  if (agente === 'codex') {
+    const aviso = await sanearCodex()
+    if (aviso) p.onLinea(aviso)
+  }
   const extra = await entornoParaAgente(comando)
   return new Promise<ResultadoTurno>((resolver, rechazar) => {
     // Un render largo debe poder esperarse en primer plano: si el agente lo deja en segundo
@@ -178,6 +183,10 @@ export async function turnoAgente(p: PeticionTurno): Promise<ResultadoTurno> {
       // Recorte o morir al cerrar lo que el agente dejó de fondo.
       if (final?.ok || codigo === 0 || p.entregaLista?.()) return fin()
       const dijo = colaUtil(error) || colaUtil(respuesta)
+      // Codex no arrancó por su configuración dañada (cambió durante el turno): se aparta
+      // para que el siguiente intento ya funcione.
+      const apartada = agente === 'codex' ? apartarConfigDanada(`${error}\n${respuesta}`) : null
+      if (apartada) return fin(new Error(`${apartada} Vuelve a pedirlo y seguirá.`))
       if (sesion && SIN_SESION.test(dijo)) return fin(new SesionPerdida(dijo))
       fin(new Error(falloDeAgente(p.base, dijo || `El agente terminó con código ${codigo} sin decir nada.`)))
     }

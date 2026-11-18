@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { sanearCodex } from './agentes'
 import { resolverBinario, pathAmpliado } from './binarios'
 import { matarArbol, Parado } from './ia'
 
@@ -80,6 +81,7 @@ async function generar(pedido: { prompt: string; formato: string }, destino: str
   if (senal?.aborted) throw new Parado()
   const codex = resolverBinario('codex')
   if (!codex) throw new Error('Para usar ChatGPT instala Codex en Ajustes → Agentes y entra con tu cuenta de ChatGPT.')
+  await sanearCodex()
   const trabajo = mkdtempSync(join(tmpdir(), 'recorte-chatgpt-'))
   const previas = new Set(imagenesDeCodex().map((x) => x.ruta))
   const instruccion = [

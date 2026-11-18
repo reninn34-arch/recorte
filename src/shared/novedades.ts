@@ -24,6 +24,19 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.84',
+    fecha: '2026-11-18',
+    resumen: 'ChatGPT (Codex) ya no se traba si su configuración se daña.',
+    novedades: [
+      {
+        icono: 'check',
+        titulo: 'Codex se arregla solo si su configuración se daña',
+        texto:
+          'Si el archivo de configuración de Codex se daña (por ejemplo, tras un apagón o un reinicio a la fuerza), Recorte lo aparta sin borrarlo y sigue: al conectar, al hacer un video o una imagen. Ya no sale «Error loading configuration» y te avisa de lo que hizo.'
+      }
+    ]
+  },
+  {
     version: '0.1.83',
     fecha: '2026-11-18',
     resumen: 'Antigravity termina los videos largos y muestra sus pasos, y Recorte acepta audios y videos en más formatos.',

@@ -7,6 +7,7 @@ import type { ConexionResultado, EstadoAgente } from '../shared/api'
 import { anadirCarpetaBinarios, pathAmpliado, resolverBinario } from './binarios'
 import { guardar } from './disco'
 import { descargarHerramienta, PUEDE_BAJAR } from './herramientas'
+import { apartarConfigDanada, sanearConfigCodex } from './configcodex'
 import { conectadoAntigravity, exeAntigravity, instalarAntigravity, loginAntigravity, rutaTokenAntigravity } from './antigravity'
 
 /**
@@ -363,7 +364,12 @@ function urlDeAcceso(salida: string): string | null {
  * a la interfaz, que espera a que aparezcan las credenciales. El proceso del login
  * queda vivo hasta completarse (máx. 10 min).
  */
-function loginNavegador(agente: DefAgente): Promise<ConexionResultado> {
+/** Antes de usar Codex: aparta su configuración si está dañada (ver configcodex.ts). */
+export function sanearCodex(): Promise<string | null> {
+  return sanearConfigCodex((orden) => correr(orden, 20_000, 4000)).catch(() => null)
+}
+
+function loginNavegador(agente: DefAgente, reintento = false): Promise<ConexionResultado> {
   return new Promise((resolver) => {
     if (loginesAbiertos.has(agente.id)) {
       resolver({ ok: false, pendiente: true, aviso: `La autorización de ${agente.nombre} ya está en marcha.` })
@@ -427,6 +433,13 @@ function loginNavegador(agente: DefAgente): Promise<ConexionResultado> {
         anunciar({ ok: true })
       } else if (!avisado) {
         terminar()
+        // Si lo que lo frenó es su configuración dañada, se aparta y se reintenta una vez.
+        const apartada = agente.id === 'codex' && !reintento ? apartarConfigDanada(salida) : null
+        if (apartada) {
+          avisado = true
+          void loginNavegador(agente, true).then((r) => resolver({ ...r, aviso: r.aviso ? `${apartada} ${r.aviso}` : apartada }))
+          return
+        }
         anunciar({ ok: false, error: salida.trim().slice(-300) || 'El inicio de sesión no se completó.' })
       }
     })
@@ -468,9 +481,13 @@ export async function conectarAgente(id: unknown): Promise<ConexionResultado> {
       const instalado = await instalar(agente)
       if (!instalado.ok) return instalado
     }
-    if (!reautorizar && conectadoAhora(agente)) return { ok: true }
+    // Una configuración de Codex dañada (por otro programa o a mano) no lo deja ni conectar.
+    const avisoConfig = agente.id === 'codex' ? await sanearCodex() : null
+    const conAviso = (r: ConexionResultado): ConexionResultado =>
+      avisoConfig ? { ...r, aviso: r.aviso ? `${avisoConfig} ${r.aviso}` : avisoConfig } : r
+    if (!reautorizar && conectadoAhora(agente)) return conAviso({ ok: true })
 
-    if (agente.login === 'navegador') return loginNavegador(agente)
+    if (agente.login === 'navegador') return conAviso(await loginNavegador(agente))
 
     if (!abrirVentana(agente)) {
       return { ok: false, error: `No pude abrir la ventana de ${agente.nombre}. Ábrelo una vez con «${agente.binario}» para iniciar sesión.` }
