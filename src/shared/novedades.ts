@@ -24,6 +24,25 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.86',
+    fecha: '2026-11-18',
+    resumen: 'Antigravity responde mucho antes a partir del segundo turno y ya no deja programas abiertos en segundo plano.',
+    novedades: [
+      {
+        icono: 'clock',
+        titulo: 'Antigravity sin esperas al arrancar',
+        texto:
+          'Antigravity tardaba unos 30 segundos en arrancar en cada turno (el plan, «Hazlo», cada cambio). Ahora se queda encendido entre turnos: el siguiente empieza en unos segundos. Si los videos los hace Antigravity, se arranca al abrir Recorte. Se cierra solo tras 15 minutos sin usarlo y al cerrar Recorte.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Sin Antigravity abierto en segundo plano',
+        texto:
+          'En Windows, cada turno de Antigravity dejaba su programa abierto en segundo plano, gastando memoria. Ya se cierra del todo.'
+      }
+    ]
+  },
+  {
     version: '0.1.85',
     fecha: '2026-11-18',
     resumen: 'Las imágenes de Flow se hacen todas a la vez: los videos con muchas escenas tardan mucho menos, con la misma calidad.',
