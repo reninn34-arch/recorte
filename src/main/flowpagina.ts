@@ -178,26 +178,69 @@ async function subirReferencia(page: Page, ruta: string): Promise<void> {
   ])
   const ext = extname(ruta).toLowerCase()
   const nombre = `recorte-${randomBytes(4).toString('hex')}${ext}`
+  const antes = await referenciasPuestas(page).count()
   await selector.setFiles({
     name: nombre,
     mimeType: ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg',
     buffer: readFileSync(ruta)
   })
-  // Flow pide confirmar los derechos de la imagen: el usuario los declaró en Ajustes.
-  await page.locator('mat-dialog-container button').last().click({ timeout: 3000 }).catch(() => {})
+  // Si Flow pide confirmar los derechos de la imagen (el usuario los declaró en Ajustes): solo en un diálogo que
+  // hable de derechos. El panel de elegir referencias también es un diálogo, y su último botón es otra imagen.
+  await page
+    .locator('mat-dialog-container, [role=alertdialog]')
+    .filter({ hasText: /derecho|rights|permiso|permission|autoriz/i })
+    .locator('button')
+    .last()
+    .click({ timeout: 3000 })
+    .catch(() => {})
+  // Está subida cuando deja de decir «Subiendo» (Flow ya no enseña miniatura de lo que subes, solo un icono).
   const item = panel.locator('button[role=option]').filter({ hasText: nombre }).first()
-  const lista = await item.locator('img[src^="https://"]').waitFor({ timeout: 60_000 }).then(() => true, () => false)
-  if (!lista) throw new Error(`Flow no tomó la referencia ${ruta}.`)
+  await item.waitFor({ timeout: 30_000 }).catch(() => {
+    throw new Error(`Flow no empezó a subir la referencia ${ruta}.`)
+  })
+  for (const limite = Date.now() + 120_000; ; ) {
+    const texto = await item.innerText().catch(() => 'subiendo')
+    if (!/subiendo|uploading|cargando|loading/i.test(texto)) break
+    if (Date.now() > limite) throw new Error(`Flow no terminó de subir la referencia ${ruta} en 2 minutos.`)
+    await page.waitForTimeout(1000)
+  }
   await item.click({ timeout: 10_000 })
-}
-
-async function ponerReferencias(page: Page, rutas: string[]) {
-  const fotos = page.locator('.base-prompt-box .prompt-top-row img')
-  for (let i = await fotos.count(); i > 0; i--) {
-    await page.locator('.base-prompt-box button:has(mat-icon:text-is("cancel"))').first().click({ timeout: 5000 })
+  // Elegida, queda puesta como «ingrediente» en el compositor.
+  for (const limite = Date.now() + 10_000; (await referenciasPuestas(page).count()) <= antes; ) {
+    if (Date.now() > limite) throw new Error(`Flow subió la referencia ${ruta} pero no la puso en el pedido.`)
     await page.waitForTimeout(300)
   }
+}
+
+/** Las referencias puestas en el compositor (antes iban en `.prompt-top-row`; ahora son «ingredientes»). */
+const referenciasPuestas = (page: Page) => page.locator('.base-prompt-box flow-image-ingredient-chip, .base-prompt-box .prompt-top-row img')
+
+async function ponerReferencias(page: Page, rutas: string[]) {
+  // Las del pedido anterior se quitan: cada una se quita al pulsarla (enseña una ✕).
+  for (let i = await referenciasPuestas(page).count(); i > 0; i--) {
+    await page
+      .locator('.base-prompt-box flow-image-ingredient-chip button, .base-prompt-box button:has(mat-icon:text-is("cancel"))')
+      .first()
+      .click({ timeout: 5000 })
+    await page.waitForTimeout(400)
+  }
+  if (await referenciasPuestas(page).count()) throw new Error('No pude quitar las referencias del pedido anterior en Flow.')
   for (const ruta of rutas) await subirReferencia(page, ruta)
+}
+
+/** Cierra lo que quedó abierto en Flow (el panel de referencias, un menú): si no, tapa el compositor al siguiente pedido. */
+export async function cerrarPaneles(page: Page): Promise<void> {
+  for (let i = 0; i < 3 && (await page.locator('.cdk-overlay-pane').count().catch(() => 0)) > 0; i++) {
+    await page.keyboard.press('Escape').catch(() => {})
+    await page.waitForTimeout(400)
+  }
+  const cerrar = page.locator('.cdk-overlay-pane button:has(mat-icon:text-is("close"))').first()
+  if (await cerrar.count().catch(() => 0)) await cerrar.click({ timeout: 3000 }).catch(() => {})
+}
+
+/** Flow avisa en el compositor cuando no hay puntos para lo elegido. */
+async function sinPuntos(page: Page): Promise<boolean> {
+  return (await page.locator('.base-prompt-box button[aria-label*="insuficiente" i], .base-prompt-box button[aria-label*="insufficient" i]').count().catch(() => 0)) > 0
 }
 
 /** El texto de un prompt como lo enseña Flow en su tarjeta mientras genera: sin saltos ni espacios dobles. */
@@ -236,6 +279,11 @@ export class PestanaFlow {
     return r
   }
 
+  /** Tras un fallo no se sabe qué quedó elegido en el compositor: el siguiente pedido lo vuelve a elegir. */
+  olvidarEleccion(): void {
+    this.elegido = null
+  }
+
   async costo(p: PedidoFlow): Promise<number> {
     const clave = `${p.tipo}|${p.formato}|${p.modelo ?? ''}`
     if (this.elegido?.clave === clave) return this.elegido.costo
@@ -266,13 +314,6 @@ export class PestanaFlow {
       ancla.id
     )
     return j < 0 ? 0 : Math.max(0, j - ancla.i)
-  }
-
-  /** Cuántas tarjetas aparecieron arriba al hacer `fn`. */
-  async contandoNuevas(fn: () => Promise<void>): Promise<number> {
-    const ancla = await this.ancla()
-    await fn()
-    return this.nuevasDesde(ancla)
   }
 }
 
@@ -394,18 +435,32 @@ export async function generarEnPestana(
 ): Promise<{ creditos: number; archivo: string }> {
   const { page } = pest
   const { creditos, suya } = await pest.aSolas(async () => {
-    const creditos = await pest.costo(p)
-    if (creditos > tope) throw new NoEmpezo(`Cuesta ${creditos} créditos y el tope es ${tope}. No se generó nada.`, '')
-    // Cada referencia subida también sale arriba como tarjeta.
-    pest.puestas += await pest.contandoNuevas(() => ponerReferencias(page, p.referencias ?? []))
-    await caja(page).click({ timeout: 10_000 })
-    await page.keyboard.insertText(p.prompt.split(/\s+/).join(' '))
-    await page.waitForTimeout(400)
-    const ancla = await pest.ancla()
-    await boton(page, 'arrow_forward').last().click({ timeout: 10_000 })
-    await esperarQueEmpiece(pest, p.prompt, ancla)
-    pest.puestas++
-    return { creditos, suya: pest.puestas }
+    // Todo lo que salga arriba desde aquí (referencias subidas y la tarjeta del pedido) se cuenta con esta marca,
+    // también si algo falla: de eso depende encontrar las tarjetas de los demás pedidos de la pestaña.
+    const marca = await pest.ancla()
+    try {
+      const creditos = await pest.costo(p)
+      if (creditos > tope) throw new NoEmpezo(`Cuesta ${creditos} créditos y el tope es ${tope}. No se generó nada.`, '')
+      if (creditos > 0 && (await sinPuntos(page))) {
+        throw new NoEmpezo(`A esta cuenta de Flow no le quedan puntos para esto (cuesta ${creditos}). No se generó nada.`, 'puntos insuficientes')
+      }
+      await ponerReferencias(page, p.referencias ?? [])
+      await caja(page).click({ timeout: 10_000 })
+      await page.keyboard.insertText(p.prompt.split(/\s+/).join(' '))
+      await page.waitForTimeout(400)
+      const ancla = await pest.ancla()
+      await boton(page, 'arrow_forward').last().click({ timeout: 10_000 })
+      await esperarQueEmpiece(pest, p.prompt, ancla)
+      // Las referencias y la del pedido (arriba del todo); si no había marca (proyecto vacío), la del pedido.
+      pest.puestas += Math.max(1, await pest.nuevasDesde(marca))
+      return { creditos, suya: pest.puestas }
+    } catch (e) {
+      pest.puestas += await pest.nuevasDesde(marca).catch(() => 0)
+      pest.olvidarEleccion()
+      // Que no quede abierto el panel de referencias o un menú: taparía el compositor en el siguiente pedido.
+      await cerrarPaneles(page)
+      throw e
+    }
   })
   pest.enMarcha++
   try {
