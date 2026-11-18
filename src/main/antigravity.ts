@@ -250,24 +250,40 @@ export class Manos {
 }
 
 /** JSON-RPC por líneas: lo mínimo para hablar ACP. */
+interface EventosRpc {
+  alAvisar: (metodo: string, params: Record<string, unknown>) => void
+  alTexto: (linea: string) => void
+  alCerrar: (error: Error) => void
+}
+
 class Rpc {
   private siguiente = 0
   private pendientes = new Map<number, { ok: (v: unknown) => void; mal: (e: Error) => void }>()
   private resto = ''
   private hijo: ChildProcess
   private manos?: Manos
+  private eventos: EventosRpc
 
-  constructor(
-    hijo: ChildProcess,
-    eventos: {
-      alAvisar: (metodo: string, params: Record<string, unknown>) => void
-      alTexto: (linea: string) => void
-      alCerrar: (error: Error) => void
-    },
-    manos?: Manos
-  ) {
+  constructor(hijo: ChildProcess, eventos: EventosRpc, manos?: Manos) {
     this.hijo = hijo
     this.manos = manos
+    this.eventos = eventos
+    const proxy: EventosRpc = {
+      alAvisar: (m, p) => this.eventos.alAvisar(m, p),
+      alTexto: (l) => this.eventos.alTexto(l),
+      alCerrar: (e) => this.eventos.alCerrar(e)
+    }
+    this.escuchar(proxy)
+  }
+
+  /** Otro turno en el mismo proceso: sus avisos y sus «manos» (su carpeta). */
+  usar(eventos: EventosRpc, manos?: Manos): void {
+    this.eventos = eventos
+    this.manos = manos
+  }
+
+  private escuchar(eventos: EventosRpc) {
+    const hijo = this.hijo
     hijo.stdout!.setEncoding('utf8')
     hijo.stdout!.on('data', (trozo: string) => {
       this.resto += trozo
@@ -298,9 +314,19 @@ class Rpc {
     hijo.stderr!.on('data', (trozo: string) => {
       for (const linea of trozo.split('\n')) if (linea.trim()) eventos.alTexto(linea.trim())
     })
-    hijo.on('error', (e) => eventos.alCerrar(e))
-    hijo.on('exit', (c) => eventos.alCerrar(new Error(`Antigravity se cerró (código ${c}).`)))
+    const caido = (e: Error) => {
+      this.muerto = true
+      // Lo que esperaba respuesta ya no la tendrá.
+      for (const p of this.pendientes.values()) p.mal(e)
+      this.pendientes.clear()
+      eventos.alCerrar(e)
+    }
+    hijo.on('error', caido)
+    hijo.on('exit', (c) => caido(new Error(`Antigravity se cerró (código ${c}).`)))
   }
+
+  /** El proceso se cerró o falló: ya no sirve para otro turno. */
+  muerto = false
 
   private async contestar(id: number, metodo: string, params: Record<string, unknown>) {
     let resultado: unknown
@@ -353,9 +379,85 @@ interface SesionAcp {
   sessionId: string
   /** Si el agente acepta imágenes dentro del pedido. */
   imagenes: boolean
+  proceso: ProcesoAcp
 }
 
-/** Abre un proceso, lo inicializa y crea una sesión. Tarda unos 40 s la primera vez. */
+/** Un servidor de Antigravity arrancado y con la cuenta lista: sirve para varias sesiones seguidas. */
+interface ProcesoAcp {
+  hijo: ChildProcess
+  rpc: Rpc
+  imagenes: boolean
+}
+
+const SIN_EVENTOS: EventosRpc = { alAvisar: () => {}, alTexto: () => {}, alCerrar: () => {} }
+
+/** Lanza el servidor, lo inicializa y entra con la cuenta. Es lo lento (unos 30 s): desempaca mucho al arrancar. */
+async function arrancarProceso(conManos: boolean): Promise<ProcesoAcp> {
+  const hijo = lanzar()
+  const rpc = new Rpc(hijo, SIN_EVENTOS)
+  try {
+    const ini = await rpc.pedir<{ agentCapabilities?: { promptCapabilities?: { image?: boolean } } }>(
+      'initialize',
+      {
+        protocolVersion: 1,
+        clientCapabilities: conManos
+          ? { fs: { readTextFile: true, writeTextFile: true }, terminal: true }
+          : { fs: { readTextFile: true, writeTextFile: false }, terminal: false },
+        clientInfo: { name: 'recorte', version: '0.1' }
+      },
+      180_000
+    )
+    // Con el token guardado esto vuelve al instante; sin él, abre el navegador y espera.
+    await rpc.pedir('authenticate', { methodId: 'oauth-personal' }, 10 * 60_000)
+    return { hijo, rpc, imagenes: Boolean(ini?.agentCapabilities?.promptCapabilities?.image) }
+  } catch (e) {
+    matarArbol(hijo)
+    throw e
+  }
+}
+
+/**
+ * Antigravity en reserva para el modo agente: al acabar un turno su servidor no se cierra y el
+ * siguiente turno solo abre una sesión nueva en él (unos 4 s en vez de 30). Se cierra tras
+ * `RESERVA_MS` sin usarse, si falla o se para un turno, y al salir de Recorte.
+ */
+const RESERVA_MS = 15 * 60_000
+let reserva: Promise<ProcesoAcp | null> | null = null
+let relojReserva: ReturnType<typeof setTimeout> | undefined
+
+function dejarEnReserva(p: Promise<ProcesoAcp | null>) {
+  cerrarAntigravity()
+  reserva = p
+  relojReserva = setTimeout(cerrarAntigravity, RESERVA_MS)
+}
+
+/** Arranca Antigravity por adelantado (si no hay uno esperando), para que el próximo turno no espere. */
+export function calentarAntigravity(): void {
+  if (reserva || !exeAntigravity() || !conectadoAntigravity()) return
+  dejarEnReserva(arrancarProceso(true).catch(() => null))
+}
+
+/** Cierra el Antigravity que espera en reserva (al salir de Recorte o al pasar su tiempo). */
+export function cerrarAntigravity(): void {
+  if (relojReserva) clearTimeout(relojReserva)
+  relojReserva = undefined
+  const r = reserva
+  reserva = null
+  void r?.then((p) => p && matarArbol(p.hijo))
+}
+
+/** El de la reserva si sigue vivo; si no, uno nuevo. */
+async function tomarProceso(): Promise<{ proceso: ProcesoAcp; deReserva: boolean }> {
+  if (relojReserva) clearTimeout(relojReserva)
+  relojReserva = undefined
+  const r = reserva
+  reserva = null
+  const p = r ? await r : null
+  if (p && !p.rpc.muerto) return { proceso: p, deReserva: true }
+  return { proceso: await arrancarProceso(true), deReserva: false }
+}
+
+/** Abre una sesión: en el modo agente, en el Antigravity de reserva (o uno nuevo); si no, en uno solo para ella. */
 async function abrirSesion(
   eventos: {
     alTexto: (linea: string) => void
@@ -366,10 +468,10 @@ async function abrirSesion(
   /** El modelo y el nivel de pensamiento elegidos (si no, los de la cuenta). */
   opciones: { modelo?: string; esfuerzo?: string } = {}
 ): Promise<SesionAcp> {
-  const hijo = lanzar()
+  const { proceso, deReserva } = manos ? await tomarProceso() : { proceso: await arrancarProceso(false), deReserva: false }
+  const { rpc, hijo } = proceso
   let cerrado: Error | null = null
-  const rpc = new Rpc(
-    hijo,
+  rpc.usar(
     {
       alAvisar: eventos.alAvisar,
       alTexto: eventos.alTexto,
@@ -379,31 +481,25 @@ async function abrirSesion(
     },
     manos?.manos
   )
-  const ini = await rpc.pedir<{ agentCapabilities?: { promptCapabilities?: { image?: boolean } } }>(
-    'initialize',
-    {
-      protocolVersion: 1,
-      clientCapabilities: manos
-        ? { fs: { readTextFile: true, writeTextFile: true }, terminal: true }
-        : { fs: { readTextFile: true, writeTextFile: false }, terminal: false },
-      clientInfo: { name: 'recorte', version: '0.1' }
-    },
-    180_000
-  )
-  // Con el token guardado esto vuelve al instante; sin él, abre el navegador y espera.
-  await rpc.pedir('authenticate', { methodId: 'oauth-personal' }, 10 * 60_000)
-  const s = await rpc.pedir<{ sessionId: string; configOptions?: OpcionAcp[] }>('session/new', { cwd: manos?.cwd ?? tmpdir(), mcpServers: [] }, 180_000)
-  if (cerrado) throw cerrado
-  guardarCatalogo(s.configOptions)
-  // El modelo y el nivel de pensamiento elegidos, con las opciones que dio la sesión (ACP).
-  const elegir = async (categoria: string, valor?: string) => {
-    const o = s.configOptions?.find((x) => x.category === categoria || x.id === categoria)
-    if (!valor || !o || !o.options?.some((v) => v.value === valor) || o.currentValue === valor) return
-    await rpc.pedir('session/set_config_option', { sessionId: s.sessionId, configId: o.id, value: valor }, 30_000).catch(() => {})
+  try {
+    const s = await rpc.pedir<{ sessionId: string; configOptions?: OpcionAcp[] }>('session/new', { cwd: manos?.cwd ?? tmpdir(), mcpServers: [] }, 180_000)
+    if (cerrado) throw cerrado
+    guardarCatalogo(s.configOptions)
+    // El modelo y el nivel de pensamiento elegidos, con las opciones que dio la sesión (ACP).
+    const elegir = async (categoria: string, valor?: string) => {
+      const o = s.configOptions?.find((x) => x.category === categoria || x.id === categoria)
+      if (!valor || !o || !o.options?.some((v) => v.value === valor) || o.currentValue === valor) return
+      await rpc.pedir('session/set_config_option', { sessionId: s.sessionId, configId: o.id, value: valor }, 30_000).catch(() => {})
+    }
+    await elegir('model', opciones.modelo)
+    await elegir('thought_level', opciones.esfuerzo)
+    return { rpc, hijo, sessionId: s.sessionId, imagenes: proceso.imagenes, proceso }
+  } catch (e) {
+    matarArbol(hijo)
+    // El de reserva pudo quedarse sin cuenta o colgarse mientras esperaba: se prueba con uno nuevo.
+    if (deReserva) return abrirSesion(eventos, manos, opciones)
+    throw e
   }
-  await elegir('model', opciones.modelo)
-  await elegir('thought_level', opciones.esfuerzo)
-  return { rpc, hijo, sessionId: s.sessionId, imagenes: Boolean(ini?.agentCapabilities?.promptCapabilities?.image) }
 }
 
 /** Una opción de la sesión ACP (modelo, nivel de pensamiento, modo…). */
@@ -447,7 +543,7 @@ export async function catalogoAntigravity(forzar = false): Promise<ModeloAgente[
   }
   if (!exeAntigravity() || !conectadoAntigravity()) return []
   const sesion = await abrirSesion({ alTexto: () => {}, alAvisar: () => {} })
-  sesion.hijo.kill()
+  matarArbol(sesion.hijo)
   return catalogo ?? []
 }
 
@@ -536,8 +632,11 @@ export async function trabajarAntigravity(
     }, 15_000)
   })
   vigilado.catch(() => {})
+  // Solo si el turno acabó por sí mismo, el servidor queda en reserva para el siguiente.
+  let limpio = false
   try {
-    await Promise.race([sesion.rpc.pedir('session/prompt', { sessionId: sesion.sessionId, prompt: partes }, tope), parado, vigilado])
+    const fin = await Promise.race([sesion.rpc.pedir('session/prompt', { sessionId: sesion.sessionId, prompt: partes }, tope), parado, vigilado])
+    limpio = fin !== 'entregado'
     if (renglon.trim()) onLinea(renglon.trim().slice(0, 200))
     return texto
   } catch (e) {
@@ -549,7 +648,12 @@ export async function trabajarAntigravity(
     if (vigia) clearInterval(vigia)
     senal?.removeEventListener('abort', alParar)
     manos.cerrarTodo()
-    sesion.hijo.kill()
+    if (limpio && !senal?.aborted && !sesion.rpc.muerto) {
+      sesion.rpc.usar(SIN_EVENTOS)
+      dejarEnReserva(Promise.resolve(sesion.proceso))
+    } else {
+      matarArbol(sesion.hijo)
+    }
   }
 }
 
@@ -596,7 +700,7 @@ export async function preguntarAntigravity(
     return texto
   } finally {
     senal?.removeEventListener('abort', alParar)
-    sesion.hijo.kill()
+    matarArbol(sesion.hijo)
   }
 }
 

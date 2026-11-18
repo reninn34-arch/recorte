@@ -21,6 +21,7 @@ import { activarHerramientas } from './herramientas'
 import { carpetaPorDefecto, copiarAVideos, carpetaDelProyecto, nombreArchivo, rutaLibre } from './carpetas'
 import { abrirFlow, agregarCuentaFlow, ajustesFlow, estadoFlow, leerSaldosFlow, pedirFlow, quitarCuentaFlow } from './flow'
 import { cerrarEdgesOciosos } from './edgeperfil'
+import { calentarAntigravity, cerrarAntigravity } from './antigravity'
 import { MODELO_CHATGPT, MODELOS_IMAGEN, modelosVideoVigentes, type PedidoFlow } from '../shared/flow'
 import { estadoChatGPT, generarImagenChatGPT } from './imagenchatgpt'
 import { atenderMedios } from './mediosagente'
@@ -554,6 +555,14 @@ app.whenReady().then(() => {
     if (Date.now() - claudeLeido() > 55 * 60_000) void usoActualizar('claude').catch(() => {})
   }
   setTimeout(leerClaudeSiHaceFalta, 15_000)
+  // Si los videos los hace Antigravity, se arranca ya (tarda unos 30 s): el primer turno no lo espera.
+  setTimeout(() => {
+    void configParaTarea()
+      .then((cfg) => {
+        if (agenteDeOrden(cfg.comandoCli ?? '') === 'antigravity') calentarAntigravity()
+      })
+      .catch(() => {})
+  }, 10_000)
   setInterval(leerClaudeSiHaceFalta, 60 * 60_000)
   ipcMain.handle('uso:estado', () => usoAhora())
   ipcMain.handle('uso:actualizar', (_e, id: unknown) => usoActualizar(String(id)))
@@ -3517,6 +3526,7 @@ app.on('before-quit', (e) => {
   if (cerrandoEdges) return
   cerrandoEdges = true
   e.preventDefault()
+  cerrarAntigravity()
   void Promise.race([cerrarEdgesOciosos(), new Promise((r) => setTimeout(r, 4000))]).finally(() => app.quit())
 })
 
