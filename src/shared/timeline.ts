@@ -51,6 +51,8 @@ export interface ClipTL {
   rampa?: ClaveTL[]
   /** Si es un anidado (varios clips hechos uno, como una secuencia anidada de Premiere): los clips de dentro. */
   anidado?: ClipTL[]
+  /** Curvas de color dibujadas a mano (la de luz y una por canal), después del color tipo Lumetri. */
+  curvas?: CurvasTL
 }
 
 export const MAX_FUNDIDO = 1.5
@@ -1505,6 +1507,7 @@ export function normalizarTimeline(entrada: unknown, duracionFuente: number, otr
       ...(c.mudo === true ? { mudo: true } : {}),
       ...(normalizarSonidoClip(c.sonido, (s - e) / (typeof c.velocidad === 'number' && c.velocidad > 0 ? c.velocidad : 1)) ? { sonido: normalizarSonidoClip(c.sonido, (s - e) / (typeof c.velocidad === 'number' && c.velocidad > 0 ? c.velocidad : 1)) } : {}),
       ...(normalizarClaves(c.claves) ? { claves: normalizarClaves(c.claves) } : {}),
+      ...(normalizarCurvas(c.curvas) ? { curvas: normalizarCurvas(c.curvas) } : {}),
       ...(normalizarClavesVolumen(c.clavesVolumen) ? { clavesVolumen: normalizarClavesVolumen(c.clavesVolumen) } : {}),
       ...(normalizarRampa(c.rampa) ? { rampa: normalizarRampa(c.rampa) } : {}),
       // Los clips de dentro de un anidado se guardan tal cual (se validan al desanidar).
@@ -1907,6 +1910,111 @@ export function curvasColor(a: Required<AjustesClip>): { r: number[]; g: number[
     })
   )
   return { r: curvas[0], g: curvas[1], b: curvas[2] }
+}
+
+// ----- Curvas dibujadas a mano (como las curvas RGB de Lumetri) -----
+
+export type CanalCurva = 'rgb' | 'r' | 'g' | 'b'
+/** Un punto de una curva: [entrada, salida], de 0 a 1. Los extremos (0,0) y (1,1) van siempre. */
+export type PuntoCurva = [number, number]
+export type CurvasTL = Partial<Record<CanalCurva, PuntoCurva[]>>
+export const CANALES_CURVA: { id: CanalCurva; nombre: string; para: string }[] = [
+  { id: 'rgb', nombre: 'Luz', para: 'la luz de toda la imagen: una S da más contraste, subir el centro aclara' },
+  { id: 'r', nombre: 'Rojo', para: 'cuánto rojo: subirlo calienta, bajarlo lo lleva al cian' },
+  { id: 'g', nombre: 'Verde', para: 'cuánto verde: bajarlo lo lleva al magenta' },
+  { id: 'b', nombre: 'Azul', para: 'cuánto azul: subirlo enfría, bajarlo lo lleva al amarillo' }
+]
+export const MAX_PUNTOS_CURVA = 8
+
+export function normalizarCurvas(entrada: unknown): CurvasTL | undefined {
+  if (!entrada || typeof entrada !== 'object') return undefined
+  const salida: CurvasTL = {}
+  for (const { id } of CANALES_CURVA) {
+    const lista = (entrada as Record<string, unknown>)[id]
+    if (!Array.isArray(lista)) continue
+    const puntos = lista
+      .filter((p): p is [number, number] => Array.isArray(p) && p.length === 2 && p.every((v) => typeof v === 'number' && Number.isFinite(v)))
+      .map(([x, y]) => [Math.round(pinza(x, 0.01, 0.99) * 1000) / 1000, Math.round(pinza(y, 0, 1) * 1000) / 1000] as PuntoCurva)
+      .sort((p, q) => p[0] - q[0])
+      .filter((p, i, a) => i === 0 || p[0] - a[i - 1][0] >= 0.01)
+      .slice(0, MAX_PUNTOS_CURVA)
+    if (puntos.length) salida[id] = puntos
+  }
+  return Object.keys(salida).length ? salida : undefined
+}
+
+/**
+ * La curva por esos puntos en `n` valores de 0 a 1 (más los extremos 0,0 y 1,1): suave y sin pasarse, como en
+ * Premiere (interpolación cúbica monótona de Fritsch–Carlson).
+ */
+export function curvaPuntos(puntos: PuntoCurva[], n = PUNTOS_CURVA): number[] {
+  const p: PuntoCurva[] = [[0, 0], ...puntos, [1, 1]]
+  const m = p.length
+  const d = p.slice(0, -1).map((a, i) => (p[i + 1][1] - a[1]) / Math.max(1e-6, p[i + 1][0] - a[0]))
+  const t = p.map((_, i) => (i === 0 ? d[0] : i === m - 1 ? d[m - 2] : d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2))
+  for (let i = 0; i < m - 1; i++) {
+    if (Math.abs(d[i]) < 1e-9) {
+      t[i] = 0
+      t[i + 1] = 0
+      continue
+    }
+    const a = t[i] / d[i]
+    const b = t[i + 1] / d[i]
+    const h = Math.hypot(a, b)
+    if (h > 3) {
+      t[i] = (3 * a * d[i]) / h
+      t[i + 1] = (3 * b * d[i]) / h
+    }
+  }
+  return Array.from({ length: n }, (_, k) => {
+    const x = k / (n - 1)
+    let i = 0
+    while (i < m - 2 && x > p[i + 1][0]) i++
+    const h = p[i + 1][0] - p[i][0]
+    const s = h > 0 ? (x - p[i][0]) / h : 0
+    const s2 = s * s
+    const s3 = s2 * s
+    const v = (2 * s3 - 3 * s2 + 1) * p[i][1] + (s3 - 2 * s2 + s) * h * t[i] + (-2 * s3 + 3 * s2) * p[i + 1][1] + (s3 - s2) * h * t[i + 1]
+    return Math.round(Math.min(1, Math.max(0, v)) * 10000) / 10000
+  })
+}
+
+/** Una curva (valores de 0 a 1 en puntos iguales) en un valor cualquiera, recta entre sus puntos (como lut1d). */
+function enCurva(tabla: number[], v: number): number {
+  const x = Math.min(1, Math.max(0, v)) * (tabla.length - 1)
+  const i = Math.min(tabla.length - 2, Math.floor(x))
+  return tabla[i] + (tabla[i + 1] - tabla[i]) * (x - i)
+}
+
+/** Las curvas finales de un clip: las del color tipo Lumetri y, encima, las dibujadas a mano. Null si no hay nada. */
+export function curvasDeClip(clip: Pick<ClipTL, 'curvas'> | undefined, a: Required<AjustesClip>): { r: number[]; g: number[]; b: number[] } | null {
+  const base = curvasColor(a)
+  const c = clip?.curvas
+  if (!c) return base
+  const rgb = c.rgb ? curvaPuntos(c.rgb) : null
+  const canal = (id: 'r' | 'g' | 'b', previa: number[] | null) => {
+    const propia = c[id] ? curvaPuntos(c[id]!) : null
+    return Array.from({ length: PUNTOS_CURVA }, (_, k) => {
+      let v = previa ? previa[k] : k / (PUNTOS_CURVA - 1)
+      if (rgb) v = enCurva(rgb, v)
+      if (propia) v = enCurva(propia, v)
+      return Math.round(v * 10000) / 10000
+    })
+  }
+  return { r: canal('r', base?.r ?? null), g: canal('g', base?.g ?? null), b: canal('b', base?.b ?? null) }
+}
+
+/** Cambia (o quita, con `puntos` vacío) la curva de un canal de un clip. */
+export function cambiarCurva(tl: Timeline, id: string, canal: CanalCurva, puntos: PuntoCurva[] | undefined): Timeline {
+  return {
+    ...tl,
+    clips: tl.clips.map((c) => {
+      if (c.id !== id) return c
+      const curvas = normalizarCurvas({ ...(c.curvas ?? {}), [canal]: puntos ?? [] })
+      const { curvas: _antes, ...resto } = c
+      return curvas ? { ...resto, curvas } : resto
+    })
+  }
 }
 
 /** Las curvas como archivo .cube de 1D (lo lee el filtro lut1d de FFmpeg). */

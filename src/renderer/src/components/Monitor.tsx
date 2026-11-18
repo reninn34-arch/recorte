@@ -52,7 +52,8 @@ import {
   ponerClaveCapa,
   CAPA_SUBTITULOS,
   letraOscura,
-  MODOS_FUSION
+  MODOS_FUSION,
+  curvasDeClip
 } from '../../../shared/timeline'
 import { useMusica, useSincronizar, useTamano, useVoces, type FuentesVista, type Historial, type Reproductor } from '../hooks/timeline'
 import type { Elegido } from './TimelineEditor'
@@ -150,7 +151,7 @@ export function Monitor({
   const previoUrl = clipPrevio && fuentes[clipPrevio.fuente]?.tipo === 'imagen' ? fuentes[clipPrevio.fuente].url : undefined
   // El color tipo Lumetri: la misma curva por canal que el MP4 (lut1d), como filtro SVG.
   const idCurvas = `curvas-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
-  const curvas = curvasColor(a)
+  const curvas = curvasDeClip(clipActual, a)
   // Recortar y transformar: la imagen entera (ya con su zoom) se recorta, se escala, se gira y se corre.
   const movimiento: React.CSSProperties | undefined = hayMovimiento(a)
     ? {

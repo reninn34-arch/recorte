@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { VistaPrevia } from '../hooks/vistaprevia'
 import {
   ajustarClip,
+  cambiarCurva,
   ubicar,
   MODOS_FUSION,
   seguirConCapa,
@@ -123,12 +124,15 @@ import {
   PISTAS_SONIDOS,
   deslizarContenido,
   desplazarClip,
-  type ColorMarcador, unirAudio, dividirSonido } from '../../../shared/timeline'
+  type ColorMarcador, unirAudio, dividirSonido,
+  CANALES_CURVA
+} from '../../../shared/timeline'
 import type { OpcionesExport } from '../../../shared/api'
 import type { TranscriptSegment } from '../../../shared/types'
 import type { Historial } from '../hooks/timeline'
 import { Icon, type IconName } from '../Icons'
 import { Onda } from './Onda'
+import { EditorCurvas } from './EditorCurvas'
 import { Medidor, Mezclador, useNiveles } from './Mezclador'
 import { useMenuContextual, type OpcionMenu } from './MenuContextual'
 import { InspectorVoz, type GenerarVoz, type GrabarVoz } from './InspectorVoz'
@@ -2967,6 +2971,19 @@ export function TimelineEditor({
               })}
                 </details>
               ))}
+              <span className="ed-seccion">
+                Curvas
+                {clipElegido.clip.curvas && (
+                  <button className="ed-seccion-quitar" title="Quitar todas las curvas de este clip" onClick={() => historial.aplicar(CANALES_CURVA.reduce((tl, c) => cambiarCurva(tl, clipElegido.clip.id, c.id, undefined), timeline))}>
+                    Quitar
+                  </button>
+                )}
+              </span>
+              <EditorCurvas
+                curvas={clipElegido.clip.curvas}
+                onEmpezar={empezarAjuste}
+                onCambio={(canal, puntos) => deslizar(cambiarCurva(timeline, clipElegido.clip.id, canal, puntos))}
+              />
               <select
                 value=""
                 title="Un movimiento de cámara para el clip; con capas con profundidad encima se ve en 3D"

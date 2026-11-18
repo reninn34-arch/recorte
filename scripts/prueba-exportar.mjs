@@ -858,5 +858,31 @@ assert.ok(Math.abs(centro6(1.7) - centro6(1.4)) > 40, 'en el corte la capa salta
   console.log('efectos animados (sepia y desenfoque) cuadro a cuadro en el MP4 ✓')
 }
 
+// Curvas dibujadas a mano: la curva de luz y la del azul salen en el MP4 con los valores que calcula el monitor.
+{
+  const { cambiarCurva, curvasDeClip, ajustesDe, curvaPuntos } = await import('../src/shared/timeline.ts')
+  const { aplicarOperaciones, validarOperaciones } = await import('../src/shared/chat.ts')
+  const grisM = join(dir, 'gris-medio.mp4')
+  ff(['-f', 'lavfi', '-i', 'color=c=0x808080:s=640x360:d=1:r=30', '-c:v', 'libx264', '-pix_fmt', 'yuv444p', grisM])
+  const p16 = { ...proyecto, source: { ...proyecto.source, path: grisM, duration: 1 }, medios: [] }
+  let tl = normalizarTimeline({ clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 1 }], textos: [] }, 1, {})
+  tl = cambiarCurva(tl, 'c1', 'rgb', [[0.5, 0.7]])
+  tl = cambiarCurva(tl, 'c1', 'b', [[0.5, 0.3]])
+  assert.ok(Math.abs(curvaPuntos([[0.5, 0.7]])[16] - 0.7) < 0.01, 'la curva pasa por su punto')
+  assert.ok(curvaPuntos([[0.25, 0.2], [0.75, 0.8]]).every((v, i, a) => i === 0 || v >= a[i - 1]), 'una S no se pasa: siempre sube')
+  assert.equal(normalizarTimeline(tl, 1, {}).clips[0].curvas.b.length, 1, 'las curvas sobreviven a guardar y abrir')
+  const c = curvasDeClip(tl.clips[0], ajustesDe(tl.clips[0]))
+  const quiero = [c.r[16], c.g[16], c.b[16]].map((v) => v * 255)
+  const r = await exportarTimeline(p16, tl, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-curvas'))
+  assert.ok(r.ok, r.error)
+  const o = spawnSync('ffmpeg', ['-v', 'error', '-ss', '0.5', '-i', join(dir, 'salidas-curvas', 'timeline-prueba-original.mp4'), '-frames:v', '1', '-vf', 'crop=40:40:300:160,scale=1:1:flags=area', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { encoding: 'buffer' }).stdout
+  const visto = [...o.subarray(0, 3)]
+  assert.ok(visto.every((v, i) => Math.abs(v - quiero[i]) < 10), `curvas: el MP4 da ${visto} y el monitor ${quiero.map(Math.round)}`)
+  assert.ok(visto[0] > 160 && visto[0] - visto[2] > 25, `la luz sube y el azul queda por debajo (${visto})`)
+  const hecho = aplicarOperaciones(normalizarTimeline({ clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 1 }], textos: [] }, 1, {}), validarOperaciones([{ op: 'curva', clip: 1, canal: 'rgb', puntos: [[0.25, 0.2], [0.75, 0.8]] }]), { duracionFuente: 1, medios: {} })
+  assert.equal(hecho.timeline.clips[0].curvas?.rgb?.length, 2, `la op curva no se aplicó: ${JSON.stringify(hecho.fallos)}`)
+  console.log('curvas dibujadas (luz y azul) iguales en el MP4; el agente las pone ✓')
+}
+
 rmSync(dir, { recursive: true, force: true })
 console.log('exportar: ok')

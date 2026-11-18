@@ -58,7 +58,8 @@ import {
   zonaEn,
   DESENFOQUE_CLIP,
   exprClave,
-  MODOS_FUSION
+  MODOS_FUSION,
+  curvasDeClip
 } from '../shared/timeline'
 import type { OpcionesExport } from '../shared/api'
 import type { ClipSuggestion, Project } from '../shared/types'
@@ -441,7 +442,7 @@ async function exportarTimelineAhora(
     const fondoBorroso = borroso > 0.005 ? `,gblur=sigma=${(borroso * DESENFOQUE_MAX * ancho).toFixed(2)}` : ''
     // El color tipo Lumetri (exposición, luces, sombras, blancos, negros, temperatura y tinte): la misma curva que el
     // monitor, en un archivo .cube que aplica lut1d antes del resto del color.
-    const curvas = curvasColor(a)
+    const curvas = curvasDeClip(t.clip, a)
     let lut = ''
     if (CLAVES_CURVA_COLOR.some((k) => cl?.[k]?.length)) {
       // Con fotogramas clave en el color: la curva de cada tramo corto (hasta 120 por clip), cada una activa solo en su
@@ -451,7 +452,7 @@ async function exportarTimelineAhora(
       for (let k = 0; k < n; k++) {
         const t0 = (largo * k) / n
         const t1 = (largo * (k + 1)) / n
-        const c = curvasColor(ajustesEn(t.clip, fuenteEnClip(t.clip, (t0 + t1) / 2)))
+        const c = curvasDeClip(t.clip, ajustesEn(t.clip, fuenteEnClip(t.clip, (t0 + t1) / 2)))
         const cubo = c ? cuboDeCurvas(c) : null
         const previo = tramosColor[tramosColor.length - 1]
         if (previo && previo.cubo === cubo) previo.b = t1

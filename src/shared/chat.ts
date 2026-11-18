@@ -61,7 +61,11 @@ import {
   quitarClaveCapa,
   type ParametroClaveCapa, anadirCapa, huellaSubtitulos, subtitulosAlDia, type SubtitulosHF,
   MODOS_FUSION,
-  type ModoFusion
+  type ModoFusion,
+  CANALES_CURVA,
+  cambiarCurva,
+  type CanalCurva,
+  type PuntoCurva
 } from './timeline'
 import { INSTRUCCIONES_CRITERIO } from './gustos'
 import type { TranscriptSegment } from './types'
@@ -148,6 +152,7 @@ export type OperacionTL =
   | ({ op: 'zoom'; clip?: number } & { [K in (typeof CAMPOS_CAMARA)[number]]?: number })
   | ({ op: 'color'; clip?: number; look?: string } & { [K in (typeof CAMPOS_COLOR)[number]]?: number })
   | { op: 'velocidad'; clip: number; velocidad: number }
+  | { op: 'curva'; clip?: number; canal: CanalCurva; puntos: PuntoCurva[] }
   | { op: 'audio_clip'; clip: number; volumen?: number; entra?: number; sale?: number; limpio?: number }
   | { op: 'clave'; clip: number; parametro: ParametroClave; en: number; valor?: number; quitar?: boolean }
   | { op: 'clave_capa'; capa_n: number; parametro: ParametroClaveCapa; en: number; valor?: number; quitar?: boolean }
@@ -499,6 +504,14 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
         const c = num(x.clip)
         const cambio = Object.fromEntries((['volumen', 'entra', 'sale', 'limpio'] as const).flatMap((k) => (num(x[k]) !== null ? [[k, num(x[k])!]] : [])))
         if (c !== null && Object.keys(cambio).length) ops.push({ op: 'audio_clip', clip: c, ...cambio })
+        break
+      }
+      case 'curva': {
+        const canal = CANALES_CURVA.find((c) => c.id === x.canal)?.id
+        const puntos = Array.isArray(x.puntos)
+          ? (x.puntos as unknown[]).filter((p): p is [number, number] => Array.isArray(p) && p.length === 2 && p.every((v) => typeof v === 'number' && Number.isFinite(v)))
+          : null
+        if (canal && puntos) ops.push({ op: 'curva', clip: num(x.clip) ?? undefined, canal, puntos })
         break
       }
       case 'velocidad': {
@@ -964,6 +977,16 @@ export function aplicarOperaciones(
         cambios.push(`Sonido del clip ${o.clip}: volumen ${Math.round(s.volumen * 100)} %${s.entra ? `, entra en ${s.entra} s` : ''}${s.sale ? `, sale en ${s.sale} s` : ''}${s.limpio ? `, ruido de fondo −${Math.round(s.limpio * 100)} %` : ''}`)
         break
       }
+      case 'curva': {
+        const destino = o.clip === undefined ? null : clipEn(o.clip)
+        if (o.clip !== undefined && !destino) {
+          fallos.push(`No existe el clip ${o.clip}.`)
+          break
+        }
+        for (const c of destino ? [destino] : tl.clips) tl = cambiarCurva(tl, c.id, o.canal, o.puntos.length ? o.puntos : undefined)
+        cambios.push(`${o.puntos.length ? 'Puse' : 'Quité'} la curva ${CANALES_CURVA.find((c) => c.id === o.canal)!.nombre.toLowerCase()} ${destino ? `al clip ${o.clip}` : 'a todos los clips'}`)
+        break
+      }
       case 'velocidad': {
         const destino = clipEn(o.clip)
         if (!destino) {
@@ -1268,6 +1291,7 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
 - {"op":"clave","clip":N,"parametro":"zoom|cx|cy|brillo|contraste|saturacion|escala|posx|posy|giro|exposicion|altas|sombras|blancos|negros|temperatura|tinte|desenfoque|sepia|tono","en":S,"valor":V}  FOTOGRAMA CLAVE: ese ajuste del clip N vale V en el segundo S (contado desde que empieza el clip) y cambia suave hasta la siguiente clave. Con dos o más claves animas a mano: un zoom que entra y vuelve a salir (zoom 1 en 0, 1.4 en 1.5, 1 en 3), el encuadre que va de una cara a otra (cx, cy), un fundido a oscuro (brillo 0 → -0.3), el color que se apaga (saturacion 1 → 0), la imagen que se achica a una esquina (escala 1 → 0.4 con posx/posy) o que gira (giro). Hasta 12 claves por ajuste. "quitar":true en vez de "valor" borra la de ese segundo.
 - {"op":"clave_capa","capa_n":N,"parametro":"x|y|ancho|giro|opacidad","en":S,"valor":V}  FOTOGRAMA CLAVE de una capa encima: en el segundo S (desde que aparece la capa) vale V, y cambia suave hasta la siguiente. x, y de -0.5 a 1.5 (fuera del cuadro para entrar o salir volando), ancho 0.05 a 2, giro en grados, opacidad 0 a 1. Así se hace un recorrido con curvas (varias claves de x e y), algo que crece y se encoge, un logo que aparece y se desvanece (opacidad 0 → 1 → 0). Mandan sobre "fin_x"… de anadir_capa. "quitar":true borra la de ese segundo.
 - {"op":"audio_clip","clip":N,"volumen":V,"entra":S,"sale":S,"limpio":L}  el sonido de un clip de VIDEO: «volumen» 0 a 1.5 (1 como viene), «entra» y «sale» segundos de fundido de entrada y de salida (0 a 5), «limpio» 0 a 1 para quitar el ruido de fondo (zumbido, aire, siseo; 0.5 suele bastar). Solo los campos que cambian.
+- {"op":"curva","clip":N,"canal":"rgb|r|g|b","puntos":[[x,y],…]}  CURVAS de color dibujadas, como las de Lumetri: cada punto [entrada, salida] de 0 a 1 (los extremos 0,0 y 1,1 van solos), hasta 8. "rgb" es la luz (una S suave [[0.25,0.2],[0.75,0.8]] da contraste de cine; [[0.5,0.58]] aclara los medios); "r", "g", "b" cada canal (subir el azul en las sombras [[0.25,0.3]] da un look frío). "puntos":[] la quita. Sin "clip", a todos.
 - {"op":"velocidad","clip":N,"velocidad":V}  cámara lenta o rápida de un clip de VIDEO: 0.25 a 4 (1 normal; 0.5 la mitad de rápido, 2 el doble). El clip dura más o menos y lo que sigue se corre. En una foto no hace nada.
 - {"op":"pista","pista":"encima|video|texto|voz|sonidos|musica","oculta":true|false}  oculta (encima, texto) o silencia (video, voz, sonidos, musica) una pista entera, en el monitor y en el MP4, sin borrar lo que tiene. "bloqueada":true la protege de cambios a mano.
 - {"op":"musica","volumen":V,"ducking":true|false}  volumen 0 a 1 de la música ya puesta (bajo la voz suele ir bien 0.2–0.4); ducking hace que baje sola cuando hay voz.

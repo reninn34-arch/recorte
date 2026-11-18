@@ -3502,3 +3502,14 @@ button { cursor: pointer; }
 
 .ed-seguir { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .ed-seguir p { margin: 0; }
+
+/* Curvas de color dibujadas a mano. */
+.ed-curvas { display: flex; flex-direction: column; gap: 6px; }
+.ed-curvas-canales { display: flex; gap: 4px; }
+.ed-curvas-canales .chip { padding: 2px 8px; font-size: 11px; }
+.ed-curvas-canales .chip.tiene:not(.is-active) { color: var(--accent); }
+.ed-curvas-lienzo { width: 100%; aspect-ratio: 1; border-radius: 6px; background: #0d0f0b; border: 1px solid var(--line-2); cursor: crosshair; touch-action: none; }
+.ed-curvas-reja line { stroke: #ffffff14; stroke-width: 1; }
+.ed-curvas-diagonal { stroke: #ffffff26; stroke-width: 1; stroke-dasharray: 3 3; }
+.ed-curvas-punto { stroke: #0d0f0b; stroke-width: 1.5; cursor: grab; }
+.ed-curvas-pie { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
