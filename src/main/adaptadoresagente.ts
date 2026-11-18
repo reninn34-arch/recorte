@@ -29,6 +29,22 @@ export interface Adaptador {
   stderrEsAvance: boolean
 }
 
+/**
+ * Lo que sirve para entender un fallo: las últimas líneas con algo dicho (sin las que son solo símbolos, como la «^» que
+ * señala una columna en un error, que sola no dice nada), hasta 600 caracteres. Antes se cortaban los últimos 300 y a
+ * veces solo quedaba esa «^».
+ */
+export function colaUtil(texto: string): string {
+  const lineas = texto
+    .replace(/\x1b\[[0-9;]*m/g, '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => /[\p{L}\p{N}]/u.test(l))
+  let fuera = ''
+  for (let i = lineas.length - 1; i >= 0 && fuera.length < 600; i--) fuera = fuera ? `${lineas[i]} · ${fuera}` : lineas[i]
+  return fuera.length > 600 ? `…${fuera.slice(-600)}` : fuera
+}
+
 const corto = (t: string, n = 160) => t.replace(/\s+/g, ' ').trim().slice(0, n)
 
 const json = (linea: string): Record<string, unknown> | null => {

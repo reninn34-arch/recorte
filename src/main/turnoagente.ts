@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { readdirSync, statSync, unlinkSync, writeFileSync, type Dirent } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ADAPTADORES, type EventoAgente } from './adaptadoresagente'
+import { ADAPTADORES, colaUtil, type EventoAgente } from './adaptadoresagente'
 import { agenteDeOrden } from './agentes'
 import { pathAmpliado } from './binarios'
 import { trabajoDeFondo } from './procesos'
@@ -128,6 +128,15 @@ export async function turnoAgente(p: PeticionTurno): Promise<ResultadoTurno> {
     let final: Extract<EventoAgente, { t: 'fin' }> | null = null
     let idSesion: string | undefined
     let error = ''
+    // Todo lo que imprimió (lo último), para el registro del turno en su carpeta si algo falla.
+    let salidaTodo = ''
+    const guardarRegistro = (codigo: number | null) => {
+      try {
+        writeFileSync(join(p.cwd, 'agente-ultimo-turno.log'), `${new Date().toISOString()} · código ${codigo}\n${comando}\n\n--- salida ---\n${salidaTodo}\n\n--- errores ---\n${error}\n`, 'utf8')
+      } catch {
+        // Sin registro, el error igual se cuenta en el chat.
+      }
+    }
     let cerrado = false
     let ultimaSalida = Date.now()
     let graciaFinal: ReturnType<typeof setTimeout> | null = null
@@ -159,15 +168,16 @@ export async function turnoAgente(p: PeticionTurno): Promise<ResultadoTurno> {
       if (resto.trim()) procesar(resto, false)
       if (restoErr.trim()) procesar(restoErr, true)
       resto = restoErr = ''
+      guardarRegistro(codigo)
       if (final && !final.ok) {
-        const dijo = final.error ?? 'El agente terminó con un error.'
+        const dijo = colaUtil(final.error ?? '') || colaUtil(error) || 'El agente terminó con un error.'
         if (sesion && SIN_SESION.test(`${dijo} ${error}`)) return fin(new SesionPerdida(dijo))
         return fin(new Error(falloDeAgente(p.base, dijo)))
       }
       // Con fin de turno o con la entrega hecha, el código de salida no importa: pudo cerrarlo
       // Recorte o morir al cerrar lo que el agente dejó de fondo.
       if (final?.ok || codigo === 0 || p.entregaLista?.()) return fin()
-      const dijo = (error.trim() || respuesta.trim()).slice(-300)
+      const dijo = colaUtil(error) || colaUtil(respuesta)
       if (sesion && SIN_SESION.test(dijo)) return fin(new SesionPerdida(dijo))
       fin(new Error(falloDeAgente(p.base, dijo || `El agente terminó con código ${codigo} sin decir nada.`)))
     }
@@ -247,6 +257,7 @@ export async function turnoAgente(p: PeticionTurno): Promise<ResultadoTurno> {
 
     hijo.stdout.on('data', (b: Buffer) => {
       ultimaSalida = Date.now()
+      salidaTodo = (salidaTodo + b.toString('utf8')).slice(-200_000)
       resto += b.toString('utf8')
       const lineas = resto.split(/\r?\n/)
       resto = lineas.pop() ?? ''

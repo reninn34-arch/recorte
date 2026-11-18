@@ -7,6 +7,7 @@ import { app, shell } from 'electron'
 import { pathAmpliado } from './binarios'
 import type { ModeloAgente } from '../shared/creacion'
 import { matarArbol, Parado } from './ia'
+import { SIN_AVANCE, ultimoArchivo } from './turnoagente'
 
 /**
  * Antigravity, el agente de Google, con la cuenta de Google del usuario.
@@ -464,20 +465,36 @@ export async function trabajarAntigravity(
   senal?: AbortSignal,
   timeoutMs = 40 * 60_000,
   imagenes: string[] = [],
-  opciones: { modelo?: string; esfuerzo?: string } = {}
+  opciones: { modelo?: string; esfuerzo?: string } = {},
+  /** Si ya dejó su entrega (resultado.json y el archivo): si se queda callado después, terminó. */
+  entregaLista?: () => boolean
 ): Promise<string> {
   if (senal?.aborted) throw new Parado()
   onLinea('Arrancando Antigravity (tarda unos segundos)')
   let texto = ''
-  const manos = new Manos(cwd, onLinea)
+  // Lo que escribe, línea a línea, también va al chat: así se ve lo que cuenta y se marcan los pasos («PASO 2: …»).
+  let renglon = ''
+  let ultimaSenal = Date.now()
+  const avance = (t: string) => {
+    ultimaSenal = Date.now()
+    onLinea(t)
+  }
+  const manos = new Manos(cwd, avance)
   const sesion = await abrirSesion(
     {
       alTexto: () => {},
       alAvisar: (metodo, params) => {
         if (metodo !== 'session/update') return
+        ultimaSenal = Date.now()
         const u = params.update as { sessionUpdate?: string; content?: { type?: string; text?: string }; title?: string } | undefined
-        if (u?.sessionUpdate === 'agent_message_chunk' && u.content?.type === 'text') texto += u.content.text ?? ''
-        else if (u?.sessionUpdate === 'tool_call' && typeof u.title === 'string') onLinea(u.title.slice(0, 160))
+        if (u?.sessionUpdate === 'agent_message_chunk' && u.content?.type === 'text') {
+          const trozo = u.content.text ?? ''
+          texto += trozo
+          renglon += trozo
+          const lineas = renglon.split(/\r?\n/)
+          renglon = lineas.pop() ?? ''
+          for (const l of lineas) if (l.trim()) avance(l.trim().slice(0, 200))
+        } else if (u?.sessionUpdate === 'tool_call' && typeof u.title === 'string') avance(u.title.slice(0, 160))
       }
     },
     { cwd, manos },
@@ -502,10 +519,34 @@ export async function trabajarAntigravity(
     else senal?.addEventListener('abort', alParar, { once: true })
   })
   parado.catch(() => {})
+  // Como con los demás agentes: un trabajo largo (un video entero, con clips e imágenes que tardan) no se corta por reloj
+  // mientras avance; solo tras SIN_AVANCE sin decir nada ni crear archivos, o pasado el tope de seguridad. Antes tenía
+  // 40 min fijos y un video con clips se cortaba justo al final. Y si ya dejó su entrega pero no cierra el turno (se queda
+  // colgado al final), terminó.
+  const largo = timeoutMs >= 30 * 60_000
+  const tope = largo ? Math.max(timeoutMs * 3, 2 * 60 * 60_000) : timeoutMs
+  let vigia: ReturnType<typeof setInterval> | null = null
+  const vigilado = new Promise<'entregado'>((ok, mal) => {
+    vigia = setInterval(() => {
+      const callado = Date.now() - ultimaSenal
+      if (entregaLista?.() && callado > 90_000) ok('entregado')
+      else if (largo && Date.now() - Math.max(ultimaSenal, ultimoArchivo(cwd)) > SIN_AVANCE) {
+        mal(new Error(`Antigravity lleva ${Math.round(SIN_AVANCE / 60_000)} min sin avanzar (sin decir nada ni crear archivos).`))
+      }
+    }, 15_000)
+  })
+  vigilado.catch(() => {})
   try {
-    await Promise.race([sesion.rpc.pedir('session/prompt', { sessionId: sesion.sessionId, prompt: partes }, timeoutMs), parado])
+    await Promise.race([sesion.rpc.pedir('session/prompt', { sessionId: sesion.sessionId, prompt: partes }, tope), parado, vigilado])
+    if (renglon.trim()) onLinea(renglon.trim().slice(0, 200))
     return texto
+  } catch (e) {
+    if (e instanceof Error && /no contestó «session\/prompt» a tiempo/.test(e.message)) {
+      throw new Error(`Antigravity lleva ${Math.round(tope / 60_000)} min trabajando: lo paré por si se quedó dando vueltas.`)
+    }
+    throw e
   } finally {
+    if (vigia) clearInterval(vigia)
     senal?.removeEventListener('abort', alParar)
     manos.cerrarTodo()
     sesion.hijo.kill()

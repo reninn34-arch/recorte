@@ -452,7 +452,7 @@ async function turnoConSesion(
   let turno: TurnoModoAgente
   if (cmd.orden.startsWith('antigravity:acp')) {
     const [{ trabajarAntigravity }, { opcionesAntigravity }] = await Promise.all([import('./antigravity'), import('./modelos')])
-    const respuesta = await trabajarAntigravity(promptCompleto, cwd, onLinea, senal, timeoutMs, imagenes, opcionesAntigravity(cmd.orden)).catch((e: unknown) => {
+    const respuesta = await trabajarAntigravity(promptCompleto, cwd, onLinea, senal, timeoutMs, imagenes, opcionesAntigravity(cmd.orden), entregaLista).catch((e: unknown) => {
       if (e instanceof Parado) throw e
       throw new Error(falloDeAgente(cmd.orden, e instanceof Error ? e.message : String(e)))
     })

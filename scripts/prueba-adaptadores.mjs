@@ -80,4 +80,13 @@ const de = (evs, t) => evs.filter((e) => e.t === t)
   assert.equal(de(evs, 'respuesta').map((e) => e.texto).join(''), 'Leyendo entrada/\nListo.\n')
 }
 
+// El error de un agente que falla: las últimas líneas con algo dicho, no un «^» suelto (lo único que se veía en el chat).
+{
+  const { colaUtil } = await import('../src/main/adaptadoresagente.ts')
+  const errorToml = 'Error: TOML parse error at line 1, column 24\n  |\n1 | model_reasoning_effort=alto\n  |                        ^\n'
+  assert.equal(colaUtil(errorToml), 'Error: TOML parse error at line 1, column 24 · 1 | model_reasoning_effort=alto')
+  assert.equal(colaUtil('^\n  |\n'), '', 'solo símbolos: nada que decir')
+  assert.ok(colaUtil('x'.repeat(900)).length <= 601, 'con tope')
+}
+
 console.log('adaptadores: ok')
