@@ -20,6 +20,7 @@ import { estadoSistema, instalarHerramienta } from './sistema'
 import { activarHerramientas } from './herramientas'
 import { carpetaPorDefecto, copiarAVideos, carpetaDelProyecto, nombreArchivo, rutaLibre } from './carpetas'
 import { abrirFlow, agregarCuentaFlow, ajustesFlow, estadoFlow, leerSaldosFlow, pedirFlow, quitarCuentaFlow } from './flow'
+import { cerrarEdgesOciosos } from './edgeperfil'
 import { MODELO_CHATGPT, MODELOS_IMAGEN, modelosVideoVigentes, type PedidoFlow } from '../shared/flow'
 import { estadoChatGPT, generarImagenChatGPT } from './imagenchatgpt'
 import { atenderMedios } from './mediosagente'
@@ -3508,6 +3509,15 @@ No pude animar los subtítulos (se animan al exportar): ${e instanceof Error ? e
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) crearVentana()
   })
+})
+
+// Al salir, cierra el Edge sin ventana que Flow y la voz dejan abierto un rato entre pedidos.
+let cerrandoEdges = false
+app.on('before-quit', (e) => {
+  if (cerrandoEdges) return
+  cerrandoEdges = true
+  e.preventDefault()
+  void Promise.race([cerrarEdgesOciosos(), new Promise((r) => setTimeout(r, 4000))]).finally(() => app.quit())
 })
 
 app.on('window-all-closed', () => {

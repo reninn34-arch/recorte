@@ -18,6 +18,8 @@ import { chromium, type Browser } from 'playwright-core'
  */
 
 const espera = (ms: number) => new Promise((r) => setTimeout(r, ms))
+/** Lo que el Edge compartido sigue abierto sin nadie: el kit pide imágenes, clips y frases seguidas. */
+export const GRACIA_MS = 90_000
 
 /** Dónde puede estar el navegador en cada sistema: primero Microsoft Edge y, si no, Google Chrome (se manejan igual). */
 function candidatosNavegador(): { exe: string; nombre: 'Edge' | 'Chrome' }[] {
@@ -76,10 +78,22 @@ export interface EdgePerfil {
   cerrar(): Promise<void>
   paginas(): Promise<{ type: string; url: string }[]>
   conSesion(): Promise<boolean>
-  /** Hace `fn` con el Edge sin ventana, en su turno; al acabar lo cierra. */
+  /**
+   * Hace `fn` con el Edge sin ventana. Varios a la vez comparten el mismo Edge (cada uno en su
+   * pestaña): se abre con el primero y se cierra cuando lleva `GRACIA_MS` sin nadie, así una
+   * tanda de pedidos no lo abre y cierra por cada uno.
+   */
   enEdge<T>(fn: (b: Browser) => Promise<T>): Promise<T>
-  /** Corre `fn` en el turno del perfil (para quien maneja el Edge por su cuenta, como la voz). */
+  /** Corre `fn` a solas con el perfil (entrar con Google con ventana): espera a que nadie lo use. */
   enTurno<T>(fn: () => Promise<T>): Promise<T>
+  /** Las descargas son de todo el navegador (a qué carpeta van): de una en una. */
+  enDescarga<T>(fn: () => Promise<T>): Promise<T>
+}
+
+const abiertos = new Set<() => Promise<void>>()
+/** Al salir de Recorte: cierra los Edge sin ventana que abrió (si no, quedarían abiertos). */
+export async function cerrarEdgesOciosos(): Promise<void> {
+  await Promise.all([...abiertos].map((f) => f().catch(() => {})))
 }
 
 /** `puertoFijo` lo usa la voz, que abre su Edge siempre en el mismo puerto. */
@@ -152,6 +166,85 @@ export function edgePerfil(perfil: string, puertoFijo?: number): EdgePerfil {
     turno = r.catch(() => {})
     return r
   }
+  let descarga: Promise<unknown> = Promise.resolve()
+  const enDescarga = <T>(fn: () => Promise<T>): Promise<T> => {
+    const r = descarga.then(fn, fn)
+    descarga = r.catch(() => {})
+    return r
+  }
+
+  // El Edge compartido: ocupa un turno del perfil mientras alguien lo usa (o hasta GRACIA_MS después).
+  interface Sesion {
+    b: Promise<Browser>
+    usuarios: number
+    reloj?: ReturnType<typeof setTimeout>
+    soltar: () => void
+  }
+  let sesion: Sesion | null = null
+  function abrirSesion(): Sesion {
+    let soltar!: () => void
+    const suelta = new Promise<void>((r) => (soltar = r))
+    let listo!: (b: Browser) => void
+    let fallo!: (e: unknown) => void
+    const b = new Promise<Browser>((ok, mal) => {
+      listo = ok
+      fallo = mal
+    })
+    b.catch(() => {})
+    const s: Sesion = { b, usuarios: 0, soltar }
+    void enTurno(async () => {
+      let br: Browser
+      try {
+        await lanzar(false)
+        br = await chromium.connectOverCDP(base())
+      } catch (e) {
+        if (sesion === s) sesion = null
+        fallo(e)
+        return
+      }
+      listo(br)
+      // Si Edge se cierra solo (se colgó), la sesión ya no sirve: el siguiente abre otra.
+      br.on('disconnected', () => {
+        if (sesion === s) sesion = null
+        soltar()
+      })
+      await suelta
+      if (sesion === s) sesion = null
+      await br.close().catch(() => {})
+      await cerrar()
+    })
+    return s
+  }
+  function soltarOciosa() {
+    const s = sesion
+    if (!s || s.usuarios > 0) return
+    if (s.reloj) clearTimeout(s.reloj)
+    sesion = null
+    s.soltar()
+  }
+  abiertos.add(async () => {
+    const habia = sesion
+    soltarOciosa()
+    if (habia) await cerrar()
+  })
+  const enEdge = async <T>(fn: (b: Browser) => Promise<T>): Promise<T> => {
+    const s = (sesion ??= abrirSesion())
+    s.usuarios++
+    if (s.reloj) clearTimeout(s.reloj)
+    s.reloj = undefined
+    try {
+      return await fn(await s.b)
+    } finally {
+      if (--s.usuarios === 0) {
+        s.reloj = setTimeout(() => {
+          if (s.usuarios === 0) {
+            if (sesion === s) sesion = null
+            s.soltar()
+          }
+        }, GRACIA_MS)
+      }
+    }
+  }
 
   return {
     lanzar,
@@ -165,17 +258,12 @@ export function edgePerfil(perfil: string, puertoFijo?: number): EdgePerfil {
         (r) => r.cookies.some((c) => c.name === 'SAPISID' && c.domain.replace(/^\./, '') === 'google.com'),
         () => false
       ),
-    enTurno,
-    enEdge: <T>(fn: (b: Browser) => Promise<T>) =>
-      enTurno(async () => {
-        await lanzar(false)
-        const b = await chromium.connectOverCDP(base())
-        try {
-          return await fn(b)
-        } finally {
-          await b.close().catch(() => {})
-          await cerrar()
-        }
-      })
+    enTurno: <T>(fn: () => Promise<T>) => {
+      // Quien lo necesita a solas no espera la gracia de un Edge que ya nadie usa.
+      if (sesion && sesion.usuarios === 0) soltarOciosa()
+      return enTurno(fn)
+    },
+    enDescarga,
+    enEdge
   }
 }

@@ -86,6 +86,36 @@ try {
   console.log('sin imágenes elegidas: se niega y lo explica ✓')
   parar()
 
+  // 4. Varias a la vez con `kit.py medios`: se piden juntas, Flow las hace en paralelo, se recogen después.
+  const lentos = {
+    ...falsos,
+    flow: async (pedido, carpeta) => {
+      await new Promise((r) => setTimeout(r, 3000))
+      return falsos.flow(pedido, carpeta)
+    }
+  }
+  parar = atenderMedios(dir, { imagenes: true, videos: false, modeloImagen: 'Nano Banana 2.1' }, '9:16', lentos, () => {})
+  const lista = join(dir, 'lista.json')
+  const { writeFileSync } = await import('node:fs')
+  writeFileSync(lista, JSON.stringify([1, 2, 3, 4, 5].map((i) => ({ nombre: `escena${i}`, tipo: 'imagen', prompt: `escena ${i} de la cafetería` }))))
+  const t0 = Date.now()
+  const encargo = await kit(['medios', 'lista.json', '--sin-esperar'])
+  assert.equal(encargo.codigo, 0, encargo.error)
+  assert.equal(encargo.r.pedidos, 5)
+  assert.ok(Date.now() - t0 < 2500, 'con --sin-esperar vuelve al momento')
+  const recogida = await kit(['medios', 'lista.json'])
+  const tardo = Date.now() - t0
+  assert.equal(recogida.codigo, 0, recogida.error)
+  assert.ok(recogida.r.ok, JSON.stringify(recogida.r))
+  assert.deepEqual(recogida.r.medios.map((m) => m.nombre), ['escena1', 'escena2', 'escena3', 'escena4', 'escena5'])
+  assert.ok(recogida.r.medios.every((m) => existsSync(join(dir, m.archivo))), 'cada una con su archivo')
+  // 5 de 3 s cada una: en paralelo, unos 3-6 s; de una en una serían 15.
+  assert.ok(tardo < 11_000, `en paralelo (tardó ${tardo} ms)`)
+  const otraVez = await kit(['medios', 'lista.json'])
+  assert.ok(otraVez.r.medios.every((m) => m.reutilizado), 'lo ya generado no se pide dos veces')
+  console.log(`kit.py medios: 5 imágenes juntas en ${(tardo / 1000).toFixed(1)} s (de una en una, 15 s) y no se repiten ✓`)
+  parar()
+
   assert.ok(lineas.some((l) => /^Imagen 1/.test(l)) && lineas.some((l) => /^Clip 3/.test(l)), 'el chat ve lo que se genera')
   console.log('prueba medios: ok')
 } catch (error) {

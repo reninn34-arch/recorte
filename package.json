@@ -49,7 +49,8 @@
     "prueba:borrar": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-borrar.mjs",
     "prueba:archivos": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-archivos.mjs",
     "prueba:configcodex": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs scripts/prueba-configcodex.mjs",
-    "prueba:medios": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs scripts/prueba-medios.mjs"
+    "prueba:medios": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs scripts/prueba-medios.mjs",
+    "prueba:flow-real": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-flow-real.mjs"
   },
   "dependencies": {
     "electron-updater": "^6.8.11",

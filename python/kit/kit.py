@@ -4134,28 +4134,41 @@ def recortar_croma(a, fondo, salida):
     return guardar_recorte(rgb, alfa, salida, {'metodo': 'croma', 'fondo': '#%02x%02x%02x' % tuple(round(x) for x in fondo), 'quitado': round(quitado, 3)})
 
 
-def pedir_a_recorte(buzon, datos, espera, que, imprimir=True):
-    """Deja un pedido en `<trabajo>/<buzon>/` y espera a que Recorte lo atienda (él tiene las cuentas del usuario).
-
-    Devuelve la respuesta; si no salió, termina con el motivo, para que el agente siga sin ello y lo diga.
-    """
-    import time
+def _dejar_pedido(buzon, datos):
+    """Deja un pedido en `<trabajo>/<buzon>/` para Recorte y devuelve su identificador (no espera)."""
     import uuid
-    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    carpeta = os.path.join(base, buzon)
+    carpeta = os.path.join(_trabajo(), buzon)
     os.makedirs(carpeta, exist_ok=True)
     ident = uuid.uuid4().hex[:8]
     temporal = os.path.join(carpeta, f'_pedido-{ident}.tmp')
     with open(temporal, 'w', encoding='utf-8') as f:
         json.dump(datos, f, ensure_ascii=False)
     os.replace(temporal, os.path.join(carpeta, f'pedido-{ident}.json'))
-    respuesta = os.path.join(carpeta, f'respuesta-{ident}.json')
+    return ident
+
+
+def _leer_respuesta(buzon, ident):
+    """La respuesta de Recorte a un pedido, o None si aún no llegó."""
+    import time
+    ruta = os.path.join(_trabajo(), buzon, f'respuesta-{ident}.json')
+    if not os.path.exists(ruta):
+        return None
+    time.sleep(0.2)
+    with open(ruta, encoding='utf-8-sig') as f:
+        return json.load(f)
+
+
+def pedir_a_recorte(buzon, datos, espera, que, imprimir=True):
+    """Deja un pedido en `<trabajo>/<buzon>/` y espera a que Recorte lo atienda (él tiene las cuentas del usuario).
+
+    Devuelve la respuesta; si no salió, termina con el motivo, para que el agente siga sin ello y lo diga.
+    """
+    import time
+    ident = _dejar_pedido(buzon, datos)
     limite = time.time() + espera
     while time.time() < limite:
-        if os.path.exists(respuesta):
-            time.sleep(0.2)
-            with open(respuesta, encoding='utf-8-sig') as f:
-                r = json.load(f)
+        r = _leer_respuesta(buzon, ident)
+        if r is not None:
             if imprimir or not r.get('ok'):
                 print(json.dumps(r, ensure_ascii=False))
             if not r.get('ok'):
@@ -4212,6 +4225,118 @@ def voz(archivo, espera=900, nueva=False):
                       'nuevas': len(faltan), 'reutilizadas': len(frases) - len(faltan)}, ensure_ascii=False))
 
 
+def _clave_medio(tipo, prompt, referencias, para_recortar):
+    """Lo que identifica un pedido de imagen o clip: mismo texto y mismas referencias = lo mismo (no se genera dos veces)."""
+    import hashlib
+    firma_refs = []
+    for ref in referencias or []:
+        try:
+            st = os.stat(ref)
+            firma_refs.append([ref, st.st_size, int(st.st_mtime)])
+        except OSError:
+            firma_refs.append([ref])
+    return hashlib.sha1(json.dumps([tipo, prompt.strip(), bool(para_recortar), firma_refs], ensure_ascii=False).encode()).hexdigest()[:16]
+
+
+def _ya_generado(previo, para_recortar):
+    existe = lambda p: bool(p) and (os.path.isfile(p) or os.path.isfile(os.path.join(_trabajo(), p)))
+    return existe(previo.get('archivo')) and (not para_recortar or existe(previo.get('recorte')))
+
+
+def _quitar_fondo(r, tipo):
+    """Le quita el fondo verde a lo generado con --recorte: añade `recorte` (o `recorte_error`) a la respuesta."""
+    base = os.path.join('medios', os.path.basename(r['archivo'])) if not os.path.isabs(r['archivo']) else r['archivo']
+    ruta = r['archivo'] if os.path.isfile(r['archivo']) else base
+    try:
+        hecho = recortar_video(ruta) if tipo == 'clip' else recortar(ruta)
+        r['recorte'] = os.path.relpath(hecho['archivo']).replace('\\', '/')
+        r['recorte_tam'] = [hecho['ancho'], hecho['alto']]
+    except SystemExit as e:
+        r['recorte_error'] = str(e)
+
+
+def medios(archivo, espera=1800, sin_esperar=False):
+    """Pide a Recorte VARIAS imágenes y clips a la vez: Flow los genera en paralelo (mucho antes que de uno en uno).
+
+    `archivo`: JSON con una lista de pedidos, cada uno {"nombre": "escena3", "tipo": "imagen"|"clip", "prompt": "…",
+    "ref": ["entrada/foto.jpg"], "recorte": false, "nuevo": false} (solo `prompt` es obligatorio; tipo imagen por defecto).
+    Con `sin_esperar` los deja pedidos y vuelve al momento: sigue trabajando (guion, voz, montaje) y vuelve a correr la
+    misma orden sin --sin-esperar para recogerlos (lo ya listo sale al instante; no se pide dos veces).
+    Devuelve cada pedido con su `archivo` (y `recorte`), o su `error`; lo ya generado antes con el mismo pedido se reutiliza.
+    """
+    import time
+    with open(archivo, encoding='utf-8-sig') as f:
+        lista = json.load(f)
+    if isinstance(lista, dict):
+        lista = lista.get('medios') or lista.get('pedidos') or []
+    if not isinstance(lista, list) or not lista:
+        raise SystemExit('El archivo tiene que ser una lista de pedidos: [{"tipo": "imagen", "prompt": "…"}, …]')
+    ruta_mem, memoria = _memoria(os.path.join('medios', '.generados.json'))
+    ruta_pend, pendientes = _memoria(os.path.join('medios', '.pendientes.json'))
+    items = []
+    for i, it in enumerate(lista):
+        if isinstance(it, str):
+            it = {'prompt': it}
+        tipo = 'clip' if it.get('tipo') in ('clip', 'video') else 'imagen'
+        prompt = str(it.get('prompt') or '').strip()
+        refs = it.get('ref') or it.get('referencias') or []
+        refs = [refs] if isinstance(refs, str) else list(refs)
+        para_recortar = bool(it.get('recorte'))
+        item = {'nombre': str(it.get('nombre') or i + 1), 'tipo': tipo, 'prompt': prompt[:80]}
+        items.append(item)
+        if not prompt:
+            item['error'] = 'Sin prompt: describe qué generar.'
+            continue
+        clave = _clave_medio(tipo, prompt, refs, para_recortar)
+        item.update(clave=clave, recortar=para_recortar)
+        previo = memoria.get(clave)
+        if previo and not it.get('nuevo') and _ya_generado(previo, para_recortar):
+            item.update({k: v for k, v in previo.items() if k in ('archivo', 'recorte', 'recorte_tam', 'hecho')}, reutilizado=True)
+            continue
+        ident = pendientes.get(clave)
+        # Un pedido que ya respondió con error (o se pidió con --nuevo) se vuelve a pedir.
+        if ident:
+            previa = _leer_respuesta('medios', ident)
+            if previa is not None and (not previa.get('ok') or it.get('nuevo')):
+                ident = None
+        if not ident:
+            ident = _dejar_pedido('medios', {'tipo': tipo, 'prompt': prompt + (PARA_RECORTAR if para_recortar else ''), 'referencias': refs})
+            pendientes[clave] = ident
+        item['ident'] = ident
+    _guardar_memoria(ruta_pend, pendientes)
+    en_marcha = [it for it in items if it.get('ident')]
+    if sin_esperar:
+        print(json.dumps({'ok': True, 'pedidos': len(en_marcha), 'ya_estaban': sum(1 for it in items if it.get('reutilizado')),
+                          'nota': 'Pedidos en marcha: Flow los genera a la vez. Sigue con lo demás y luego corre la misma orden sin '
+                                  '--sin-esperar para recogerlos.'}, ensure_ascii=False))
+        return
+    limite = time.time() + espera
+    while en_marcha and time.time() < limite:
+        for it in list(en_marcha):
+            r = _leer_respuesta('medios', it['ident'])
+            if r is None:
+                continue
+            en_marcha.remove(it)
+            pendientes.pop(it['clave'], None)
+            if not r.get('ok'):
+                it['error'] = r.get('error') or 'Recorte no pudo generarlo.'
+                continue
+            if it['recortar']:
+                _quitar_fondo(r, it['tipo'])
+            it.update({k: v for k, v in r.items() if k in ('archivo', 'recorte', 'recorte_tam', 'recorte_error', 'hecho', 'creditos')})
+            if not it['recortar'] or r.get('recorte'):
+                memoria[it['clave']] = {k: v for k, v in r.items() if k not in ('creditos',)}
+        _guardar_memoria(ruta_mem, memoria)
+        _guardar_memoria(ruta_pend, pendientes)
+        if en_marcha:
+            time.sleep(1)
+    for it in en_marcha:
+        it['error'] = 'Aún no llegó: vuelve a correr la misma orden más tarde para recogerlo (no se pide dos veces).'
+    salida = [{k: v for k, v in it.items() if k not in ('clave', 'ident', 'recortar')} for it in items]
+    print(json.dumps({'ok': all(not it.get('error') for it in salida), 'medios': salida,
+                      'creditos': sum(it.get('creditos') or 0 for it in salida)}, ensure_ascii=False))
+
+
 def medio(tipo, prompt, referencias, espera, para_recortar=False, nuevo=False):
     """Pide a Recorte una imagen o un clip generado (Google Flow o ChatGPT, con las cuentas del usuario).
 
@@ -4222,20 +4347,11 @@ def medio(tipo, prompt, referencias, espera, para_recortar=False, nuevo=False):
     if not prompt.strip():
         raise SystemExit('Describe qué generar.')
     # Lo mismo pedido otra vez (mismo texto, mismas referencias): se reutiliza lo que ya se generó, sin gastar.
-    import hashlib
-    firma_refs = []
-    for ref in referencias or []:
-        try:
-            st = os.stat(ref)
-            firma_refs.append([ref, st.st_size, int(st.st_mtime)])
-        except OSError:
-            firma_refs.append([ref])
-    clave = hashlib.sha1(json.dumps([tipo, prompt.strip(), bool(para_recortar), firma_refs], ensure_ascii=False).encode()).hexdigest()[:16]
+    clave = _clave_medio(tipo, prompt, referencias, para_recortar)
     ruta_mem, memoria = _memoria(os.path.join('medios', '.generados.json'))
     previo = memoria.get(clave)
     if previo and not nuevo:
-        existe = lambda p: bool(p) and (os.path.isfile(p) or os.path.isfile(os.path.join(_trabajo(), p)))
-        if existe(previo.get('archivo')) and (not para_recortar or existe(previo.get('recorte'))):
+        if _ya_generado(previo, para_recortar):
             print(json.dumps({**previo, 'reutilizado': True,
                               'nota': 'Ya lo habías generado con este mismo pedido: no se volvió a generar ni gastó. Usa --nuevo para otra versión.'},
                              ensure_ascii=False))
@@ -4246,14 +4362,7 @@ def medio(tipo, prompt, referencias, espera, para_recortar=False, nuevo=False):
         memoria[clave] = {k: v for k, v in r.items() if k not in ('creditos',)}
         _guardar_memoria(ruta_mem, memoria)
     if para_recortar:
-        base = os.path.join('medios', os.path.basename(r['archivo'])) if not os.path.isabs(r['archivo']) else r['archivo']
-        ruta = r['archivo'] if os.path.isfile(r['archivo']) else base
-        try:
-            hecho = recortar_video(ruta) if tipo == 'clip' else recortar(ruta)
-            r['recorte'] = os.path.relpath(hecho['archivo']).replace('\\', '/')
-            r['recorte_tam'] = [hecho['ancho'], hecho['alto']]
-        except SystemExit as e:
-            r['recorte_error'] = str(e)
+        _quitar_fondo(r, tipo)
         if r.get('recorte'):
             memoria[clave] = {k: v for k, v in r.items() if k not in ('creditos',)}
             _guardar_memoria(ruta_mem, memoria)
@@ -5232,6 +5341,9 @@ def main():
         m.add_argument('--recorte', action='store_true',
                        help='sobre verde croma y sin fondo: un PNG (imagen) o un WebM con transparencia (clip) para usar como capa')
         m.add_argument('--nuevo', action='store_true', help='generar otra versión aunque ya exista una con el mismo pedido')
+    md = sub.add_parser('medios', help='varias imágenes y clips a la vez (Flow los genera en paralelo)')
+    md.add_argument('archivo', help='JSON con la lista: [{"nombre": "escena1", "tipo": "imagen", "prompt": "…", "ref": […], "recorte": false}]')
+    md.add_argument('--sin-esperar', action='store_true', help='dejarlos pedidos y seguir; la misma orden sin esto los recoge')
     an = sub.add_parser('animar')
     an.add_argument('imagen')
     an.add_argument('--tipo', choices=TIPOS_ANIMAR + GESTOS + GESTOS_PIERNAS, default='respirar')
@@ -5355,6 +5467,8 @@ def main():
         print(json.dumps(modelos(x.buscar), ensure_ascii=False))
     elif x.orden == 'voz':
         voz(x.archivo, nueva=x.nueva)
+    elif x.orden == 'medios':
+        medios(x.archivo, sin_esperar=x.sin_esperar)
     elif x.orden in ('imagen', 'clip'):
         # Un clip puede tardar varios minutos en Flow.
         medio(x.orden, x.prompt, x.ref, 900 if x.orden == 'imagen' else 1500, para_recortar=getattr(x, 'recorte', False),

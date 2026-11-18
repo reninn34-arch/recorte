@@ -178,32 +178,31 @@ async function ponerVoz(page: Page, nombre: string): Promise<void> {
  * Genera el WAV en AI Studio con la cuenta conectada: pega el texto, pone la voz,
  * Run, espera a que el audio termine de llegar y lo baja a `salida`.
  */
-/** En el turno del perfil: Flow usa el mismo Edge y no deben pisarse. */
+/** En el Edge compartido del perfil, en su propia pestaña: Flow puede estar generando a la vez en otra. */
 export function generarVozGoogle(texto: string, voz: string, salida: string): Promise<void> {
-  return perfilDeLaVoz().enTurno(() => generarVozGoogleYa(texto, voz, salida))
+  const perfilVoz = perfilDeLaVoz()
+  return perfilVoz.enEdge((b) => generarVozGoogleYa(b, perfilVoz.enDescarga, texto, voz, salida))
 }
 
-async function generarVozGoogleYa(texto: string, voz: string, salida: string): Promise<void> {
+async function generarVozGoogleYa(
+  b: Browser,
+  enDescarga: <T>(fn: () => Promise<T>) => Promise<T>,
+  texto: string,
+  voz: string,
+  salida: string
+): Promise<void> {
   if (!correo) throw new Error('Conecta tu cuenta de Google para generar la voz sin llave.')
   // Cada frase baja a su propia carpeta: si Edge aún escribe una descarga anterior, no se pisan (antes, la carpeta
   // compartida no se podía borrar —«directorio no vacío»— y la frase fallaba entera).
   const descargas = join(carpeta(), 'descargas')
   limpiarDescargasViejas(descargas)
   const bajada = join(descargas, randomUUID().slice(0, 8))
-  let b: Browser | null = null
+  const page = await b.contexts()[0].newPage()
   try {
-    b = await abrirEdge()
-    const page = await b.contexts()[0].newPage()
     const caja = await abrirDialogo(page)
     await ponerVoz(page, voz)
     await caja.fill(texto)
-
     mkdirSync(bajada, { recursive: true })
-    await (await b.newBrowserCDPSession()).send('Browser.setDownloadBehavior', {
-      behavior: 'allowAndName',
-      downloadPath: bajada,
-      eventsEnabled: true
-    })
 
     const respuesta = page.waitForResponse((r) => r.url().includes('MakerSuiteService/GenerateContent'), { timeout: 15 * 60_000 })
     await page.locator('button:has-text("Run")').last().click()
@@ -215,15 +214,25 @@ async function generarVozGoogleYa(texto: string, voz: string, salida: string): P
     // El botón Download sale antes de que el audio esté completo: se repite hasta que baje.
     const bajar = page.getByRole('button', { name: 'Download' }).first()
     await bajar.waitFor({ timeout: 120_000 })
-    let wav: string | null = null
-    for (let i = 0; i < 10 && !wav; i++) {
-      await page.mouse.move(5, 5)
-      await bajar.click({ force: true })
-      for (let k = 0; k < 20 && !wav; k++) {
-        await espera(300)
-        wav = await descargaCompleta(bajada)
+    // La carpeta de descargas es de todo el navegador: en su turno, para no pisar a Flow.
+    const wav = await enDescarga(async () => {
+      const cdp = await b.newBrowserCDPSession()
+      try {
+        await cdp.send('Browser.setDownloadBehavior', { behavior: 'allowAndName', downloadPath: bajada, eventsEnabled: true })
+        let w: string | null = null
+        for (let i = 0; i < 10 && !w; i++) {
+          await page.mouse.move(5, 5)
+          await bajar.click({ force: true })
+          for (let k = 0; k < 20 && !w; k++) {
+            await espera(300)
+            w = await descargaCompleta(bajada)
+          }
+        }
+        return w
+      } finally {
+        await cdp.detach().catch(() => {})
       }
-    }
+    })
     if (!wav) throw new Error('El WAV de AI Studio no bajó.')
     mkdirSync(dirname(salida), { recursive: true })
     copyFileSync(wav, salida)
@@ -233,8 +242,7 @@ async function generarVozGoogleYa(texto: string, voz: string, salida: string): P
     } catch {
       // Si Edge aún la tiene abierta, se borra en la próxima frase (limpiarDescargasViejas).
     }
-    await b?.close().catch(() => {})
-    await cerrarEdge().catch(() => {})
+    await page.close().catch(() => {})
   }
 }
 

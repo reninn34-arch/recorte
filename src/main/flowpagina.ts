@@ -23,12 +23,12 @@ const TERMINA_MS = 10 * 60_000
 
 /** Flow no empezó a generar, así que no gastó: el pedido puede ir a otra cuenta. */
 export class NoEmpezo extends Error {
-  constructor(
-    mensaje: string,
-    readonly aviso: string,
-    readonly sinSesion = false
-  ) {
+  readonly aviso: string
+  readonly sinSesion: boolean
+  constructor(mensaje: string, aviso: string, sinSesion = false) {
     super(mensaje)
+    this.aviso = aviso
+    this.sinSesion = sinSesion
   }
 }
 
@@ -200,27 +200,121 @@ async function ponerReferencias(page: Page, rutas: string[]) {
   for (const ruta of rutas) await subirReferencia(page, ruta)
 }
 
-const firma = (t: Locator) => t.evaluate((d) => `${(d as HTMLElement).innerText} ${d.querySelector('img')?.src ?? ''}`).catch(() => '')
+/** El texto de un prompt como lo enseña Flow en su tarjeta mientras genera: sin saltos ni espacios dobles. */
+const plano = (t: string) => t.replace(/\s+/g, ' ').trim().toLowerCase()
 
-/** Espera a que la tarjeta del pedido empiece (cambia) y termine (sin % y con imagen o reproducir). */
-async function esperar(page: Page, tarjeta: Locator, tipo: PedidoFlow['tipo'], antes: string) {
+/**
+ * Una pestaña de Flow en el proyecto de Recorte, donde se mandan los pedidos de una cuenta uno
+ * tras otro sin esperar a que acaben: Flow los genera a la vez (se probó con 8 imágenes).
+ *
+ * Cómo se sabe cuál tarjeta es de cada pedido: las nuevas salen siempre arriba y, mientras
+ * genera, la tarjeta enseña el prompt (así se confirma que es la suya). Al terminar Flow cambia
+ * la tarjeta por otra con la imagen en el mismo sitio. Cada pedido guarda cuántas tarjetas se
+ * habían puesto en la pestaña al mandarlo (`puestas`): la suya está en la posición
+ * `puestas ahora − puestas suyas`.
+ */
+export class PestanaFlow {
+  /** Tarjetas que Recorte ha puesto arriba en esta pestaña (pedidos y referencias subidas). */
+  puestas = 0
+  /** Los pedidos que siguen generando en la pestaña. */
+  enMarcha = 0
+  proyecto: string | undefined
+  /** Lo último elegido en el compositor y su costo: si el siguiente pide lo mismo no se vuelve a elegir. */
+  private elegido: { clave: string; costo: number } | null = null
+  private cola: Promise<unknown> = Promise.resolve()
+
+  readonly page: Page
+
+  constructor(page: Page) {
+    this.page = page
+  }
+
+  /** Lo que toca el compositor o los menús (elegir, escribir, mandar, bajar): de uno en uno. */
+  aSolas<T>(fn: () => Promise<T>): Promise<T> {
+    const r = this.cola.then(fn, fn)
+    this.cola = r.catch(() => {})
+    return r
+  }
+
+  async costo(p: PedidoFlow): Promise<number> {
+    const clave = `${p.tipo}|${p.formato}|${p.modelo ?? ''}`
+    if (this.elegido?.clave === clave) return this.elegido.costo
+    this.elegido = null
+    const costo = await elegir(this.page, p)
+    this.elegido = { clave, costo }
+    return costo
+  }
+
+  tarjeta(puestaSuya: number): Locator {
+    return this.page.locator('flow-tile-container').nth(this.puestas - puestaSuya)
+  }
+
+  /** La primera tarjeta que ya tiene imagen y su posición: la marca para contar las que salen encima. */
+  ancla(): Promise<Ancla | null> {
+    return this.page.evaluate(() => {
+      const ts = [...document.querySelectorAll('flow-tile-container')]
+      const i = ts.findIndex((t) => t.querySelector('[data-media-id]'))
+      return i < 0 ? null : { i, id: ts[i].querySelector('[data-media-id]')?.getAttribute('data-media-id') ?? '' }
+    })
+  }
+
+  /** Cuántas tarjetas salieron encima de la marca desde que se tomó. */
+  async nuevasDesde(ancla: Ancla | null): Promise<number> {
+    if (!ancla) return 0
+    const j = await this.page.evaluate(
+      (id) => [...document.querySelectorAll('flow-tile-container')].findIndex((t) => t.querySelector(`[data-media-id="${id}"]`)),
+      ancla.id
+    )
+    return j < 0 ? 0 : Math.max(0, j - ancla.i)
+  }
+
+  /** Cuántas tarjetas aparecieron arriba al hacer `fn`. */
+  async contandoNuevas(fn: () => Promise<void>): Promise<number> {
+    const ancla = await this.ancla()
+    await fn()
+    return this.nuevasDesde(ancla)
+  }
+}
+
+type Ancla = { i: number; id: string }
+
+/**
+ * Espera a que salga arriba la tarjeta del pedido: una más encima de la marca y, arriba, su
+ * prompt (los prompts suelen empezar igual: lo que manda es la marca). Si no sale, Flow no lo
+ * empezó y no gastó.
+ */
+async function esperarQueEmpiece(pest: PestanaFlow, prompt: string, ancla: Ancla | null) {
+  const { page } = pest
+  const inicio = plano(prompt).slice(0, 40)
   const limite = Date.now() + EMPIEZA_MS
-  while ((await firma(tarjeta)) === antes) {
+  for (;;) {
+    const arriba = await page
+      .locator('flow-tile-container')
+      .first()
+      .evaluate((d) => (d as HTMLElement).innerText)
+      .catch(() => '')
+    if (plano(arriba).includes(inicio) && (!ancla || (await pest.nuevasDesde(ancla)) >= 1)) return
     if (Date.now() > limite) {
       const aviso = await avisos(page)
       throw new NoEmpezo(`Flow no empezó a generar${aviso ? `: ${aviso}` : ' (¿sin créditos?)'}.`, aviso)
     }
-    await page.waitForTimeout(1000)
+    await page.waitForTimeout(700)
   }
+}
+
+/** Espera a que la tarjeta termine (sin % y con imagen o reproducir). La tarjeta se busca cada vez: Flow la cambia al acabar. */
+async function esperarQueTermine(page: Page, tarjeta: () => Locator, tipo: PedidoFlow['tipo']) {
   const fin = Date.now() + TERMINA_MS
   let ultimoAvance = Date.now()
   while (Date.now() < fin) {
-    const e = await tarjeta.evaluate((d, esVideo) => {
-      const texto = (d as HTMLElement).innerText
-      const img = d.querySelector('img')
-      const avanza = /\d+\s*%/.test(texto)
-      return { avanza, lista: !avanza && (esVideo ? /play_arrow/.test(texto) : !!img?.complete && img.naturalWidth > 0), texto }
-    }, tipo === 'video')
+    const e = await tarjeta()
+      .evaluate((d, esVideo) => {
+        const texto = (d as HTMLElement).innerText
+        const img = d.querySelector('img')
+        const avanza = /\d+\s*%/.test(texto)
+        return { avanza, lista: !avanza && (esVideo ? /play_arrow/.test(texto) : !!img?.complete && img.naturalWidth > 0), texto }
+      }, tipo === 'video')
+      .catch(() => ({ avanza: true, lista: false, texto: '' }))
     if (e.lista) return
     if (e.avanza) ultimoAvance = Date.now()
     else if (Date.now() - ultimoAvance > 60_000) throw new Error(`Flow no lo generó: ${e.texto.replace(/\s+/g, ' ').slice(0, 200)}`)
@@ -267,37 +361,58 @@ async function bajar(page: Page, b: Browser, tarjeta: Locator, carpeta: string, 
   })
   await tarjeta.click({ button: 'right', timeout: 15_000 })
   await page.getByRole('menuitem').filter({ has: page.locator('mat-icon:text-is("download")') }).first().click({ timeout: 10_000 })
-  const ruta = await Promise.race([
-    bajado,
-    new Promise<string>((_, mal) => setTimeout(() => mal(new Error('Lo generado no bajó en 2 minutos.')), 120_000))
-  ])
-  return conExtension(ruta, tipo)
+  try {
+    const ruta = await Promise.race([
+      bajado,
+      new Promise<string>((_, mal) => setTimeout(() => mal(new Error('Lo generado no bajó en 2 minutos.')), 120_000))
+    ])
+    return conExtension(ruta, tipo)
+  } finally {
+    await cdp.detach().catch(() => {})
+  }
+}
+
+/** Abre la pestaña de Flow de la cuenta en el proyecto de Recorte (o crea uno). */
+export async function abrirPestanaFlow(b: Browser, url: string | undefined): Promise<PestanaFlow> {
+  const p = new PestanaFlow(await abrirPagina(b))
+  p.proyecto = await proyecto(p.page, url)
+  return p
 }
 
 /**
- * Genera el pedido en el proyecto de Recorte y lo baja a `carpeta`. Si cuesta más que el
- * tope, no genera. `alEntrar` recibe el proyecto en cuanto se conoce, para reusarlo.
+ * Genera el pedido en la pestaña y lo baja a `carpeta`. Mandarlo y bajarlo van de uno en uno;
+ * la espera mientras Flow genera, a la vez con los demás pedidos de la pestaña. Si cuesta más
+ * que el tope, no genera.
  */
-export async function generarEnFlow(
+export async function generarEnPestana(
   b: Browser,
-  page: Page,
-  url: string | undefined,
+  pest: PestanaFlow,
   p: PedidoFlow,
   tope: number,
   carpeta: string,
-  alEntrar: (url: string) => void
+  enDescarga: <T>(fn: () => Promise<T>) => Promise<T>
 ): Promise<{ creditos: number; archivo: string }> {
-  alEntrar(await proyecto(page, url))
-  const creditos = await elegir(page, p)
-  if (creditos > tope) throw new NoEmpezo(`Cuesta ${creditos} créditos y el tope es ${tope}. No se generó nada.`, '')
-  await ponerReferencias(page, p.referencias ?? [])
-  // La tarjeta nueva sale la primera; cada referencia subida también es una tarjeta.
-  const tarjeta = page.locator('flow-tile-container').first()
-  const antes = (await tarjeta.count()) ? await firma(tarjeta) : ''
-  await caja(page).click({ timeout: 10_000 })
-  await page.keyboard.insertText(p.prompt.split(/\s+/).join(' '))
-  await page.waitForTimeout(500)
-  await boton(page, 'arrow_forward').last().click({ timeout: 10_000 })
-  await esperar(page, tarjeta, p.tipo, antes)
-  return { creditos, archivo: await bajar(page, b, tarjeta, carpeta, p.tipo) }
+  const { page } = pest
+  const { creditos, suya } = await pest.aSolas(async () => {
+    const creditos = await pest.costo(p)
+    if (creditos > tope) throw new NoEmpezo(`Cuesta ${creditos} créditos y el tope es ${tope}. No se generó nada.`, '')
+    // Cada referencia subida también sale arriba como tarjeta.
+    pest.puestas += await pest.contandoNuevas(() => ponerReferencias(page, p.referencias ?? []))
+    await caja(page).click({ timeout: 10_000 })
+    await page.keyboard.insertText(p.prompt.split(/\s+/).join(' '))
+    await page.waitForTimeout(400)
+    const ancla = await pest.ancla()
+    await boton(page, 'arrow_forward').last().click({ timeout: 10_000 })
+    await esperarQueEmpiece(pest, p.prompt, ancla)
+    pest.puestas++
+    return { creditos, suya: pest.puestas }
+  })
+  pest.enMarcha++
+  try {
+    await esperarQueTermine(page, () => pest.tarjeta(suya), p.tipo)
+    const archivo = await pest.aSolas(() => enDescarga(() => bajar(page, b, pest.tarjeta(suya), carpeta, p.tipo)))
+    return { creditos, archivo }
+  } finally {
+    pest.enMarcha--
+  }
 }

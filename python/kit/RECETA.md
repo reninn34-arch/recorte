@@ -368,6 +368,12 @@ Si el usuario eligió generar imágenes o clips (lo dice AGENTS.md), Recorte los
   momento; si no (una sala, la calle), con un modelo que encuentra al sujeto principal (la primera vez se baja, 178 MB).
   Mira el resultado antes de usarlo: si se coló algo del fondo, pide la pieza con `--recorte`.
 - `python kit/kit.py clip "descripción" [--ref …]` → `{"archivo": "medios/clip-….mp4"}` (varios minutos; GASTA créditos: solo los del guion gráfico que aprobó el usuario).
+- **Varias a la vez (lo normal en un video)**: `python kit/kit.py medios lista.json --sin-esperar`, con `lista.json` así:
+  `[{"nombre": "escena1", "tipo": "imagen", "prompt": "…", "ref": ["entrada/01.jpg"], "recorte": false}, {"nombre": "escena4", "tipo": "clip", "prompt": "…"}]`.
+  Flow las genera EN PARALELO (8 imágenes tardan lo que una). Pídelas en cuanto tengas el guion, sigue con la voz y la receta,
+  y recógelas con `python kit/kit.py medios lista.json` (sin `--sin-esperar`): devuelve cada una con su `archivo` (y `recorte`)
+  o su `error`. Lo ya generado sale al instante y no se pide dos veces. Lo que necesita otra cosa hecha antes (el clip con `--ref`
+  de la imagen de su escena) va en una segunda tanda.
 - Describe bien: sujeto, acción, encuadre (vertical u horizontal ya va solo), luz y estilo. Sin texto escrito dentro de la imagen:
   los rótulos los pones tú en la receta (así el usuario los edita).
 - `--ref` usa fotos del usuario como referencia (que se parezca a su producto, su local, su cara); hasta 3.

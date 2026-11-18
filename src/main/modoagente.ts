@@ -301,6 +301,9 @@ ${(() => {
       m.clips
         ? `- Clips de video con ${m.clips}: \`python kit/kit.py clip "descripción" [--ref …]\`. GASTAN créditos del usuario: solo los de las escenas "clip" del guion gráfico que aprobó (${clipsDelPlan(c.agente?.plan) ? `${clipsDelPlan(c.agente?.plan)} clips` : `${MAX_CLIPS_VEO} como mucho, para los momentos clave`}); en un cambio sobre lo ya hecho, los que el usuario pida en ese cambio (hasta ${MAX_CLIPS_GUION}), y en el resumen di cuántos fueron y cuánto costaron. Haz antes la imagen de cada escena y pásala con --ref al clip para que todo se vea coherente.`
         : '- Clips generados: NO (el usuario no los eligió).',
+      m.imagenes || m.clips
+        ? '- Varias a la vez: en cuanto sepas qué escenas hacen falta, pídelas TODAS juntas con `python kit/kit.py medios lista.json --sin-esperar` (una lista JSON: [{"nombre": "escena1", "tipo": "imagen", "prompt": "…", "ref": [], "recorte": false}, …]); Flow las genera en paralelo. Sigue con la voz y la receta mientras tanto y recógelas con la misma orden sin `--sin-esperar`. Pedirlas de una en una esperando cada una hace el video mucho más lento. Las que dependen de otra (un clip con `--ref` de su imagen) van en una segunda tanda.'
+        : '',
       'Lee «Imágenes y clips generados» en `kit/RECETA.md`. Sin texto escrito dentro de lo generado: los rótulos van en la receta.'
     ].join('\n')
   })()}

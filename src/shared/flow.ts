@@ -47,7 +47,6 @@ export const FORMATOS_VIDEO = ['9:16', '16:9']
 /** Lo más que gasta un video si no se dice otro tope (Lite y Fast caben; Quality, no). */
 export const TOPE_POR_DEFECTO = 20
 /** Cuántas cuentas generan a la vez (cada una abre su Edge sin ventana). */
-export const A_LA_VEZ = 3
 export const MAX_CUENTAS = 50
 
 /** Cómo llama Flow a sus créditos según el idioma de la cuenta («créditos», «puntos», «credits»). */

@@ -4,7 +4,6 @@ import { mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { Parado } from './ia'
 import {
-  A_LA_VEZ,
   DESCANSO_MS,
   MAX_CUENTAS,
   motivoDe,
@@ -17,8 +16,19 @@ import {
   type UsoFlow
 } from '../shared/flow'
 import { guardar } from './disco'
+import type { Browser } from 'playwright-core'
 import { edgeExe, edgePerfil, perfilDeLaVoz, type EdgePerfil } from './edgeperfil'
-import { abrirPagina, correoEnFlow, generarEnFlow, leerCreditos, NoEmpezo, ponerAyudarAMejorar, URL_FLOW } from './flowpagina'
+import {
+  abrirPagina,
+  abrirPestanaFlow,
+  correoEnFlow,
+  generarEnPestana,
+  leerCreditos,
+  NoEmpezo,
+  ponerAyudarAMejorar,
+  URL_FLOW,
+  type PestanaFlow
+} from './flowpagina'
 import { correoVozGoogle } from './vozgoogle'
 
 /**
@@ -27,9 +37,11 @@ import { correoVozGoogle } from './vozgoogle'
  *
  * - Cuentas: la de la voz (Ajustes → Voz) y las que se agregan aquí, cada una con su perfil de
  *   Edge en `<userData>/flow/cuentas/<id>/perfil`. La sesión de Google no la ve ningún agente.
- * - Reparto: cada pedido va a la cuenta libre que lleva más sin generar, hasta `A_LA_VEZ` a la
- *   vez. Si Flow no lo empieza (sin créditos, frenada, sin sesión), no gastó: esa cuenta
- *   descansa y el pedido pasa a otra que no lo haya probado.
+ * - Reparto: cada pedido va a la cuenta con menos trabajo (y, a igualdad, la que lleva más sin
+ *   generar). Cada cuenta trabaja en UNA pestaña de su proyecto y manda allí los pedidos
+ *   seguidos, sin esperar a que acabe el anterior: Flow los genera a la vez (`POR_CUENTA`).
+ *   Si Flow no lo empieza (sin créditos, frenada, sin sesión), no gastó: esa cuenta descansa y
+ *   el pedido pasa a otra que no lo haya probado.
  * - Gasto: antes de generar se lee el costo y no se pasa del tope del pedido.
  * - «Ayudar a mejorar Flow» solo se toca si el usuario lo eligió aquí; «Tengo los derechos»
  *   es obligatorio para mandar imágenes de referencia.
@@ -94,8 +106,26 @@ const edgeDe = (id: string) => {
   return e
 }
 
+/**
+ * Lo que cada cuenta tiene en marcha a la vez en su pestaña. Imágenes: se probó con 8 a la vez
+ * en una pestaña, sin avisos de Flow. Videos: de uno en uno hasta probar más (gastan créditos).
+ */
+const POR_CUENTA = { total: 6, video: 1 }
+
 const descansos = new Map<string, { hasta: number; motivo: Motivo }>()
-const generando = new Set<string>()
+/** Por cuenta: cuántas imágenes y videos tiene en marcha. */
+const enMarcha = new Map<string, { imagen: number; video: number }>()
+const ocupacion = (correo: string) => enMarcha.get(correo) ?? { imagen: 0, video: 0 }
+const total = (correo: string) => ocupacion(correo).imagen + ocupacion(correo).video
+const generando = { has: (correo: string) => total(correo) > 0 }
+const libre = (correo: string, tipo: PedidoFlow['tipo']) =>
+  total(correo) < POR_CUENTA.total && (tipo !== 'video' || ocupacion(correo).video < POR_CUENTA.video)
+const contar = (correo: string, tipo: PedidoFlow['tipo'], n: number) => {
+  const o = ocupacion(correo)
+  enMarcha.set(correo, { ...o, [tipo]: o[tipo] + n })
+}
+/** La pestaña de Flow de cada cuenta, en el Edge que tiene abierto ahora. */
+const pestanas = new Map<string, { b: Browser; p: Promise<PestanaFlow> }>()
 const ultimoUso = new Map<string, number>()
 /** Lo que ya se puso de «Ayudar a mejorar Flow» en cada cuenta desde que arrancó Recorte. */
 const aportarPuesto = new Map<string, boolean>()
@@ -131,25 +161,53 @@ function apuntarUso(correo: string, creditos: number) {
   guardarDatos()
 }
 
+/** La pestaña de la cuenta en este Edge: la que ya tiene o una nueva en su proyecto. */
+async function pestanaDe(c: Cuenta, b: Browser): Promise<PestanaFlow> {
+  const hay = pestanas.get(c.correo)
+  if (hay && hay.b === b) {
+    const pest = await hay.p
+    if (!pest.page.isClosed()) return pest
+    if (pestanas.get(c.correo) === hay) pestanas.delete(c.correo)
+    return pestanaDe(c, b)
+  }
+  const p = (async () => {
+    if (datos.aportar !== undefined && aportarPuesto.get(c.correo) !== datos.aportar) {
+      const page = await abrirPagina(b)
+      try {
+        await ponerAyudarAMejorar(page, datos.aportar)
+        aportarPuesto.set(c.correo, datos.aportar)
+      } finally {
+        await page.close().catch(() => {})
+      }
+    }
+    const pest = await abrirPestanaFlow(b, datos.proyectos[c.correo])
+    if (pest.proyecto && datos.proyectos[c.correo] !== pest.proyecto) {
+      datos.proyectos[c.correo] = pest.proyecto
+      guardarDatos()
+    }
+    return pest
+  })()
+  const nueva = { b, p }
+  pestanas.set(c.correo, nueva)
+  p.catch(() => {
+    if (pestanas.get(c.correo) === nueva) pestanas.delete(c.correo)
+  })
+  return p
+}
+
 async function generarCon(t: Trabajo, c: Cuenta) {
-  generando.add(c.correo)
+  contar(c.correo, t.pedido.tipo, 1)
   ultimoUso.set(c.correo, Date.now())
   t.probadas.add(c.correo)
   try {
     const r = await c.edge.enEdge(async (b) => {
-      const page = await abrirPagina(b)
-      if (datos.aportar !== undefined && aportarPuesto.get(c.correo) !== datos.aportar) {
-        await ponerAyudarAMejorar(page, datos.aportar)
-        aportarPuesto.set(c.correo, datos.aportar)
+      const pest = await pestanaDe(c, b)
+      const hecho = await generarEnPestana(b, pest, t.pedido, t.pedido.tope ?? TOPE_POR_DEFECTO, t.carpeta, c.edge.enDescarga)
+      // El saldo, cuando la pestaña queda sin nada en marcha (abre el menú de la cuenta).
+      if (pest.enMarcha === 0) {
+        const saldo = await pest.aSolas(() => leerCreditos(pest.page, false)).catch(() => null)
+        if (saldo !== null) datos.saldos[c.correo] = { creditos: saldo, leido: Date.now() }
       }
-      const hecho = await generarEnFlow(b, page, datos.proyectos[c.correo], t.pedido, t.pedido.tope ?? TOPE_POR_DEFECTO, t.carpeta, (url) => {
-        if (datos.proyectos[c.correo] !== url) {
-          datos.proyectos[c.correo] = url
-          guardarDatos()
-        }
-      })
-      const saldo = await leerCreditos(page, false).catch(() => null)
-      if (saldo !== null) datos.saldos[c.correo] = { creditos: saldo, leido: Date.now() }
       return hecho
     })
     if (t.pedido.tipo === 'video' || r.creditos > 0) apuntarUso(c.correo, r.creditos)
@@ -169,36 +227,30 @@ async function generarCon(t: Trabajo, c: Cuenta) {
       t.mal(e instanceof Error ? e : new Error(String(e)))
     }
   } finally {
-    generando.delete(c.correo)
+    contar(c.correo, t.pedido.tipo, -1)
     repartir()
   }
 }
 
 function repartir() {
-  while (fila.length && generando.size < A_LA_VEZ) {
-    const libres = cuentas()
-      .filter((c) => !generando.has(c.correo))
-      .sort((a, b) => (ultimoUso.get(a.correo) ?? 0) - (ultimoUso.get(b.correo) ?? 0))
-    let asignado = false
-    for (let i = 0; i < fila.length; i++) {
-      const t = fila[i]
-      const c = libres.find((x) => !t.probadas.has(x.correo) && puede(x.correo, t.pedido.tipo))
-      if (!c) continue
-      fila.splice(i, 1)
-      void generarCon(t, c)
-      asignado = true
-      break
+  // Cada pedido, en orden, a la cuenta que pueda con él y tenga menos en marcha.
+  for (let i = 0; i < fila.length; ) {
+    const t = fila[i]
+    const c = cuentas()
+      .filter((x) => !t.probadas.has(x.correo) && puede(x.correo, t.pedido.tipo) && libre(x.correo, t.pedido.tipo))
+      .sort((a, b) => total(a.correo) - total(b.correo) || (ultimoUso.get(a.correo) ?? 0) - (ultimoUso.get(b.correo) ?? 0))[0]
+    if (!c) {
+      i++
+      continue
     }
-    if (!asignado) {
-      // Nadie libre puede con lo que queda: si nadie lo podrá hacer, se avisa.
-      for (const t of [...fila]) {
-        const alguna = cuentas().some((x) => !t.probadas.has(x.correo) && puede(x.correo, t.pedido.tipo))
-        if (!alguna) {
-          fila.splice(fila.indexOf(t), 1)
-          t.mal(new Error(cuentas().length ? 'Ninguna cuenta de Flow puede generar ahora (sin créditos o frenadas). Prueba más tarde.' : 'Conecta una cuenta de Google en Ajustes → Google Flow.'))
-        }
-      }
-      return
+    fila.splice(i, 1)
+    void generarCon(t, c)
+  }
+  // Lo que ninguna cuenta podrá hacer (ni cuando se libere) se avisa.
+  for (const t of [...fila]) {
+    if (!cuentas().some((x) => !t.probadas.has(x.correo) && puede(x.correo, t.pedido.tipo))) {
+      fila.splice(fila.indexOf(t), 1)
+      t.mal(new Error(cuentas().length ? 'Ninguna cuenta de Flow puede generar ahora (sin créditos o frenadas). Prueba más tarde.' : 'Conecta una cuenta de Google en Ajustes → Google Flow.'))
     }
   }
 }
@@ -279,7 +331,14 @@ export async function leerSaldosFlow(): Promise<EstadoFlow> {
         .filter((c) => !generando.has(c.correo))
         .map((c) =>
           c.edge
-            .enEdge(async (b) => leerCreditos(await abrirPagina(b)))
+            .enEdge(async (b) => {
+              const page = await abrirPagina(b)
+              try {
+                return await leerCreditos(page)
+              } finally {
+                await page.close().catch(() => {})
+              }
+            })
             .then((n) => {
               if (n !== null) datos.saldos[c.correo] = { creditos: n, leido: Date.now() }
             })
