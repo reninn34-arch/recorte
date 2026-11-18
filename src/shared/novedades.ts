@@ -24,6 +24,31 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.87',
+    fecha: '2026-11-18',
+    resumen: 'Las imágenes de referencia vuelven a funcionar en Flow, y Recorte avisa si a tu cuenta no le quedan puntos.',
+    novedades: [
+      {
+        icono: 'image',
+        titulo: 'Referencias en Flow otra vez',
+        texto:
+          'Flow cambió su pantalla de subir imágenes y Recorte creía que tus fotos de referencia no se subían, así que los clips e imágenes con referencia fallaban. Ya se suben y se ponen en el pedido como antes.'
+      },
+      {
+        icono: 'alerta',
+        titulo: 'Sin puntos, te lo dice',
+        texto:
+          'Si a tu cuenta de Flow no le quedan puntos para un clip, Recorte no lo intenta y lo dice claro, sin gastar nada.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Un fallo ya no tumba los siguientes',
+        texto:
+          'Si un pedido a Flow fallaba, el panel de referencias se quedaba abierto y los siguientes también fallaban. Ahora se cierra y el resto del video sigue generándose.'
+      }
+    ]
+  },
+  {
     version: '0.1.86',
     fecha: '2026-11-18',
     resumen: 'Antigravity responde mucho antes a partir del segundo turno y ya no deja programas abiertos en segundo plano.',
