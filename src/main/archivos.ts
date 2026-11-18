@@ -15,8 +15,13 @@ export const EXT_VIDEO = ['.mp4', '.mov', '.webm', '.mkv', '.m4v']
 export const EXT_HEIC = ['.heic', '.heif']
 /** Audios: una narración grabada (también los .ogg/.opus de WhatsApp) sobre la que se arma el video. */
 export const EXT_AUDIO = ['.mp3', '.wav', '.m4a', '.ogg', '.opus', '.aac', '.flac']
+/**
+ * Audio o video en un formato que el resto de Recorte no usa (un .mpeg de un grabador o de WhatsApp, un .avi, un .3gp de un
+ * teléfono viejo…): al subirlo se mira qué trae por dentro y se pasa a uno que sí (.mp3/.m4a el audio, .mp4 el video).
+ */
+export const EXT_CONVERTIBLE = ['.mpeg', '.mpg', '.mpga', '.mp2', '.avi', '.wmv', '.wma', '.3gp', '.3g2', '.ts', '.mts', '.m2ts', '.flv', '.amr', '.aiff', '.aif', '.caf', '.weba', '.oga']
 /** Lo que se puede elegir en «Adjuntar» (sin punto). */
-export const EXTENSIONES_SUBIBLES = [...EXT_IMAGEN, ...EXT_HEIC, ...EXT_VIDEO, ...EXT_AUDIO, '.zip'].map((e) => e.slice(1))
+export const EXTENSIONES_SUBIBLES = [...EXT_IMAGEN, ...EXT_HEIC, ...EXT_VIDEO, ...EXT_AUDIO, ...EXT_CONVERTIBLE, '.zip'].map((e) => e.slice(1))
 
 /** Lo más que entra en una creación (una carpeta de material puede traer muchos). */
 const MAX_ARCHIVOS = 80
@@ -112,6 +117,57 @@ async function heicAJpg(ruta: string, destino: string): Promise<string | null> {
   return ok && existsSync(salida) ? salida : null
 }
 
+/** Lo que imprime un programa (para leer a ffprobe), o null si falló. */
+function salidaDe(exe: string, args: string[], timeoutMs: number): Promise<string | null> {
+  return new Promise((ok) => {
+    let texto = ''
+    const hijo = spawn(exe, args, { windowsHide: true })
+    const reloj = setTimeout(() => hijo.kill(), timeoutMs)
+    hijo.stdout.on('data', (b: Buffer) => (texto += b.toString('utf8')))
+    hijo.on('error', () => (clearTimeout(reloj), ok(null)))
+    hijo.on('close', (c) => (clearTimeout(reloj), ok(c === 0 ? texto : null)))
+  })
+}
+
+/**
+ * Un audio o video en un formato que Recorte no usa, pasado a uno que sí: se mira qué trae (ffprobe). Con imagen en
+ * movimiento, un .mp4; solo sonido, un .mp3 si ya es MP3 por dentro (se copia, sin perder calidad) o un .m4a. null si no
+ * trae ni lo uno ni lo otro, o no se pudo.
+ */
+export async function convertirMedio(ruta: string, destino: string): Promise<string | null> {
+  const ffprobe = resolverBinario('ffprobe') ?? 'ffprobe'
+  const ffmpeg = resolverBinario('ffmpeg') ?? 'ffmpeg'
+  const info = await salidaDe(ffprobe, ['-v', 'error', '-show_entries', 'stream=codec_type,codec_name:stream_disposition=attached_pic', '-of', 'json', ruta], 60_000)
+  if (!info) return null
+  let pistas: { codec_type?: string; codec_name?: string; disposition?: { attached_pic?: number } }[] = []
+  try {
+    pistas = (JSON.parse(info) as { streams?: typeof pistas }).streams ?? []
+  } catch {
+    return null
+  }
+  // La portada de un audio (una imagen pegada) no cuenta como video.
+  const video = pistas.some((p) => p.codec_type === 'video' && !p.disposition?.attached_pic)
+  const audio = pistas.find((p) => p.codec_type === 'audio')
+  if (!video && !audio) return null
+  mkdirSync(destino, { recursive: true })
+  // «Your ready.mp3.mpeg» → «Your ready.mp3»: sin repetir la extensión que ya traía el nombre.
+  const nombre = basename(ruta, extname(ruta)).replace(/\.(mp3|m4a|wav|aac|mp4|mov)$/i, '')
+  let salida: string
+  let args: string[]
+  if (video) {
+    salida = join(destino, `${nombre}.mp4`)
+    args = ['-v', 'error', '-y', '-i', ruta, '-map', '0:v:0', '-map', '0:a:0?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', salida]
+  } else if (audio?.codec_name === 'mp3') {
+    salida = join(destino, `${nombre}.mp3`)
+    args = ['-v', 'error', '-y', '-i', ruta, '-map', '0:a:0', '-c:a', 'copy', salida]
+  } else {
+    salida = join(destino, `${nombre}.m4a`)
+    args = ['-v', 'error', '-y', '-i', ruta, '-map', '0:a:0', '-c:a', 'aac', '-b:a', '192k', salida]
+  }
+  const ok = await correr(ffmpeg, args, 20 * 60_000)
+  return ok && existsSync(salida) ? salida : null
+}
+
 /**
  * Deja la lista lista para usar: abre los zip, convierte los HEIC y descarta lo que no sirve.
  * `trabajo` es una carpeta temporal donde quedan los archivos convertidos o descomprimidos.
@@ -138,6 +194,10 @@ export async function prepararArchivos(rutas: string[], trabajo: string): Promis
       const jpg = await heicAJpg(ruta, join(trabajo, `heic-${++n}`))
       if (jpg) listos.push(jpg)
       else descartados.push(`${basename(ruta)} (no pude convertir la foto HEIC)`)
+    } else if (EXT_CONVERTIBLE.includes(ext)) {
+      const convertido = await convertirMedio(ruta, join(trabajo, `medio-${++n}`))
+      if (convertido) listos.push(convertido)
+      else descartados.push(`${basename(ruta)} (no pude leer su audio ni su video)`)
     } else if (ext === '.zip') {
       const dentro = join(trabajo, `zip-${++n}`)
       if (!descomprimir(ruta, dentro)) {
