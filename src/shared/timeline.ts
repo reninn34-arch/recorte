@@ -53,6 +53,8 @@ export interface ClipTL {
   anidado?: ClipTL[]
   /** Curvas de color dibujadas a mano (la de luz y una por canal), después del color tipo Lumetri. */
   curvas?: CurvasTL
+  /** Un LUT 3D (.cube) que el usuario cargó (un look de cine, el de su cámara): antes del resto del color. */
+  lut?: LutClip
 }
 
 export const MAX_FUNDIDO = 1.5
@@ -1508,6 +1510,7 @@ export function normalizarTimeline(entrada: unknown, duracionFuente: number, otr
       ...(normalizarSonidoClip(c.sonido, (s - e) / (typeof c.velocidad === 'number' && c.velocidad > 0 ? c.velocidad : 1)) ? { sonido: normalizarSonidoClip(c.sonido, (s - e) / (typeof c.velocidad === 'number' && c.velocidad > 0 ? c.velocidad : 1)) } : {}),
       ...(normalizarClaves(c.claves) ? { claves: normalizarClaves(c.claves) } : {}),
       ...(normalizarCurvas(c.curvas) ? { curvas: normalizarCurvas(c.curvas) } : {}),
+      ...(normalizarLut(c.lut) ? { lut: normalizarLut(c.lut) } : {}),
       ...(normalizarClavesVolumen(c.clavesVolumen) ? { clavesVolumen: normalizarClavesVolumen(c.clavesVolumen) } : {}),
       ...(normalizarRampa(c.rampa) ? { rampa: normalizarRampa(c.rampa) } : {}),
       // Los clips de dentro de un anidado se guardan tal cual (se validan al desanidar).
@@ -2002,6 +2005,40 @@ export function curvasDeClip(clip: Pick<ClipTL, 'curvas'> | undefined, a: Requir
     })
   }
   return { r: canal('r', base?.r ?? null), g: canal('g', base?.g ?? null), b: canal('b', base?.b ?? null) }
+}
+
+// ----- LUT 3D (.cube) -----
+
+export interface LutClip {
+  /** Dentro del proyecto: `media/luts/<nombre>.cube`. */
+  archivo: string
+  nombre: string
+  /** 0 (nada) a 1 (el LUT tal cual). */
+  intensidad: number
+}
+
+function normalizarLut(entrada: unknown): LutClip | undefined {
+  if (!entrada || typeof entrada !== 'object') return undefined
+  const l = entrada as Partial<LutClip>
+  if (typeof l.archivo !== 'string' || !/^media\/luts\/[\w.-]+\.cube$/i.test(l.archivo) || l.archivo.includes('..')) return undefined
+  return {
+    archivo: l.archivo,
+    nombre: typeof l.nombre === 'string' && l.nombre ? l.nombre.slice(0, 80) : l.archivo.slice(11),
+    intensidad: typeof l.intensidad === 'number' && Number.isFinite(l.intensidad) ? Math.round(pinza(l.intensidad, 0, 1) * 100) / 100 : 1
+  }
+}
+
+/** Pone, cambia o quita (con `lut` undefined) el LUT de un clip (o de todos, con `id` null). */
+export function ponerLut(tl: Timeline, id: string | null, lut: LutClip | undefined): Timeline {
+  return {
+    ...tl,
+    clips: tl.clips.map((c) => {
+      if (id !== null && c.id !== id) return c
+      const { lut: _antes, ...resto } = c
+      const valido = normalizarLut(lut)
+      return valido ? { ...resto, lut: valido } : resto
+    })
+  }
 }
 
 /** Cambia (o quita, con `puntos` vacío) la curva de un canal de un clip. */

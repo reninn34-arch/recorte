@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { VistaPrevia } from '../hooks/vistaprevia'
 import {
   ajustarClip,
+  ponerLut,
   cambiarCurva,
   ubicar,
   MODOS_FUSION,
@@ -125,7 +126,8 @@ import {
   deslizarContenido,
   desplazarClip,
   type ColorMarcador, unirAudio, dividirSonido,
-  CANALES_CURVA
+  CANALES_CURVA,
+  type LutClip
 } from '../../../shared/timeline'
 import type { OpcionesExport } from '../../../shared/api'
 import type { TranscriptSegment } from '../../../shared/types'
@@ -231,6 +233,7 @@ export function TimelineEditor({
   duraciones,
   ponerSonido,
   paneles,
+  importarLut,
   panelMedios,
   panelSubtitulos,
   pestanasExtra,
@@ -306,6 +309,8 @@ export function TimelineEditor({
   miniaturaDe?: (fuente: string) => string | undefined
   /** La dirección de un archivo del proyecto (para dibujar la onda de un audio). */
   urlDe?: (archivo: string) => string
+  /** Elegir un LUT (.cube) del equipo; devuelve el LUT ya copiado al proyecto, o null. */
+  importarLut?: () => Promise<LutClip | null>
   /** Dónde se dibuja cada parte del editor: la biblioteca (izquierda), el inspector (derecha) y el transporte (bajo el monitor). */
   paneles: { biblioteca: HTMLElement | null; inspector: HTMLElement | null; transporte: HTMLElement | null }
   /** La pestaña «Medios» de la biblioteca (los archivos del proyecto). */
@@ -2971,6 +2976,55 @@ export function TimelineEditor({
               })}
                 </details>
               ))}
+              <span className="ed-seccion">
+                LUT
+                {clipElegido.clip.lut && (
+                  <button className="ed-seccion-quitar" title="Quitar el LUT de este clip" onClick={() => historial.aplicar(ponerLut(timeline, clipElegido.clip.id, undefined))}>
+                    Quitar
+                  </button>
+                )}
+              </span>
+              {clipElegido.clip.lut ? (
+                <>
+                  <span className="ed-lut-nombre" title={clipElegido.clip.lut.archivo}>
+                    {clipElegido.clip.lut.nombre}
+                  </span>
+                  <label className="tl-ajuste">
+                    <span>
+                      Intensidad <b>{Math.round(clipElegido.clip.lut.intensidad * 100)} %</b>
+                    </span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={clipElegido.clip.lut.intensidad}
+                      onPointerDown={empezarAjuste}
+                      onFocus={empezarAjuste}
+                      onChange={(e) => deslizar(ponerLut(timeline, clipElegido.clip.id, { ...clipElegido.clip.lut!, intensidad: Number(e.target.value) }))}
+                    />
+                  </label>
+                  {timeline.clips.length > 1 && (
+                    <button className="btn small ghost" onClick={() => historial.aplicar(ponerLut(timeline, null, clipElegido.clip.lut))} title="El mismo LUT y la misma intensidad en todos los clips">
+                      Ponerlo en todos los clips
+                    </button>
+                  )}
+                </>
+              ) : (
+                <p className="tl-dim">Un look de cine o el de tu cámara en formato .cube (el de Premiere y DaVinci).</p>
+              )}
+              {importarLut && (
+                <button
+                  className="btn small"
+                  onClick={async () => {
+                    const id = clipElegido.clip.id
+                    const lut = await importarLut()
+                    if (lut) historial.aplicar(ponerLut(timeline, id, lut))
+                  }}
+                >
+                  {clipElegido.clip.lut ? 'Cambiar el LUT…' : 'Cargar un LUT (.cube)…'}
+                </button>
+              )}
               <span className="ed-seccion">
                 Curvas
                 {clipElegido.clip.curvas && (

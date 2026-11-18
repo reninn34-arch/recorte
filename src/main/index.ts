@@ -71,6 +71,7 @@ import { viabilidadDe } from './estilo/viabilidad'
 import { guardar } from './disco'
 import { cambiaElGuion, ID_SEGURO, MAX_CLIPS_VEO, mismaNarracion, pideMontarVoz, textoMuestra, textoNarracion, VOCES_GEMINI, vozDesactualizada, vozVigente } from '../shared/creacion'
 import type { AgenteId, Creacion, EleccionTarea, MensajeCreacion, NivelModelo, PeticionCreacion, TareasCreacion } from '../shared/creacion'
+import { leerCube as leerCubeLut } from '../shared/lut'
 import { archivosVersion, armarBase, baseDe, EstilosPropios, versionBase } from './estilospropios'
 import { turnoAgente } from './chat'
 import { buscarActualizacion, estadoActualizacion, instalarActualizacion, prepararActualizaciones } from './actualizar'
@@ -3303,6 +3304,25 @@ No pude animar los subtítulos (se animan al exportar): ${e instanceof Error ? e
     if ((tipo === 'deshizo' || tipo === 'corrigio' || tipo === 'eligio' || tipo === 'paro') && typeof detalle === 'string') senalGusto(tipo, detalle)
   })
 
+  // Un LUT 3D (.cube) para el color de un clip: se comprueba que se puede leer y se copia a media/luts/ del proyecto.
+  ipcMain.handle('proyecto:importar-lut', async (_evento, id: unknown) => {
+    if (typeof id !== 'string') return { ok: false, error: 'Proyecto inválido.' }
+    if (!proyectos.get(id)) return { ok: false, error: 'El proyecto ya no existe.' }
+    const eleccion = await dialog.showOpenDialog({ title: 'Elige el LUT', properties: ['openFile'], filters: [{ name: 'LUT 3D', extensions: ['cube'] }] })
+    const origen = eleccion.filePaths[0]
+    if (eleccion.canceled || !origen) return null
+    try {
+      leerCubeLut(readFileSync(origen, 'utf8'))
+    } catch (error) {
+      return { ok: false, error: `Ese archivo no es un LUT que pueda usar: ${error instanceof Error ? error.message : String(error)}` }
+    }
+    const base = basename(origen, extname(origen)).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'lut'
+    const nombreArchivo = `${base}-${Date.now().toString(36)}.cube`
+    const carpetaLuts = join(proyectos.carpeta(id), 'media', 'luts')
+    mkdirSync(carpetaLuts, { recursive: true })
+    copyFileSync(origen, join(carpetaLuts, nombreArchivo))
+    return { ok: true, lut: { archivo: `media/luts/${nombreArchivo}`, nombre: basename(origen, extname(origen)), intensidad: 1 } }
+  })
   ipcMain.handle('proyecto:importar-musica', async (_evento, id: unknown) => {
     if (typeof id !== 'string') return { ok: false, error: 'Proyecto inválido.' }
     if (!proyectos.get(id)) return { ok: false, error: 'El proyecto ya no existe.' }

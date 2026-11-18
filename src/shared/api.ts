@@ -1,6 +1,6 @@
 import type { MensajeChat, OperacionTL } from './chat'
 import type { Gustos, SenalGusto } from './gustos'
-import type { MusicaTL, Timeline } from './timeline'
+import type { MusicaTL, Timeline, LutClip } from './timeline'
 import type { ProblemaAudio } from './audio'
 import type { PiezaAnimada, ValoresPieza } from './piezas'
 import type { AjustesCreacion, Creacion, EstiloPropio, MensajeCreacion, ModeloAgente, PeticionCreacion } from './creacion'
@@ -387,6 +387,8 @@ export interface RecorteApi {
   /** La URL de la muestra de una voz de Gemini (la genera la primera vez). */
   vozMuestra: (voz: string) => Promise<string>
   importarMusica: (id: string) => Promise<{ ok: boolean; musica?: MusicaTL; error?: string } | null>
+  /** Un LUT 3D (.cube) elegido por el usuario, copiado al proyecto. */
+  importarLut: (id: string) => Promise<{ ok: boolean; lut?: LutClip; error?: string } | null>
   /** Copia un efecto de sonido al proyecto: uno incluido (su id) o, sin id, uno que elija el usuario. */
   /** Cuánto le queda a cada agente y servicio con cuota (lo que ya se sabe, sin gastar). */
   usoEstado: () => Promise<EstadoUso>

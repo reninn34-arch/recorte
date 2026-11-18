@@ -78,6 +78,7 @@ const api: RecorteApi = {
   vozGrabada: (id, datos, texto) => ipcRenderer.invoke('proyecto:voz-grabada', id, datos, texto),
   vozMuestra: (voz) => ipcRenderer.invoke('voz:muestra', voz),
   importarMusica: (id) => ipcRenderer.invoke('proyecto:importar-musica', id),
+  importarLut: (id) => ipcRenderer.invoke('proyecto:importar-lut', id),
   usoEstado: () => ipcRenderer.invoke('uso:estado'),
   usoActualizar: (id: string) => ipcRenderer.invoke('uso:actualizar', id),
   mcpEstado: () => ipcRenderer.invoke('mcp:estado'),

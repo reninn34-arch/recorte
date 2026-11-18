@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } fr
 import type { Project } from '../../../shared/types'
 import { Icon } from '../Icons'
 import { mediaUrl } from '../media'
+import { LienzoLut } from './LienzoLut'
 import { Medidores } from './Medidores'
 import { aplicarCadena } from '../audio'
 import type { VistaPrevia } from '../hooks/vistaprevia'
@@ -159,6 +160,9 @@ export function Monitor({
         clipPath: `inset(${(a.recorteArr * 100).toFixed(3)}% ${(a.recorteDer * 100).toFixed(3)}% ${(a.recorteAba * 100).toFixed(3)}% ${(a.recorteIzq * 100).toFixed(3)}%)`
       }
     : undefined
+  // El LUT del clip (no en una demo, que no tiene carpeta).
+  const conLut = Boolean(clipActual?.lut && !proyecto.demo && !vacia)
+  const imagenRef = useRef<HTMLImageElement | null>(null)
   const estiloImagen: React.CSSProperties = {
     visibility: vacia ? 'hidden' : 'visible',
     transform:
@@ -400,11 +404,20 @@ export function Monitor({
                   data-pista-audio="video"
                   crossOrigin="anonymous"
                   preload="auto"
-                  style={{ ...estiloImagen, visibility: vacia || enImagen || reproductor.activo !== i ? 'hidden' : 'visible' }}
+                  style={{ ...estiloImagen, visibility: vacia || enImagen || reproductor.activo !== i || conLut ? 'hidden' : 'visible' }}
                   {...reproductor.eventos}
                 />
               ))}
-              {enImagen && <img className="monitor-imagen" src={reproductor.imagen!} alt="" style={estiloImagen} />}
+              {enImagen && <img ref={imagenRef} className="monitor-imagen" src={reproductor.imagen!} alt="" crossOrigin="anonymous" style={{ ...estiloImagen, ...(conLut ? { visibility: 'hidden' } : {}) }} />}
+              {/* Con LUT: el cuadro pasa por él con WebGL (el mismo LUT que el MP4) y tapa al video o la foto. */}
+              {conLut && (
+                <LienzoLut
+                  url={mediaUrl(proyecto.id, clipActual!.lut!.archivo)}
+                  intensidad={clipActual!.lut!.intensidad}
+                  estilo={estiloImagen}
+                  fuente={() => (enImagen ? imagenRef.current : reproductor.videos[reproductor.activo]?.current ?? null)}
+                />
+              )}
               {/* En pausa, lo que el monitor no pinta en vivo (el color por zonas): el cuadro ya pintado, con su encuadre. */}
               {vistaPrevia?.cuadro && !reproductor.reproduciendo && !enImagen && <img className="monitor-imagen monitor-fijo" src={vistaPrevia.cuadro} alt="" />}
               {/* Las zonas tapadas del clip: lo mismo que el MP4 (un recuadro difuminado o en negro). */}

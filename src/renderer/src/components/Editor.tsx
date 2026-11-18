@@ -908,6 +908,15 @@ export function Editor({
                 return r?.ok && r.sonido ? r.sonido : null
               }
         }
+        importarLut={
+          proyecto.demo
+            ? undefined
+            : async () => {
+                const r = await window.recorte.importarLut(proyecto.id)
+                if (r && !r.ok) onAviso(r.error ?? 'No pude cargar el LUT.')
+                return r?.ok && r.lut ? r.lut : null
+              }
+        }
         importarMusica={async () => {
           const r = await window.recorte.importarMusica(proyecto.id)
           if (r && !r.ok) onAviso(r.error ?? 'No pude añadir la música.')

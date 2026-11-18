@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { escribirCube, leerCube, mezclarLut } from '../shared/lut'
 import { rutaScriptPython } from './transcribir'
 import { join } from 'node:path'
 import {
@@ -442,6 +443,18 @@ async function exportarTimelineAhora(
     const fondoBorroso = borroso > 0.005 ? `,gblur=sigma=${(borroso * DESENFOQUE_MAX * ancho).toFixed(2)}` : ''
     // El color tipo Lumetri (exposición, luces, sombras, blancos, negros, temperatura y tinte): la misma curva que el
     // monitor, en un archivo .cube que aplica lut1d antes del resto del color.
+    // El LUT 3D del clip (con su intensidad ya mezclada en el archivo), antes del resto del color, como en el monitor.
+    let lut3d = ''
+    if (t.clip.lut && existsSync(join(carpeta, t.clip.lut.archivo))) {
+      try {
+        const base = leerCube(readFileSync(join(carpeta, t.clip.lut.archivo), 'utf8'))
+        const archivo = `lut-clip-${i}.cube`
+        writeFileSync(join(carpeta, archivo), escribirCube(mezclarLut(base, t.clip.lut.intensidad)), 'utf8')
+        lut3d = `format=rgb24,lut3d=file=${archivo}:interp=trilinear,`
+      } catch {
+        // Un LUT que ya no se puede leer: el clip sale sin él (el editor ya avisó al cargarlo).
+      }
+    }
     const curvas = curvasDeClip(t.clip, a)
     let lut = ''
     if (CLAVES_CURVA_COLOR.some((k) => cl?.[k]?.length)) {
@@ -480,7 +493,7 @@ async function exportarTimelineAhora(
       writeFileSync(join(carpeta, archivo), cuboDeZona(a), 'utf8')
       zona = `,format=gbrp,lut3d=file=${archivo}:interp=tetrahedral`
     }
-    const crudo = `[${iv}:v]${ritmo},fps=${fps},${zoom}${encuadre}${lento}${fondoBorroso},setsar=1${lut}${color}${zona}${efectos}`
+    const crudo = `[${iv}:v]${ritmo},fps=${fps},${lut3d}${zoom}${encuadre}${lento}${fondoBorroso},setsar=1${lut}${color}${zona}${efectos}`
     // Las zonas tapadas (una cara, una placa): cada una se recorta, se difumina o se pinta de negro y se pega en su sitio.
     let base = crudo
     // Las de modo «borrar» no se tapan aquí: el clip sin el objeto va encima como otra capa.

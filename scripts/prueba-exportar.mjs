@@ -884,5 +884,57 @@ assert.ok(Math.abs(centro6(1.7) - centro6(1.4)) > 40, 'en el corte la capa salta
   console.log('curvas dibujadas (luz y azul) iguales en el MP4; el agente las pone ✓')
 }
 
+// LUT 3D (.cube): un look que cruza los canales sale en el MP4 con el color que calcula el monitor (trilineal), al
+// 100 % y al 50 %.
+{
+  const { ponerLut } = await import('../src/shared/timeline.ts')
+  const { leerCube, escribirCube, aplicarLut, mezclarLut } = await import('../src/shared/lut.ts')
+  const { aplicarOperaciones, validarOperaciones } = await import('../src/shared/chat.ts')
+  // Un LUT de 17³ que no se puede hacer con curvas: el rojo de salida sale del azul de entrada, y el azul del verde.
+  const n = 17
+  const filas = ['TITLE "prueba"', `LUT_3D_SIZE ${n}`]
+  for (let b = 0; b < n; b++) for (let g = 0; g < n; g++) for (let r = 0; r < n; r++) {
+    const R0 = r / (n - 1), G0 = g / (n - 1), B0 = b / (n - 1)
+    filas.push(`${(0.3 * R0 + 0.7 * B0).toFixed(6)} ${G0.toFixed(6)} ${(0.5 * G0 + 0.5 * B0).toFixed(6)}`)
+  }
+  mkdirSync(join(dir, 'media', 'luts'), { recursive: true })
+  const cube = filas.join(String.fromCharCode(10)) + String.fromCharCode(10)
+  const { writeFileSync: escribe } = await import('node:fs')
+  escribe(join(dir, 'media', 'luts', 'cruce.cube'), cube)
+  const lut = leerCube(cube)
+  assert.equal(lut.tamano, 17)
+  assert.equal(leerCube(escribirCube(lut)).datos.length, lut.datos.length, 'escribir y volver a leer da el mismo LUT')
+  const rojo3 = join(dir, 'rojo3.mp4')
+  ff(['-f', 'lavfi', '-i', 'color=c=0xC85032:s=640x360:d=1:r=30', '-c:v', 'libx264', '-pix_fmt', 'yuv444p', rojo3])
+  const p17 = { ...proyecto, source: { ...proyecto.source, path: rojo3, duration: 1 }, medios: [] }
+  const base = normalizarTimeline({ clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 1 }], textos: [] }, 1, {})
+  const leer = (carpeta) => {
+    const o = spawnSync('ffmpeg', ['-v', 'error', '-ss', '0.5', '-i', join(dir, carpeta, 'timeline-prueba-original.mp4'), '-frames:v', '1', '-vf', 'crop=40:40:300:160,scale=1:1:flags=area', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { encoding: 'buffer' }).stdout
+    return [...o.subarray(0, 3)]
+  }
+  // El color sin LUT, tal como sale (punto de partida de lo que calcula el monitor).
+  const r0 = await exportarTimeline(p17, base, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, 'salidas-lut0'))
+  assert.ok(r0.ok, r0.error)
+  const partida = leer('salidas-lut0').map((v) => v / 255)
+  for (const k of [1, 0.5]) {
+    const tl = ponerLut(base, 'c1', { archivo: 'media/luts/cruce.cube', nombre: 'cruce', intensidad: k })
+    assert.equal(normalizarTimeline(tl, 1, {}).clips[0].lut.intensidad, k, 'el LUT sobrevive a guardar y abrir')
+    const carpeta = `salidas-lut-${k}`
+    const r = await exportarTimeline(p17, tl, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, carpeta))
+    assert.ok(r.ok, r.error)
+    const visto = leer(carpeta)
+    const quiero = aplicarLut(mezclarLut(lut, k), partida).map((v) => v * 255)
+    assert.ok(visto.every((v, i) => Math.abs(v - quiero[i]) < 8), `LUT al ${k * 100} %: el MP4 da ${visto} y el monitor ${quiero.map(Math.round)}`)
+  }
+  // El agente cambia la intensidad del LUT que hay, y no puede inventarse uno.
+  const conLut = ponerLut(base, 'c1', { archivo: 'media/luts/cruce.cube', nombre: 'cruce', intensidad: 1 })
+  const hecho = aplicarOperaciones(conLut, validarOperaciones([{ op: 'lut', clip: 1, intensidad: 0.4 }]), { duracionFuente: 1, medios: {} })
+  assert.equal(hecho.timeline.clips[0].lut.intensidad, 0.4, `la op lut no se aplicó: ${JSON.stringify(hecho.fallos)}`)
+  const sin = aplicarOperaciones(base, validarOperaciones([{ op: 'lut', intensidad: 0.4 }]), { duracionFuente: 1, medios: {} })
+  assert.ok(sin.fallos.length && !sin.timeline.clips[0].lut, 'sin LUT cargado, el agente no pone ninguno')
+  assert.throws(() => leerCube(['LUT_1D_SIZE 4', '0 0 0'].join(String.fromCharCode(10))), /1D/)
+  console.log('LUT 3D (.cube) igual en el MP4 que en el monitor, al 100 % y al 50 % ✓')
+}
+
 rmSync(dir, { recursive: true, force: true })
 console.log('exportar: ok')

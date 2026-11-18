@@ -3513,3 +3513,5 @@ button { cursor: pointer; }
 .ed-curvas-diagonal { stroke: #ffffff26; stroke-width: 1; stroke-dasharray: 3 3; }
 .ed-curvas-punto { stroke: #0d0f0b; stroke-width: 1.5; cursor: grab; }
 .ed-curvas-pie { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+.ed-lut-nombre { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
