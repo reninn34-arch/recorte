@@ -24,6 +24,38 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.89',
+    fecha: '2026-11-18',
+    resumen: 'Color y composición de editor profesional: LUT, curvas a mano, modos de fusión y capas que siguen lo que se mueve.',
+    novedades: [
+      {
+        icono: 'palette',
+        titulo: 'LUT 3D (.cube)',
+        texto: 'Carga en un clip el look de cine o el de tu cámara en formato .cube, el de Premiere y DaVinci, y ajusta su intensidad. Lo ves en el monitor mientras reproduces y sale igual en el MP4. Con un clic lo pones en todos los clips.'
+      },
+      {
+        icono: 'sliders',
+        titulo: 'Curvas de color a mano',
+        texto: 'Dibuja las curvas de luz, rojo, verde y azul del clip, como en Lumetri: clic añade un punto, arrastrarlo lo mueve y doble clic lo quita. Una S suave da contraste de cine.'
+      },
+      {
+        icono: 'layers',
+        titulo: 'Modos de fusión',
+        texto: 'Multiplicar, Trama, Superponer, Aclarar, Oscurecer, Diferencia y Sumar en las capas encima: una textura de papel, luz, fuego o polvo sobre negro se funden con el video sin recortarlos.'
+      },
+      {
+        icono: 'film',
+        titulo: 'Capas que siguen lo que se mueve',
+        texto: 'Pon un logo, una flecha o un texto encima de algo del video y toca «Seguir lo que tiene debajo»: irá pegado a eso aunque se mueva.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Efectos animados',
+        texto: 'El desenfoque, la sepia y el tono de un clip ya tienen fotogramas clave: una imagen que se va desenfocando o que pasa a sepia poco a poco.'
+      }
+    ]
+  },
+  {
     version: '0.1.88',
     fecha: '2026-11-18',
     resumen: 'Recorte distingue una canción de una narración: tu música se usa como banda sonora, sin subtítulos.',
