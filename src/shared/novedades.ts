@@ -24,6 +24,25 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.88',
+    fecha: '2026-11-18',
+    resumen: 'Recorte distingue una canción de una narración: tu música se usa como banda sonora, sin subtítulos.',
+    novedades: [
+      {
+        icono: 'music',
+        titulo: 'Tu música no es una narración',
+        texto:
+          'Antes, cualquier audio que subías se trataba como tu voz: el agente le ponía subtítulos y, si no cubrían toda la canción, Recorte no entregaba el video. Ahora Recorte escucha el audio y, si casi no se habla (una canción, una base con un «You ready?»), lo usa como banda sonora: los cortes siguen su ritmo y no lleva subtítulos salvo que los pidas.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Subtítulos hasta donde se habla',
+        texto:
+          'Con tu narración grabada, los subtítulos tienen que llegar hasta donde terminas de hablar, no hasta el último segundo del video: un cierre con logo o música al final ya no impide la entrega.'
+      }
+    ]
+  },
+  {
     version: '0.1.87',
     fecha: '2026-11-18',
     resumen: 'Las imágenes de referencia vuelven a funcionar en Flow, y Recorte avisa si a tu cuenta no le quedan puntos.',
