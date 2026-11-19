@@ -24,6 +24,38 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.90',
+    fecha: '2026-11-19',
+    resumen: 'El agente entiende tus videos toma por toma, tiene habilidades que aprenden de ti y trabaja con todo lo suyo.',
+    novedades: [
+      {
+        icono: 'film',
+        titulo: 'Tus videos, toma por toma',
+        texto: 'El agente separa cada video en tomas y sabe cómo es cada una: el movimiento de cámara, el encuadre, si es grabada, un gráfico o una foto con zoom, la luz y el color, si lleva texto y si está oscura, borrosa o movida. También sabe si la música corta en el golpe. Lo hace en tu equipo, en segundos y sin gastar.'
+      },
+      {
+        icono: 'wand',
+        titulo: '«Edítalo como este video»',
+        texto: 'Trae una referencia, un TikTok o un anuncio, y pídele que edite así. El agente la analiza toma por toma y te dice qué copia tal cual y qué adapta: su ritmo, la cámara, los textos y la música. Copia la forma, nunca su contenido.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Habilidades que aprenden de ti',
+        texto: 'El agente tiene habilidades, formas probadas de hacer algo, y usa la que encaja con lo que pides. Al entregar apunta lo que aprendió, sobre todo lo que le corriges, y la próxima vez lo tiene en cuenta. Lo que pides en el momento siempre manda. En Ajustes → Habilidades ves lo que aprendió y añades las tuyas (las skills de Claude Code sirven tal cual).'
+      },
+      {
+        icono: 'layers',
+        titulo: 'Tu agente, con todo lo suyo',
+        texto: 'Claude Code ya trabaja en Recorte con sus skills, la búsqueda en internet y tus conexiones (Blender, Canva, Figma…). Recorte le pone el taller y él pone su oficio. En Mac, Codex también puede usar internet.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Escoge tus mejores tomas',
+        texto: 'Con mucho material, el agente deja fuera las tomas oscuras, borrosas o movidas, abre con la más llamativa y te cuenta cuántas usó. Si quieres tu clip tal cual, no lo toca.'
+      }
+    ]
+  },
+  {
     version: '0.1.89',
     fecha: '2026-11-18',
     resumen: 'Color y composición de editor profesional: LUT, curvas a mano, modos de fusión y capas que siguen lo que se mueve.',
