@@ -24,6 +24,19 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.95',
+    fecha: '2026-11-19',
+    resumen: 'El chat de los videos hechos por el agente usa el agente que eliges en la caja.',
+    novedades: [
+      {
+        icono: 'sparkles',
+        titulo: 'El agente que eliges es el que responde',
+        texto:
+          'En los videos que hizo el agente, el «Cambio rápido» del editor iba al agente de siempre aunque eligieras otro en la caja. Ahora responde el agente y modelo que elegiste, con tu voz, Flow y «Pregúntame antes», y además sabe dónde estás en el editor.'
+      }
+    ]
+  },
+  {
     version: '0.1.94',
     fecha: '2026-11-19',
     resumen: 'El agente sabe solo dónde estás en el editor: «cambia esto» o «corta aquí» se entienden sin explicarlo.',

@@ -9,6 +9,7 @@ import type { Project } from '../../../shared/types'
 import type { Agentes } from '../hooks/agentes'
 import { Icon } from '../Icons'
 import { CajaCrear } from './CajaCrear'
+import { describirDonde } from '../donde'
 import type { PuenteEditor } from './ChatAgente'
 import { LogoAgente } from './Logos'
 import { mediaUrl } from '../media'
@@ -250,7 +251,14 @@ export function ChatCreacion({
     const historial: MensajeChat[] = c.mensajes.slice(-10).map((m) => ({ id: m.id, rol: m.rol, texto: m.texto, fecha: m.fecha }))
     let respuesta: Partial<MensajeCreacion>
     try {
-      const r = await window.recorte.chatAgente(ed.proyecto.id, p0.timeline, historial, texto)
+      // Lo elegido en la caja de esta creación (agente y modelo, voz, Flow) y dónde está el usuario en el editor.
+      const ajustes: AjustesCreacion = {
+        vozElegida: c.vozElegida ?? null,
+        directo: Boolean(c.directo),
+        flow: c.flow ?? null,
+        tareas: c.tareas?.video ? { video: c.tareas.video } : null
+      }
+      const r = await window.recorte.chatAgente(ed.proyecto.id, p0.timeline, historial, texto, describirDonde(p0.timeline, p0.tiempo, p0.elegido), ajustes)
       if (turnoRapido.current !== mio) return
       if (r.parado) respuesta = { rol: 'agente', texto: 'Lo paraste. No cambié nada.' }
       else if (!r.ok) respuesta = { rol: 'agente', texto: r.error ?? 'El agente no pudo responder.', error: true }
