@@ -10,7 +10,10 @@ rea-video (https://github.com/JuneYaooo/rea-video, Apache 2.0, de JuneYaooo); es
 Deja en la carpeta de salida, para leer por capas y gastar pocos tokens:
     ANALISIS.md   el resumen del video (empieza por aquí)
     tomas.md      una línea por toma
-    tomas/        un fotograma de cada toma (toma-01.jpg…)
+    tomas/        un fotograma de cada toma (toma-01.jpg…), lo que pasa dentro de las largas (toma-NN-tira.jpg),
+                  el texto de cerca y cuadro a cuadro (toma-NN-texto.jpg, toma-NN-texto-tira.jpg)
+    vistazo.jpg   todo el video en una hoja de cuadros
+    cierre.jpg    cómo termina, cuadro a cuadro
     analisis.json todo lo medido
 
     python analizar.py video.mp4 --salida analisis/ref [--ffmpeg …] [--ffprobe …]
@@ -35,7 +38,7 @@ FPS_ANALISIS = 8
 ANCHO_MOV = 192
 ANCHO_FOTO = 640
 MAX_TOMAS = 120
-VERSION = 1
+VERSION = 2
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +193,16 @@ def caras(gris):
 def texto_encima(gris):
     """Dónde hay renglones que parecen texto puesto encima (letras de alto contraste en fila): arriba, centro o abajo.
     Es una pista: confírmalo mirando el fotograma."""
+    zonas = {}
+    for (x, y, cw, ch) in renglones(gris):
+        centro = y + ch / 2
+        zona = 'arriba' if centro < 0.33 else 'abajo' if centro > 0.66 else 'centro'
+        zonas[zona] = zonas.get(zona, 0) + cw * ch
+    return [z for z, _ in sorted(zonas.items(), key=lambda kv: -kv[1])]
+
+
+def renglones(gris):
+    """Los renglones que parecen texto, como cajas (x, y, ancho, alto) en fracciones del cuadro."""
     if cv2 is None:
         return []
     h, w = gris.shape
@@ -199,7 +212,7 @@ def texto_encima(gris):
         return []
     unido = cv2.morphologyEx(bn, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (max(9, w // 40), 3)))
     cont, _ = cv2.findContours(unido, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    zonas = {}
+    cajas = []
     for c in cont:
         x, y, cw, ch = cv2.boundingRect(c)
         if ch < h * 0.012 or ch > h * 0.12 or cw < w * 0.12 or cw < ch * 2.5:
@@ -211,10 +224,85 @@ def texto_encima(gris):
         fila = bn[y + ch // 2, x:x + cw] > 0
         if np.count_nonzero(fila[1:] != fila[:-1]) < max(10, 1.5 * cw / max(6, ch * 0.9)):
             continue
-        centro = (y + ch / 2) / h
-        zona = 'arriba' if centro < 0.33 else 'abajo' if centro > 0.66 else 'centro'
-        zonas[zona] = zonas.get(zona, 0) + cw * ch
-    return [z for z, _ in sorted(zonas.items(), key=lambda kv: -kv[1])]
+        cajas.append((x / w, y / h, cw / w, ch / h))
+    return cajas
+
+
+def caja_texto(cajas):
+    """La caja que junta los renglones de la zona con más texto (un título partido a los lados cuenta como uno)."""
+    if not cajas:
+        return None
+
+    def zona(c):
+        m = c[1] + c[3] / 2
+        return 0 if m < 0.33 else 2 if m > 0.66 else 1
+
+    por = {}
+    for c in cajas:
+        por.setdefault(zona(c), []).append(c)
+    grupo = max(por.values(), key=lambda g: sum(c[2] * c[3] for c in g))
+    x0 = min(c[0] for c in grupo)
+    y0 = min(c[1] for c in grupo)
+    x1 = max(c[0] + c[2] for c in grupo)
+    y1 = max(c[1] + c[3] for c in grupo)
+    # Con margen: las sombras, los contornos y las letras que se mueven salen un poco de la caja.
+    mx, my = 0.07, max(0.01, (y1 - y0) * 0.6)
+    return max(0.0, x0 - mx), max(0.0, y0 - my), min(1.0, x1 + mx), min(1.0, y1 + my)
+
+
+def colores_texto(rgb):
+    """Los colores de las letras en un recorte de texto: lo que se aleja del fondo (el borde del recorte)."""
+    m = rgb.astype(np.int16)
+    borde = np.concatenate([m[0], m[-1], m[:, 0], m[:, -1]])
+    fondo = np.median(borde, axis=0)
+    dist = np.abs(m - fondo).sum(axis=2)
+    # Más separado que el fondo y su ruido (un lavanda sobre lila claro también cuenta).
+    letras = m[dist > max(30.0, float(np.percentile(np.abs(borde - fondo).sum(axis=1), 90)) * 1.5)]
+    hex_fondo = '#%02x%02x%02x' % tuple(int(v) for v in fondo)
+    if len(letras) < 30:
+        return {'fondo': hex_fondo, 'letras': []}
+    q = (letras // 24).astype(np.int32)
+    claves = (q[:, 0] << 10) | (q[:, 1] << 5) | q[:, 2]
+    vals, cuenta = np.unique(claves, return_counts=True)
+    salida = []
+    for k in np.argsort(-cuenta)[:6]:
+        sel = letras[claves == vals[k]]
+        hexa = '#%02x%02x%02x' % tuple(int(v) for v in sel.mean(axis=0))
+        if cuenta[k] / len(letras) >= 0.08 and hexa not in salida:
+            salida.append(hexa)
+        if len(salida) == 3:
+            break
+    return {'fondo': hex_fondo, 'letras': salida}
+
+
+def tira(ffmpeg, ruta, desde, hasta, n, archivo, alto=360, caja=None, columnas=None):
+    """Una hoja con n cuadros entre desde y hasta (de izquierda a derecha y de arriba abajo), de todo el cuadro o
+    de la caja (x0, y0, x1, y1 en fracciones). Para ver lo que pasa dentro de una toma sin abrir el video."""
+    dur = max(0.05, hasta - desde)
+    col = columnas or n
+    filtros = [f'fps={n / dur:.4f}']
+    if caja:
+        x0, y0, x1, y1 = caja
+        filtros.append(f'crop=iw*{x1 - x0:.4f}:ih*{y1 - y0:.4f}:iw*{x0:.4f}:ih*{y0:.4f}')
+    filtros += [f'scale=-2:{alto}', f'tile={col}x{math.ceil(n / col)}:padding=4:color=white']
+    r = subprocess.run([ffmpeg, '-v', 'error', '-y', '-ss', f'{max(0.0, desde):.3f}', '-t', f'{dur:.3f}', '-i', ruta,
+                        '-vf', ','.join(filtros), '-frames:v', '1', '-q:v', '4', archivo], capture_output=True)
+    return archivo if r.returncode == 0 and os.path.isfile(archivo) else None
+
+
+def cambia_la_zona(ffmpeg, ruta, desde, hasta, caja):
+    """Cuánto cambia la zona del texto de un cuadro al siguiente (el texto que parpadea, se escribe o se mueve)."""
+    x0, y0, x1, y1 = caja
+    w = 160
+    h = max(8, int(round(w * (y1 - y0) / max(0.01, x1 - x0) / 2)) * 2)
+    p = subprocess.run([ffmpeg, '-v', 'error', '-ss', f'{desde:.3f}', '-t', f'{max(0.3, min(4.0, hasta - desde)):.3f}',
+                        '-i', ruta, '-vf', f'fps=10,crop=iw*{x1 - x0:.4f}:ih*{y1 - y0:.4f}:iw*{x0:.4f}:ih*{y0:.4f},scale={w}:{h}',
+                        '-pix_fmt', 'gray', '-f', 'rawvideo', '-'], capture_output=True)
+    n = w * h
+    cs = [np.frombuffer(p.stdout[i:i + n], np.uint8).astype(np.int16) for i in range(0, len(p.stdout) - n + 1, n)]
+    if len(cs) < 3:
+        return 0.0
+    return float(np.median([np.abs(b - a).mean() for a, b in zip(cs, cs[1:])]))
 
 
 def color_medio(rgb):
@@ -453,13 +541,14 @@ def analizar(ruta, salida, ffmpeg='ffmpeg', ffprobe='ffprobe', progreso=None):
         t_medio = a + (b - a) * 0.5
         rgb = foto(ffmpeg, ruta, t_medio, af, hf)
         r = {'ruido': 0.0, 'planitud': 0.0, 'nitidez': 0.0, 'luz': float(np.mean(luz[i0:i1] or [0])), 'quemado': 0.0}
-        enc, texto, col = {'tipo': 'sin medir', 'caras': 0}, [], None
+        enc, texto, col, cajas = {'tipo': 'sin medir', 'caras': 0}, [], None, []
         archivo = None
         if rgb is not None:
             g = (rgb[..., 0] * 0.299 + rgb[..., 1] * 0.587 + rgb[..., 2] * 0.114).astype(np.uint8)
             r.update(ruido=ruido(g), planitud=planitud(rgb), nitidez=nitidez(g), luz=float(g.mean()),
                      quemado=float((g > 250).mean()))
             enc = encuadre(caras(g))
+            cajas = renglones(g)
             texto = texto_encima(g)
             col = color_medio(rgb)
             archivo = os.path.join(carpeta_tomas, f'toma-{k + 1:02d}.jpg')
@@ -471,13 +560,43 @@ def analizar(ruta, salida, ffmpeg='ffmpeg', ffprobe='ffprobe', progreso=None):
                     cv2.imwrite(archivo, cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 82])
                 else:
                     archivo = None
+        extra = {}
+        # Lo que pasa dentro de una toma larga (lo que entra, cómo se arma): una sola foto no lo cuenta.
+        if b - a >= 1.5 and not quieta:
+            hoja = tira(ffmpeg, ruta, a, b, 6 if b - a < 6 else 8, os.path.join(carpeta_tomas, f'toma-{k + 1:02d}-tira.jpg'), alto=300)
+            if hoja:
+                extra['tira'] = os.path.relpath(hoja, salida).replace(os.sep, '/')
+        # El texto de cerca (su letra, su color, si lleva sombra) y cuadro a cuadro (cómo entra o se anima).
+        caja = caja_texto(cajas)
+        if caja:
+            alto_t = min(info['alto'], 1920)
+            alto_caja = alto_t * (caja[3] - caja[1])
+            cerca = tira(ffmpeg, ruta, t_medio, t_medio + 0.05, 1, os.path.join(carpeta_tomas, f'toma-{k + 1:02d}-texto.jpg'),
+                         alto=int(max(120, min(420, alto_caja * 2))), caja=caja)
+            anim = tira(ffmpeg, ruta, a, min(b, a + 2.4), 8, os.path.join(carpeta_tomas, f'toma-{k + 1:02d}-texto-tira.jpg'),
+                        alto=int(max(60, min(160, alto_caja))), caja=caja, columnas=1)
+            cambio = cambia_la_zona(ffmpeg, ruta, a, b, caja)
+            info_t = {'caja': [round(v, 3) for v in caja]}
+            if rgb is not None:
+                hh, ww = rgb.shape[:2]
+                y0, y1 = int(caja[1] * hh), max(int(caja[1] * hh) + 2, int(caja[3] * hh))
+                x0, x1 = int(caja[0] * ww), max(int(caja[0] * ww) + 2, int(caja[2] * ww))
+                info_t.update(colores_texto(rgb[y0:y1, x0:x1]))
+            # Si la zona del texto cambia con la cámara quieta, el texto se anima (parpadea, se escribe, se mueve).
+            info_t['se_anima'] = bool(cambio > 1.2 and (quieta or cam.get('tipo') in ('fija', 'sin medir')))
+            info_t['cambio'] = round(cambio, 2)
+            if cerca:
+                info_t['foto'] = os.path.relpath(cerca, salida).replace(os.sep, '/')
+            if anim:
+                info_t['tira'] = os.path.relpath(anim, salida).replace(os.sep, '/')
+            extra['texto_de_cerca'] = info_t
         tipo_origen, pruebas, confianza = origen(r, cam, actividad, quieta)
         toma = {'n': k + 1, 'inicio': round(a, 2), 'fin': round(b, 2), 'duracion': round(b - a, 2),
                 'camara': cam, 'encuadre': enc, 'origen': {'tipo': tipo_origen, 'confianza': confianza, 'pruebas': pruebas},
                 'accion': 'mucha' if actividad > 9 else 'media' if actividad > 3 else 'poca',
                 'luz': round(r['luz']), 'nitidez': round(r['nitidez']), 'grano': round(r['ruido'], 2),
                 'color': col, 'texto': texto, 'fallos': calidad(r, cam, tipo_origen),
-                'foto': os.path.relpath(archivo, salida).replace(os.sep, '/') if archivo else None}
+                'foto': os.path.relpath(archivo, salida).replace(os.sep, '/') if archivo else None, **extra}
         if snd:
             j0, j1 = int(a / snd['paso']), max(int(a / snd['paso']) + 1, int(b / snd['paso']))
             toma['volumen'] = round(float(np.percentile(snd['db'][j0:j1], 90)), 1) if j1 <= len(snd['db']) else None
@@ -506,7 +625,18 @@ def analizar(ruta, salida, ffmpeg='ffmpeg', ffprobe='ffprobe', progreso=None):
         for k, toma in enumerate(tomas[1:]):
             toma['corte_en_golpe'] = cerca[k] <= 0.09
 
+    if progreso:
+        progreso(0.98, 'Mirando el cierre')
+    n_vista = max(8, min(32, int(duracion * 2)))
+    vistazo = tira(ffmpeg, ruta, 0, duracion, n_vista, os.path.join(salida, 'vistazo.jpg'), alto=260, columnas=8)
+    cierre = medir_cierre(luz, duracion)
+    ini = cierre['desde'] if cierre.get('desde') is not None else max(0.0, duracion - min(3.5, duracion * 0.3))
+    ini = min(ini, max(0.0, duracion - 1.0))
+    if tira(ffmpeg, ruta, ini, duracion, 8, os.path.join(salida, 'cierre.jpg'), alto=360, columnas=4):
+        cierre['foto'] = 'cierre.jpg'
     resumen = resumir(info, tomas, ritmo, snd, duracion)
+    resumen['cierre'] = cierre
+    resumen['vistazo'] = 'vistazo.jpg' if vistazo else None
     datos = {'version': VERSION, 'archivo': os.path.basename(ruta), 'video': info, 'resumen': resumen, 'ritmo': ritmo,
              'golpes_sonido': snd['golpes'][:400] if snd else [], 'tomas': tomas}
     with open(os.path.join(salida, 'analisis.json'), 'w', encoding='utf-8') as f:
@@ -515,6 +645,29 @@ def analizar(ruta, salida, ffmpeg='ffmpeg', ffprobe='ffprobe', progreso=None):
     if progreso:
         progreso(1.0, 'Listo')
     return datos
+
+
+def medir_cierre(luz, duracion):
+    """Cómo termina: si se oscurece (o se va a negro) al final y desde cuándo. Lo demás (un logo, un usuario, una
+    llamada a la acción) se ve en cierre.jpg."""
+    n = len(luz)
+    if n < FPS_ANALISIS * 3:
+        return {'tipo': 'corto'}
+    base = float(np.median(luz[int(n * 0.2):int(n * 0.7)] or luz))
+    if base < 25:
+        return {'tipo': 'oscuro todo el video'}
+    desde = None
+    for i in range(int(n * 0.5), n - 1):
+        resto = luz[i:]
+        if luz[i] < base * 0.82 and float(np.mean(resto)) < base * 0.75 and max(resto) < base * 0.92:
+            desde = i
+            break
+    if desde is None:
+        return {'tipo': 'sin cambio de luz', 'desde': None}
+    final = float(np.mean(luz[-3:]))
+    t = round(desde / FPS_ANALISIS, 2)
+    tipo = 'a negro' if final < 18 and duracion - t < 1.2 else 'se oscurece'
+    return {'tipo': tipo, 'desde': t, 'dura': round(duracion - t, 2), 'luz_antes': round(base), 'luz_final': round(final)}
 
 
 # ---------------------------------------------------------------------------
@@ -578,6 +731,31 @@ def escribir_md(salida, datos):
                   + ' (Pista: confírmalo en los fotogramas.)')
     if r['temperatura']:
         lineas.append(f"- Color: sobre todo {r['temperatura'][0]['que']}; luz media {r['luz_media']} de 255.")
+    de_cerca = [t for t in datos['tomas'] if t.get('texto_de_cerca')]
+    if de_cerca:
+        lineas += ['', '## El texto', '']
+        for t in de_cerca[:6]:
+            tc = t['texto_de_cerca']
+            partes = [f"Toma {t['n']}"]
+            # Los colores medidos no van aquí: lo que hay detrás de las letras (un árbol, una cara) los confunde.
+            # El color se ve en el recorte.
+            partes.append('**se anima** (cambia de un cuadro a otro: parpadea, se escribe o se mueve)' if tc['se_anima']
+                          else 'quieto')
+            fotos = [f"`{p}`" for p in (tc.get('foto'), tc.get('tira')) if p]
+            lineas.append('- ' + ', '.join(partes) + '.' + (f" Míralo: {' y '.join(fotos)}." if fotos else ''))
+        lineas.append('- Copia de estos recortes la letra (gruesa o fina, redonda o recta, con o sin serifa), sus colores '
+                      'y su animación. Si no lleva sombra ni contorno, el tuyo tampoco.')
+    ci = r.get('cierre') or {}
+    lineas += ['', '## El cierre', '']
+    if ci.get('tipo') in ('se oscurece', 'a negro'):
+        lineas.append(f"- Desde {ci['desde']} s ({ci['dura']} s) {'se va a negro' if ci['tipo'] == 'a negro' else 'se oscurece'}"
+                      f" (luz {ci['luz_antes']} → {ci['luz_final']}).")
+    else:
+        lineas.append('- No cambia la luz al final.')
+    if ci.get('foto'):
+        lineas.append('- Míralo en `cierre.jpg`: si cierra con un logo, un usuario, una web o una llamada a la acción, es '
+                      'parte de la edición. Cópialo con los datos del usuario; si no los tienes, pregúntaselos. No lo quites '
+                      'sin preguntarle.')
     lineas += ['', '## El sonido', '']
     if ri:
         if ri['tempo'] and ri['ritmo_marcado']:
@@ -596,7 +774,11 @@ def escribir_md(salida, datos):
                    '- ' + ', '.join(f"{t['n']} ({', '.join(t['fallos'])})" for t in datos['tomas'] if t['fallos'])]
     lineas += ['', '## Para seguir', '',
                '- `tomas.md`: una línea por toma (tiempo, cámara, encuadre, origen, color, texto, sonido).',
+               '- `vistazo.jpg`: todo el video en una hoja (míralo primero: cómo se arma, qué entra y cuándo).',
                '- `tomas/toma-NN.jpg`: el fotograma del medio de cada toma. Míralo antes de decidir algo de esa toma.',
+               '- `tomas/toma-NN-tira.jpg`: lo que pasa dentro de las tomas largas, cuadro a cuadro (cómo entran las cosas).',
+               '- `tomas/toma-NN-texto.jpg` y `-texto-tira.jpg`: el texto de cerca y cuadro a cuadro.',
+               '- `cierre.jpg`: cómo termina.',
                '- `analisis.json`: todas las medidas.', '']
     with open(os.path.join(salida, 'ANALISIS.md'), 'w', encoding='utf-8', newline='\n') as f:
         f.write('\n'.join(lineas))

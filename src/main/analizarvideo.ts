@@ -53,7 +53,7 @@ export interface VideoAnalizado {
   carpeta: string
 }
 
-const VERSION = 1
+const VERSION = 2
 
 function leer(carpeta: string): VideoAnalizado | null {
   try {

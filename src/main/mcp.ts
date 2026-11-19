@@ -12,6 +12,8 @@ export interface ResultadoHerramienta {
   texto: string
   /** Una imagen PNG o JPG para que el agente la vea (base64). */
   imagen?: { datos: string; tipo: 'image/png' | 'image/jpeg' }
+  /** Más imágenes, después de la primera (p. ej. el vistazo, el texto de cerca y el cierre de un análisis). */
+  imagenes?: { datos: string; tipo: 'image/png' | 'image/jpeg' }[]
   error?: boolean
 }
 
@@ -181,7 +183,7 @@ export class ServidorMcp {
           rpcOk(id, {
             content: [
               { type: 'text', text: r.texto },
-              ...(r.imagen ? [{ type: 'image', data: r.imagen.datos, mimeType: r.imagen.tipo }] : [])
+              ...[...(r.imagen ? [r.imagen] : []), ...(r.imagenes ?? [])].map((i) => ({ type: 'image', data: i.datos, mimeType: i.tipo }))
             ],
             ...(r.error ? { isError: true } : {})
           })

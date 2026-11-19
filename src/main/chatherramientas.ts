@@ -42,8 +42,9 @@ El usuario tiene abierto el proyecto «${p.name}» (id ${p.id}). Lo editas con l
   descripción tiene la lista de operaciones. Junta en una llamada lo que va junto.
 - ver_cuadro: cómo se ve un segundo, tal cual saldría. Úsalo para mirar antes de cambiar algo visual y para COMPROBAR
   después que quedó bien (un texto que tapa una cara, un logo descolocado). Si no quedó bien, corrígelo.
-- analizar_video: un video toma por toma (cámara, encuadre, fallos, ritmo de la música). Para escoger tomas, cortar al
-  ritmo o editar «como» un video que el usuario nombre.
+- analizar_video: un video toma por toma (cámara, encuadre, fallos, ritmo de la música), con imágenes de todo el video,
+  del texto de cerca cuadro a cuadro y del cierre. Para escoger tomas, cortar al ritmo o editar «como» un video que el
+  usuario nombre: copia su letra, sus colores, su sombra (o que no tiene), cómo entra cada cosa y su cierre.
 - Y las demás que necesites: revisar_audio, quitar_fondo, animar_capa, anadir_pieza, poner_audio, transcribir…
 Lo que cambias aparece al momento en su editor y él lo deshace con Ctrl+Z.
 

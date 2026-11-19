@@ -380,18 +380,38 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
         } catch (e) {
           return fallo(e instanceof Error ? e.message : String(e))
         }
-        const cuerpo = `${a.md.split('## Para seguir')[0].trim()}\n\n${a.tomasMd.trim()}\n\nLos fotogramas de cada toma están en ${join(a.carpeta, 'tomas')} (toma-NN.jpg). Lo marcado «míralo» o «pista» confírmalo viendo su fotograma.`
-        // La hoja: un fotograma por toma (las 24 primeras), para ver el video de un vistazo.
-        const n = Math.min(24, a.tomas.length)
-        const jpg = join(a.carpeta, 'hoja-tomas.jpg')
-        if (n && !existsSync(jpg)) {
-          const columnas = Math.min(6, n)
-          spawnSync(rutaFfmpeg(), ['-v', 'error', '-y', '-start_number', '1', '-i', join(a.carpeta, 'tomas', 'toma-%02d.jpg'), '-frames:v', '1',
-            '-vf', `scale=180:-2,pad=iw+4:ih+4:2:2:white,tile=${columnas}x${Math.ceil(n / columnas)}`, '-q:v', '5', jpg])
+        // Las imágenes que van con el texto: todo el video de un vistazo, el texto de cerca cuadro a cuadro (su letra,
+        // su color y cómo se anima) y el cierre. Una foto por toma no basta: dentro de una toma pasan cosas.
+        const vistas: { que: string; ruta: string }[] = []
+        const vistazo = join(a.carpeta, 'vistazo.jpg')
+        if (existsSync(vistazo)) vistas.push({ que: 'todo el video, cuadro a cuadro', ruta: vistazo })
+        else {
+          // Análisis de antes: la hoja con un fotograma por toma (las 24 primeras).
+          const n = Math.min(24, a.tomas.length)
+          const jpg = join(a.carpeta, 'hoja-tomas.jpg')
+          if (n && !existsSync(jpg)) {
+            const columnas = Math.min(6, n)
+            spawnSync(rutaFfmpeg(), ['-v', 'error', '-y', '-start_number', '1', '-i', join(a.carpeta, 'tomas', 'toma-%02d.jpg'), '-frames:v', '1',
+              '-vf', `scale=180:-2,pad=iw+4:ih+4:2:2:white,tile=${columnas}x${Math.ceil(n / columnas)}`, '-q:v', '5', jpg])
+          }
+          if (existsSync(jpg)) vistas.push({ que: 'un fotograma por toma', ruta: jpg })
         }
-        return existsSync(jpg)
-          ? { texto: cuerpo, imagen: { datos: readFileSync(jpg).toString('base64'), tipo: 'image/jpeg' } }
-          : ok(cuerpo)
+        const conTexto = (a.tomas as { n: number; texto_de_cerca?: { tira?: string } }[]).find((t) => t.texto_de_cerca?.tira)
+        if (conTexto?.texto_de_cerca?.tira) {
+          const tira = join(a.carpeta, conTexto.texto_de_cerca.tira)
+          if (existsSync(tira)) vistas.push({ que: `el texto de la toma ${conTexto.n} de cerca, cuadro a cuadro (de arriba abajo)`, ruta: tira })
+        }
+        const cierre = join(a.carpeta, 'cierre.jpg')
+        if (existsSync(cierre)) vistas.push({ que: 'el cierre, cuadro a cuadro', ruta: cierre })
+        const cuerpo =
+          `${a.md.split('## Para seguir')[0].trim()}\n\n${a.tomasMd.trim()}\n\n` +
+          (vistas.length ? `Las imágenes, en orden: ${vistas.map((v, i) => `${i + 1}) ${v.que}`).join('; ')}. ` : '') +
+          `Todo está en ${a.carpeta} (tomas/toma-NN.jpg, -tira.jpg, -texto.jpg, cierre.jpg). Lo marcado «míralo» o «pista» ` +
+          'confírmalo en las imágenes. Para copiar un video: su letra (gruesa o fina, redonda o recta), sus colores, su sombra o ' +
+          'su falta de sombra, cómo entra y se anima cada cosa y su cierre (logo, usuario, llamada a la acción); no quites el ' +
+          'cierre sin preguntarle al usuario.'
+        const [primera, ...resto] = vistas.map((v) => ({ datos: readFileSync(v.ruta).toString('base64'), tipo: 'image/jpeg' as const }))
+        return primera ? { texto: cuerpo, imagen: primera, imagenes: resto } : ok(cuerpo)
       }
     },
     {

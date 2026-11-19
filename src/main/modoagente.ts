@@ -182,7 +182,9 @@ y efectos de sonido (34: transiciones, golpes, tensión, objetos y ambientes; \`
 gruesa, palabra roja enorme, subrayado, grano), la etiqueta de papel con un nombre, palabras sueltas que flotan, un objeto
 de museo bajo un foco que entra girando en 3D y fotos de archivo que caen apiladas. Lee \`kit/RECETA.md\` (es corto).
 - \`python kit/kit.py analizar <video>\`: un video toma por toma (local, gratis, segundos): \`analisis/<nombre>/ANALISIS.md\`
-  (ritmo, cámara, encuadre, origen, texto, tempo y si corta en el golpe), \`tomas.md\` y un fotograma por toma.
+  (ritmo, cámara, encuadre, origen, texto, cierre, tempo y si corta en el golpe), \`tomas.md\`, un fotograma por toma y,
+  para mirar: \`vistazo.jpg\` (todo el video), \`tomas/toma-NN-tira.jpg\` (lo que pasa dentro de una toma),
+  \`tomas/toma-NN-texto.jpg\` y \`-texto-tira.jpg\` (el texto de cerca y cómo se anima) y \`cierre.jpg\`.
 - **Si el usuario trae un video de referencia para copiar su estilo** (mira la habilidad \`copiar-un-video\`), haz una
   lista de sus efectos (qué letra, qué color,
   cómo entra cada cosa, cada cuánto cambia la imagen) y pon al lado la pieza del kit que hace cada uno: casi todo está.

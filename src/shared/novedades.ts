@@ -24,6 +24,25 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.96',
+    fecha: '2026-11-19',
+    resumen: 'Al copiar un video, el agente mira de cerca su texto, cómo entra cada cosa y cómo termina.',
+    novedades: [
+      {
+        icono: 'search',
+        titulo: 'Copia la letra y su animación',
+        texto:
+          'El análisis de una referencia ahora le muestra al agente el texto de cerca y cuadro a cuadro: su letra, sus colores, si lleva sombra y si parpadea, se escribe o se mueve. Así lo copia, en vez de poner su letra de siempre con sombra.'
+      },
+      {
+        icono: 'film',
+        titulo: 'Ve todo el video y su cierre',
+        texto:
+          'Ve el video entero en una hoja, lo que pasa dentro de cada toma (de dónde entra cada producto) y cómo termina. Si la referencia cierra con un logo o tu Instagram, lo copia con tus datos o te los pregunta; ya no lo quita por su cuenta.'
+      }
+    ]
+  },
+  {
     version: '0.1.95',
     fecha: '2026-11-19',
     resumen: 'El chat de los videos hechos por el agente usa el agente que eliges en la caja.',
