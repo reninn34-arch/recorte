@@ -24,6 +24,28 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.93',
+    fecha: '2026-11-19',
+    resumen: 'El chat de cualquier proyecto trae la caja completa: eliges agente, modelo, imágenes, clips y voz.',
+    novedades: [
+      {
+        icono: 'sparkles',
+        titulo: 'La caja completa en todos los proyectos',
+        texto: 'El chat de un proyecto que editas a mano trae ahora lo mismo que el de una conversación: el agente, el modelo y cuánto piensa, imágenes y clips de Flow, la voz y «Pregúntame antes». El «+» añade fotos, videos o una carpeta a tu biblioteca.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Cada proyecto recuerda lo que eliges',
+        texto: 'Lo que eliges en la caja se guarda en el proyecto y el agente lo respeta: edita con ese agente y modelo, no genera imágenes, clips ni voz si no lo permites, y te pide permiso antes de gastar créditos.'
+      },
+      {
+        icono: 'layers',
+        titulo: 'Menús que caben en el chat',
+        texto: 'El menú de modelos del chat del editor ya no se corta: se abre completo, con los agentes arriba.'
+      }
+    ]
+  },
+  {
     version: '0.1.92',
     fecha: '2026-11-19',
     resumen: 'Una puesta a punto del diseño: el editor más limpio, conversaciones más fáciles de leer y Ajustes por secciones.',
