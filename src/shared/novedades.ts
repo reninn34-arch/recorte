@@ -24,6 +24,33 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.92',
+    fecha: '2026-11-19',
+    resumen: 'Una puesta a punto del diseño: el editor más limpio, conversaciones más fáciles de leer y Ajustes por secciones.',
+    novedades: [
+      {
+        icono: 'layers',
+        titulo: 'Un editor más limpio',
+        texto: 'Las pistas muestran su nombre entero, las capas se leen sin puntos encima, las palabras resaltadas de tus textos salen en color (sin asteriscos) y los atajos quedan alineados. El agente del chat se ve completo, en una barra compacta.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Conversaciones más fáciles de leer',
+        texto: 'Lo que el agente comprobó antes de entregar sale en una lista, y los puntos de su plan, cada uno en su renglón. La tarjeta del video ya no se corta y trae «Abrir carpeta».'
+      },
+      {
+        icono: 'settings',
+        titulo: 'Ajustes por secciones',
+        texto: 'Ajustes ahora tiene un menú a la izquierda (General, Agentes, Voz, Imágenes y clips, Aprendizaje, Conexiones, Equipo y Acerca de) y un buscador para llegar a cualquier ajuste.'
+      },
+      {
+        icono: 'image',
+        titulo: 'Portadas sin franjas negras',
+        texto: 'La miniatura de un video nuevo salta los cuadros con una franja negra arriba o abajo, como un fundido desde negro.'
+      }
+    ]
+  },
+  {
     version: '0.1.91',
     fecha: '2026-11-19',
     resumen: 'El chat del editor ahora trabaja con herramientas: mira, edita y comprueba, con cualquier agente.',
