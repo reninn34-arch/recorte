@@ -37,11 +37,16 @@ function TarjetaVideo({ c, numero, onEditor, ocupado }: { c: Creacion; numero?: 
           {numero ? `Video ${numero} · ` : ''}
           {c.guion?.titulo ?? c.nombre} · versión {c.version}
         </strong>
-        <span>{c.formato === 'vertical' ? 'Vertical 9:16' : 'Horizontal 16:9'} · guardado en tu carpeta de videos</span>
+        <span>{c.formato === 'vertical' ? 'Vertical 9:16' : 'Horizontal 16:9'}{c.copia ? ' · guardado en tu carpeta de videos' : ''}</span>
         <div className="conv-entrega-botones">
           <button className="btn primary" onClick={onEditor} disabled={ocupado}>
             <Icon name="layers" size={15} /> Abrir en el editor
           </button>
+          {c.copia && (
+            <button className="btn" onClick={() => void window.recorte.carpetaAbrir(c.copia!.replace(/[\\/][^\\/]+$/, ''))} title={c.copia}>
+              <Icon name="carpeta" size={15} /> Abrir carpeta
+            </button>
+          )}
         </div>
         <span className="conv-entrega-nota">En el editor cada foto, rótulo y frase de voz queda suelta para tocarla a mano, con este mismo chat al lado.</span>
       </div>

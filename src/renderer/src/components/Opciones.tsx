@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { EstadoSistema, Herramienta, MedidaRender, Preferencias } from '../../../shared/api'
 import type { AjustesIA } from '../../../shared/types'
 import type { Agentes } from '../hooks/agentes'
-import { Icon } from '../Icons'
+import { Icon, type IconName } from '../Icons'
 import { ListaAgentes } from './ListaAgentes'
 import { LogoAgente, LogoHerramienta } from './Logos'
 import { SeccionFlow } from './SeccionFlow'
@@ -239,6 +239,26 @@ export function Opciones({
     }
   }
   const [instalando, setInstalando] = useState<string | null>(null)
+  const [seccion, setSeccion] = useState<IdSeccion>(() => {
+    try {
+      const guardada = localStorage.getItem('recorte.ajustes.seccion') as IdSeccion | null
+      return guardada && SECCIONES.some((x) => x.id === guardada) ? guardada : 'general'
+    } catch {
+      return 'general'
+    }
+  })
+  const [busca, setBusca] = useState('')
+  const elegir = (id: IdSeccion) => {
+    setSeccion(id)
+    setBusca('')
+    try {
+      localStorage.setItem('recorte.ajustes.seccion', id)
+    } catch {
+      // Sin almacenamiento, vuelve a General la próxima vez.
+    }
+  }
+  /** Si una parte se ve: la de la sección elegida o, buscando, la que tenga esas palabras (en cualquier sección). */
+  const ver = (id: IdSeccion, palabras: string) => (busca.trim() ? coincide(busca, palabras) : seccion === id)
   const [voz, setVoz] = useState<EstadoVoz | null>(null)
   const [pidiendoClave, setPidiendoClave] = useState(false)
   const [clave, setClave] = useState('')
@@ -311,24 +331,60 @@ export function Opciones({
 
   const uso = sistema ? sistema.uso.proyectos + sistema.uso.creaciones + sistema.uso.agentes : 0
 
+  const faltaHerramienta = Boolean(sistema?.herramientas.some((h) => h.estado === 'falta'))
+  const actual = SECCIONES.find((x) => x.id === seccion) ?? SECCIONES[0]
+  const buscando = busca.trim()
+
   return (
-    <div className="opciones">
-      <div className="op-columna">
+    <div className="opciones op-con-menu">
+      <nav className="op-menu" aria-label="Secciones de ajustes">
         {onVolver && (
           <button className="btn small ghost boton-volver op-volver" onClick={onVolver}>
             <Icon name="chevron" size={14} /> Inicio
           </button>
         )}
         <h2 className="op-encabezado">Ajustes</h2>
+        <label className="op-buscar">
+          <Icon name="search" size={14} />
+          <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar un ajuste…" aria-label="Buscar un ajuste" />
+        </label>
+        {SECCIONES.map((x) => (
+          <button
+            key={x.id}
+            className={`op-menu-item ${!buscando && seccion === x.id ? 'is-on' : ''}`}
+            onClick={() => elegir(x.id)}
+            aria-current={!buscando && seccion === x.id ? 'page' : undefined}
+          >
+            <Icon name={x.icono} size={15} />
+            <span>{x.nombre}</span>
+            {x.id === 'equipo' && faltaHerramienta && <i className="op-menu-aviso" title="Falta una herramienta de video" />}
+          </button>
+        ))}
+      </nav>
+      <div className="op-columna">
+        <div className="op-cabeza-seccion">
+          <h2>{buscando ? `Buscando «${buscando}»` : actual.nombre}</h2>
+          {!buscando && <p>{actual.nota}</p>}
+        </div>
 
+        {ver('general', 'tamaño interfaz zoom escala grande chica') && (
+          <>
         <Seccion titulo="Tamaño de la interfaz" nota="En automático crece con la ventana: en un monitor grande todo se ve proporcionado. También con Ctrl + y Ctrl − (Ctrl 0 vuelve a automático).">
           <TamanoInterfaz />
         </Seccion>
+          </>
+        )}
 
+        {ver('general', 'tus videos carpeta exportaciones guardar') && (
+          <>
         <Seccion titulo="Tus videos">
           <CarpetaVideos modo="ajustes" />
         </Seccion>
+          </>
+        )}
 
+        {ver('agentes', 'agentes claude codex chatgpt gemini kimi opencode antigravity conectar plan') && (
+          <>
         <section className="op-seccion">
           <div className="op-titulo">
             <h3>Agentes</h3>
@@ -341,9 +397,17 @@ export function Opciones({
             OpenCode, solo tu cuenta, que es gratis. Los demás, la cuenta o la llave de cada uno.
           </p>
         </section>
+          </>
+        )}
 
+        {ver('agentes', 'uso cuota plan limite queda') && (
+          <>
         <SeccionUso onAviso={onAviso} />
+          </>
+        )}
 
+        {ver('voz', 'voz narracion google ai studio llave gemini tts') && (
+          <>
         <Seccion
           titulo="Voz"
           nota="Al hacer un video eliges en el paso Voz si la grabas tú o la genera Gemini. La sesión de Google vive en un perfil aparte: ningún agente la usa."
@@ -430,15 +494,35 @@ export function Opciones({
             <p className="op-nota op-dentro">Para entrar con tu cuenta de Google hace falta Microsoft Edge o Google Chrome; con la llave no.</p>
           )}
         </Seccion>
+          </>
+        )}
 
+        {ver('flow', 'flow imagenes clips veo nano banana chatgpt creditos derechos') && (
+          <>
         <SeccionFlow onAviso={onAviso} />
+          </>
+        )}
 
+        {ver('aprende', 'criterio gustos aprender aprendido') && (
+          <>
         <SeccionCriterio onAviso={onAviso} />
+          </>
+        )}
 
+        {ver('aprende', 'habilidades skills lecciones aprendido') && (
+          <>
         <SeccionHabilidades onAviso={onAviso} />
+          </>
+        )}
 
+        {ver('conexiones', 'mcp claude code conexiones servidor contrasena') && (
+          <>
         <SeccionMcp onAviso={onAviso} />
+          </>
+        )}
 
+        {ver('general', 'avisos notificacion sonido') && (
+          <>
         <Seccion titulo="Avisos">
           <div className="op-fila">
             <span className="op-icono"><Icon name="clock" size={16} /></span>
@@ -456,7 +540,11 @@ export function Opciones({
             </div>
           </div>
         </Seccion>
+          </>
+        )}
 
+        {ver('equipo', 'equipo procesador memoria gpu render velocidad whisper') && (
+          <>
         <Seccion
           titulo="Tu equipo"
           extra={
@@ -506,11 +594,19 @@ export function Opciones({
             </button>
           </div>
         </Seccion>
+          </>
+        )}
 
+        {ver('acerca', 'version actualizar novedades') && (
+          <>
         <Seccion titulo="Versión">
           <FilaVersion onNovedades={onNovedades} />
         </Seccion>
+          </>
+        )}
 
+        {ver('equipo', 'espacio disco ocupa carpeta') && (
+          <>
         <Seccion titulo="Espacio en disco">
           <div className="op-fila">
             <span className="op-icono"><Icon name="folder" size={16} /></span>
@@ -529,7 +625,11 @@ export function Opciones({
             </div>
           </div>
         </Seccion>
+          </>
+        )}
 
+        {ver('equipo', 'herramientas ffmpeg python node hyperframes instalar') && (
+          <>
         <Seccion
           titulo="Herramientas de video"
           extra={
@@ -555,8 +655,14 @@ export function Opciones({
             <div className="op-fila"><span className="tl-dim">Revisando…</span></div>
           )}
         </Seccion>
+          </>
+        )}
 
+        {ver('agentes', 'api propia llave avanzado') && (
+          <>
         <ApiPropia agentes={agentes} onAviso={onAviso} />
+          </>
+        )}
       </div>
     </div>
   )
@@ -583,4 +689,25 @@ function veredictoEquipo(s: EstadoSistema | null, m: MedidaRender | null): strin
   if (m && m.minutos_documental > 15) return 'Videos del agente: tu equipo alcanza, aunque tarda'
   if (m) return 'Videos del agente: tu equipo va bien'
   return gbMem >= 15 && s.hilos >= 8 ? 'Videos del agente: tu equipo debería ir bien' : 'Videos del agente'
+}
+
+type IdSeccion = 'general' | 'agentes' | 'voz' | 'flow' | 'aprende' | 'conexiones' | 'equipo' | 'acerca'
+
+/** Las secciones de Ajustes, como en los ajustes de Claude: cada una en su página, con su menú a la izquierda. */
+const SECCIONES: { id: IdSeccion; nombre: string; icono: IconName; nota: string }[] = [
+  { id: 'general', nombre: 'General', icono: 'settings', nota: 'El tamaño de la interfaz, dónde se guardan tus videos y los avisos.' },
+  { id: 'agentes', nombre: 'Agentes', icono: 'sparkles', nota: 'Quién edita y crea contigo, con qué cuenta paga y cuánto le queda.' },
+  { id: 'voz', nombre: 'Voz', icono: 'music', nota: 'La voz que narra tus videos.' },
+  { id: 'flow', nombre: 'Imágenes y clips', icono: 'image', nota: 'Google Flow y ChatGPT para generar lo que falte en un video.' },
+  { id: 'aprende', nombre: 'Aprendizaje', icono: 'key', nota: 'Lo que el agente sabe de ti y las formas de trabajar que usa.' },
+  { id: 'conexiones', nombre: 'Conexiones', icono: 'paperclip', nota: 'Usar Recorte desde Claude Code, Codex u otro agente (MCP).' },
+  { id: 'equipo', nombre: 'Equipo y herramientas', icono: 'sliders', nota: 'Tu equipo, las herramientas de video y el espacio en disco.' },
+  { id: 'acerca', nombre: 'Acerca de', icono: 'gift', nota: 'La versión de Recorte y sus novedades.' }
+]
+
+/** Si lo buscado está en esas palabras: todas las palabras, sin tildes ni mayúsculas. */
+function coincide(busca: string, palabras: string): boolean {
+  const limpio = (t: string) => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  const donde = limpio(palabras)
+  return limpio(busca).split(/\s+/).filter(Boolean).every((w) => donde.includes(w))
 }

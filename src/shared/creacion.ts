@@ -112,6 +112,8 @@ export interface MensajeCreacion {
   error?: boolean
   /** Siguientes pasos que propone el agente (botones). */
   propuestas?: string[]
+  /** Lo que el agente comprobó antes de entregar (una línea por punto, se dibuja como lista). */
+  comprobado?: string[]
   /** Gustos que aprendió en este paso. */
   aprendido?: string[]
   /** El plan tal como quedó en este turno de la charla (se dibuja con sus pasos y «Hazlo»). */

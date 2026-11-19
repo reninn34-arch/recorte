@@ -3522,3 +3522,67 @@ button { cursor: pointer; }
 .ed-curvas-pie { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 
 .ed-lut-nombre { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ===== Puesta a punto del diseño (0.1.92) ===== */
+/* Cabeceras de pista: el nombre entero, y en las pistas con varias filas los botones en la primera (no a media altura
+   pisando el nombre de otra fila). */
+.ed .tl-nombres { width: 128px; }
+.ed .tl-nombre { gap: 2px; padding: 0 6px 0 12px; }
+.tl-nombre-texto { letter-spacing: 0.04em; }
+.tl-nombre:has(.tl-nombre-filas) { align-items: flex-start; }
+.tl-nombre:has(.tl-nombre-filas) .tl-pista-boton { margin-top: 6px; }
+.tl-nombre-filas i { min-height: 30px; }
+.tl-pista-boton { width: 22px; height: 22px; }
+/* Capas: la miniatura repetida de una pieza se veía como puntos encima del nombre; el nombre va sobre una base oscura,
+   y una capa que pisa a otra se separa con un filo. */
+.tl-capa .tl-clip-texto { background: rgba(8, 9, 7, 0.72); border-radius: 4px; padding: 0 5px; max-width: calc(100% - 12px); text-shadow: none; }
+.tl-capa { box-shadow: -2px 0 0 var(--bg); }
+.tl-clave { bottom: 1px; width: 6px; height: 6px; margin-left: -3px; }
+/* Textos: la palabra resaltada en color, sin los asteriscos. */
+.tl-resalte { color: #ffd860; font-weight: 700; }
+/* Chat del editor: el agente en una barra compacta (nombre entero, una línea corta debajo), no en una caja que lo corta. */
+.agente-panel .panel-head { padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.agente-panel .agente-actual { border: none; background: transparent; padding: 4px 6px; border-radius: 10px; }
+.agente-panel .agente-actual:hover { background: var(--panel-2); }
+.agente-panel .agente-actual-texto strong { font-size: 13px; }
+.agente-actual-cambiar { display: grid; place-items: center; color: var(--dim); }
+/* Los mensajes se desvanecen al pasar bajo la cabecera, en vez de cortarse en seco. */
+.agente-panel .chat-lista { mask-image: linear-gradient(to bottom, transparent 0, #000 22px); -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 22px); padding-top: 14px; }
+.chat-paso { color: var(--muted); }
+/* Atajos: cada tecla a su altura, arriba junto a su explicación (no estirada hasta la altura del texto). */
+.ed-atajos { align-items: start; }
+.ed-atajos dt { align-self: start; line-height: 1.6; }
+.ed-atajos dd { line-height: 1.45; padding-top: 1px; }
+/* Conversación: lo que comprobó el agente, como lista (no pegado al resumen con «;»). */
+.chat-comprobado { margin-top: 10px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); display: flex; flex-direction: column; gap: 6px; }
+.chat-comprobado-titulo { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.chat-comprobado ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.chat-comprobado li { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: #d8dccd; line-height: 1.45; }
+.chat-comprobado li svg { color: var(--accent); flex-shrink: 0; margin-top: 3px; }
+/* La tarjeta del video: el reproductor reserva su alto desde el principio (9:16 o 16:9), así el chat baja hasta el
+   final de verdad y la tarjeta no queda cortada cuando el video termina de cargar. */
+.conv-entrega-video { aspect-ratio: 9 / 16; height: auto; object-fit: contain; }
+.conv-entrega-video.horizontal { aspect-ratio: 16 / 9; }
+.conv-entrega { align-items: flex-start; }
+.conv-entrega-texto { flex: 1; align-self: stretch; }
+/* Ajustes por secciones, como los de Claude: el menú a la izquierda y cada sección en su página. */
+.opciones.op-con-menu { display: flex; align-items: flex-start; }
+.op-menu { position: sticky; top: 0; width: 240px; flex-shrink: 0; box-sizing: border-box; padding: 24px 12px; display: flex; flex-direction: column; gap: 2px; border-right: 1px solid var(--line); min-height: 100%; align-self: stretch; }
+.op-menu .op-volver { margin-bottom: 14px; }
+.op-menu .op-encabezado { padding: 0 10px 12px; }
+.op-buscar { display: flex; align-items: center; gap: 8px; margin: 0 2px 10px; padding: 0 10px; height: 34px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--dim); }
+.op-buscar input { flex: 1; min-width: 0; border: none; background: transparent; color: var(--text); font: inherit; font-size: 13px; outline: none; }
+.op-buscar:focus-within { border-color: var(--line-2); }
+.op-menu-item { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border: none; border-radius: 9px; background: transparent; color: var(--muted); font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
+.op-menu-item:hover { background: var(--panel-2); color: var(--text); }
+.op-menu-item.is-on { background: var(--panel-3); color: var(--text); }
+.op-menu-item span { flex: 1; }
+.op-menu-aviso { width: 7px; height: 7px; border-radius: 999px; background: var(--accent-2); }
+.op-con-menu .op-columna { flex: 1; min-width: 0; padding-top: 40px; }
+.op-cabeza-seccion { display: flex; flex-direction: column; gap: 6px; }
+.op-cabeza-seccion h2 { margin: 0; font-size: 24px; letter-spacing: -.02em; }
+.op-cabeza-seccion p { margin: 0; color: var(--muted); font-size: 13.5px; }
+/* Los puntos que el agente escribe con «•» dentro del párrafo, cada uno en su renglón. */
+.chat-puntos-lista { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.chat-puntos-lista li { line-height: 1.5; }
+.chat-puntos-lista li::marker { color: var(--accent); }

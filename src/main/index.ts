@@ -54,7 +54,7 @@ import { convertirAVoz, generarVozGemini, prepararVoz } from './voz'
 import { montarVozEnVideo } from './montajevoz'
 import { conectarVozGoogle, desconectarVozGoogle, estadoVozGoogle, generarVozGoogle } from './vozgoogle'
 import { analizarMaterialCreacion } from './estilo/material'
-import { anotar, archivoEntregado, comandoAgentico, copiarEntrada, definirConectadas, LimiteUso, pasoHacer, pasoPlan, revisarYPublicar } from './modoagente'
+import { anotar, archivoEntregado, comandoAgentico, portadaClara, copiarEntrada, definirConectadas, LimiteUso, pasoHacer, pasoPlan, revisarYPublicar } from './modoagente'
 import { prepararArchivos } from './archivos'
 import { clipsDelPlan, esAprobacion, MAX_CLIPS_GUION, pasoAnunciado } from '../shared/modoagente'
 import { estiloPorId } from '../shared/estilos'
@@ -807,13 +807,15 @@ app.whenReady().then(() => {
         delete c.agente.nota
         if (revisado.resultado.tipo === 'video') {
           c.salida = revisado.resultado.archivo
-          c.portada = revisado.resultado.revision[1] ?? revisado.resultado.revision[0]
+          c.portada = await portadaClara(carpeta, revisado.resultado.revision)
         }
         c.fase = 'listo'
         const copia = revisado.resultado.tipo === 'video' ? await copiarCreacion(c) : null
-        const comprobado = revisado.resultado.comprobaciones.length ? ` Comprobé: ${revisado.resultado.comprobaciones.join('; ')}.` : ''
+        // Lo comprobado va como lista aparte (no pegado al resumen con «;»); la carpeta, en el botón de la tarjeta.
+        const comprobado = revisado.resultado.comprobaciones.map((x) => x.trim().replace(/[\s;.]+$/, '')).filter(Boolean)
         c.mensajes.push({
-          ...mensaje('agente', `${revisado.resultado.resumen}${comprobado}${copia ? ` Guardado en ${copia}.` : ''}`),
+          ...mensaje('agente', revisado.resultado.resumen || (copia ? 'Listo: tu video está en tu carpeta de videos.' : 'Listo.')),
+          ...(comprobado.length ? { comprobado } : {}),
           propuestas: []
         })
         // Si parte de la narración no se pudo generar (casi siempre, la cuota diaria de voz), el video se entrega igual,

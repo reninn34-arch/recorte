@@ -1212,3 +1212,25 @@ async function renderLimpio(rutaReceta: string, carpeta: string, version: number
 export function anotar(estado: EstadoModoAgente, linea: string): void {
   estado.registro = [...estado.registro, linea].slice(-MAX_REGISTRO)
 }
+
+/**
+ * La portada de un video: un fotograma de revisión que no tenga una franja negra arriba o abajo (un fundido desde negro,
+ * bandas de un video horizontal metido en vertical). Mira el brillo de la franja de arriba y la de abajo con FFmpeg;
+ * si todos la tienen, se queda con el de siempre (el del 25 %).
+ */
+export async function portadaClara(carpeta: string, revision: string[]): Promise<string | undefined> {
+  const orden = [1, 2, 3, 0, 4].filter((i) => i < revision.length)
+  const ffmpeg = resolverBinario('ffmpeg') ?? 'ffmpeg'
+  const brillo = async (archivo: string, y: string): Promise<number | null> => {
+    const r = await ejecutar([`"${ffmpeg}"`, '-hide_banner', '-i', `"${join(carpeta, archivo)}"`, '-vf', `crop=iw:ih*0.12:0:${y},showinfo`, '-f', 'null', '-'], carpeta, 20_000)
+    const m = /mean:\[(\d+)/.exec(r.salida)
+    return m ? Number(m[1]) : null
+  }
+  for (const i of orden) {
+    const arriba = await brillo(revision[i], '0')
+    const abajo = await brillo(revision[i], 'ih*0.88')
+    if (arriba === null || abajo === null) break
+    if (arriba > 24 && abajo > 24) return revision[i]
+  }
+  return revision[1] ?? revision[0]
+}

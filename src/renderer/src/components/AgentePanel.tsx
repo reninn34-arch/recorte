@@ -53,9 +53,11 @@ export function AgentePanel({
             ) : null}
             <span className="agente-actual-texto">
               <strong>{activo?.nombre ?? api?.nombre}</strong>
-              <span>{activo ? PLAN_DE[activo.id] : api?.plan}</span>
+              <span title={activo ? PLAN_DE[activo.id] : api?.plan}>{activo ? 'Mira, edita y comprueba' : 'Llave de API · solo texto'}</span>
             </span>
-            <span className="agente-actual-cambiar">Cambiar</span>
+            <span className="agente-actual-cambiar" aria-hidden="true">
+              <Icon name="chevron" size={14} />
+            </span>
           </button>
         ) : (
           <div className="agente-falta">

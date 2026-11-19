@@ -343,11 +343,24 @@ export function ChatCreacion({
           {c.adjuntos.length > 0 && !material && <span className="chat-ref">{c.adjuntos.length} {c.adjuntos.length === 1 ? 'archivo' : 'archivos'}</span>}
         </div>
         {material}
-        {c.mensajes.map((m) => {
+        {c.mensajes.map((m0) => {
+          const m = conComprobadoAparte(m0)
           const ultimo = m.id === c.mensajes.at(-1)?.id
           return (
             <div key={m.id} className={`chat-msg ${m.rol} ${m.error ? 'is-error' : ''}`}>
-              {m.texto && <p>{m.texto}</p>}
+              {m.texto && <TextoMensaje texto={m.texto} />}
+              {m.comprobado?.length ? (
+                <div className="chat-comprobado">
+                  <span className="chat-comprobado-titulo">Lo que comprobé</span>
+                  <ul>
+                    {m.comprobado.map((x, i) => (
+                      <li key={i}>
+                        <Icon name="check" size={12} /> {x}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
               {m.medios?.length ? (
                 <div className="cr-medios">
                   {m.medios.map((r) =>
@@ -517,5 +530,33 @@ export function ChatCreacion({
         />
       </div>
     </aside>
+  )
+}
+
+/**
+ * Los mensajes de entrega de antes llevaban lo comprobado pegado al resumen («… Comprobé: a; b. Guardado en C:\…»):
+ * se separa para dibujarlo como lista, igual que los nuevos, sin tocar lo guardado.
+ */
+function conComprobadoAparte(m: MensajeCreacion): MensajeCreacion {
+  if (m.comprobado || m.rol !== 'agente' || !m.texto.includes(' Comprobé: ')) return m
+  const [antes, despues] = m.texto.split(' Comprobé: ', 2)
+  const lista = despues.replace(/ Guardado en .*$/s, '').split(/;\s*/).map((x) => x.trim().replace(/[\s;.]+$/, '')).filter(Boolean)
+  return lista.length ? { ...m, texto: antes.trim(), comprobado: lista } : m
+}
+
+/** Un mensaje del agente: si trae sus puntos con «•» en medio del párrafo, cada punto va en su renglón, como lista. */
+function TextoMensaje({ texto }: { texto: string }) {
+  const partes = texto.split(/\s+•\s+/)
+  if (partes.length < 3) return <p>{texto}</p>
+  const [antes, ...puntos] = partes
+  return (
+    <>
+      {antes.trim() && <p>{antes.trim()}</p>}
+      <ul className="chat-puntos-lista">
+        {puntos.map((x, i) => (
+          <li key={i}>{x.trim()}</li>
+        ))}
+      </ul>
+    </>
   )
 }

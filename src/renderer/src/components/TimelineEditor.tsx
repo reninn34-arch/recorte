@@ -1894,7 +1894,7 @@ export function TimelineEditor({
                 ) : p.id === 'sonidos' && filasSonidos > 1 ? (
                   <span className="tl-nombre-texto tl-nombre-filas" title="Varias pistas de sonidos: arrastra un efecto arriba o abajo para encimarlo con otro.">
                     {Array.from({ length: filasSonidos }, (_, i) => (
-                      <i key={i}>Son. {filasSonidos - i}</i>
+                      <i key={i}>Sonido {filasSonidos - i}</i>
                     ))}
                   </span>
                 ) : (
@@ -2131,10 +2131,10 @@ export function TimelineEditor({
                   onContextMenu={(e) => menuDe(e, { tipo: 'texto', id: x.id })}
                     onPointerDown={(e) => sumar(e, { tipo: 'texto', id: x.id }) || arrastrarTexto(e, x.id, 'mover')}
                   onDoubleClick={() => textoRef.current?.select()}
-                  title={x.texto}
+                  title={x.texto.replace(/\*([^*]+)\*/g, '$1')}
                 >
                   <span className="tl-asa izquierda" onPointerDown={(e) => arrastrarTexto(e, x.id, 'inicio')} />
-                  <span className="tl-clip-texto">{x.texto || 'Texto vacío'}</span>
+                  <span className="tl-clip-texto">{x.texto ? conResaltes(x.texto) : 'Texto vacío'}</span>
                   <span className="tl-asa derecha" onPointerDown={(e) => arrastrarTexto(e, x.id, 'fin')} />
                 </div>
               ))}
@@ -3729,4 +3729,17 @@ function nombreMatiz(h: number): string {
   if (x < 260) return 'Azules'
   if (x < 290) return 'Violetas'
   return 'Magentas'
+}
+
+/** El texto de un rótulo con sus palabras resaltadas (`*así*`) en color y sin los asteriscos. */
+function conResaltes(texto: string): React.ReactNode[] {
+  return texto.split(/(\*[^*]+\*)/g).map((trozo, i) =>
+    /^\*[^*]+\*$/.test(trozo) ? (
+      <b key={i} className="tl-resalte">
+        {trozo.slice(1, -1)}
+      </b>
+    ) : (
+      trozo
+    )
+  )
 }
