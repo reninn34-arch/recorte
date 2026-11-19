@@ -734,6 +734,10 @@ export default function App() {
     setProyecto((p) => (p && p.id === id ? { ...p, chat } : p))
   }
 
+  function cambiarAjustesChat(id: string, ajustes: AjustesCreacion) {
+    setProyecto((p) => (p && p.id === id ? { ...p, chatAjustes: { ...p.chatAjustes, ...ajustes } } : p))
+  }
+
   function cambiarTimeline(timeline: Timeline) {
     setProyecto((p) => (p ? { ...p, timeline } : p))
   }
@@ -1174,6 +1178,7 @@ export default function App() {
                 agentes={agentes}
                 puente={puente}
                 onCambiarChat={cambiarChat}
+                onAjustesChat={cambiarAjustesChat}
                 onCambiarAgente={() => setVista('inicio')}
                 editando={editando}
                 generando={generando}

@@ -99,7 +99,8 @@ function Opcion({ elegida, onClick, children, nota }: { elegida: boolean; onClic
  * momento y, mientras el agente trabaja, el botón de enviar es el de parar.
  */
 export interface CajaEnChat {
-  creacion: Creacion
+  /** Lo elegido hasta ahora: el de una conversación o el del chat de un proyecto del editor. */
+  creacion: AjustesCreacion
   ocupado: boolean
   onParar: () => void
   onEnviar: (texto: string) => void

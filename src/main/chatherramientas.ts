@@ -28,6 +28,8 @@ export interface PeticionChatHerramientas {
   mcp: { url: string; contrasena: string }
   /** Su carpeta de trabajo para este proyecto (en los datos de Recorte). */
   carpeta: string
+  /** Lo que puede usar según la caja del chat (imágenes, clips, voz, si pregunta antes), en palabras. */
+  permisos?: string
   senal?: AbortSignal
   onPaso?: (texto: string) => void
 }
@@ -115,6 +117,7 @@ export async function turnoChatHerramientas(p: PeticionChatHerramientas & { agen
   }
   const pedido = [
     p.gustos ? `${p.gustos}\n` : '',
+    p.permisos ? `LO QUE PUEDES USAR (lo eligió el usuario en la caja del chat; respétalo):\n${p.permisos}\n` : '',
     p.referencia ? `DÓNDE ESTÁ EL USUARIO EN EL EDITOR: ${p.referencia}` : '',
     `PETICIÓN DEL USUARIO: ${p.peticion}`
   ]

@@ -74,7 +74,7 @@ import { analizarConGeminiVideo, interpretarEstilo } from './estilo/ficha'
 import { viabilidadDe } from './estilo/viabilidad'
 import { guardar } from './disco'
 import { cambiaElGuion, ID_SEGURO, MAX_CLIPS_VEO, mismaNarracion, pideMontarVoz, textoMuestra, textoNarracion, VOCES_GEMINI, vozDesactualizada, vozVigente } from '../shared/creacion'
-import type { AgenteId, Creacion, EleccionTarea, MensajeCreacion, NivelModelo, PeticionCreacion, TareasCreacion } from '../shared/creacion'
+import type { AgenteId, AjustesCreacion, Creacion, EleccionTarea, MensajeCreacion, NivelModelo, PeticionCreacion, TareasCreacion } from '../shared/creacion'
 import { leerCube as leerCubeLut } from '../shared/lut'
 import { archivosVersion, armarBase, baseDe, EstilosPropios, versionBase } from './estilospropios'
 import { turnoAgente } from './chat'
@@ -1583,6 +1583,22 @@ app.whenReady().then(() => {
   ipcMain.handle('proyecto:listar', () => proyectos.list())
 
   // ===== Medios: más videos e imágenes en un proyecto =====
+  // El «+» de la caja del chat del editor: archivos sueltos o carpetas (de una carpeta, sus videos e imágenes).
+  ipcMain.handle('proyecto:agregar-rutas', async (_evento, id: unknown, rutas: unknown) => {
+    if (typeof id !== 'string' || !proyectos.get(id) || !Array.isArray(rutas)) return null
+    const MEDIO = /\.(mp4|mov|mkv|webm|m4v|jpe?g|png|webp)$/i
+    const archivos: string[] = []
+    for (const r of rutas.filter((x): x is string => typeof x === 'string' && existsSync(x))) {
+      if (statSync(r).isDirectory()) {
+        for (const n of readdirSync(r)) if (MEDIO.test(n)) archivos.push(join(r, n))
+      } else if (MEDIO.test(r)) archivos.push(r)
+    }
+    if (!archivos.length) return { agregados: [], fallos: ['Ahí no hay videos ni imágenes que pueda usar.'] }
+    const hecho = await agregarRutas(id, archivos)
+    const { transcript: _t, ...ligero } = hecho.project
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('proyecto:externo', { proyecto: ligero, quien: 'chat', conTimeline: false })
+    return { agregados: hecho.agregados, fallos: hecho.fallos }
+  })
   ipcMain.handle('proyecto:agregar-medios', async (_evento, id: unknown) => {
     if (typeof id !== 'string' || !proyectos.get(id)) throw new Error('Proyecto inválido.')
     const r = await dialog.showOpenDialog({
@@ -3070,13 +3086,18 @@ app.whenReady().then(() => {
 
   ipcMain.handle(
     'agente:chat',
-    async (_evento, id: unknown, timeline: unknown, historial: unknown, peticion: unknown, referencia: unknown) => {
+    async (_evento, id: unknown, timeline: unknown, historial: unknown, peticion: unknown, referencia: unknown, ajustesChat: unknown) => {
       if (typeof id !== 'string' || typeof peticion !== 'string' || !peticion.trim()) {
         return { ok: false, mensaje: '', operaciones: [], error: 'Mensaje vacío.' }
       }
       const proyecto = proyectos.abrir(id)
       if (!proyecto) return { ok: false, mensaje: '', operaciones: [], error: 'El proyecto ya no existe.' }
-      const config = await ajustes.cargar()
+      // Lo elegido en la caja del chat (lo que viene con el mensaje; si no, lo guardado en el proyecto).
+      const opciones = ajustesDeChat(ajustesChat) ?? proyecto.chatAjustes ?? {}
+      // Quién edita: el agente y modelo elegidos en la caja, si están conectados; si no, el de siempre.
+      const config = opciones.tareas?.video
+        ? { ...(await ajustes.cargar()), ...(await configParaTarea(opciones.tareas.video)) }
+        : await ajustes.cargar()
       const esLocal = /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(config.baseUrl)
       const clave = config.proveedor === 'api' ? ((await ajustes.clave()) ?? (esLocal ? 'local' : null)) : null
       const mensajes = Array.isArray(historial) ? (historial as MensajeChat[]).filter((m) => m && typeof m.texto === 'string') : []
@@ -3106,6 +3127,7 @@ app.whenReady().then(() => {
             mcp: { url: estadoMcp.url, contrasena: estadoMcp.contrasena },
             carpeta: join(app.getPath('userData'), 'chat-agente', id),
             senal,
+            permisos: permisosDelChat(opciones),
             onPaso: (texto) => _evento.sender.send('agente:chat-paso', { id, texto })
           })
           // Si su versión no vio las herramientas de Recorte, sigue como chat de texto (abajo).
@@ -3615,3 +3637,44 @@ app.on('before-quit', (e) => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
+
+/** Las opciones de la caja del chat que manda la interfaz, limpias (o null si no vino nada válido). */
+function ajustesDeChat(crudo: unknown): AjustesCreacion | null {
+  if (!crudo || typeof crudo !== 'object') return null
+  const a = crudo as Record<string, unknown>
+  const flow = a.flow && typeof a.flow === 'object' ? (a.flow as Record<string, unknown>) : null
+  const video = a.tareas && typeof a.tareas === 'object' ? (a.tareas as { video?: unknown }).video : undefined
+  const tarea = video && typeof video === 'object' && typeof (video as { agente?: unknown }).agente === 'string' ? (video as EleccionTarea) : null
+  return {
+    vozElegida: typeof a.vozElegida === 'string' && a.vozElegida ? a.vozElegida : null,
+    directo: a.directo === true,
+    flow: flow
+      ? {
+          imagenes: flow.imagenes === true,
+          videos: flow.videos === true,
+          ...(typeof flow.modeloImagen === 'string' ? { modeloImagen: flow.modeloImagen } : {}),
+          ...(typeof flow.modeloVideo === 'string' ? { modeloVideo: flow.modeloVideo } : {})
+        }
+      : null,
+    tareas: tarea ? { video: tarea } : null
+  }
+}
+
+/** Lo que el agente del chat puede usar, según la caja, en palabras para su pedido. */
+function permisosDelChat(o: AjustesCreacion): string {
+  const f = o.flow
+  return [
+    f?.imagenes
+      ? `- Imágenes generadas: SÍ, con ${f.modeloImagen ?? 'Google Flow'} (generar_con_flow; te devuelve el costo: pregúntale antes de confirmar).`
+      : '- Imágenes generadas: NO. El usuario eligió «Sin imágenes»: no generes ninguna; usa su material.',
+    f?.videos
+      ? `- Clips generados: SÍ, con ${f.modeloVideo ?? 'Veo'} (gastan créditos de Flow: dile cuántos y cuánto cuestan y espera su «sí»).`
+      : '- Clips generados: NO. El usuario eligió «Sin clips»: no generes ninguno.',
+    o.vozElegida
+      ? `- Voz: la narración nueva va con la voz «${o.vozElegida}» (anadir_voz o cambiar_voz con "voz": "${o.vozElegida}").`
+      : '- Voz: NO generes narración nueva (eligió «Sin voz»); la que ya tiene el proyecto sí la puedes mover o recortar.',
+    o.directo
+      ? '- Eligió «Hazlo directo»: no preguntes lo que puedas decidir tú con sensatez; hazlo y cuéntalo.'
+      : '- Eligió «Pregúntame antes»: si el cambio es grande o se puede entender de dos formas, pregunta antes de editar.'
+  ].join('\n')
+}

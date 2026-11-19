@@ -484,8 +484,11 @@ export interface RecorteApi {
     timeline: Timeline,
     historial: MensajeChat[],
     peticion: string,
-    referencia?: string
+    referencia?: string,
+    ajustes?: import('./creacion').AjustesCreacion
   ) => Promise<TurnoChat>
+  /** Añade a la biblioteca del proyecto estos archivos o carpetas (el «+» de la caja del chat del editor). */
+  agregarRutasProyecto: (id: string, rutas: string[]) => Promise<{ agregados: string[]; fallos: string[] } | null>
   /** Las habilidades del agente (las de Recorte y las del usuario) con lo que aprendió cada una. */
   habilidades: () => Promise<HabilidadVista[]>
   /** Añade una habilidad desde un .md o una carpeta (abre el diálogo); null si se canceló. */

@@ -1,4 +1,5 @@
 import type { MensajeChat } from './chat'
+import type { AjustesCreacion } from './creacion'
 import type { Timeline } from './timeline'
 
 /** Un video o una imagen que el usuario agregó al proyecto; sus clips lo nombran por `id`. */
@@ -109,6 +110,11 @@ export interface Project {
   timelineSalida?: string
   /** La conversación con el agente que edita este proyecto. */
   chat?: MensajeChat[]
+  /**
+   * Lo elegido en la caja de su chat, como en una conversación: quién edita (agente, modelo y esfuerzo), si puede
+   * generar imágenes y clips con Flow, la voz que narra y si pregunta antes.
+   */
+  chatAjustes?: AjustesCreacion
 }
 
 /**

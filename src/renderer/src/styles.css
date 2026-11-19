@@ -3586,3 +3586,10 @@ button { cursor: pointer; }
 .chat-puntos-lista { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
 .chat-puntos-lista li { line-height: 1.5; }
 .chat-puntos-lista li::marker { color: var(--accent); }
+/* El chat del editor es estrecho: sus menús (el de modelos mide 560 px) se salían por la izquierda y el panel los cortaba.
+   Ahí ocupan el ancho del chat, y el selector de modelos pone los agentes en una fila arriba en vez de en una columna. */
+.agente-panel .crear-caja.cc.is-chat .cc-panel { left: 0; right: 0; width: auto !important; max-width: none; }
+.agente-panel .em { display: flex; flex-direction: column; min-height: 0; }
+.agente-panel .em-agentes { flex-direction: row; flex-wrap: wrap; border-right: none; border-bottom: 1px solid var(--line); }
+.agente-panel .em-agente { flex: 0 0 auto; }
+.agente-panel .em-modelos { max-height: min(46vh, 330px); }

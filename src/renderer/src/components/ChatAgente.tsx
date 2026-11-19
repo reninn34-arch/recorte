@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { aplicarOperaciones, MAX_MENSAJES, type MensajeChat } from '../../../shared/chat'
 import { duracionesDeMedios, tramos, type Timeline } from '../../../shared/timeline'
+import type { AjustesCreacion } from '../../../shared/creacion'
 import type { Project } from '../../../shared/types'
+import type { Agentes } from '../hooks/agentes'
+import { CajaCrear } from './CajaCrear'
 import { Icon } from '../Icons'
 import type { Elegido } from './TimelineEditor'
 import { tc } from './TimelineEditor'
@@ -65,7 +68,9 @@ export function ChatAgente({
   listo,
   nombreAgente,
   onCambiarChat,
-  onConectar
+  onConectar,
+  agentes,
+  onAjustesChat
 }: {
   proyecto: Project
   puente: React.RefObject<PuenteEditor | null>
@@ -73,6 +78,9 @@ export function ChatAgente({
   nombreAgente?: string
   onCambiarChat: (id: string, mensajes: MensajeChat[]) => void
   onConectar: () => void
+  /** Con ellos, la caja completa de las conversaciones (modelo, imágenes, clips, voz…); sin ellos, la sencilla. */
+  agentes?: Agentes
+  onAjustesChat?: (id: string, ajustes: AjustesCreacion) => void
 }) {
   const [texto, setTexto] = useState('')
   const [pensando, setPensando] = useState<number | null>(null)
@@ -138,7 +146,7 @@ export function ChatAgente({
     try {
       // Al agente le basta el texto: las timelines guardadas no viajan.
       const sinAntes = historial.map(({ antes: _a, ...m }) => m)
-      const r0 = await window.recorte.chatAgente(proyectoId, p.timeline, sinAntes, limpio, referencia)
+      const r0 = await window.recorte.chatAgente(proyectoId, p.timeline, sinAntes, limpio, referencia, proyecto.chatAjustes)
       if (turno.current !== mio) return
       if (r0.parado) {
         respuesta = { id: crypto.randomUUID(), rol: 'agente' as const, texto: 'Lo paraste. Si alcanzó a cambiar algo, lo deshaces con Ctrl+Z.', fecha: Date.now(), parado: true }
@@ -410,6 +418,24 @@ export function ChatAgente({
             <Icon name="search" size={11} /> {conReferencia ? etiquetaReferencia(p) : 'Sin referencia'}
           </button>
         )}
+        {agentes && onAjustesChat ? (
+          <CajaCrear
+            agentes={agentes}
+            creando={false}
+            estilo="libre"
+            onConectar={onConectar}
+            chat={{
+              creacion: proyecto.chatAjustes ?? {},
+              ocupado: pensando !== null,
+              onParar: parar,
+              onEnviar: (t) => void enviar(t),
+              onAjustar: (a) => onAjustesChat(proyectoId, a),
+              onAdjuntar: (rutas) =>
+                void window.recorte.agregarRutasProyecto(proyectoId, rutas).catch(() => null),
+              placeholder: 'Pídele un cambio… (Enter envía)'
+            }}
+          />
+        ) : (
         <div className="chat-caja">
           <textarea
             value={texto}
@@ -436,6 +462,7 @@ export function ChatAgente({
             </button>
           )}
         </div>
+        )}
       </div>
     </div>
   )

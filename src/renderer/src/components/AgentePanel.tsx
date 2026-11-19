@@ -1,4 +1,5 @@
 import type { MensajeChat } from '../../../shared/chat'
+import type { AjustesCreacion } from '../../../shared/creacion'
 import type { Project } from '../../../shared/types'
 import type { Agentes } from '../hooks/agentes'
 import { Icon } from '../Icons'
@@ -15,6 +16,7 @@ export function AgentePanel({
   agentes,
   puente,
   onCambiarChat,
+  onAjustesChat,
   onCambiarAgente,
   editando,
   generando,
@@ -28,6 +30,7 @@ export function AgentePanel({
   agentes: Agentes
   puente: React.RefObject<PuenteEditor | null>
   onCambiarChat: (id: string, mensajes: MensajeChat[]) => void
+  onAjustesChat: (id: string, ajustes: AjustesCreacion) => void
   onCambiarAgente: () => void
   editando: boolean
   generando: boolean
@@ -37,7 +40,9 @@ export function AgentePanel({
   onRenderizarEdicion: () => void
   onAbrirAjustes: () => void
 }) {
-  const activo = agentes.activo
+  // El que eligió en la caja de este chat (si sigue conectado); si no, el de siempre.
+  const elegido = proyecto.chatAjustes?.tareas?.video?.agente
+  const activo = (elegido && agentes.lista.find((a) => a.id === elegido && a.conectado && a.instalado)) || agentes.activo
   const api = agentes.apiActivo
   const transcrita = proyecto.transcription === 'lista'
 
@@ -84,6 +89,8 @@ export function AgentePanel({
         nombreAgente={activo?.nombre ?? api?.nombre}
         onCambiarChat={onCambiarChat}
         onConectar={onCambiarAgente}
+        agentes={agentes}
+        onAjustesChat={onAjustesChat}
       />
 
       <div className="agente-rapidas">
