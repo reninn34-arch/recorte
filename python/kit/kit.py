@@ -3047,6 +3047,23 @@ def armar(ruta, prueba=None, todo=False):
 # Medir y revisar
 # ---------------------------------------------------------------------------
 
+def analizar_video(video, salida=None):
+    """El video toma por toma (analizar.py, junto a este kit): deja ANALISIS.md, tomas.md y un fotograma por toma."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import analizar as _an
+    if not os.path.isfile(video):
+        raise SystemExit(f'No existe: {video}')
+    nombre = re.sub(r'[^\w.-]+', '-', os.path.splitext(os.path.basename(video))[0]).strip('-') or 'video'
+    salida = salida or os.path.join(_trabajo(), 'analisis', nombre)
+    os.makedirs(salida, exist_ok=True)
+    datos = _an.analizar(video, salida, FFMPEG, FFPROBE)
+    r = _an.breve(datos)
+    r['carpeta'] = os.path.relpath(salida, _trabajo()).replace(os.sep, '/')
+    r['siguiente'] = (f"Lee {r['carpeta']}/ANALISIS.md y {r['carpeta']}/tomas.md; abre el fotograma de cada toma "
+                      '(tomas/toma-NN.jpg) antes de decidir algo de ella: lo que dice «míralo» o «pista» hay que confirmarlo.')
+    return r
+
+
 def golpes(ruta, n=16):
     """Los golpes más marcados de la música (inicio de notas fuertes), con el tempo estimado."""
     r = subprocess.run([FFMPEG, '-v', 'error', '-i', ruta, '-vn', '-ac', '1', '-ar', '22050', '-f', 'f32le', '-'], capture_output=True)
@@ -5396,6 +5413,9 @@ def main():
     ro.add_argument('--desde', type=float)
     ro.add_argument('--hasta', type=float)
     ro.add_argument('--tolerante', action='store_true')
+    anz = sub.add_parser('analizar', help='un video toma por toma: cortes, cámara, encuadre, origen, color, texto y ritmo')
+    anz.add_argument('video')
+    anz.add_argument('--salida', help='por defecto analisis/<nombre del video>/')
     rv2 = sub.add_parser('revisar')
     rv2.add_argument('video')
     rv2.add_argument('--referencia', help='el video de referencia, para comparar ritmo y estilo')
@@ -5512,6 +5532,8 @@ def main():
         print(json.dumps(cambiar_cielo(x.video, x.cielo, x.salida, x.desde, x.hasta, x.tolerante), ensure_ascii=False))
     elif x.orden == 'rotoscopia':
         print(json.dumps(rotoscopia(x.video, x.caja, x.salida, x.desde, x.hasta, x.tolerante, x.caja_archivo), ensure_ascii=False))
+    elif x.orden == 'analizar':
+        print(json.dumps(analizar_video(x.video, x.salida), ensure_ascii=False, default=float))
     elif x.orden == 'golpes':
         golpes(x.archivo, x.n)
     elif x.orden == 'hoja':

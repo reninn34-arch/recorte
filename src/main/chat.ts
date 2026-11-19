@@ -48,7 +48,8 @@ export function armarPrompt(
   historial: MensajeChat[],
   peticion: string,
   referencia?: string,
-  gustos = ''
+  gustos = '',
+  tomas = ''
 ): { sistema: string; usuario: string } {
   const usuario = [
     `Proyecto: «${proyecto.name}».`,
@@ -63,6 +64,13 @@ export function armarPrompt(
       30_000,
       Object.fromEntries((proyecto.medios ?? []).map((m) => [m.id, `${m.tipo === 'imagen' ? 'imagen' : 'video'} «${m.nombre}»`]))
     ),
+    '',
+    tomas
+      ? 'TUS VIDEOS TOMA POR TOMA (medido en local: cámara, encuadre, origen, fallos como oscura/borrosa/tiembla, texto, ' +
+        'si el corte cae en el golpe de la música; los tiempos son de la FUENTE, los de recortar_clip y reconstruir). Úsalo ' +
+        'para escoger las mejores tomas, cortar al ritmo o editar «como» un video de la biblioteca que el usuario nombre ' +
+        '(copia su forma: duración de tomas, cámara, texto, ritmo):\n' + tomas
+      : '',
     '',
     'CONVERSACIÓN HASTA AHORA',
     conversacion(historial),
@@ -100,12 +108,13 @@ export async function turnoAgente(
   config: AjustesIA,
   clave: string | null,
   senal?: AbortSignal,
-  gustos = ''
+  gustos = '',
+  tomas = ''
 ): Promise<TurnoAgente> {
   if (!config.activa) {
     return { ok: false, mensaje: '', operaciones: [], error: 'Conecta un agente en Inicio para hablar con él.' }
   }
-  const { sistema, usuario } = armarPrompt(proyecto, timeline, historial, peticion, referencia, gustos)
+  const { sistema, usuario } = armarPrompt(proyecto, timeline, historial, peticion, referencia, gustos, tomas)
   try {
     const texto =
       config.proveedor === 'cli'

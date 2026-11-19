@@ -76,6 +76,11 @@ export interface EstiloMedido {
   fotogramas: string[]
   /** Hojas de contacto (`analisis/ref-hoja-…jpg`). */
   hojas: string[]
+  /**
+   * La referencia toma por toma (python/kit/analizar.py): el resumen (ANALISIS.md) y una línea por toma (tomas.md),
+   * con su cámara, encuadre, origen, color, texto y si el corte cae en el golpe. Falta si no había Python.
+   */
+  tomas?: { resumen: string; lineas: string; carpeta: string }
 }
 
 /** Los tipos de recurso que una referencia puede usar y Recorte sabe valorar. */

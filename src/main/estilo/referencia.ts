@@ -8,6 +8,7 @@ import { probeVideo } from '../ffmpeg'
 import { Parado } from '../ia'
 import { transcribirArchivo } from '../transcribir'
 import { detectarPlanos, hojaContacto, miniatura } from './material'
+import { analizarVideo } from '../analizarvideo'
 
 /**
  * Fase 2 (parte local) de «Copiar un estilo»: mide el video de referencia sin gastar
@@ -189,6 +190,18 @@ export async function medirReferencia(
     }
   }
 
+  // Toma por toma (cámara, encuadre, de dónde sale la imagen, texto, si corta en el golpe). Si falla (sin Python),
+  // la ficha sale igual con lo de arriba.
+  let tomas: EstiloMedido['tomas']
+  try {
+    onProgreso(0.97, 'Mirando cada toma de la referencia')
+    const a = await analizarVideo(ruta, join(analisis, 'tomas-referencia'), undefined, senal)
+    tomas = { resumen: a.md, lineas: a.tomasMd, carpeta: 'analisis/tomas-referencia' }
+  } catch (e) {
+    if (senal?.aborted) throw new Parado()
+    console.warn('[estilo] sin análisis por tomas:', e)
+  }
+
   const medido: EstiloMedido = {
     duracion: redondeo(info.duration),
     ancho: info.width,
@@ -205,7 +218,8 @@ export async function medirReferencia(
     silencios,
     colores,
     fotogramas,
-    hojas
+    hojas,
+    ...(tomas ? { tomas } : {})
   }
   guardar(join(analisis, 'estilo-medido.json'), JSON.stringify(medido, null, 2))
   return medido

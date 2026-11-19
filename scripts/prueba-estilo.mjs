@@ -291,6 +291,13 @@ try {
   }
   if (medido.formato !== '9:16') throw new Error(`La referencia es vertical; el formato salió ${medido.formato}.`)
   console.log(`estilo-medido.json: mediana ${medido.medianaPlano} s por plano, formato ${medido.formato} ✓`)
+  // Toma por toma (python/kit/analizar.py): las mismas tomas que corta la referencia, con su línea cada una.
+  const lineasTomas = (medido.tomas?.lineas ?? '').split(/\r?\n/).filter((l) => /^\d+ \|/.test(l))
+  if (!medido.tomas?.resumen?.includes('cortes por minuto') || lineasTomas.length < 3) {
+    throw new Error(`Falta el análisis toma por toma de la referencia (${lineasTomas.length} tomas).`)
+  }
+  if (!existsSync(join(carpeta, medido.tomas.carpeta, 'tomas', 'toma-01.jpg'))) throw new Error('El análisis por tomas no dejó sus fotogramas.')
+  console.log(`análisis toma por toma: ${lineasTomas.length} tomas, con su fotograma ✓`)
 
   if (!analizada.ficha?.resumen) throw new Error('El análisis no dejó ficha de estilo.')
   // La ficha tiene que venir del agente (no del respaldo con lo medido), y el agente tuvo que recibir las imágenes.

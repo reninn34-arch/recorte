@@ -54,14 +54,15 @@ const mmss = (s: number): string => {
 const INSTRUCCION_FICHA = `Eres un director de video analizando el ESTILO DE EDICIÓN de un video de referencia.
 No analices el tema ni el contenido: solo CÓMO está editado, para copiar ese estilo en otro video.
 
-Recibes mediciones hechas en local (planos, cortes por minuto, volumen, silencios, colores) e
+Recibes mediciones hechas en local (planos, cortes por minuto, volumen, silencios, colores y, si está, cada toma con su
+movimiento de cámara, encuadre, origen y si el corte cae en el golpe de la música) e
 imágenes del video (hojas de contacto y fotogramas clave). A partir de todo eso responde SOLO con
 JSON, sin markdown ni explicaciones, con esta forma:
 {
   "resumen": "el estilo en una frase",
   "subtitulos": {"lleva": true, "posicion": "abajo centro", "tamano": "grande", "color": "blanco con borde negro", "modo": "palabra", "mayusculas": true},
   "tipografia": "descripción corta",
-  "zooms": "ninguno|pocos|frecuentes",
+  "zooms": "ninguno|pocos|frecuentes" (usa el movimiento de cámara medido de cada toma),
   "broll": "qué B-roll usa y con qué frecuencia",
   "recortesPersona": false,
   "textos": "qué textos en pantalla y cómo entran",
@@ -87,6 +88,12 @@ function medidoParaPrompt(medido: EstiloMedido): string {
       : 'Sin silencios de medio segundo o más.',
     medido.colores.length ? `Colores dominantes: ${medido.colores.join(', ')}` : ''
   ].filter(Boolean)
+  if (medido.tomas) {
+    // El resumen sin su pie («Para seguir»: archivos que el agente de la ficha no abre) y las tomas, hasta 40.
+    lineas.push('', 'Toma por toma (medido: cámara, encuadre, de dónde sale la imagen, texto, ritmo; lo de «míralo» o «pista» confírmalo con las imágenes):')
+    lineas.push(medido.tomas.resumen.split('## Para seguir')[0].trim())
+    lineas.push(...medido.tomas.lineas.split(/\r?\n/).slice(0, 44))
+  }
   if (medido.transcripcion.length) {
     lineas.push('Lo que se dice (con tiempos):')
     for (const t of medido.transcripcion.slice(0, 60)) lineas.push(`[${mmss(t.inicio)}] ${t.texto}`)

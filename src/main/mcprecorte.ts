@@ -13,6 +13,7 @@ import type { Project } from '../shared/types'
 /** Lo que se añade a un pedido de imagen «para recortar» (lo mismo que PARA_RECORTAR del kit). */
 const PARA_RECORTAR =
   ' Aislado sobre un fondo verde croma liso y uniforme (#00B140), sin degradados, sin sombras ni suelo en el fondo, el sujeto entero dentro del encuadre con un poco de margen, sin texto.'
+import { analisisGuardado, analizarVideo, type VideoAnalizado } from './analizarvideo'
 import { exportarTimeline } from './exportar'
 import { duracionMedio, rutaFfmpeg } from './ffmpeg'
 import { rutaScriptPython } from './transcribir'
@@ -103,6 +104,8 @@ Con estas herramientas ves y editas sus proyectos: lo que cambias aparece al mom
 y el usuario lo puede retocar a mano o deshacerlo con Ctrl+Z. Empieza con listar_proyectos y
 ver_proyecto; usa ver_cuadro para mirar cómo queda un momento antes y después de cambiarlo.
 Exportar escribe un MP4 en su carpeta de Videos. Habla con el usuario en español.
+Antes de editar material del usuario, o si pide «edítalo como este video», usa analizar_video: separa
+el video en tomas y dice cómo es cada una (cámara, encuadre, origen, fallos, ritmo de la música).
 
 Para un video nuevo hecho por el agente de Recorte: crear_video, luego ver_creacion hasta que deje de
 trabajar (tarda minutos; espera entre consultas), contesta lo que pregunte con hablar_con_agente y,
@@ -326,6 +329,66 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
         } finally {
           rmSync(tmp, { recursive: true, force: true })
         }
+      }
+    },
+    {
+      nombre: 'analizar_video',
+      descripcion:
+        'Un video toma por toma, en el equipo y sin gastar: dónde corta y cuánto dura cada toma, el movimiento de cámara ' +
+        '(fija, acercar, paneo, cámara en mano), el encuadre, de dónde sale la imagen (grabada, gráfico o pantalla, foto con ' +
+        'movimiento), luz y color, si hay texto encima, fallos (oscura, borrosa, tiembla), el tempo de la música y si los cortes ' +
+        'caen en el golpe. Con un medio del proyecto sirve para escoger sus mejores tomas; con «archivo» (un video de ' +
+        'referencia del usuario) para editar «como ese»: copia su forma (ritmo, cámara, texto, música) y di antes qué copias ' +
+        'tal cual y qué adaptas. Devuelve el resumen, una línea por toma y una hoja con un fotograma de cada toma.',
+      esquema: {
+        type: 'object',
+        properties: {
+          proyecto: proyectoArg,
+          medio: { type: 'string', description: 'Con «proyecto»: el id de un video de su biblioteca (ver_proyecto); sin él, el video principal.' },
+          archivo: { type: 'string', description: 'O la ruta completa de cualquier video del equipo (p. ej. una referencia que trajo el usuario).' }
+        }
+      },
+      soloLee: true,
+      correr: async (args) => {
+        let ruta: string
+        let salida: string
+        const archivo = texto(args.archivo)
+        if (archivo) {
+          if (!existsSync(archivo)) return fallo(`No existe: ${archivo}`)
+          ruta = archivo
+          const nombre = basename(archivo, extname(archivo)).replace(/[^\w.-]+/g, '-').slice(0, 60) || 'video'
+          salida = join(tmpdir(), 'recorte-analisis', `${nombre}-${randomBytes(3).toString('hex')}`)
+          // El mismo archivo otra vez: la misma carpeta (no se repite el análisis).
+          const previa = join(tmpdir(), 'recorte-analisis')
+          const igual = existsSync(previa) ? readdirSync(previa).find((d) => d.replace(/-[0-9a-f]{6}$/, '') === nombre) : undefined
+          if (igual && analisisGuardado(ruta, join(previa, igual))) salida = join(previa, igual)
+        } else {
+          const p = buscar(args.proyecto)
+          const id = texto(args.medio)
+          const m = id ? p.medios?.find((x) => x.id === id) : undefined
+          if (id && !m) return fallo(`El proyecto no tiene el medio «${id}» (míralos con ver_proyecto).`)
+          if (m && m.tipo !== 'video') return fallo('Ese medio es una imagen: solo se analizan videos.')
+          ruta = m ? m.ruta : p.source.path
+          salida = join(ctx.proyectos.carpeta(p.id), 'analisis', m ? m.id : 'principal')
+        }
+        let a: VideoAnalizado
+        try {
+          a = await analizarVideo(ruta, salida)
+        } catch (e) {
+          return fallo(e instanceof Error ? e.message : String(e))
+        }
+        const cuerpo = `${a.md.split('## Para seguir')[0].trim()}\n\n${a.tomasMd.trim()}\n\nLos fotogramas de cada toma están en ${join(a.carpeta, 'tomas')} (toma-NN.jpg). Lo marcado «míralo» o «pista» confírmalo viendo su fotograma.`
+        // La hoja: un fotograma por toma (las 24 primeras), para ver el video de un vistazo.
+        const n = Math.min(24, a.tomas.length)
+        const jpg = join(a.carpeta, 'hoja-tomas.jpg')
+        if (n && !existsSync(jpg)) {
+          const columnas = Math.min(6, n)
+          spawnSync(rutaFfmpeg(), ['-v', 'error', '-y', '-start_number', '1', '-i', join(a.carpeta, 'tomas', 'toma-%02d.jpg'), '-frames:v', '1',
+            '-vf', `scale=180:-2,pad=iw+4:ih+4:2:2:white,tile=${columnas}x${Math.ceil(n / columnas)}`, '-q:v', '5', jpg])
+        }
+        return existsSync(jpg)
+          ? { texto: cuerpo, imagen: { datos: readFileSync(jpg).toString('base64'), tipo: 'image/jpeg' } }
+          : ok(cuerpo)
       }
     },
     {
