@@ -5,6 +5,7 @@ import type { AjustesCreacion } from '../../../shared/creacion'
 import type { Project } from '../../../shared/types'
 import type { Agentes } from '../hooks/agentes'
 import { CajaCrear } from './CajaCrear'
+import { describirDonde } from '../donde'
 import { Icon } from '../Icons'
 import type { Elegido } from './TimelineEditor'
 import { tc } from './TimelineEditor'
@@ -35,19 +36,6 @@ const SUGERENCIAS = [
   'Pon un título al inicio',
   '¿De qué trata el video?'
 ]
-
-function referenciaDe(p: PuenteEditor | null): string | undefined {
-  if (!p) return undefined
-  const partes = [`cabezal en ${p.tiempo.toFixed(2)} s de la timeline`]
-  if (p.elegido?.tipo === 'clip') {
-    const t = tramos(p.timeline).find((x) => x.clip.id === p.elegido?.id)
-    if (t) partes.push(`clip ${t.indice + 1} elegido (timeline ${t.inicio.toFixed(2)}–${t.fin.toFixed(2)}, fuente ${t.clip.entrada.toFixed(2)}–${t.clip.salida.toFixed(2)})`)
-  } else if (p.elegido?.tipo === 'texto') {
-    const i = p.timeline.textos.findIndex((x) => x.id === p.elegido?.id)
-    if (i >= 0) partes.push(`texto ${i + 1} elegido («${p.timeline.textos[i].texto}»)`)
-  }
-  return partes.join('; ')
-}
 
 function etiquetaReferencia(p: PuenteEditor | null): string {
   if (!p) return ''
@@ -88,7 +76,6 @@ export function ChatAgente({
   /** Lo último que hizo el agente (cuando trabaja con herramientas: «ver_cuadro», «editar_timeline»…). */
   const [paso, setPaso] = useState<string | null>(null)
   useEffect(() => window.recorte.onChatPaso((e) => { if (e.id === proyecto.id) setPaso(pasoLegible(e.texto)) }), [proyecto.id])
-  const [conReferencia, setConReferencia] = useState(true)
   const [editando, setEditando] = useState<{ id: string; texto: string } | null>(null)
   const [, refrescar] = useState(0)
   // Cada envío tiene su número: si lo paran (o se rebobina), su respuesta tardía se ignora.
@@ -122,13 +109,13 @@ export function ChatAgente({
     if (!limpio || pensando !== null || !p0) return
     // Tras volver atrás, el puente aún no trae la timeline restaurada: se usa la que toca.
     const p = desde ? { ...p0, timeline: desde } : p0
-    const referencia = conReferencia ? referenciaDe(p) : undefined
+    const referencia = describirDonde(p.timeline, p.tiempo, p.elegido)
     const delUsuario: MensajeChat = {
       id: crypto.randomUUID(),
       rol: 'usuario',
       texto: limpio,
       fecha: Date.now(),
-      referencia: conReferencia ? etiquetaReferencia(p) : undefined,
+      referencia: etiquetaReferencia(p),
       antes: p.timeline
     }
     const historial = base
@@ -409,15 +396,6 @@ export function ChatAgente({
       </div>
 
       <div className="chat-redactar">
-        {p && (
-          <button
-            className={`chat-ref-toggle ${conReferencia ? 'is-on' : ''}`}
-            onClick={() => setConReferencia((v) => !v)}
-            title={conReferencia ? 'El agente sabe dónde estás. Clic para no enviarlo.' : 'Clic para decirle al agente dónde estás'}
-          >
-            <Icon name="search" size={11} /> {conReferencia ? etiquetaReferencia(p) : 'Sin referencia'}
-          </button>
-        )}
         {agentes && onAjustesChat ? (
           <CajaCrear
             agentes={agentes}

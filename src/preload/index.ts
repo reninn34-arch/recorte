@@ -143,6 +143,7 @@ const api: RecorteApi = {
   chatAgente: (id, timeline, historial, peticion, referencia, ajustes) =>
     ipcRenderer.invoke('agente:chat', id, timeline, historial, peticion, referencia, ajustes),
   agregarRutasProyecto: (id, rutas) => ipcRenderer.invoke('proyecto:agregar-rutas', id, rutas),
+  editorDonde: (id, texto) => ipcRenderer.invoke('editor:donde', id, texto),
   pararAgente: (id) => ipcRenderer.invoke('agente:parar', id),
   habilidades: () => ipcRenderer.invoke('habilidades:ver'),
   habilidadAnadir: (carpeta) => ipcRenderer.invoke('habilidades:anadir', carpeta),

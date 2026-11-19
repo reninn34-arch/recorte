@@ -93,20 +93,6 @@ export function AgentePanel({
         onAjustesChat={onAjustesChat}
       />
 
-      <div className="agente-rapidas">
-        <span className="tl-dim">Automático</span>
-        <button className="chip" onClick={onEditar} disabled={!transcrita || editando} title="El agente propone una edición completa">
-          <Icon name="sparkles" size={12} /> {editando ? 'Editando…' : 'Edición completa'}
-        </button>
-        <button className="chip" onClick={onGenerar} disabled={!transcrita || generando} title="Busca los mejores momentos para reels">
-          <Icon name="scissors" size={12} /> {generando ? 'Buscando…' : 'Proponer clips'}
-        </button>
-        {proyecto.receta && (
-          <button className="chip" onClick={onRenderizarEdicion} disabled={renderizando}>
-            <Icon name="play" size={12} /> {renderizando ? 'Renderizando…' : 'Render receta'}
-          </button>
-        )}
-      </div>
     </aside>
   )
 }

@@ -1583,6 +1583,10 @@ app.whenReady().then(() => {
   ipcMain.handle('proyecto:listar', () => proyectos.list())
 
   // ===== Medios: más videos e imágenes en un proyecto =====
+  // Dónde está el usuario en el editor de cada proyecto (lo manda el editor al moverse): para el chat y el MCP.
+  ipcMain.handle('editor:donde', (_evento, id: unknown, texto: unknown) => {
+    if (typeof id === 'string' && typeof texto === 'string') dondeEnEditor.set(id, { texto: texto.slice(0, 500), fecha: Date.now() })
+  })
   // El «+» de la caja del chat del editor: archivos sueltos o carpetas (de una carpeta, sus videos e imágenes).
   ipcMain.handle('proyecto:agregar-rutas', async (_evento, id: unknown, rutas: unknown) => {
     if (typeof id !== 'string' || !proyectos.get(id) || !Array.isArray(rutas)) return null
@@ -3121,7 +3125,7 @@ app.whenReady().then(() => {
             proyecto: enDisco ?? proyecto,
             historial: mensajes,
             peticion: peticion.slice(0, 4000),
-            referencia: typeof referencia === 'string' ? referencia.slice(0, 500) : undefined,
+            referencia: typeof referencia === 'string' ? referencia.slice(0, 500) : dondeEsta(id),
             gustos: bloqueGustos(),
             base: agentico.orden,
             mcp: { url: estadoMcp.url, contrasena: estadoMcp.contrasena },
@@ -3489,6 +3493,7 @@ No pude animar los subtítulos (se animan al exportar): ${e instanceof Error ? e
     transcribir: (id) => transcribirProyecto(id),
     exportar: (id, timeline, opciones) => exportarProyecto(id, timeline, opciones),
     copiarSonido: copiarSonidoIncluido,
+    donde: (id) => dondeEsta(id),
     avisarCambio: (proyecto, quien, conTimeline) => {
       const { transcript: _t, ...ligero } = proyecto
       for (const w of BrowserWindow.getAllWindows()) w.webContents.send('proyecto:externo', { proyecto: ligero, quien, conTimeline: Boolean(conTimeline) })
@@ -3677,4 +3682,13 @@ function permisosDelChat(o: AjustesCreacion): string {
       ? '- Eligió «Hazlo directo»: no preguntes lo que puedas decidir tú con sensatez; hazlo y cuéntalo.'
       : '- Eligió «Pregúntame antes»: si el cambio es grande o se puede entender de dos formas, pregunta antes de editar.'
   ].join('\n')
+}
+
+/** Dónde está el usuario en el editor de cada proyecto (lo último que mandó el editor). */
+const dondeEnEditor = new Map<string, { texto: string; fecha: number }>()
+
+/** Dónde está en el editor de ese proyecto, si lo tuvo abierto hace poco (si no, no se sabe). */
+function dondeEsta(id: string): string | undefined {
+  const d = dondeEnEditor.get(id)
+  return d && Date.now() - d.fecha < 6 * 60 * 60_000 ? d.texto : undefined
 }

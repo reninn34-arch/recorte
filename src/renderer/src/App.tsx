@@ -1125,6 +1125,8 @@ export default function App() {
           importando={importando}
           generando={generando}
           onInicio={() => setVista('inicio')}
+          onRenderReceta={proyecto.receta ? renderizarEdicion : undefined}
+          renderizando={renderizando}
         />
 
         <div className={`content ${vista === 'proyectos' ? `is-editor ${chatPlegado ? 'is-chat-plegado' : ''}` : 'is-wide'}`}>

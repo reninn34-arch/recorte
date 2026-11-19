@@ -42,6 +42,8 @@ export interface ContextoMcp {
   copiarSonido: (id: string, sonido: string) => Promise<{ archivo: string; duracion: number; nombre: string } | null>
   /** El proyecto cambió por fuera: la interfaz lo recoge (si está abierto, como un paso de deshacer). */
   avisarCambio: (proyecto: Project, quien: string, conTimeline?: boolean) => void
+  /** Dónde está el usuario en el editor de ese proyecto (el cabezal y lo elegido), si lo tiene abierto. */
+  donde?: (id: string) => string | undefined
   /** Trae la ventana de Recorte al frente con el proyecto abierto en el editor. */
   abrirEnApp: (id: string) => void
   /** Quita el fondo liso de una imagen de la biblioteca y la agrega como medio nuevo. */
@@ -296,6 +298,7 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
           `Proyecto «${p.name}» (id ${p.id}). Video principal: ${p.source.name}, ${p.source.width}×${p.source.height}.`,
           p.medios?.length ? `Biblioteca: ${p.medios.map((m) => `${m.id} = ${m.tipo} «${m.nombre}»${m.tipo === 'video' ? ` (${m.duracion.toFixed(1)} s)` : ''}`).join('; ')}.` : 'Biblioteca: solo el video principal.',
           p.timelineSalida ? `Último MP4 exportado: ${p.timelineSalida}` : 'Aún no se ha exportado.',
+          ...(ctx.donde?.(p.id) ? [`Dónde está el usuario en el editor ahora: ${ctx.donde(p.id)}. Si dice «esto», «aquí» o «este clip», es eso.`] : []),
           ''
         ]
         return ok(cabeza.join('\n') + describirTimelineParaAgente(tl, p.transcript, p.source.duration, 60_000, nombresDe(p)))

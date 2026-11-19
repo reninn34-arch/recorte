@@ -489,6 +489,8 @@ export interface RecorteApi {
   ) => Promise<TurnoChat>
   /** Añade a la biblioteca del proyecto estos archivos o carpetas (el «+» de la caja del chat del editor). */
   agregarRutasProyecto: (id: string, rutas: string[]) => Promise<{ agregados: string[]; fallos: string[] } | null>
+  /** Dónde está el usuario en el editor de ese proyecto (el cabezal y lo elegido), para el agente. */
+  editorDonde: (id: string, texto: string) => Promise<void>
   /** Las habilidades del agente (las de Recorte y las del usuario) con lo que aprendió cada una. */
   habilidades: () => Promise<HabilidadVista[]>
   /** Añade una habilidad desde un .md o una carpeta (abre el diálogo); null si se canceló. */

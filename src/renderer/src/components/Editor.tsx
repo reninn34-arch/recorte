@@ -18,6 +18,7 @@ import { SubtitulosAnimados } from './SubtitulosAnimados'
 
 const CLAVE_ALTO_TL = 'recorte.altoLineaDeTiempo'
 import { mediaUrl } from '../media'
+import { describirDonde } from '../donde'
 import { useVistaPrevia } from '../hooks/vistaprevia'
 import { ajustarClip, anadirCapa, borrarCapa, duracionesDeMedios, ponerMusica, anadirSonido, sobrescribirClip, separarAudio, sonidoUnicoMulticam, inicioEscenaMulticam, anidarClips, clipsSeguidos, cambiarATramo, ubicar, capaNueva, cambiarCapa, cambiarFuente, escalaAnimada, type TipoAnimar, duracionTimeline, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, timelineActiva, type Timeline } from '../../../shared/timeline'
 import { useHistorial, useReproductor, type FuentesVista } from '../hooks/timeline'
@@ -498,6 +499,14 @@ export function Editor({
     aplicar: historial.aplicar,
     deshacer: historial.deshacer
   }
+
+  // Dónde está el usuario (el cabezal y lo elegido), para que el agente lo sepa sin que se lo digan: lo lee el chat y
+  // el MCP de Recorte (ver_proyecto). Se manda al cambiar, con el cabezal redondeado a la décima.
+  const donde = describirDonde(timeline, Math.round(reproductor.tiempo * 10) / 10, elegido, nombreDe)
+  useEffect(() => {
+    const t = setTimeout(() => void window.recorte.editorDonde(proyecto.id, donde).catch(() => {}), 300)
+    return () => clearTimeout(t)
+  }, [proyecto.id, donde])
 
   /** Reemplaza la timeline entera (receta, momento): se puede deshacer. */
   function llevarATimeline(nueva: Timeline) {

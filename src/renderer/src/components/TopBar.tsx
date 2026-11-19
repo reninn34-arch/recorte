@@ -7,7 +7,9 @@ export function TopBar({
   puedeGenerar,
   importando,
   generando,
-  onInicio
+  onInicio,
+  onRenderReceta,
+  renderizando
 }: {
   name: string
   onImport: () => void
@@ -16,6 +18,9 @@ export function TopBar({
   importando: boolean
   generando: boolean
   onInicio: () => void
+  /** Solo en los proyectos que tienen una receta de edición del agente (de versiones anteriores). */
+  onRenderReceta?: () => void
+  renderizando?: boolean
 }) {
   return (
     <header className="topbar">
@@ -30,6 +35,11 @@ export function TopBar({
         <button className="btn ghost" onClick={onImport} disabled={importando}>
           <Icon name="upload" size={16} /> {importando ? 'Importando…' : 'Nuevo proyecto'}
         </button>
+        {onRenderReceta && (
+          <button className="btn ghost" onClick={onRenderReceta} disabled={renderizando}>
+            <Icon name="play" size={16} /> {renderizando ? 'Renderizando…' : 'Render receta'}
+          </button>
+        )}
         <button className="btn primary" onClick={onBatch} disabled={!puedeGenerar || generando}>
           <Icon name="sparkles" size={16} /> {generando ? 'Buscando momentos…' : 'Generar lote'}
         </button>
