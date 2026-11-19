@@ -1,5 +1,14 @@
 import type { MensajeChat, OperacionTL } from './chat'
 import type { Gustos, SenalGusto } from './gustos'
+
+/** Una habilidad del agente tal como se ve en Ajustes. */
+export interface HabilidadVista {
+  id: string
+  nombre: string
+  cuando: string
+  origen: 'recorte' | 'usuario'
+  aprendido: string[]
+}
 import type { MusicaTL, Timeline, LutClip } from './timeline'
 import type { ProblemaAudio } from './audio'
 import type { PiezaAnimada, ValoresPieza } from './piezas'
@@ -475,6 +484,13 @@ export interface RecorteApi {
     peticion: string,
     referencia?: string
   ) => Promise<TurnoChat>
+  /** Las habilidades del agente (las de Recorte y las del usuario) con lo que aprendió cada una. */
+  habilidades: () => Promise<HabilidadVista[]>
+  /** Añade una habilidad desde un .md o una carpeta (abre el diálogo); null si se canceló. */
+  habilidadAnadir: (carpeta: boolean) => Promise<{ ok: boolean; id?: string; error?: string } | null>
+  habilidadOlvidarLeccion: (id: string, leccion: string) => Promise<HabilidadVista[]>
+  /** Abre la carpeta de las habilidades del usuario (para ponerlas o cambiarlas a mano). */
+  habilidadesAbrirCarpeta: () => Promise<void>
   /** El criterio que la app aprendió del usuario (se ve y se borra en Ajustes). */
   gustos: () => Promise<Gustos>
   gustoAgregar: (texto: string) => Promise<Gustos>

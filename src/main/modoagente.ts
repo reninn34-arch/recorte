@@ -25,6 +25,7 @@ import { mediosDisponibles } from './mediosagente'
 import { buscarPython, rutaScriptPython, transcribirArchivo } from './transcribir'
 import { PIEZAS_ENCIMA } from './recetaeditor'
 import { traerModelos } from './modelos3d'
+import { guardarHabilidadNueva, guardarLecciones, prepararHabilidades } from './habilidades'
 
 /**
  * El modo agente (ver shared/modoagente.ts). Cada creación en este modo tiene su carpeta
@@ -96,7 +97,7 @@ function copiarKit(trabajo: string): boolean {
   if (!existsSync(join(origen, 'kit.py'))) return false
   const destino = join(trabajo, 'kit')
   mkdirSync(destino, { recursive: true })
-  for (const n of ['kit.py', 'RECETA.md']) copyFileSync(join(origen, n), join(destino, n))
+  for (const n of ['kit.py', 'RECETA.md', 'analizar.py']) if (existsSync(join(origen, n))) copyFileSync(join(origen, n), join(destino, n))
   // Las letras de documental (Playfair Display, Anton), para `"fuente": "cursiva" | "serif" | "titular"`.
   const letras = rutaScriptPython('fuentes')
   if (existsSync(letras)) {
@@ -152,6 +153,11 @@ ${conKit ? '- `kit/`: piezas probadas de Recorte para hacer el video sin program
 
 Herramientas:
 ${(await herramientasDisponibles()).join('\n')}
+- **Lo tuyo también vale aquí.** Recorte no te quita nada: si tienes skills (de video, 3D, motion graphics, diseño),
+  búsqueda en internet o servidores MCP (Blender, Figma…), úsalos cuando ayuden al video: buscar cómo se ven los
+  anuncios de un nicho, leer la web de la marca para sacar sus colores y su tono, modelar en Blender, una skill que ya
+  sabe hacer ese tipo de video. Recorte te da el taller (este manual, el kit, el material, Flow, la voz y tus
+  habilidades de edición); tu oficio lo pones tú.
 
 ## Trabaja rápido (como un editor con oficio)
 - Mira primero \`vistazo/\` (léete \`vistazo/LEEME.txt\`): hojas con todas las fotos en miniatura y fotogramas de cada
@@ -175,7 +181,10 @@ frases con brillo, rótulos, desenfocar zonas, fundidos, la música recortada, c
 y efectos de sonido (34: transiciones, golpes, tensión, objetos y ambientes; \`kit.py sonidos\`). Para mini documentales trae además títulos de revista (serif cursiva, sans
 gruesa, palabra roja enorme, subrayado, grano), la etiqueta de papel con un nombre, palabras sueltas que flotan, un objeto
 de museo bajo un foco que entra girando en 3D y fotos de archivo que caen apiladas. Lee \`kit/RECETA.md\` (es corto).
-- **Si el usuario trae un video de referencia para copiar su estilo**, haz una lista de sus efectos (qué letra, qué color,
+- \`python kit/kit.py analizar <video>\`: un video toma por toma (local, gratis, segundos): \`analisis/<nombre>/ANALISIS.md\`
+  (ritmo, cámara, encuadre, origen, texto, tempo y si corta en el golpe), \`tomas.md\` y un fotograma por toma.
+- **Si el usuario trae un video de referencia para copiar su estilo** (mira la habilidad \`copiar-un-video\`), haz una
+  lista de sus efectos (qué letra, qué color,
   cómo entra cada cosa, cada cuánto cambia la imagen) y pon al lado la pieza del kit que hace cada uno: casi todo está.
   Respeta su ritmo (en estos documentales, un cambio cada 1–1,5 s: parte una escena en dos o tres momentos con otro
   encuadre o con un título encima) y su jerarquía de letras. Lo que el kit no tenga, dilo en el resumen.
@@ -207,7 +216,7 @@ Escribe código propio solo para lo que el kit no tenga, y aun así usa el kit p
 
 `
       : ''
-  }${seccionPlantilla(c, trabajo)}${await seccionHerramientas(c)}## El método (síguelo siempre)
+  }${seccionPlantilla(c, trabajo)}${await seccionHerramientas(c)}${prepararHabilidades(trabajo)}## El método (síguelo siempre)
 1. **Entiende el pedido.** ¿Es un video para redes, un recurso para otro editor (sin textos, con croma…),
    una pieza corta? No impongas un formato: haz lo que se pide.
 2. **Mira los archivos de verdad.** Abre cada imagen de \`entrada/\` y míralas. De los videos, usa ffprobe y
@@ -232,7 +241,8 @@ Escribe código propio solo para lo que el kit no tenga, y aun así usa el kit p
    - Corrige cada defecto, vuelve a armar (solo se rehacen los segundos que cambian) y vuelve a revisar lo corregido.
      No entregues con un defecto que viste.
 7. **Entrega** escribiendo \`resultado.json\` en esta carpeta:
-   \`{"archivo": "salida/<nombre>", "receta": "receta.json", "resumen": "qué hiciste, en 1-3 frases", "comprobaciones": ["qué comprobaste y cómo salió", "…"]}\`
+   \`{"archivo": "salida/<nombre>", "receta": "receta.json", "resumen": "qué hiciste, en 1-3 frases", "comprobaciones": ["qué comprobaste y cómo salió", "…"], "habilidades": [], "lecciones": []}\`
+   (las habilidades que usaste y lo que aprendiste con ellas: mira «Tus habilidades» arriba)
    En un cambio, el resumen contesta PUNTO POR PUNTO lo que pidió el usuario: «Pediste X → hice Y (en el segundo Z)»,
    y si algo no se pudo, por qué.
    (\`receta\` solo si lo hiciste con el kit: con ella el usuario abre cada foto, rótulo y frase de voz suelta en su editor para retocarla a mano. Por eso, si el kit alcanza, úsalo.)
@@ -300,8 +310,11 @@ ${(() => {
   })()}
 
 ## Reglas
-- No salgas de esta carpeta, no borres nada de \`entrada/\` y no toques archivos del sistema.
-- No bajes material de internet con derechos de terceros ni uses servicios de pago por tu cuenta: lo generado se pide a Recorte (arriba).
+- No escribas fuera de esta carpeta, no borres nada de \`entrada/\` y no toques archivos del sistema (leer y consultar,
+  sí: tus skills, internet, tus MCP).
+- Buscar y leer en internet para informarte, sí; meter en el video material de internet con derechos de terceros
+  (fotos, música, clips ajenos), no. Y no uses servicios de pago por tu cuenta: lo generado se pide a Recorte (arriba),
+  que le enseña el costo al usuario.
 - Si algo del pedido es ambiguo, elige lo más sensato para el objetivo y dilo en el resumen.
 - Guarda los archivos de texto (receta.json, resultado.json, notas.md) en UTF-8 SIN BOM, con sus tildes y «comillas»:
   en PowerShell no uses Set-Content ni Out-File (agregan BOM o pierden las tildes); escríbelos con Python o con
@@ -903,7 +916,8 @@ export async function pasoHacer(
 6. Comprueba cada punto: saca el cuadro de esos segundos ANTES y DESPUÉS, míralos lado a lado y comprueba también que
    lo de alrededor sigue igual. \`python kit/kit.py revisar\` sobre el nuevo si el cambio fue grande.
 7. Escribe resultado.json contestando punto por punto («Pediste X → hice Y, en el segundo Z») y termina sin dejar
-   procesos abiertos.`
+   procesos abiertos. Si el usuario corrigió algo que hiciste usando una habilidad y es un gusto que se va a repetir
+   (no un detalle de este video), apúntalo en "lecciones" de esa habilidad: es lo que más vale aprender.`
   const completo =
     hay && pedido
       ? `ESTO ES UN CAMBIO sobre un video que ya hiciste, no un video nuevo. Tu manual sigue en AGENTS.md por si lo necesitas.
@@ -1117,6 +1131,18 @@ export async function revisarYPublicar(
     if (receta) {
       onLinea('Recorte prepara la versión editable (sin textos pegados al video)')
       limpio = (await renderLimpio(rutaReceta, carpeta, version)) ?? undefined
+    }
+  }
+  // Lo que aprendió con sus habilidades (solo de una entrega que vale: con problemas, la rehace).
+  if (!problemas.length) {
+    try {
+      const { lecciones, habilidadNueva } = hallado.entrega
+      const creada = habilidadNueva ? guardarHabilidadNueva(habilidadNueva) : null
+      if (creada) onLinea(`El agente guardó una habilidad nueva: «${habilidadNueva!.nombre || creada}»`)
+      const nuevas = lecciones.length ? guardarLecciones(lecciones) : 0
+      if (nuevas) onLinea(`El agente aprendió ${nuevas} cosa${nuevas === 1 ? '' : 's'} para la próxima vez (${[...new Set(lecciones.map((l) => l.habilidad))].join(', ')})`)
+    } catch (e) {
+      console.warn('[habilidades] no pude guardar lo aprendido:', e)
     }
   }
   return {

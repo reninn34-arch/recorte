@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { readdirSync, statSync, unlinkSync, writeFileSync, type Dirent } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ADAPTADORES, colaUtil, type EventoAgente } from './adaptadoresagente'
+import { ADAPTADORES, colaUtil, recordarMcpClaude, type EventoAgente } from './adaptadoresagente'
 import { agenteDeOrden, sanearCodex } from './agentes'
 import { apartarConfigDanada } from './configcodex'
 import { pathAmpliado } from './binarios'
@@ -200,6 +200,7 @@ export async function turnoAgente(p: PeticionTurno): Promise<ResultadoTurno> {
         if (ev.t === 'linea') p.onLinea(ev.texto)
         else if (ev.t === 'sesion') idSesion = ev.id
         else if (ev.t === 'uso') apuntarClaude(ev.info)
+        else if (ev.t === 'mcp') recordarMcpClaude(ev.servidores)
         else if (ev.t === 'respuesta') respuesta = ad.conSesion ? ev.texto : respuesta + ev.texto
         else if (ev.t === 'fin') {
           final = ev

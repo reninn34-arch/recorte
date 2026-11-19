@@ -1,4 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, shell } from 'electron'
+import { tomasDelProyecto } from './analizarvideo'
+import { usarArchivoMcp } from './adaptadoresagente'
+import { anadirHabilidad, carpetaHabilidadesUsuario, habilidadesConLecciones, olvidarLeccion } from './habilidades'
 import { ANIMAR_CAPA, fuenteEnClip, tramos, zonaEn, frasesSubtitulos, huellaSubtitulos, subtitulosAlDia, duracionTimeline, duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, SONIDOS_INCLUIDOS, timelineInicial, timelineVacia, type Timeline } from '../shared/timeline'
 import { randomUUID } from 'node:crypto'
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -161,6 +164,8 @@ app.whenReady().then(() => {
   const ajustes = new Ajustes()
   const creaciones = new Creaciones()
   iniciarUso(join(app.getPath('userData'), 'uso.json'))
+  // Los MCP de Claude Code que se vieron al arrancarlo (los de sus plugins), para permitirlos en el modo agente.
+  usarArchivoMcp(join(app.getPath('userData'), 'mcp-claude.json'))
   const carpetaMuestras = join(app.getPath('userData'), 'muestras-voz')
   registrarMedia(proyectos, creaciones, carpetaMuestras)
 
@@ -3083,7 +3088,8 @@ app.whenReady().then(() => {
           config,
           clave,
           senal,
-          bloqueGustos()
+          bloqueGustos(),
+          await tomasDelProyecto(proyecto, proyectos.carpeta(id)).catch(() => '')
         )
         // La voz que pidió cambiar o añadir se genera aquí, antes de aplicar nada: así la
         // interfaz recibe las frases con su audio listo y todo entra en un solo paso de deshacer.
@@ -3290,6 +3296,30 @@ No pude animar los subtítulos (se animan al exportar): ${e instanceof Error ? e
   ipcMain.handle('actualizacion:estado', () => estadoActualizacion())
   ipcMain.handle('actualizacion:buscar', () => buscarActualizacion())
   ipcMain.handle('actualizacion:instalar', () => instalarActualizacion())
+
+  // Las habilidades del agente (ver habilidades.ts): verlas, añadir las suyas y olvidar una lección.
+  const vistaHabilidades = () =>
+    habilidadesConLecciones().map((h) => ({ id: h.id, nombre: h.nombre, cuando: h.cuando, origen: h.origen, aprendido: h.aprendido }))
+  ipcMain.handle('habilidades:ver', () => vistaHabilidades())
+  ipcMain.handle('habilidades:anadir', async (_evento, carpeta: unknown) => {
+    const eleccion = await dialog.showOpenDialog(
+      carpeta
+        ? { title: 'Elige la carpeta de la habilidad', properties: ['openDirectory'] }
+        : { title: 'Elige la habilidad (.md)', properties: ['openFile'], filters: [{ name: 'Habilidad', extensions: ['md'] }] }
+    )
+    const ruta = eleccion.filePaths[0]
+    if (eleccion.canceled || !ruta) return null
+    const r = anadirHabilidad(ruta)
+    return r.id ? { ok: true, id: r.id } : { ok: false, error: r.error }
+  })
+  ipcMain.handle('habilidades:olvidar-leccion', (_evento, id: unknown, leccion: unknown) => {
+    if (typeof id === 'string' && typeof leccion === 'string') olvidarLeccion(id, leccion)
+    return vistaHabilidades()
+  })
+  ipcMain.handle('habilidades:abrir-carpeta', async () => {
+    mkdirSync(carpetaHabilidadesUsuario(), { recursive: true })
+    await shell.openPath(carpetaHabilidadesUsuario())
+  })
 
   // El criterio que Recorte aprende del usuario (ver shared/gustos.ts).
   ipcMain.handle('gustos:ver', () => cargarGustos())

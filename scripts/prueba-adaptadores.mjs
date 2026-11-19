@@ -2,7 +2,10 @@
 // que cada uno lance bien su orden (nueva y retomando la sesión) y traduzca su salida.
 // npm run prueba:adaptadores
 import assert from 'node:assert/strict'
-import { ADAPTADORES } from '../src/main/adaptadoresagente.ts'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { ADAPTADORES, mcpDeClaude, permitidasClaude, recordarMcpClaude, usarArchivoMcp } from '../src/main/adaptadoresagente.ts'
 
 const leer = (agente, lineas) => lineas.flatMap((l) => ADAPTADORES[agente].leer(l))
 const de = (evs, t) => evs.filter((e) => e.t === t)
@@ -24,6 +27,35 @@ const de = (evs, t) => evs.filter((e) => e.t === t)
   const orden = ADAPTADORES.claude.orden('claude -p --model opus', 'C:\\t', 'abc')
   assert.match(orden, /^claude -p --model opus .*--output-format stream-json --verbose --resume abc$/)
   assert.doesNotMatch(ADAPTADORES.claude.orden('claude -p', 'C:\\t'), /--resume/)
+  // Llega con todo lo suyo (Recorte es una extensión): sus skills, internet y sus MCP; el de Recorte no.
+  const permitidas = /--allowedTools "([^"]*)"/.exec(orden)[1].split(' ')
+  for (const h of ['Skill', 'WebSearch', 'WebFetch', 'TodoWrite', 'Bash', 'Agent']) assert.ok(permitidas.includes(h), `falta ${h}`)
+  const dir = mkdtempSync(join(tmpdir(), 'recorte-claude-'))
+  try {
+    writeFileSync(join(dir, '.claude.json'), JSON.stringify({ mcpServers: { blender: {}, recorte: {}, 'mi-figma': {} } }))
+    assert.deepEqual(mcpDeClaude(join(dir, '.claude.json')), ['blender', 'mi-figma'])
+    assert.deepEqual(mcpDeClaude(join(dir, 'no-existe.json')), [])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+  // Los de sus plugins se ven al arrancar: se apuntan y desde la vez siguiente también se permiten.
+  const init = leer('claude', [JSON.stringify({ type: 'system', subtype: 'init', session_id: 's1', mcp_servers: [{ name: 'plugin:marketing:canva', status: 'connected' }, { name: 'recorte', status: 'connected' }, { name: 'claude.ai Google Drive', status: 'needs-auth' }] })])
+  const vistos = de(init, 'mcp')[0].servidores
+  assert.deepEqual(vistos, ['plugin:marketing:canva', 'recorte', 'claude.ai Google Drive'])
+  const dir2 = mkdtempSync(join(tmpdir(), 'recorte-mcp-'))
+  try {
+    usarArchivoMcp(join(dir2, 'mcp-claude.json'))
+    recordarMcpClaude(vistos)
+    const todas = permitidasClaude()
+    assert.ok(todas.includes('mcp__plugin_marketing_canva') && todas.includes('mcp__claude_ai_Google_Drive'), todas.join(' '))
+    assert.ok(!todas.some((t) => /recorte/i.test(t)), 'el MCP de Recorte no se permite')
+    usarArchivoMcp(join(dir2, 'mcp-claude.json'))
+    assert.ok(permitidasClaude().includes('mcp__plugin_marketing_canva'), 'se recuerdan al volver a abrir Recorte')
+    assert.match(ADAPTADORES.claude.orden('claude -p', 'C:\\t'), /--allowedTools "[^"]*mcp__plugin_marketing_canva[^"]*" --disallowedTools "mcp__recorte"/)
+  } finally {
+    rmSync(dir2, { recursive: true, force: true })
+  }
+  console.log('Claude Code: con sus skills, internet y sus MCP (también los de plugins; sin el de Recorte) ✓')
 }
 
 // Codex 0.167: `exec --json` (grabado).
@@ -44,9 +76,9 @@ const de = (evs, t) => evs.filter((e) => e.t === t)
   const nueva = ADAPTADORES.codex.orden('codex exec -m gpt-5', 'C:\\t')
   // En Windows, sin sandbox (el suyo rechaza todo comando); en Mac y Linux, con su sandbox.
   const permisos = process.platform === 'win32' ? '--dangerously-bypass-approvals-and-sandbox' : null
-  assert.equal(nueva, `codex exec -m gpt-5 --json --skip-git-repo-check ${permisos ?? '-s workspace-write'} -C "C:\\t" -`)
+  assert.equal(nueva, `codex exec -m gpt-5 --json --skip-git-repo-check ${permisos ?? '-s workspace-write -c sandbox_workspace_write.network_access=true'} -C "C:\\t" -`)
   const retoma = ADAPTADORES.codex.orden('codex exec -m gpt-5', 'C:\\t', 'abc')
-  assert.equal(retoma, `codex exec resume -m gpt-5 --json --skip-git-repo-check ${permisos ?? '-c sandbox_mode=workspace-write'} abc -`)
+  assert.equal(retoma, `codex exec resume -m gpt-5 --json --skip-git-repo-check ${permisos ?? '-c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=true'} abc -`)
 }
 
 // OpenCode 1.19: `run --format json` (grabado) y `-s <id>` para seguir la sesión.

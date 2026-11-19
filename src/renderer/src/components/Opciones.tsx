@@ -9,6 +9,7 @@ import { SeccionFlow } from './SeccionFlow'
 import { SeccionMcp } from './SeccionMcp'
 import { SeccionUso } from './SeccionUso'
 import { SeccionCriterio } from './SeccionCriterio'
+import { SeccionHabilidades } from './SeccionHabilidades'
 import { FilaVersion } from './AvisoActualizacion'
 import { CarpetaVideos } from './CarpetaVideos'
 
@@ -433,6 +434,8 @@ export function Opciones({
         <SeccionFlow onAviso={onAviso} />
 
         <SeccionCriterio onAviso={onAviso} />
+
+        <SeccionHabilidades onAviso={onAviso} />
 
         <SeccionMcp onAviso={onAviso} />
 

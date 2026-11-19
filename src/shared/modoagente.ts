@@ -249,13 +249,39 @@ export function limiteDeUso(texto: string, ahora = Date.now()): { reanudar?: num
 }
 
 /** Lo que el agente deja en `resultado.json` al terminar. */
-export function validarEntrega(crudo: unknown): { archivo?: string; receta?: string; resumen: string; comprobaciones: string[] } {
+export interface EntregaAgente {
+  archivo?: string
+  receta?: string
+  resumen: string
+  comprobaciones: string[]
+  /** Las habilidades que usó (ids). */
+  habilidades: string[]
+  /** Lo que aprendió con cada una, para la próxima vez. */
+  lecciones: { habilidad: string; leccion: string }[]
+  /** Una forma de hacer algo que descubrió y se va a repetir. */
+  habilidadNueva?: { id: string; nombre: string; cuando: string; cuerpo: string }
+}
+
+export function validarEntrega(crudo: unknown): EntregaAgente {
   const r = (crudo && typeof crudo === 'object' ? crudo : {}) as Record<string, unknown>
+  const lecciones = (Array.isArray(r.lecciones) ? r.lecciones : [])
+    .slice(0, 8)
+    .map((l) => (l && typeof l === 'object' ? (l as Record<string, unknown>) : {}))
+    .map((l) => ({ habilidad: texto(l.habilidad, 60), leccion: texto(l.leccion, 400) }))
+    .filter((l) => l.habilidad && l.leccion)
+  const n = (r.habilidad_nueva ?? r.habilidadNueva) as Record<string, unknown> | undefined
+  const nueva =
+    n && typeof n === 'object' && texto(n.id, 60) && texto(n.cuando, 300) && typeof n.cuerpo === 'string' && n.cuerpo.trim()
+      ? { id: texto(n.id, 60), nombre: texto(n.nombre, 80), cuando: texto(n.cuando, 300), cuerpo: n.cuerpo.trim().slice(0, 8000) }
+      : undefined
   return {
     ...(texto(r.archivo, 300) ? { archivo: texto(r.archivo, 300) } : {}),
     ...(texto(r.receta, 300) ? { receta: texto(r.receta, 300) } : {}),
     resumen: texto(r.resumen, 600),
-    comprobaciones: lista(r.comprobaciones, 12, 240)
+    comprobaciones: lista(r.comprobaciones, 12, 240),
+    habilidades: lista(r.habilidades, 10, 60),
+    lecciones,
+    ...(nueva ? { habilidadNueva: nueva } : {})
   }
 }
 

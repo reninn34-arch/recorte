@@ -2605,6 +2605,13 @@ button { cursor: pointer; }
 .criterio-veces { font-size: 11px; color: var(--dim); }
 .criterio-quitar { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: none; border-radius: 5px; background: transparent; color: var(--dim); cursor: pointer; }
 .criterio-quitar:hover { color: var(--danger); background: var(--panel-2); }
+.habilidades-lista li.habilidad { display: block; padding: 0; }
+.habilidad-cabeza { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 0; border: none; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.habilidad-cabeza:hover .criterio-texto strong { color: var(--accent); }
+.habilidad-aprendido { padding: 0 0 10px 52px; font-size: 12px; }
+.habilidad-aprendido ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.habilidad-aprendido li { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; border: none; }
+.habilidad-aprendido li span { flex: 1; color: var(--muted); }
 
 /* Aviso de versión nueva */
 .actualizacion {

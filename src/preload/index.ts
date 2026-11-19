@@ -138,6 +138,10 @@ const api: RecorteApi = {
   chatAgente: (id, timeline, historial, peticion, referencia) =>
     ipcRenderer.invoke('agente:chat', id, timeline, historial, peticion, referencia),
   pararAgente: (id) => ipcRenderer.invoke('agente:parar', id),
+  habilidades: () => ipcRenderer.invoke('habilidades:ver'),
+  habilidadAnadir: (carpeta) => ipcRenderer.invoke('habilidades:anadir', carpeta),
+  habilidadOlvidarLeccion: (id, leccion) => ipcRenderer.invoke('habilidades:olvidar-leccion', id, leccion),
+  habilidadesAbrirCarpeta: () => ipcRenderer.invoke('habilidades:abrir-carpeta'),
   gustos: () => ipcRenderer.invoke('gustos:ver'),
   gustoAgregar: (texto) => ipcRenderer.invoke('gustos:agregar', texto),
   gustoQuitar: (id) => ipcRenderer.invoke('gustos:quitar', id),

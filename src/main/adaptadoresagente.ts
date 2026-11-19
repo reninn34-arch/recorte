@@ -1,4 +1,6 @@
-import { basename } from 'node:path'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { basename, join } from 'node:path'
 
 /**
  * Los adaptadores de cada agente: cómo se lanza un turno (nuevo o retomando la sesión) y cómo
@@ -17,6 +19,8 @@ export type EventoAgente =
   | { t: 'fin'; ok: boolean; respuesta?: string; error?: string; costoUsd?: number }
   /** Cuánto lleva usado de su plan (Claude Code lo cuenta en cada turno). */
   | { t: 'uso'; info: unknown }
+  /** Los servidores MCP que el agente anunció al arrancar (Claude Code, también los de sus plugins). */
+  | { t: 'mcp'; servidores: string[] }
 
 export interface Adaptador {
   /** Con sesión: si el turno puede retomar una conversación anterior. */
@@ -84,17 +88,76 @@ function lineaDeClaude(ev: Record<string, unknown>): string | null {
   return null
 }
 
+/**
+ * Las herramientas de Claude Code en Recorte: TODAS las suyas, no un recorte. Recorte es una extensión: el agente llega
+ * con sus skills, internet y los MCP que el usuario tenga conectados (Blender…); el manual solo lo enfoca en el video.
+ * Fuera queda el MCP de Recorte, para que no lance otro video desde dentro de un video.
+ */
+export const HERRAMIENTAS_CLAUDE = ['Bash', 'Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep', 'Task', 'Agent', 'Skill', 'WebSearch', 'WebFetch', 'TodoWrite', 'NotebookEdit', 'ToolSearch']
+
+/** Los MCP que el usuario tiene en Claude Code (`~/.claude.json`, los de su usuario), sin el de Recorte. */
+export function mcpDeClaude(config = join(process.env.CLAUDE_CONFIG_DIR || homedir(), '.claude.json')): string[] {
+  try {
+    const datos = JSON.parse(readFileSync(config, 'utf8')) as { mcpServers?: Record<string, unknown> }
+    return Object.keys(datos.mcpServers ?? {}).filter((n) => /^[\w-]+$/.test(n) && n.toLowerCase() !== 'recorte')
+  } catch {
+    return []
+  }
+}
+
+/** El prefijo de las herramientas de un servidor MCP en Claude Code («plugin:marketing:ahrefs» → mcp__plugin_marketing_ahrefs). */
+export const prefijoMcp = (servidor: string): string => `mcp__${servidor.replace(/[^\w-]/g, '_')}`
+const esRecorte = (servidor: string): boolean => /^recorte$/i.test(servidor.trim())
+
+/**
+ * Los MCP de los plugins de Claude Code no están en su configuración: solo se saben cuando arranca y los anuncia. Recorte
+ * los apunta (en sus datos) y desde la vez siguiente también los permite.
+ */
+let archivoMcpVistos: string | null = null
+let mcpVistos: string[] = []
+export function usarArchivoMcp(ruta: string): void {
+  archivoMcpVistos = ruta
+  try {
+    const lista = JSON.parse(readFileSync(ruta, 'utf8'))
+    mcpVistos = Array.isArray(lista) ? lista.filter((x): x is string => typeof x === 'string') : []
+  } catch {
+    mcpVistos = []
+  }
+}
+export function recordarMcpClaude(servidores: string[]): void {
+  const nuevos = [...new Set(servidores.filter((n) => n && !esRecorte(n)))].sort()
+  if (nuevos.join('|') === mcpVistos.join('|')) return
+  mcpVistos = nuevos
+  if (archivoMcpVistos) {
+    try {
+      writeFileSync(archivoMcpVistos, JSON.stringify(nuevos))
+    } catch {
+      // Sin apuntarlos, la próxima vez solo van los de la configuración.
+    }
+  }
+}
+
+/** Lo que se le permite a Claude Code: sus herramientas y TODOS sus MCP (los de su configuración y los vistos), menos Recorte. */
+export function permitidasClaude(): string[] {
+  const mcp = [...new Set([...mcpDeClaude(), ...mcpVistos].filter((n) => !esRecorte(n)).map(prefijoMcp))]
+  return [...HERRAMIENTAS_CLAUDE, ...mcp]
+}
+
 const CLAUDE: Adaptador = {
   conSesion: true,
   stderrEsAvance: false,
   orden: (base, _cwd, sesion) =>
     // acceptEdits: escribe solo dentro de su directorio de trabajo; stream-json para ver qué hace.
-    `${base.trim()} --permission-mode acceptEdits --allowedTools "Bash Read Write Edit Glob Grep Task Agent" --output-format stream-json --verbose${sesion ? ` --resume ${sesion}` : ''}`,
+    `${base.trim()} --permission-mode acceptEdits --allowedTools "${permitidasClaude().join(' ')}" --disallowedTools "mcp__recorte" --output-format stream-json --verbose${sesion ? ` --resume ${sesion}` : ''}`,
   leer(linea) {
     const ev = json(linea)
     if (!ev) return linea.trim() ? [{ t: 'linea', texto: corto(linea, 200) }] : []
     const fuera: EventoAgente[] = []
     if (typeof ev.session_id === 'string' && ev.session_id) fuera.push({ t: 'sesion', id: ev.session_id })
+    if (ev.type === 'system' && ev.subtype === 'init' && Array.isArray(ev.mcp_servers)) {
+      const servidores = (ev.mcp_servers as { name?: unknown }[]).map((m) => (typeof m?.name === 'string' ? m.name : '')).filter(Boolean)
+      if (servidores.length) fuera.push({ t: 'mcp', servidores })
+    }
     if (ev.type === 'result') {
       const res = typeof ev.result === 'string' ? ev.result : ''
       const costoUsd = typeof ev.total_cost_usd === 'number' ? ev.total_cost_usd : undefined
@@ -121,6 +184,8 @@ const CLAUDE: Adaptador = {
 // ---------------------------------------------------------------------------
 
 export const SIN_SANDBOX_CODEX = process.platform === 'win32'
+/** Con sandbox (Mac): que pueda usar internet (buscar, sus MCP), como fuera de Recorte. Solo escribe en su carpeta. */
+const RED_CODEX = '-c sandbox_workspace_write.network_access=true'
 
 const CODEX: Adaptador = {
   conSesion: true,
@@ -128,11 +193,11 @@ const CODEX: Adaptador = {
   orden(base, cwd, sesion) {
     const b = base.trim()
     const permisos = SIN_SANDBOX_CODEX ? '--dangerously-bypass-approvals-and-sandbox' : null
-    if (!sesion) return `${b} --json --skip-git-repo-check ${permisos ?? '-s workspace-write'} -C "${cwd}" -`
+    if (!sesion) return `${b} --json --skip-git-repo-check ${permisos ?? `-s workspace-write ${RED_CODEX}`} -C "${cwd}" -`
     // `resume` no lleva -s ni -C: el sandbox va por configuración y la carpeta es donde se lanza
     // (Codex busca la sesión por carpeta). El modelo elegido (`-m`) se conserva.
     const resto = b.replace(/^codex\s+exec\b/, '').trim()
-    return `codex exec resume ${resto ? `${resto} ` : ''}--json --skip-git-repo-check ${permisos ?? '-c sandbox_mode=workspace-write'} ${sesion} -`
+    return `codex exec resume ${resto ? `${resto} ` : ''}--json --skip-git-repo-check ${permisos ?? `-c sandbox_mode=workspace-write ${RED_CODEX}`} ${sesion} -`
   },
   leer(linea) {
     const ev = json(linea)
