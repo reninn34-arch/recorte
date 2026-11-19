@@ -24,6 +24,33 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.91',
+    fecha: '2026-11-19',
+    resumen: 'El chat del editor ahora trabaja con herramientas: mira, edita y comprueba, con cualquier agente.',
+    novedades: [
+      {
+        icono: 'sparkles',
+        titulo: 'Un chat que mira y comprueba',
+        texto: 'Cuando le pides algo en el chat del editor, el agente mira tu proyecto, hace el cambio y lo comprueba viendo el cuadro. Si algo quedó mal, lo corrige en el mismo mensaje. Ves al momento lo que cambia, y lo deshaces con Ctrl+Z.'
+      },
+      {
+        icono: 'layers',
+        titulo: 'Con todos tus agentes',
+        texto: 'Funciona con Claude Code, Codex, OpenCode, Kimi Code, Gemini CLI y Antigravity. Cada uno trae lo suyo (sus skills, internet, sus conexiones) y recuerda la conversación. Con una llave de API, el chat sigue como antes.'
+      },
+      {
+        icono: 'clock',
+        titulo: 'Ves lo que va haciendo',
+        texto: 'Mientras trabaja, el chat te dice en qué va: «mirando un cuadro», «editando la línea de tiempo», «analizando las tomas»… Con herramientas tarda un poco más que antes, porque comprueba lo que hace.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Kimi Code vuelve a funcionar',
+        texto: 'La versión nueva de Kimi Code no arrancaba desde Recorte. Ya funciona, en el chat y al crear videos.'
+      }
+    ]
+  },
+  {
     version: '0.1.90',
     fecha: '2026-11-19',
     resumen: 'El agente entiende tus videos toma por toma, tiene habilidades que aprenden de ti y trabaja con todo lo suyo.',
