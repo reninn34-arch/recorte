@@ -77,6 +77,9 @@ export function ChatAgente({
   const [texto, setTexto] = useState('')
   const [pensando, setPensando] = useState<number | null>(null)
   const [segundos, setSegundos] = useState(0)
+  /** Lo último que hizo el agente (cuando trabaja con herramientas: «ver_cuadro», «editar_timeline»…). */
+  const [paso, setPaso] = useState<string | null>(null)
+  useEffect(() => window.recorte.onChatPaso((e) => { if (e.id === proyecto.id) setPaso(pasoLegible(e.texto)) }), [proyecto.id])
   const [conReferencia, setConReferencia] = useState(true)
   const [editando, setEditando] = useState<{ id: string; texto: string } | null>(null)
   const [, refrescar] = useState(0)
@@ -127,6 +130,7 @@ export function ChatAgente({
     setEditando(null)
     setPensando(Date.now())
     setSegundos(0)
+    setPaso(null)
     const mio = ++turno.current
     enCurso.current = conPregunta
 
@@ -137,7 +141,7 @@ export function ChatAgente({
       const r0 = await window.recorte.chatAgente(proyectoId, p.timeline, sinAntes, limpio, referencia)
       if (turno.current !== mio) return
       if (r0.parado) {
-        respuesta = { id: crypto.randomUUID(), rol: 'agente' as const, texto: 'Lo paraste. No cambié nada.', fecha: Date.now(), parado: true }
+        respuesta = { id: crypto.randomUUID(), rol: 'agente' as const, texto: 'Lo paraste. Si alcanzó a cambiar algo, lo deshaces con Ctrl+Z.', fecha: Date.now(), parado: true }
       } else if (!r0.ok) {
         respuesta = { id: crypto.randomUUID(), rol: 'agente', texto: r0.error ?? 'El agente no pudo responder.', fecha: Date.now(), error: true }
       } else {
@@ -190,7 +194,7 @@ export function ChatAgente({
     setPensando(null)
     onCambiarChat(proyectoId, [
       ...base,
-      { id: crypto.randomUUID(), rol: 'agente' as const, texto: 'Lo paraste. No cambié nada.', fecha: Date.now(), parado: true }
+      { id: crypto.randomUUID(), rol: 'agente' as const, texto: 'Lo paraste. Si alcanzó a cambiar algo, lo deshaces con Ctrl+Z.', fecha: Date.now(), parado: true }
     ].slice(-MAX_MENSAJES))
   }
 
@@ -387,6 +391,7 @@ export function ChatAgente({
             </span>
             <span>
               {nombreAgente ?? 'El agente'} está editando… {segundos} s
+              {paso && <span className="chat-paso"> · {paso}</span>}
             </span>
             <button className="chat-parar-mini" onClick={parar} title="Parar al agente (Esc)">
               Parar
@@ -434,4 +439,24 @@ export function ChatAgente({
       </div>
     </div>
   )
+}
+
+/** Un paso del agente en palabras («mcp__recorte__ver_cuadro: …» → «mirando un cuadro»). */
+const PASOS: [RegExp, string][] = [
+  [/ver_proyecto/, 'mirando el proyecto'],
+  [/ver_cuadro/, 'mirando un cuadro'],
+  [/editar_timeline/, 'editando la línea de tiempo'],
+  [/analizar_video/, 'analizando las tomas'],
+  [/revisar_audio/, 'revisando el audio'],
+  [/quitar_fondo/, 'quitando el fondo'],
+  [/animar_capa|anadir_pieza/, 'animando'],
+  [/poner_audio/, 'poniendo el audio'],
+  [/^Skill/, 'usando una de sus skills'],
+  [/^Web(Search|Fetch)/, 'buscando en internet'],
+  [/^(Read|Glob|Grep)/, 'leyendo'],
+  [/^Bash/, 'midiendo']
+]
+function pasoLegible(texto: string): string | null {
+  for (const [re, dicho] of PASOS) if (re.test(texto)) return dicho
+  return null
 }

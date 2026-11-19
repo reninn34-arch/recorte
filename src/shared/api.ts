@@ -408,6 +408,8 @@ export interface RecorteApi {
   mcpNuevaContrasena: () => Promise<EstadoMcp>
   /** Un agente cambió un proyecto por MCP (la interfaz lo recoge). Devuelve cómo dejar de escuchar. */
   onProyectoExterno: (cb: (e: { proyecto: Project; quien: string; conTimeline: boolean }) => void) => () => void
+  /** Lo que va haciendo el agente del chat del editor cuando trabaja con herramientas («ver_cuadro: …»). */
+  onChatPaso: (cb: (e: { id: string; texto: string }) => void) => () => void
   /** Un agente pidió mostrar un proyecto en el editor. */
   onAbrirProyecto: (cb: (id: string) => void) => () => void
   /** Un agente de fuera (MCP) pide enseñar una creación con su chat. */

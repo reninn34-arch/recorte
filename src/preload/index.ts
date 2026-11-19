@@ -89,6 +89,11 @@ const api: RecorteApi = {
     ipcRenderer.on('proyecto:externo', listener)
     return () => ipcRenderer.removeListener('proyecto:externo', listener)
   },
+  onChatPaso: (cb) => {
+    const listener = (_evento: Electron.IpcRendererEvent, e: { id: string; texto: string }) => cb(e)
+    ipcRenderer.on('agente:chat-paso', listener)
+    return () => ipcRenderer.removeListener('agente:chat-paso', listener)
+  },
   onAbrirProyecto: (cb) => {
     const listener = (_evento: Electron.IpcRendererEvent, id: string) => cb(id)
     ipcRenderer.on('proyecto:abrir', listener)

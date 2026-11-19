@@ -143,6 +143,22 @@ export function permitidasClaude(): string[] {
   return [...HERRAMIENTAS_CLAUDE, ...mcp]
 }
 
+/** La orden de Claude Code para el chat del editor: con el MCP de Recorte (que el modo agente deja fuera) por su archivo. */
+export function ordenConRecorte(comando: string, archivoMcp: string): string {
+  return comando
+    .replace(/ --disallowedTools "mcp__recorte"/, '')
+    .replace('--allowedTools "', `--mcp-config "${archivoMcp}" --allowedTools "mcp__recorte `)
+}
+
+/**
+ * La orden de Codex para el chat del editor: el MCP de Recorte por configuración (`-c`), con la contraseña en la variable
+ * RECORTE_MCP_TOKEN. Los valores van sin comillas: Codex toma como texto lo que no es TOML (así no hay que escaparlos).
+ */
+export function ordenCodexConRecorte(comando: string, url: string): string {
+  const mcp = `-c mcp_servers.recorte.url=${url} -c mcp_servers.recorte.bearer_token_env_var=RECORTE_MCP_TOKEN`
+  return comando.replace(/^(\S*codex(?:\.cmd)?\s+exec(?:\s+resume)?)(?=\s|$)/, `$1 ${mcp}`)
+}
+
 const CLAUDE: Adaptador = {
   conSesion: true,
   stderrEsAvance: false,
@@ -213,6 +229,9 @@ const CODEX: Adaptador = {
     }
     if (tipo === 'error') return [{ t: 'linea', texto: `Aviso de Codex: ${corto(String(ev.message ?? ''))}` }]
     if (tipo === 'item.started' && deItem === 'command_execution') return [{ t: 'linea', texto: `Bash: ${corto(String(item.command ?? ''))}` }]
+    // Una herramienta de un MCP (las de Recorte en el chat del editor): «mcp__recorte__ver_cuadro: …», como Claude.
+    if (tipo === 'item.started' && deItem === 'mcp_tool_call') return [{ t: 'linea', texto: `mcp__${String(item.server ?? '')}__${String(item.tool ?? '')}: ` }]
+    if (tipo === 'item.started' && deItem === 'web_search') return [{ t: 'linea', texto: `WebSearch: ${corto(String(item.query ?? ''))}` }]
     if (tipo === 'item.completed') {
       if (deItem === 'agent_message' && typeof item.text === 'string') {
         return [
@@ -291,7 +310,9 @@ const texto = (ajustar: (b: string, cwd: string) => string): Adaptador => ({
   }
 })
 
-const KIMI = texto((b) => b.replace(/^kimi\b/, 'kimi --auto'))
+// Kimi Code 2.x ya no deja combinar `-p` con `--auto` ni con `--yolo` («Cannot combine --prompt with --auto»): con
+// `-p` trabaja solo, sin preguntar. Se quita el que traiga la orden de Ajustes (las de versiones anteriores lo llevaban).
+const KIMI = texto((b) => b.replace(/\s--(auto|yolo)\b|\s-y\b/g, ''))
 // `-p` lleva valor: sin él, el siguiente flag (`-m`, `--yolo`) se toma como el prompt. El
 // pedido llega por stdin y `-p` se le suma al final (así lo documenta `gemini --help`).
 // `--skip-trust`: en una carpeta nueva, Gemini no la trata como «no confiable» (que le quita herramientas).

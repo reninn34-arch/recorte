@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, shell } from 'electron'
 import { tomasDelProyecto } from './analizarvideo'
+import { AGENTES_CHAT_HERRAMIENTAS, turnoChatHerramientas } from './chatherramientas'
 import { usarArchivoMcp } from './adaptadoresagente'
 import { anadirHabilidad, carpetaHabilidadesUsuario, habilidadesConLecciones, olvidarLeccion } from './habilidades'
 import { ANIMAR_CAPA, fuenteEnClip, tramos, zonaEn, frasesSubtitulos, huellaSubtitulos, subtitulosAlDia, duracionTimeline, duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, SONIDOS_INCLUIDOS, timelineInicial, timelineVacia, type Timeline } from '../shared/timeline'
@@ -53,7 +54,7 @@ import { convertirAVoz, generarVozGemini, prepararVoz } from './voz'
 import { montarVozEnVideo } from './montajevoz'
 import { conectarVozGoogle, desconectarVozGoogle, estadoVozGoogle, generarVozGoogle } from './vozgoogle'
 import { analizarMaterialCreacion } from './estilo/material'
-import { anotar, archivoEntregado, copiarEntrada, definirConectadas, LimiteUso, pasoHacer, pasoPlan, revisarYPublicar } from './modoagente'
+import { anotar, archivoEntregado, comandoAgentico, copiarEntrada, definirConectadas, LimiteUso, pasoHacer, pasoPlan, revisarYPublicar } from './modoagente'
 import { prepararArchivos } from './archivos'
 import { clipsDelPlan, esAprobacion, MAX_CLIPS_GUION, pasoAnunciado } from '../shared/modoagente'
 import { estiloPorId } from '../shared/estilos'
@@ -3079,6 +3080,35 @@ app.whenReady().then(() => {
       const mensajes = Array.isArray(historial) ? (historial as MensajeChat[]).filter((m) => m && typeof m.texto === 'string') : []
       const senal = empezarTrabajo(`chat:${id}`)
       try {
+        const tlActual = normalizarTimeline(timeline, proyecto.source.duration, duracionesDeMedios(proyecto.medios))
+        // Con un agente que trabaja con herramientas (Claude Code) y el MCP de Recorte activo, el chat edita mirando y
+        // comprobando, a través del MCP. Con una llave de API (sin herramientas), como siempre: texto → operaciones.
+        const agentico = config.proveedor === 'cli' ? comandoAgentico(config.comandoCli) : null
+        const estadoMcp = mcp.estado()
+        if (agentico && AGENTES_CHAT_HERRAMIENTAS.includes(agentico.agente) && estadoMcp.activo) {
+          // El agente parte de lo que el usuario ve ahora (puede haber editado a mano sin que se guardara).
+          const enDisco = proyectos.get(id)
+          if (enDisco) {
+            enDisco.timeline = tlActual
+            delete enDisco.timelinePendiente
+            proyectos.save(enDisco)
+          }
+          const conHerramientas = await turnoChatHerramientas({
+            agente: agentico.agente,
+            proyecto: enDisco ?? proyecto,
+            historial: mensajes,
+            peticion: peticion.slice(0, 4000),
+            referencia: typeof referencia === 'string' ? referencia.slice(0, 500) : undefined,
+            gustos: bloqueGustos(),
+            base: agentico.orden,
+            mcp: { url: estadoMcp.url, contrasena: estadoMcp.contrasena },
+            carpeta: join(app.getPath('userData'), 'chat-agente', id),
+            senal,
+            onPaso: (texto) => _evento.sender.send('agente:chat-paso', { id, texto })
+          })
+          // Si su versión no vio las herramientas de Recorte, sigue como chat de texto (abajo).
+          if (!conHerramientas.sinHerramientas) return conHerramientas
+        }
         const turno = await turnoAgente(
           proyecto,
           normalizarTimeline(timeline, proyecto.source.duration, duracionesDeMedios(proyecto.medios)),

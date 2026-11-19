@@ -82,6 +82,10 @@ export interface PeticionTurno {
   timeoutMs: number
   /** Si el agente ya dejó su entrega: con eso y un rato callado, el turno terminó aunque no salga. */
   entregaLista?: () => boolean
+  /** Un retoque a la orden del agente (el chat del editor le añade el MCP de Recorte). */
+  ordenFinal?: (comando: string) => string
+  /** Variables de entorno de más para el agente (la contraseña del MCP de Recorte para Codex). */
+  entorno?: Record<string, string>
 }
 
 export interface ResultadoTurno {
@@ -109,6 +113,7 @@ export async function turnoAgente(p: PeticionTurno): Promise<ResultadoTurno> {
   if (!agente || !ad) throw new Error('Este agente no sabe trabajar con herramientas en una carpeta.')
   const sesion = ad.conSesion ? p.sesion : undefined
   let comando = ad.orden(p.base, p.cwd, sesion)
+  if (p.ordenFinal) comando = p.ordenFinal(comando)
   let archivoPrompt: string | null = null
   if (comando.includes('{prompt}')) {
     // Kimi toma el prompt como archivo (`-p "@{prompt}"`), no por stdin.
@@ -126,7 +131,7 @@ export async function turnoAgente(p: PeticionTurno): Promise<ResultadoTurno> {
     // plano y termina su turno, al cerrar su proceso se corta el render (y no hay entrega).
     // Claude Code acepta estos topes por entorno (por defecto, 2 y 10 min).
     const esperaLarga = { BASH_DEFAULT_TIMEOUT_MS: String(30 * 60_000), BASH_MAX_TIMEOUT_MS: String(60 * 60_000) }
-    const hijo = spawn(comando, { cwd: p.cwd, shell: true, windowsHide: true, env: { ...process.env, ...esperaLarga, ...extra, PATH: pathAmpliado() } })
+    const hijo = spawn(comando, { cwd: p.cwd, shell: true, windowsHide: true, env: { ...process.env, ...esperaLarga, ...extra, ...p.entorno, PATH: pathAmpliado() } })
     let resto = ''
     let restoErr = ''
     let respuesta = ''

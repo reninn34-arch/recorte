@@ -5,7 +5,26 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ADAPTADORES, mcpDeClaude, permitidasClaude, recordarMcpClaude, usarArchivoMcp } from '../src/main/adaptadoresagente.ts'
+import { ADAPTADORES, mcpDeClaude, ordenCodexConRecorte, ordenConRecorte, permitidasClaude, recordarMcpClaude, usarArchivoMcp } from '../src/main/adaptadoresagente.ts'
+
+// El chat del editor: Claude Code con el MCP de Recorte (por su archivo) y permitido; el modo agente lo deja fuera.
+{
+  const chat = ordenConRecorte(ADAPTADORES.claude.orden('claude -p', 'C:\\t', 'abc'), 'C:\\datos\\recorte-mcp.json')
+  assert.match(chat, /--mcp-config "C:\\datos\\recorte-mcp\.json" --allowedTools "mcp__recorte Bash /)
+  assert.doesNotMatch(chat, /--disallowedTools/)
+  assert.match(chat, /--resume abc$/)
+  assert.match(ADAPTADORES.claude.orden('claude -p', 'C:\\t'), /--disallowedTools "mcp__recorte"/)
+  console.log('chat del editor: Claude Code con el MCP de Recorte; el modo agente, sin él ✓')
+  // Codex: el MCP por configuración, la contraseña por variable de entorno (no en la orden), nuevo y retomando.
+  const url = 'http://127.0.0.1:47116/mcp'
+  const mcp = `-c mcp_servers.recorte.url=${url} -c mcp_servers.recorte.bearer_token_env_var=RECORTE_MCP_TOKEN`
+  assert.ok(ordenCodexConRecorte(ADAPTADORES.codex.orden('codex exec -m gpt-5', 'C:\\t'), url).startsWith(`codex exec ${mcp} -m gpt-5 `))
+  assert.ok(ordenCodexConRecorte(ADAPTADORES.codex.orden('codex exec', 'C:\\t', 'abc'), url).startsWith(`codex exec resume ${mcp} `))
+  // Y sus llamadas a un MCP salen como pasos que el chat entiende (grabado de Codex 0.167).
+  const paso = ADAPTADORES.codex.leer('{"type":"item.started","item":{"id":"item_1","type":"mcp_tool_call","server":"recorte","tool":"ver_cuadro","arguments":{"segundo":0.8},"status":"in_progress"}}')
+  assert.equal(paso.find((e) => e.t === 'linea').texto, 'mcp__recorte__ver_cuadro: ')
+  console.log('chat del editor con Codex: su MCP en la orden y sus pasos ✓')
+}
 
 const leer = (agente, lineas) => lineas.flatMap((l) => ADAPTADORES[agente].leer(l))
 const de = (evs, t) => evs.filter((e) => e.t === t)
@@ -107,6 +126,9 @@ const de = (evs, t) => evs.filter((e) => e.t === t)
 // Los de texto: sin sesión, y Gemini con `-p` bien formado.
 {
   assert.equal(ADAPTADORES.kimi.conSesion, false)
+  // Kimi Code 2.x rechaza `-p` con `--auto` o `--yolo`: la orden va sin ellos aunque Ajustes los traiga.
+  assert.equal(ADAPTADORES.kimi.orden('kimi -p "@{prompt}"', 'C:\\t'), 'kimi -p "@{prompt}"')
+  assert.equal(ADAPTADORES.kimi.orden('kimi --yolo -m k2 -p "@{prompt}"', 'C:\\t'), 'kimi -m k2 -p "@{prompt}"')
   assert.equal(ADAPTADORES.gemini.orden('gemini -p -m gemini-2.5-pro', 'C:\\t'), 'gemini -m gemini-2.5-pro --yolo --skip-trust -p "Sigue al pie de la letra las instrucciones de arriba."')
   const evs = leer('kimi', ['Leyendo entrada/', 'Listo.'])
   assert.equal(de(evs, 'respuesta').map((e) => e.texto).join(''), 'Leyendo entrada/\nListo.\n')

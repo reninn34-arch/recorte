@@ -466,7 +466,9 @@ async function abrirSesion(
   /** Modo agente: trabaja en esta carpeta, con permiso para escribir y terminal (solo ahí). */
   manos?: { cwd: string; manos: Manos },
   /** El modelo y el nivel de pensamiento elegidos (si no, los de la cuenta). */
-  opciones: { modelo?: string; esfuerzo?: string } = {}
+  opciones: { modelo?: string; esfuerzo?: string } = {},
+  /** Servidores MCP por HTTP para esta sesión (el chat del editor le da el de Recorte). */
+  mcp: { nombre: string; url: string; cabeceras: Record<string, string> }[] = []
 ): Promise<SesionAcp> {
   const { proceso, deReserva } = manos ? await tomarProceso() : { proceso: await arrancarProceso(false), deReserva: false }
   const { rpc, hijo } = proceso
@@ -482,7 +484,13 @@ async function abrirSesion(
     manos?.manos
   )
   try {
-    const s = await rpc.pedir<{ sessionId: string; configOptions?: OpcionAcp[] }>('session/new', { cwd: manos?.cwd ?? tmpdir(), mcpServers: [] }, 180_000)
+    const s = await rpc.pedir<{ sessionId: string; configOptions?: OpcionAcp[] }>('session/new',
+      {
+        cwd: manos?.cwd ?? tmpdir(),
+        mcpServers: mcp.map((m) => ({ type: 'http', name: m.nombre, url: m.url, headers: Object.entries(m.cabeceras).map(([name, value]) => ({ name, value })) }))
+      },
+      180_000
+    )
     if (cerrado) throw cerrado
     guardarCatalogo(s.configOptions)
     // El modelo y el nivel de pensamiento elegidos, con las opciones que dio la sesión (ACP).
@@ -563,7 +571,9 @@ export async function trabajarAntigravity(
   imagenes: string[] = [],
   opciones: { modelo?: string; esfuerzo?: string } = {},
   /** Si ya dejó su entrega (resultado.json y el archivo): si se queda callado después, terminó. */
-  entregaLista?: () => boolean
+  entregaLista?: () => boolean,
+  /** Servidores MCP por HTTP para esta sesión. */
+  mcp: { nombre: string; url: string; cabeceras: Record<string, string> }[] = []
 ): Promise<string> {
   if (senal?.aborted) throw new Parado()
   onLinea('Arrancando Antigravity (tarda unos segundos)')
@@ -594,7 +604,8 @@ export async function trabajarAntigravity(
       }
     },
     { cwd, manos },
-    opciones
+    opciones,
+    mcp
   )
   const partes: unknown[] = [{ type: 'text', text: prompt }]
   if (sesion.imagenes) {
