@@ -24,6 +24,23 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.94',
+    fecha: '2026-11-19',
+    resumen: 'El agente sabe solo dónde estás en el editor: «cambia esto» o «corta aquí» se entienden sin explicarlo.',
+    novedades: [
+      {
+        icono: 'search',
+        titulo: 'El agente ve dónde estás',
+        texto: 'Sabe en qué segundo está el cabezal y qué tienes elegido (un clip, un texto, una capa, un sonido…), sin que actives nada. Pídele «cambia esto» o «corta aquí» y lo entiende. Funciona en el chat de cualquier proyecto y desde Claude Code o Codex por MCP.'
+      },
+      {
+        icono: 'check',
+        titulo: 'Un chat más limpio',
+        texto: 'Se fueron la pastilla del cabezal y la fila «Automático»: la edición completa se pide en el chat, y «Proponer clips» es «Generar lote», arriba.'
+      }
+    ]
+  },
+  {
     version: '0.1.93',
     fecha: '2026-11-19',
     resumen: 'El chat de cualquier proyecto trae la caja completa: eliges agente, modelo, imágenes, clips y voz.',
