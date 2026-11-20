@@ -40,6 +40,18 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.98',
+    fecha: '2026-11-20',
+    resumen: 'Tú eliges qué estilos salen como tarjetas: ya no viene ninguno añadido.',
+    novedades: [
+      {
+        icono: 'palette',
+        titulo: 'Tus tarjetas, las que tú añadas',
+        texto: 'Debajo de la caja salen solo los estilos que añadas desde «Estilos». Ya no aparecen tres añadidos por su cuenta.'
+      }
+    ]
+  },
+  {
     version: '0.1.97',
     fecha: '2026-11-20',
     resumen: 'Nueva sección «Estilos»: eliges cómo se ve tu video y el agente lo hace en 3D en tu equipo, sin gastar créditos.',

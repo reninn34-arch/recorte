@@ -63,9 +63,9 @@ try {
     console.log('la boca del personaje sigue la voz ✓')
   }
 
-  // 2. La primera vez salen unos añadidos; se añade (al final) y se quita.
-  assert.deepEqual(cat.filter((e) => e.anadido).map((e) => e.id), ['plastilina', 'neon', 'inflado'])
-  C.anadirEstilo('diorama-miniatura')
+  // 2. La primera vez no hay ninguno añadido: los añade el usuario (al final, en su orden) y los quita.
+  assert.deepEqual(cat.filter((e) => e.anadido).map((e) => e.id), [], 'ningún estilo viene añadido')
+  for (const id of ['plastilina', 'neon', 'inflado', 'diorama-miniatura']) C.anadirEstilo(id)
   C.quitarEstilo('neon')
   cat = C.catalogoEstilos(lecciones)
   assert.deepEqual(cat.filter((e) => e.anadido).map((e) => e.id), ['plastilina', 'inflado', 'diorama-miniatura'])

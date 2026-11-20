@@ -28,7 +28,9 @@ export function Novedades({ forzar, onCerrar, onEstilos }: { forzar?: boolean; o
   }, [])
 
   const mostrar = forzar ? NOVEDADES.filter((v) => !actual || compararVersion(v.version, actual) <= 0).slice(0, 3) : lista
-  const portada = mostrar[0]?.portada
+  // la versión con portada se presenta en grande aunque haya otras más nuevas (van debajo, como lista)
+  const conPortada = mostrar.find((v) => v.portada)
+  const portada = conPortada?.portada
   useEffect(() => {
     if (portada) window.recorte.estilosCatalogo().then(setCatalogo).catch(() => setCatalogo([]))
   }, [portada])
@@ -41,9 +43,9 @@ export function Novedades({ forzar, onCerrar, onEstilos }: { forzar?: boolean; o
   }
 
   const principal = mostrar[0]
-  if (portada) {
+  if (portada && conPortada) {
     const videos = portada.estilos.map((id) => catalogo.find((e) => e.id === id)).filter((e): e is EstiloCatalogo => Boolean(e?.vista)).slice(0, 5)
-    const otras = mostrar.slice(1)
+    const otras = mostrar.filter((v) => v !== conPortada)
     return (
       <div className="novedades-fondo" role="dialog" aria-modal="true" aria-labelledby="novedades-titulo" onMouseDown={(e) => e.target === e.currentTarget && cerrar()}>
         <div className="novedades is-portada" onKeyDown={(e) => e.key === 'Escape' && cerrar()}>
@@ -56,7 +58,7 @@ export function Novedades({ forzar, onCerrar, onEstilos }: { forzar?: boolean; o
             ))}
             {!videos.length && <div className="nov-cuadro is-grande is-vacio" />}
             <span className="nov-etiqueta">
-              <Icon name="sparkles" size={12} /> {portada.etiqueta} · {principal.version}
+              <Icon name="sparkles" size={12} /> {portada.etiqueta} · {conPortada.version}
             </span>
             <button className="nov-cerrar" aria-label="Cerrar" onClick={cerrar}>
               <Icon name="x" size={14} />
@@ -66,7 +68,7 @@ export function Novedades({ forzar, onCerrar, onEstilos }: { forzar?: boolean; o
             <h2 id="novedades-titulo">{portada.titulo}</h2>
             <p className="nov-texto">{portada.texto}</p>
             <div className="nov-tarjetas">
-              {principal.novedades.map((n) => (
+              {conPortada.novedades.map((n) => (
                 <div key={n.titulo} className="nov-tarjeta">
                   <span className="nov-icono">
                     <Icon name={n.icono as IconName} size={16} />

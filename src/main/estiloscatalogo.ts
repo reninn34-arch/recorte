@@ -18,7 +18,6 @@ import { rutaScriptPython } from './transcribir'
 const ID = /^[a-z0-9][a-z0-9-]{1,48}$/
 const GRUPOS: GrupoEstilo[] = ['3d', 'vender', 'ensenar', 'contar', 'inspirar']
 /** Los que salen añadidos la primera vez (para que el usuario los vea sin buscar). */
-const DE_ENTRADA = ['plastilina', 'neon', 'inflado']
 
 const carpetaRecorte = (): string => rutaScriptPython('estilos')
 export const carpetaEstilosUsuario = (): string => join(app.getPath('userData'), 'estilos-catalogo')
@@ -76,8 +75,7 @@ export function leerAnadidos(): string[] {
     const lista = JSON.parse(readFileSync(archivoAnadidos(), 'utf8')) as unknown
     if (Array.isArray(lista)) return lista.filter((x): x is string => typeof x === 'string' && ID.test(x))
   } catch {
-    // La primera vez: unos cuantos para que se vean las tarjetas.
-    return DE_ENTRADA.filter((id) => fichasEstilos().some((f) => f.id === id))
+    // La primera vez no hay ninguno: las tarjetas las añade el usuario desde «Estilos».
   }
   return []
 }
