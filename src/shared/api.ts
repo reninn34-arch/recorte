@@ -498,6 +498,15 @@ export interface RecorteApi {
   habilidadOlvidarLeccion: (id: string, leccion: string) => Promise<HabilidadVista[]>
   /** Abre la carpeta de las habilidades del usuario (para ponerlas o cambiarlas a mano). */
   habilidadesAbrirCarpeta: () => Promise<void>
+  /** La sección «Estilos»: el catálogo (lo añadido primero, en su orden). */
+  estilosCatalogo: () => Promise<import('./estilos').EstiloCatalogo[]>
+  /** Añade un estilo a las tarjetas de debajo de la caja (al final). */
+  estiloAnadir: (id: string) => Promise<import('./estilos').EstiloCatalogo[]>
+  estiloQuitar: (id: string) => Promise<import('./estilos').EstiloCatalogo[]>
+  /** Un estilo propio, contado con palabras o pegando un prompt; queda añadido. */
+  estiloCrear: (datos: { nombre: string; descripcion: string; grupo?: string }) => Promise<{ id?: string; error?: string; catalogo: import('./estilos').EstiloCatalogo[] }>
+  /** Borra un estilo que creó el usuario. */
+  estiloBorrar: (id: string) => Promise<import('./estilos').EstiloCatalogo[]>
   /** El criterio que la app aprendió del usuario (se ve y se borra en Ajustes). */
   gustos: () => Promise<Gustos>
   gustoAgregar: (texto: string) => Promise<Gustos>

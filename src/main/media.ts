@@ -1,4 +1,5 @@
 import { carpetaDePieza } from './piezas'
+import { carpetaEstiloCatalogo } from './estiloscatalogo'
 import { protocol } from 'electron'
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, join, resolve, sep } from 'node:path'
@@ -57,6 +58,14 @@ export function registrarMedia(proyectos: Proyectos, creaciones: Creaciones, car
       const carpeta = carpetaDePieza(relativo.replace(/\.mp4$/, ''))
       if (!carpeta) return new Response('No encontrado', { status: 404 })
       return servirArchivo(join(carpeta, 'muestra.mp4'), request)
+    }
+
+    // `estilos/<id>/vista.mp4|vista.jpg`: la vista previa de un estilo de la sección «Estilos».
+    if (id === 'estilos') {
+      const m = /^([a-z0-9][a-z0-9-]{1,48})\/(vista\.(?:mp4|jpg))$/.exec(relativo)
+      const carpeta = m ? carpetaEstiloCatalogo(m[1]) : null
+      if (!m || !carpeta) return new Response('No encontrado', { status: 404 })
+      return servirArchivo(join(carpeta, m[2]), request)
     }
 
     // `muestras/<voz>.wav`: la muestra de una voz de Gemini, para oírla antes de elegirla.

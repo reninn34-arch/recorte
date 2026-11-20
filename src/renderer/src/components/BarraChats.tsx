@@ -60,7 +60,9 @@ export function BarraChats({
   onAjustes,
   agenteActivo,
   viendoVideos,
-  onMisVideos
+  onMisVideos,
+  viendoEstilos,
+  onEstilos
 }: {
   creaciones: Creacion[]
   proyectos: Project[]
@@ -80,6 +82,9 @@ export function BarraChats({
   /** Si se está viendo «Mis videos». */
   viendoVideos?: boolean
   onMisVideos: () => void
+  /** Si se está viendo la sección «Estilos». */
+  viendoEstilos?: boolean
+  onEstilos?: () => void
 }) {
   const [borrando, setBorrando] = useState<{ tipo: 'proyecto' | 'creacion'; id: string; nombre: string; ids?: string[] } | null>(null)
   const [enCursoBorrar, setEnCursoBorrar] = useState(false)
@@ -176,6 +181,11 @@ export function BarraChats({
       <button className={`bc-accion ${viendoVideos ? 'is-activa' : ''}`} onClick={onMisVideos}>
         <Icon name="layers" size={16} /> Mis videos
       </button>
+      {onEstilos && (
+        <button className={`bc-accion ${viendoEstilos ? 'is-activa' : ''}`} onClick={onEstilos}>
+          <Icon name="sparkles" size={16} /> Estilos
+        </button>
+      )}
 
       <div className="bc-lista">
         {grupos.map((g) => (

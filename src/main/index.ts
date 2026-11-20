@@ -2,7 +2,8 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, shell } from 'elec
 import { tomasDelProyecto } from './analizarvideo'
 import { AGENTES_CHAT_HERRAMIENTAS, turnoChatHerramientas } from './chatherramientas'
 import { usarArchivoMcp } from './adaptadoresagente'
-import { anadirHabilidad, carpetaHabilidadesUsuario, habilidadesConLecciones, olvidarLeccion } from './habilidades'
+import { anadirHabilidad, carpetaHabilidadesUsuario, habilidadesConLecciones, leerLecciones, olvidarLeccion } from './habilidades'
+import { anadirEstilo, borrarEstilo, catalogoEstilos, crearEstilo, quitarEstilo, registrarCatalogo } from './estiloscatalogo'
 import { ANIMAR_CAPA, fuenteEnClip, tramos, zonaEn, frasesSubtitulos, huellaSubtitulos, subtitulosAlDia, duracionTimeline, duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, SONIDOS_INCLUIDOS, timelineInicial, timelineVacia, type Timeline } from '../shared/timeline'
 import { randomUUID } from 'node:crypto'
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -167,6 +168,8 @@ app.whenReady().then(() => {
   iniciarUso(join(app.getPath('userData'), 'uso.json'))
   // Los MCP de Claude Code que se vieron al arrancarlo (los de sus plugins), para permitirlos en el modo agente.
   usarArchivoMcp(join(app.getPath('userData'), 'mcp-claude.json'))
+  // Los estilos de la sección «Estilos», como tipos de video (para que el agente siga el de la tarjeta elegida).
+  registrarCatalogo()
   const carpetaMuestras = join(app.getPath('userData'), 'muestras-voz')
   registrarMedia(proyectos, creaciones, carpetaMuestras)
 
@@ -3377,6 +3380,32 @@ No pude animar los subtítulos (se animan al exportar): ${e instanceof Error ? e
   ipcMain.handle('habilidades:abrir-carpeta', async () => {
     mkdirSync(carpetaHabilidadesUsuario(), { recursive: true })
     await shell.openPath(carpetaHabilidadesUsuario())
+  })
+
+  // La sección «Estilos» (ver estiloscatalogo.ts): el catálogo, añadir o quitar uno y crear los suyos.
+  const vistaEstilos = () => catalogoEstilos((id) => leerLecciones(id).length)
+  const esId = (x: unknown): x is string => typeof x === 'string' && /^[a-z0-9][a-z0-9-]{1,48}$/.test(x)
+  ipcMain.handle('estilos:catalogo', () => vistaEstilos())
+  ipcMain.handle('estilos:anadir', (_evento, id: unknown) => {
+    if (esId(id)) anadirEstilo(id)
+    return vistaEstilos()
+  })
+  ipcMain.handle('estilos:quitar', (_evento, id: unknown) => {
+    if (esId(id)) quitarEstilo(id)
+    return vistaEstilos()
+  })
+  ipcMain.handle('estilos:crear', (_evento, datos: unknown) => {
+    const d = (datos ?? {}) as { nombre?: unknown; descripcion?: unknown; grupo?: unknown }
+    const r = crearEstilo({
+      nombre: typeof d.nombre === 'string' ? d.nombre : '',
+      descripcion: typeof d.descripcion === 'string' ? d.descripcion : '',
+      grupo: typeof d.grupo === 'string' ? d.grupo : undefined
+    })
+    return { ...r, catalogo: vistaEstilos() }
+  })
+  ipcMain.handle('estilos:borrar', (_evento, id: unknown) => {
+    if (esId(id)) borrarEstilo(id)
+    return vistaEstilos()
   })
 
   // El criterio que Recorte aprende del usuario (ver shared/gustos.ts).

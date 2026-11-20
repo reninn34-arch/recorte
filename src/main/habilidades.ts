@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { basename, dirname, extname, join } from 'node:path'
 import { guardar } from './disco'
+import { fichasEstilos, habilidadDeEstilo } from './estiloscatalogo'
 import { rutaScriptPython } from './transcribir'
 
 /**
@@ -61,7 +62,7 @@ export function leerCabecera(texto: string): { nombre?: string; cuando?: string;
 
 /** El archivo de una habilidad: HABILIDAD.md, o SKILL.md si es una skill traída de Claude Code. */
 export function archivoHabilidad(carpeta: string): string | null {
-  for (const n of ['HABILIDAD.md', 'SKILL.md']) if (existsSync(join(carpeta, n))) return join(carpeta, n)
+  for (const n of ['HABILIDAD.md', 'SKILL.md', 'ESTILO.md']) if (existsSync(join(carpeta, n))) return join(carpeta, n)
   return null
 }
 
@@ -90,6 +91,19 @@ export function listarHabilidades(): Habilidad[] {
   const porId = new Map<string, Habilidad>()
   for (const h of enCarpeta(carpetaHabilidadesRecorte(), 'recorte')) porId.set(h.id, h)
   for (const h of enCarpeta(carpetaHabilidadesUsuario(), 'usuario')) porId.set(h.id, h)
+  // Los estilos de la sección «Estilos»: el agente los usa si el usuario los nombra, y aprende de cada uno.
+  for (const e of fichasEstilos()) {
+    const id = habilidadDeEstilo(e.id)
+    if (porId.has(id)) continue
+    porId.set(id, {
+      id,
+      nombre: `Estilo «${e.campos.nombre}»`,
+      cuando: `el usuario pide un video en estilo «${e.campos.nombre}» (${e.campos.para ?? ''}) o eligió su tarjeta`,
+      origen: e.origen,
+      carpeta: e.carpeta,
+      lecciones: leerLecciones(id).length
+    })
+  }
   return [...porId.values()].sort((a, b) => a.id.localeCompare(b.id))
 }
 
@@ -180,11 +194,16 @@ export function prepararHabilidades(trabajo: string): string {
     guardar(join(destino, 'HABILIDAD.md'), texto)
     // Lo que traiga además (ejemplos, plantillas), tal cual.
     for (const n of readdirSync(h.carpeta)) {
-      if (n === 'HABILIDAD.md' || n === 'SKILL.md' || n === 'aprendido.md') continue
+      if (n === 'HABILIDAD.md' || n === 'SKILL.md' || n === 'ESTILO.md' || n === 'aprendido.md' || /^vista\./.test(n)) continue
       const ruta = join(h.carpeta, n)
       if (statSync(ruta).isFile() && statSync(ruta).size < 5 * 1024 * 1024) copyFileSync(ruta, join(destino, n))
+      // ejemplos en subcarpetas (estilo-plastilina/personaje/): su código, sin videos ni audios
+      else if (statSync(ruta).isDirectory()) cpSync(ruta, join(destino, n), { recursive: true, filter: (o) => statSync(o).isDirectory() || /\.(js|md|json)$/.test(o) })
     }
   }
+  // El motor 3D de los estilos que traen escena de referencia (escena.js + guion.js): va entero a `motor3d/`.
+  const motor = rutaScriptPython('motor3d')
+  if (existsSync(motor)) cpSync(motor, join(trabajo, 'motor3d'), { recursive: true })
   return `## Tus habilidades (úsalas según la tarea)
 Son formas probadas de hacer algo, como el oficio de un editor con experiencia. Cada una está en
 \`habilidades/<id>/HABILIDAD.md\`. Si el pedido encaja con su «cuándo», **léela entera antes de planear**: es tu punto

@@ -9,6 +9,7 @@ import { Novedades } from './components/Novedades'
 import { Inicio } from './components/Inicio'
 import { BarraChats, Escritorio } from './components/BarraChats'
 import { MisVideos } from './components/MisVideos'
+import { TiendaEstilos } from './components/TiendaEstilos'
 import { EstudioCreacion } from './components/EstudioCreacion'
 import { EstudioAgente, type ExtrasChat } from './components/EstudioAgente'
 import { ChatCreacion } from './components/ChatCreacion'
@@ -72,6 +73,8 @@ function colaDe(proyecto: Project): RenderJob[] {
 
 export default function App() {
   const [vista, setVista] = useState('inicio')
+  // El estilo que se eligió con «Probar ya» en la sección «Estilos» (el inicio lo deja marcado).
+  const [estiloInicio, setEstiloInicio] = useState<string | null>(null)
   const [proyectos, setProyectos] = useState<Project[]>([])
   const [proyecto, setProyecto] = useState<Project | null>(null)
   const [seleccion, setSeleccion] = useState('')
@@ -923,6 +926,8 @@ export default function App() {
       activa={vista === 'estudio' && creacion ? hiloDe(creacion) : undefined}
       viendoVideos={vista === 'videos'}
       onMisVideos={() => setVista('videos')}
+      viendoEstilos={vista === 'estilos'}
+      onEstilos={() => setVista('estilos')}
       importando={importando}
       onNueva={() => setVista('inicio')}
       onEditarAMano={() => void importar()}
@@ -937,7 +942,7 @@ export default function App() {
     <>
       {aviso && <Toast text={aviso} />}
       <AvisoActualizacion />
-      <Novedades forzar={verNovedades} onCerrar={() => setVerNovedades(false)} />
+      <Novedades forzar={verNovedades} onCerrar={() => setVerNovedades(false)} onEstilos={() => setVista('estilos')} />
     </>
   )
 
@@ -946,6 +951,24 @@ export default function App() {
       <>
         <Escritorio barra={barra}>
           <Opciones agentes={agentes} onAviso={setAviso} onVolver={() => setVista('inicio')} onNovedades={() => setVerNovedades(true)} />
+        </Escritorio>
+        {avisos}
+      </>
+    )
+  }
+
+  if (vista === 'estilos') {
+    return (
+      <>
+        <Escritorio barra={barra}>
+          <TiendaEstilos
+            onAviso={setAviso}
+            onProbar={(id) => {
+              // «Probar ya»: al inicio con su tarjeta elegida.
+              setEstiloInicio(id)
+              setVista('inicio')
+            }}
+          />
         </Escritorio>
         {avisos}
       </>
@@ -1084,6 +1107,9 @@ export default function App() {
             onAbrir={abrirDesdeLista}
             onAbrirCreacion={(id) => void abrirCreacionIA(id)}
             onAjustes={() => setVista('ajustes')}
+            onEstilos={() => setVista('estilos')}
+            estiloInicial={estiloInicio}
+            onEstiloUsado={() => setEstiloInicio(null)}
           />
         </Escritorio>
         {avisos}
@@ -1205,7 +1231,7 @@ export default function App() {
 
       {aviso && <Toast text={aviso} />}
         <AvisoActualizacion />
-        <Novedades forzar={verNovedades} onCerrar={() => setVerNovedades(false)} />
+        <Novedades forzar={verNovedades} onCerrar={() => setVerNovedades(false)} onEstilos={() => setVista('estilos')} />
     </div>
   )
 }

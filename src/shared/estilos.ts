@@ -22,7 +22,39 @@ export interface EstiloVideo {
   plantilla?: boolean
 }
 
-export type GrupoEstilo = 'libre' | 'ensenar' | 'vender' | 'contar' | 'inspirar'
+export type GrupoEstilo = 'libre' | 'ensenar' | 'vender' | 'contar' | 'inspirar' | '3d'
+
+/**
+ * Un estilo de la sección «Estilos» (los que trae Recorte en `python/estilos/` y los que crea el usuario): se añade y
+ * sale como tarjeta debajo de la caja. Su id en la creación es `cat-<id>`.
+ */
+export interface EstiloCatalogo {
+  id: string
+  nombre: string
+  grupo: GrupoEstilo
+  /** Lo que sale en la esquina de la tarjeta («3D», «MÍO»…). */
+  etiqueta: string
+  para: string
+  descripcion: string
+  vabien: string
+  /** Fondo y dos tonos, para la vista previa dibujada cuando no hay video. */
+  colores: string[]
+  origen: 'recorte' | 'usuario'
+  anadido: boolean
+  /** La vista previa (recorte-media://estilos/<id>/vista.mp4) y su póster, si las tiene. */
+  vista?: string
+  poster?: string
+  /** Cuántas cosas aprendió el agente usándolo. */
+  lecciones: number
+}
+
+export const PREFIJO_CATALOGO = 'cat-'
+
+/** Los estilos del catálogo, como tipos de video (los registra el proceso principal al arrancar y al cambiar). */
+const registrados: EstiloVideo[] = []
+export function registrarEstilos(lista: EstiloVideo[]): void {
+  registrados.splice(0, registrados.length, ...lista)
+}
 
 export const GRUPOS: { id: Exclude<GrupoEstilo, 'libre'>; nombre: string }[] = [
   { id: 'ensenar', nombre: 'Enseñar' },
@@ -154,5 +186,5 @@ la voz, las imágenes y clips generados (como fondos, texturas, tarjetitas con f
 ]
 
 export function estiloPorId(id: string | undefined): EstiloVideo {
-  return ESTILOS.find((e) => e.id === id) ?? ESTILOS[0]
+  return ESTILOS.find((e) => e.id === id) ?? registrados.find((e) => e.id === id) ?? ESTILOS[0]
 }
