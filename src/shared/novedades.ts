@@ -40,6 +40,41 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.2.0',
+    fecha: '2026-11-20',
+    resumen: 'Recorte 0.2: la sección «Estilos». Eliges cómo se ve tu video y el agente lo hace en 3D en tu equipo, sin gastar créditos.',
+    portada: {
+      etiqueta: 'Recorte 0.2',
+      titulo: 'Tu video, en el estilo que elijas',
+      texto: 'Plastilina, papel, neón, un teatrito, una maqueta… Elige un estilo y el agente cuenta tu tema con ese aspecto, en 3D y en tu equipo. Sin gastar créditos.',
+      estilos: ['escenario-con-foco', 'plastilina', 'diorama-miniatura', 'neon', 'papel-desplegable', 'inflado', 'low-poly'],
+      boton: 'Ver los estilos',
+      destino: 'estilos'
+    },
+    novedades: [
+      {
+        icono: 'palette',
+        titulo: 'Estilos para tus videos',
+        texto: 'Siete estilos en 3D con su vista previa, en «Estilos». Añade los que te gusten como tarjetas debajo de la caja o pruébalos con «Probar ya».'
+      },
+      {
+        icono: 'cubo',
+        titulo: 'Hechos en 3D en tu equipo',
+        texto: 'Luz de verdad, sombras suaves, desenfoque y sonido a la medida. El agente cuenta tu tema con ese aspecto y no gasta créditos.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Personajes que hablan',
+        texto: 'Si tu video tiene protagonista, el agente lo hace del material del estilo y le mueve la boca al ritmo de la voz.'
+      },
+      {
+        icono: 'layers',
+        titulo: 'Las tarjetas, en una fila',
+        texto: 'Debajo de la caja, en una sola fila con flechas: la caja queda con más espacio.'
+      }
+    ]
+  },
+  {
     version: '0.1.100',
     fecha: '2026-11-20',
     resumen: 'Quien instala Recorte por primera vez ve la presentación de los estilos.',
@@ -84,14 +119,6 @@ export const NOVEDADES: VersionNovedades[] = [
     version: '0.1.97',
     fecha: '2026-11-20',
     resumen: 'Nueva sección «Estilos»: eliges cómo se ve tu video y el agente lo hace en 3D en tu equipo, sin gastar créditos.',
-    portada: {
-      etiqueta: 'Nuevo en Recorte',
-      titulo: 'Tu video, en el estilo que elijas',
-      texto: 'Plastilina, papel, neón, un teatrito, una maqueta… Elige un estilo y el agente cuenta tu tema con ese aspecto, en 3D y en tu equipo. Sin gastar créditos.',
-      estilos: ['escenario-con-foco', 'plastilina', 'diorama-miniatura', 'neon', 'papel-desplegable', 'inflado', 'low-poly'],
-      boton: 'Ver los estilos',
-      destino: 'estilos'
-    },
     novedades: [
       {
         icono: 'palette',

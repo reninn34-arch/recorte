@@ -45,7 +45,8 @@ export function Novedades({ forzar, onCerrar, onEstilos }: { forzar?: boolean; o
   const principal = mostrar[0]
   if (portada && conPortada) {
     const videos = portada.estilos.map((id) => catalogo.find((e) => e.id === id)).filter((e): e is EstiloCatalogo => Boolean(e?.vista)).slice(0, 5)
-    const otras = mostrar.filter((v) => v !== conPortada)
+    // debajo, solo lo que es más nuevo que la portada (lo anterior ya está contado en ella)
+    const otras = mostrar.filter((v) => compararVersion(v.version, conPortada.version) > 0)
     return (
       <div className="novedades-fondo" role="dialog" aria-modal="true" aria-labelledby="novedades-titulo" onMouseDown={(e) => e.target === e.currentTarget && cerrar()}>
         <div className="novedades is-portada" onKeyDown={(e) => e.key === 'Escape' && cerrar()}>
