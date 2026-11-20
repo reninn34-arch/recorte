@@ -1,5 +1,6 @@
 ---
 nombre: Low poly
+orden: 7
 grupo: 3d
 etiqueta: 3D
 para: Un mundo de caras planas, como piedra tallada.

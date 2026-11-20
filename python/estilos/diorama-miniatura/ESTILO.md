@@ -1,5 +1,6 @@
 ---
 nombre: Diorama miniatura
+orden: 3
 grupo: 3d
 etiqueta: 3D
 para: Un mundo chiquito visto desde arriba, con el fondo desenfocado.

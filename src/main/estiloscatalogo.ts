@@ -135,7 +135,10 @@ export function catalogoEstilos(lecciones: (id: string) => number): EstiloCatalo
       lecciones: lecciones(habilidadDeEstilo(f.id))
     }
   })
-  const orden = (e: EstiloCatalogo): number => (e.anadido ? anadidos.indexOf(e.id) : 1000 + (e.origen === 'usuario' ? 0 : 1))
+  // lo añadido primero (en el orden en que se añadió), después los del usuario y después los de Recorte en el orden
+  // de vitrina de su ficha (`orden:`), y por nombre si no tienen
+  const vitrina = new Map(fichasEstilos().map((f) => [f.id, Number(f.campos.orden) || 999]))
+  const orden = (e: EstiloCatalogo): number => (e.anadido ? anadidos.indexOf(e.id) : e.origen === 'usuario' ? 1000 : 2000 + (vitrina.get(e.id) ?? 999))
   return lista.sort((a, b) => orden(a) - orden(b) || a.nombre.localeCompare(b.nombre))
 }
 

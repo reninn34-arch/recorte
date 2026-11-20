@@ -40,6 +40,18 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.99',
+    fecha: '2026-11-20',
+    resumen: 'Los estilos salen en un orden pensado, con Plastilina primero.',
+    novedades: [
+      {
+        icono: 'palette',
+        titulo: 'Los estilos, en vitrina',
+        texto: 'En «Estilos» salen primero los que añadiste y después el resto en un orden pensado, empezando por Plastilina, en vez de por orden alfabético.'
+      }
+    ]
+  },
+  {
     version: '0.1.98',
     fecha: '2026-11-20',
     resumen: 'Tú eliges qué estilos salen como tarjetas: ya no viene ninguno añadido.',

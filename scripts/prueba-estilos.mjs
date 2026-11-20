@@ -29,6 +29,7 @@ try {
     assert.equal(e.grupo, '3d')
     assert.equal(e.origen, 'recorte')
   }
+  assert.deepEqual(ids, ['plastilina', 'escenario-con-foco', 'diorama-miniatura', 'neon', 'papel-desplegable', 'inflado', 'low-poly'], 'el orden de vitrina')
   console.log(`el catálogo de Recorte: ${ids.length} estilos con su ficha ✓`)
 
   // 1b. El sonido de una escena de referencia sale del guion, sin navegador: un WAV estéreo de 48 kHz

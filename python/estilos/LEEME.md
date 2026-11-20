@@ -3,7 +3,7 @@
 Cada carpeta es un estilo de la sección «Estilos» de la app: el usuario lo añade y le sale como tarjeta debajo de la caja.
 
 - `ESTILO.md`: arriba, entre `---`, su ficha (lo que ve el usuario); debajo, la guía que sigue el agente.
-  - `nombre`, `grupo` (`3d`, `vender`, `ensenar`, `contar` o `inspirar`), `etiqueta` (lo que sale en la esquina de la
+  - `nombre`, `orden` (su lugar en la tienda: 1 va primero), `grupo` (`3d`, `vender`, `ensenar`, `contar` o `inspirar`), `etiqueta` (lo que sale en la esquina de la
     tarjeta), `para` (una línea), `descripcion` (dos o tres frases), `vabien` (con qué temas encaja), `colores` (tres,
     separados por comas: el fondo y los dos tonos de la vista previa cuando no hay video).
 - `escena.js` y `guion.js`: la escena de referencia hecha con el motor 3D (`python/motor3d/`). Solo se publican los

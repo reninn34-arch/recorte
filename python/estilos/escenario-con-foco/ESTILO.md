@@ -1,5 +1,6 @@
 ---
 nombre: Escenario con foco
+orden: 2
 grupo: 3d
 etiqueta: 3D
 para: Un teatrito de noche con la historia bajo dos focos.

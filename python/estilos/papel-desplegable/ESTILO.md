@@ -1,5 +1,6 @@
 ---
 nombre: Papel desplegable
+orden: 5
 grupo: 3d
 etiqueta: 3D
 para: Capas de papel que se levantan como un libro pop-up.
