@@ -40,6 +40,23 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.1.100',
+    fecha: '2026-11-20',
+    resumen: 'Quien instala Recorte por primera vez ve la presentación de los estilos.',
+    novedades: [
+      {
+        icono: 'gift',
+        titulo: 'Bienvenida con los estilos',
+        texto: 'Quien instala Recorte por primera vez ve la presentación de los estilos con sus videos, en vez de solo la última nota.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'El aviso de actualización cuenta lo importante',
+        texto: 'Si todavía no tienes los estilos, el aviso de versión nueva te dice que llegaron, aunque la última versión traiga un cambio chico.'
+      }
+    ]
+  },
+  {
     version: '0.1.99',
     fecha: '2026-11-20',
     resumen: 'Los estilos salen en un orden pensado, con Plastilina primero.',
@@ -2269,19 +2286,30 @@ export function compararVersion(a: string, b: string): number {
   return 0
 }
 
-/** Las versiones que el usuario aún no vio, de la más nueva a la más vieja (hasta la actual). */
+/**
+ * Las versiones que el usuario aún no vio, de la más nueva a la más vieja (hasta la actual). Quien instala Recorte por
+ * primera vez (no vio ninguna) ve la presentación más reciente con portada, si es de las últimas versiones; si no, la
+ * última versión.
+ */
 export function novedadesPendientes(actual: string, vista?: string): VersionNovedades[] {
-  return NOVEDADES.filter((v) => compararVersion(v.version, actual) <= 0 && (!vista || compararVersion(v.version, vista) > 0)).slice(
-    0,
-    vista ? undefined : 1
-  )
+  const hasta = NOVEDADES.filter((v) => compararVersion(v.version, actual) <= 0)
+  if (!vista) {
+    const portada = hasta.slice(0, 10).find((v) => v.portada)
+    return portada ? [portada] : hasta.slice(0, 1)
+  }
+  return hasta.filter((v) => compararVersion(v.version, vista) > 0)
 }
 
 /** Las notas del release en GitHub (Markdown). */
 export function notasMarkdown(version: string): string {
   const v = NOVEDADES.find((x) => x.version === version)
   if (!v) return `Recorte ${version}.`
+  // La app instalada muestra la primera frase de estas notas en el aviso de versión nueva. Si una de las últimas
+  // versiones trajo algo grande (con portada), esa frase va primero: quien viene de antes se entera aunque esta
+  // versión traiga un cambio chico.
+  const i = NOVEDADES.indexOf(v), grande = NOVEDADES.slice(i + 1, i + 6).find((x) => x.portada)
   return [
+    ...(grande ? [`${grande.resumen.replace(/\.$/, '')} (desde la ${grande.version}).`, ''] : []),
     v.resumen,
     '',
     ...v.novedades.map((n) => `- **${n.titulo}.** ${n.texto}`),
