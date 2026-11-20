@@ -44,7 +44,7 @@ export const NOVEDADES: VersionNovedades[] = [
     fecha: '2026-11-20',
     resumen: 'Recorte 0.2: la sección «Estilos». Eliges cómo se ve tu video y el agente lo hace en 3D en tu equipo, sin gastar créditos.',
     portada: {
-      etiqueta: 'Recorte 0.2',
+      etiqueta: 'Nuevo en Recorte',
       titulo: 'Tu video, en el estilo que elijas',
       texto: 'Plastilina, papel, neón, un teatrito, una maqueta… Elige un estilo y el agente cuenta tu tema con ese aspecto, en 3D y en tu equipo. Sin gastar créditos.',
       estilos: ['escenario-con-foco', 'plastilina', 'diorama-miniatura', 'neon', 'papel-desplegable', 'inflado', 'low-poly'],
