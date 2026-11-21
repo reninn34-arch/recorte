@@ -684,14 +684,38 @@ export default function App() {
   }
 
   async function abrirEnEditor(id: string) {
+    const previo = creacion?.id === id ? creacion.proyectoEditor : undefined
+    // Que se note al instante: preparar una versión nueva para el editor puede tardar.
+    setAviso('Abriendo en el editor…')
+    let esperando = true
+    // Si ya tenía su proyecto y esto tarda, se entra igual: la versión nueva llega después, como un paso de Ctrl+Z.
+    const reloj = previo
+      ? window.setTimeout(() => {
+          if (!esperando) return
+          esperando = false
+          void abrirDesdeLista(previo).then(() => setAviso('Abrí tu proyecto: la versión nueva entra en cuanto esté lista (Ctrl+Z la quita).'))
+        }, 20000)
+      : undefined
     try {
-      const p = await window.recorte.creacionAlEditor(id)
-      setCreacion((c) => (c && c.id === id ? { ...c, proyectoEditor: p.id, editorSalida: c.salida } : c))
+      const respuesta = await window.recorte.creacionAlEditor(id)
+      window.clearTimeout(reloj)
+      if (!esperando) return
+      esperando = false
+      const { avisoEditor, ...p } = respuesta
+      setCreacion((c) => (c && c.id === id ? { ...c, proyectoEditor: p.id, editorSalida: avisoEditor ? c.editorSalida : c.salida } : c))
       abrir(p)
       setVista('proyectos')
+      if (avisoEditor) setAviso(avisoEditor)
       await recargarProyectos()
     } catch (error) {
-      setAviso(`No pude abrirlo en el editor: ${mensajeDe(error)}`)
+      window.clearTimeout(reloj)
+      if (!esperando) return
+      esperando = false
+      // Si ya tenía su proyecto en el editor, se entra igual a ese: el botón nunca te deja afuera.
+      if (previo) {
+        await abrirDesdeLista(previo)
+        setAviso(`Abrí tu proyecto de siempre: no pude traer la versión nueva (${mensajeDe(error)}).`)
+      } else setAviso(`No pude abrirlo en el editor: ${mensajeDe(error)}`)
     }
   }
 

@@ -40,6 +40,18 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.2.1',
+    fecha: '2026-11-20',
+    resumen: '«Abrir en el editor» siempre te deja entrar, también después de pedir un cambio en el chat.',
+    novedades: [
+      {
+        icono: 'layers',
+        titulo: 'Al editor, siempre',
+        texto: 'Después de pedir un cambio en la conversación, el botón a veces no hacía nada mientras preparaba la versión nueva. Ahora avisa al instante, y si tarda o falla te abre tu proyecto igual: la versión nueva entra en cuanto está lista, como un paso que se deshace con Ctrl+Z.'
+      }
+    ]
+  },
+  {
     version: '0.2.0',
     fecha: '2026-11-20',
     resumen: 'Recorte 0.2: la sección «Estilos». Eliges cómo se ve tu video y el agente lo hace en 3D en tu equipo, sin gastar créditos.',

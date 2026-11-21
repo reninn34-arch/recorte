@@ -1380,6 +1380,24 @@ app.whenReady().then(() => {
     if (c.proyectoEditor) {
       const previo = proyectos.abrir(c.proyectoEditor)
       if (previo) {
+        try {
+          return await versionNuevaAlEditor(c, previo)
+        } catch (e) {
+          // Si la versión nueva no se pudo traer, se entra igual al proyecto de siempre (con sus ediciones): nunca
+          // te deja afuera del editor. El aviso dice qué pasó.
+          console.error('[editor] no pude traer la versión nueva', e)
+          return { ...previo, avisoEditor: `Abrí tu proyecto de siempre: no pude traer la versión ${c.version} (${textoError(e).slice(0, 160)}).` }
+        }
+      }
+    }
+    return ingerirCreacion(c)
+  }
+  /** Una versión nueva del agente entra en el MISMO proyecto del editor. */
+  async function versionNuevaAlEditor(c: Creacion, previo: Project): Promise<Project> {
+    const id = c.id
+    if (!c.salida) throw new Error('Todavía no hay un video para editar.')
+    {
+      {
         const carpeta = creaciones.carpeta(id)
         const ruta = join(carpeta, c.salida)
         const info = await probeVideo(ruta)
@@ -1417,9 +1435,19 @@ app.whenReady().then(() => {
         guardarEntregada(c, timeline)
         c.editorSalida = c.salida
         creaciones.guardar(c)
-        return proyectos.abrir(previo.id) ?? previo
+        const listo = proyectos.abrir(previo.id) ?? previo
+        // Si el editor ya está abierto en este proyecto (porque esto tardó y se entró sin esperar), la versión nueva
+        // le llega igual, como un paso que se deshace con Ctrl+Z.
+        const { transcript: _t, ...ligero } = listo
+        for (const w of BrowserWindow.getAllWindows()) w.webContents.send('proyecto:externo', { proyecto: { ...ligero, timeline }, quien: 'recorte', conTimeline: true })
+        return listo
       }
     }
+  }
+  /** El primer paso al editor: el video entregado entra como proyecto nuevo (con su receta, si la hay). */
+  async function ingerirCreacion(c: Creacion): Promise<Project> {
+    const id = c.id
+    if (!c.salida) throw new Error('Todavía no hay un video para editar.')
     const ingesta = await ingerir(join(creaciones.carpeta(id), c.salida), `${c.guion?.titulo ?? c.nombre}${c.version > 1 ? ` (v${c.version})` : ''}`)
     c.proyectoEditor = ingesta.project.id
     c.editorSalida = c.salida

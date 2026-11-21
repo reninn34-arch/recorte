@@ -79,6 +79,8 @@ export interface BrandKit {
 export interface Project {
   id: string
   name: string
+  /** Solo al abrir desde una conversación: por qué se abrió sin la versión nueva (no se guarda). */
+  avisoEditor?: string
   source: SourceVideo
   transcript?: TranscriptSegment[]
   clips: ClipSuggestion[]
