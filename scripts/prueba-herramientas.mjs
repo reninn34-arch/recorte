@@ -12,7 +12,7 @@ import { join } from 'node:path'
 const { descargarHerramienta, tieneHerramienta, pythonPropio, paquetesFfmpegMac, PUEDE_BAJAR } = await import('../src/main/herramientas.ts')
 
 if (process.argv.includes('--solo-direcciones')) {
-  // Sin bajar nada: la dirección «latest» de FFmpeg para Mac llega a una carpeta con versión y trae sus huellas.
+  // Sin bajar nada: la versión fija de FFmpeg para Mac está en su página y trae sus huellas.
   const paquetes = await paquetesFfmpegMac()
   assert.deepEqual(paquetes.map((p) => p.nombre), ['ffmpeg.zip', 'ffprobe.zip'])
   for (const p of paquetes) {

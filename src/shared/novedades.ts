@@ -40,6 +40,18 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.2.2',
+    fecha: '2026-11-21',
+    resumen: 'En Mac, FFmpeg se baja en una versión probada: la más nueva fallaba al exportar capas con fundido.',
+    novedades: [
+      {
+        icono: 'download',
+        titulo: 'Exportar en Mac, sin sorpresas',
+        texto: 'Recorte baja FFmpeg 9.0.2 en Mac en vez de la última versión que salga: la 9.1 fallaba al exportar videos con capas que entran con fundido.'
+      }
+    ]
+  },
+  {
     version: '0.2.1',
     fecha: '2026-11-20',
     resumen: '«Abrir en el editor» siempre te deja entrar, también después de pedir un cambio en el chat.',

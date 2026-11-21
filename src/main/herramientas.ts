@@ -140,18 +140,22 @@ async function paqueteFfmpegWindows(): Promise<Paquete> {
   }
 }
 
-/** Los dos programas de FFmpeg para Mac (vienen en zips aparte), con su huella. La versión de «release» más nueva. */
+/**
+ * La versión de FFmpeg para Mac, fija y probada (la carpeta de su build en el servidor de martin-riedl). No se baja «la
+ * última»: la 9.1 rompió el fundido de las capas al exportar («Frame size or format changed without filter graph
+ * reinitialization»). Para subirla, cambia estas carpetas y deja pasar las pruebas de Mac (mac.yml).
+ */
+const FFMPEG_MAC = { version: '9.0.2', carpeta: { arm64: '1789931890_9.0.2', amd64: '1789931006_9.0.2' } } as const
+
+/** Los dos programas de FFmpeg para Mac (vienen en zips aparte), con su huella. */
 export async function paquetesFfmpegMac(): Promise<Paquete[]> {
   const arq = OBJETIVO === 'mac-arm64' ? 'arm64' : 'amd64'
   const salida: Paquete[] = []
   for (const nombre of ['ffmpeg', 'ffprobe']) {
-    // La dirección «latest» redirige a la carpeta de la versión; se lee a dónde llegó (sin bajar el archivo).
-    const r = await fetch(`https://ffmpeg.martin-riedl.de/redirect/latest/macos/${arq}/release/${nombre}.zip`, { headers: { 'User-Agent': CABECERAS['User-Agent'], Range: 'bytes=0-0' } })
-    await r.body?.cancel().catch(() => {})
-    if (!r.ok || !r.url.endsWith(`/${nombre}.zip`)) throw new Error(`No encontré ${nombre} para Mac en su página (${r.status}).`)
-    const h = (await texto(`${r.url}.sha256`)).trim().split(/\s+/)[0]
-    if (!/^[a-f0-9]{64}$/i.test(h)) throw new Error('No encontré la huella de FFmpeg.')
-    salida.push({ url: r.url, nombre: `${nombre}.zip`, sha256: h.toLowerCase(), version: /\/(\d+\.\d+(?:\.\d+)?)\/[^/]+$/.exec(r.url)?.[1] ?? /_(\d+\.\d+(?:\.\d+)?)\/[^/]+$/.exec(r.url)?.[1] ?? 'última' })
+    const url = `https://ffmpeg.martin-riedl.de/download/macos/${arq}/${FFMPEG_MAC.carpeta[arq]}/${nombre}.zip`
+    const h = (await texto(`${url}.sha256`)).trim().split(/\s+/)[0]
+    if (!/^[a-f0-9]{64}$/i.test(h)) throw new Error(`No encontré ${nombre} ${FFMPEG_MAC.version} para Mac en su página.`)
+    salida.push({ url, nombre: `${nombre}.zip`, sha256: h.toLowerCase(), version: FFMPEG_MAC.version })
   }
   return salida
 }
