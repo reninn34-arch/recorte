@@ -1,4 +1,5 @@
 import {
+  Scan,
   ArrowUp,
   Eye,
   EyeOff,
@@ -117,6 +118,7 @@ const ICONOS = {
   repetir: Repeat,
   extraer: ScissorsLineDashed,
   pantalla: Maximize,
+  zonaSegura: Scan,
   achicar: Minimize,
   rodar: ArrowLeftRight,
   deslizar: MoveHorizontal,

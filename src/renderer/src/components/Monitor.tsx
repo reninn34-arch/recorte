@@ -54,16 +54,51 @@ import {
   CAPA_SUBTITULOS,
   letraOscura,
   MODOS_FUSION,
-  curvasDeClip
+  curvasDeClip,
+  normalizarRecorte,
+  type RecorteCapa
 } from '../../../shared/timeline'
 import { useMusica, useSincronizar, useTamano, useVoces, type FuentesVista, type Historial, type Reproductor } from '../hooks/timeline'
 import type { Elegido } from './TimelineEditor'
+import { anclajeRotulo, centroEnCuadro, estiloMedioCapa, estiloRotulo } from '../rotulos'
+import { cajaEnCuadro, imanEje, objetivosIman, ZONA_ACCION, ZONA_TITULO, type Caja, type TipoGuia } from '../guias'
 
 /** Lo que se está moviendo en el monitor, antes de soltarlo: su sitio y su ancho. */
-type Borrador = { tipo: 'capa' | 'texto'; id: string; x: number; y: number; ancho?: number; fin?: boolean } | null
+type Borrador = {
+  tipo: 'capa' | 'texto'
+  id: string
+  x: number
+  y: number
+  ancho?: number
+  fin?: boolean
+  /** Girando: el giro nuevo (grados). */
+  giro?: number
+  /** Agrandando un texto: su tamaño nuevo. */
+  tamano?: number
+  /** Recortando una capa: su recorte nuevo. */
+  recorte?: RecorteCapa
+} | null
 
-/** A menos de esto del centro, se pega al centro (y se ve la guía). */
-const IMAN = 0.02
+/** Lo que hace un arrastre: mover, cambiar el tamaño (desde una esquina), girar o recortar un lado. */
+type ModoArrastre = 'mover' | 'ancho' | 'giro' | 'recorte-izq' | 'recorte-der' | 'recorte-arriba' | 'recorte-abajo'
+
+/** El giro elegido con el ratón: con Mayús, de 15 en 15; si no, se pega a 0, 90, 180 y −90 cuando está cerca. */
+function giroConIman(grados: number, mayus: boolean): number {
+  let g = ((((grados + 180) % 360) + 360) % 360) - 180
+  if (mayus) g = Math.round(g / 15) * 15
+  else {
+    const recto = Math.round(g / 90) * 90
+    if (Math.abs(g - recto) < 3) g = recto
+  }
+  return Math.round((g === -180 ? 180 : g) * 10) / 10
+}
+
+/** A menos de estos píxeles de una guía (un borde, el centro, un tercio, la zona segura, otra capa), se pega a ella. */
+const IMAN_PX = 6
+
+/** Las guías que se ven mientras se arrastra algo: verticales (x) y horizontales (y). */
+type Guias = { v: { v: number; tipo: TipoGuia }[]; h: { v: number; tipo: TipoGuia }[] }
+const SIN_GUIAS: Guias = { v: [], h: [] }
 
 /**
  * El monitor: la timeline sin renderizar. Dentro, un cuadro con la forma del video final donde
@@ -263,7 +298,24 @@ export function Monitor({
     window.addEventListener('pointermove', mover)
     window.addEventListener('pointerup', soltar)
   }
-  const [guia, setGuia] = useState<{ v: boolean; h: boolean }>({ v: false, h: false })
+  const [guia, setGuia] = useState<Guias>(SIN_GUIAS)
+  // La zona segura (acción 90 %, títulos 80 %): se recuerda si estaba a la vista.
+  const [verZona, setVerZona] = useState(() => {
+    try {
+      return localStorage.getItem('recorte:zonaSegura') === '1'
+    } catch {
+      return false
+    }
+  })
+  const alternarZona = () =>
+    setVerZona((v) => {
+      try {
+        localStorage.setItem('recorte:zonaSegura', v ? '0' : '1')
+      } catch {
+        // Sin almacenamiento, dura lo que dura la sesión.
+      }
+      return !v
+    })
   const capas = vistaAhora ? [] : capasEn(vista, reproductor.tiempo)
   const [soltando, setSoltando] = useState(false)
 
@@ -283,13 +335,16 @@ export function Monitor({
     onElegir({ tipo: 'capa', id: r.id })
   }
 
-  /** Mueve una capa o un rótulo con el ratón (o cambia el ancho de la capa por su esquina). */
+  /**
+   * Mueve una capa o un rótulo con el ratón; desde una esquina cambia su tamaño (el ancho de la capa, el tamaño del
+   * texto), desde el tirador de arriba lo gira y desde los lados recorta la capa.
+   */
   function arrastrar(
     e: React.PointerEvent,
     tipo: 'capa' | 'texto',
     id: string,
-    inicio: { x: number; y: number; ancho?: number },
-    modo: 'mover' | 'ancho' = 'mover',
+    inicio: { x: number; y: number; ancho?: number; giro?: number; tamano?: number; recorte?: RecorteCapa },
+    modo: ModoArrastre = 'mover',
     /** Mueve dónde TERMINA una capa que se mueve (su silueta punteada). */
     fin = false
   ) {
@@ -300,20 +355,73 @@ export function Monitor({
     const y0 = e.clientY
     let movido = false
     let ultimo: Borrador = null
+    // El punto sobre el que se agranda y gira (el centro de la capa, el punto de anclaje del texto), en la pantalla.
+    const cuadro = monitorRef.current?.querySelector('.monitor-cuadro')?.getBoundingClientRect()
+    const px = (cuadro?.left ?? 0) + inicio.x * cw
+    const py = (cuadro?.top ?? 0) + inicio.y * ch
+    const dist0 = Math.max(4, Math.hypot(x0 - px, y0 - py))
+    const angulo0 = Math.atan2(y0 - py, x0 - px)
+    // Para recortar: lo que mide la capa sin girar y hacia dónde apunta.
+    const caja = (e.currentTarget as HTMLElement).closest('.monitor-capa') as HTMLElement | null
+    const [wCaja, hCaja] = [Math.max(1, caja?.offsetWidth ?? 1), Math.max(1, caja?.offsetHeight ?? 1)]
+    const rad = ((inicio.giro ?? 0) * Math.PI) / 180
+    // Para el imán: dónde quedan los bordes de lo que se arrastra respecto a su punto de anclaje, y las demás cajas.
+    const propio = (e.currentTarget as HTMLElement).closest('.monitor-capa, .monitor-rotulo') as HTMLElement | null
+    const iman = (() => {
+      if (modo !== 'mover' || !propio || !cuadro) return null
+      const visible = (propio.querySelector(':scope > .monitor-capa-marco') as HTMLElement | null) ?? propio
+      const c = cajaEnCuadro(visible.getBoundingClientRect(), cuadro)
+      const otras: Caja[] = []
+      monitorRef.current?.querySelectorAll('.monitor-cuadro .monitor-capa, .monitor-cuadro .monitor-rotulo').forEach((el) => {
+        if (el === propio || el.closest('.monitor-capa-grupo') === propio.closest('.monitor-capa-grupo') && propio.classList.contains('monitor-capa')) return
+        const r = el.getBoundingClientRect()
+        // Lo que ocupa todo el cuadro (la persona recortada, los subtítulos animados) no sirve de guía.
+        if (!r.width || (r.width >= cw * 0.98 && r.height >= ch * 0.98)) return
+        otras.push(cajaEnCuadro(r, cuadro))
+      })
+      return {
+        x: [c.izq - inicio.x, (c.izq + c.der) / 2 - inicio.x, c.der - inicio.x],
+        y: [c.arriba - inicio.y, (c.arriba + c.abajo) / 2 - inicio.y, c.abajo - inicio.y],
+        objetivos: objetivosIman(otras, verZona)
+      }
+    })()
     const calcular = (ev: PointerEvent): Borrador => {
       if (modo === 'ancho') {
-        const ancho = Math.max(0.05, Math.min(fin ? 1.5 : 1, (inicio.ancho ?? 0.3) + ((ev.clientX - x0) * 2) / cw))
+        const k = Math.hypot(ev.clientX - px, ev.clientY - py) / dist0
+        if (tipo === 'texto') return { tipo, id, x: inicio.x, y: inicio.y, tamano: Math.round(Math.max(0.5, Math.min(6, (inicio.tamano ?? 1) * k)) * 100) / 100 }
+        const ancho = Math.max(0.05, Math.min(2, (inicio.ancho ?? 0.3) * k))
         return { tipo, id, x: inicio.x, y: inicio.y, ancho, fin }
+      }
+      if (modo === 'giro') {
+        const g = (inicio.giro ?? 0) + ((Math.atan2(ev.clientY - py, ev.clientX - px) - angulo0) * 180) / Math.PI
+        return { tipo, id, x: inicio.x, y: inicio.y, ...(inicio.ancho !== undefined ? { ancho: inicio.ancho } : {}), giro: giroConIman(g, ev.shiftKey), fin }
+      }
+      if (modo.startsWith('recorte-')) {
+        // El movimiento en los ejes de la capa (girada), en fracción de lo que mide.
+        const dx = ev.clientX - x0
+        const dy = ev.clientY - y0
+        const lx = (dx * Math.cos(rad) + dy * Math.sin(rad)) / wCaja
+        const ly = (-dx * Math.sin(rad) + dy * Math.cos(rad)) / hCaja
+        const r0 = inicio.recorte ?? { izq: 0, der: 0, arriba: 0, abajo: 0 }
+        const r = { ...r0 }
+        if (modo === 'recorte-izq') r.izq = r0.izq + lx
+        if (modo === 'recorte-der') r.der = r0.der - lx
+        if (modo === 'recorte-arriba') r.arriba = r0.arriba + ly
+        if (modo === 'recorte-abajo') r.abajo = r0.abajo - ly
+        return { tipo, id, x: inicio.x, y: inicio.y, ancho: inicio.ancho, recorte: normalizarRecorte(r) ?? { izq: 0, der: 0, arriba: 0, abajo: 0 } }
       }
       // El final de un recorrido puede quedar fuera del cuadro (para salir volando).
       const [lo, hi] = fin ? [-0.5, 1.5] : [0, 1]
       let x = Math.max(lo, Math.min(hi, inicio.x + (ev.clientX - x0) / cw))
       let y = Math.max(lo, Math.min(hi, inicio.y + (ev.clientY - y0) / ch))
-      const v = Math.abs(x - 0.5) < IMAN
-      const h = Math.abs(y - 0.5) < IMAN
-      if (v) x = 0.5
-      if (h) y = 0.5
-      setGuia({ v, h })
+      // El imán (Alt lo suelta, para colocarlo libre).
+      if (iman && !ev.altKey) {
+        const ix = imanEje(x, iman.x, iman.objetivos.x, IMAN_PX / cw)
+        const iy = imanEje(y, iman.y, iman.objetivos.y, IMAN_PX / ch)
+        x = ix.pos
+        y = iy.pos
+        setGuia({ v: ix.guias, h: iy.guias })
+      } else setGuia(SIN_GUIAS)
       return { tipo, id, x, y, ...(inicio.ancho !== undefined ? { ancho: inicio.ancho } : {}), fin }
     }
     const alMover = (ev: PointerEvent) => {
@@ -339,11 +447,39 @@ export function Monitor({
       window.removeEventListener('pointerup', alSoltar)
       if (movido) ultimo = calcular(ev)
       setBorrador(null)
-      setGuia({ v: false, h: false })
+      setGuia(SIN_GUIAS)
+      // Soltar fuera de lo que se arrastró dispara un clic en el monitor (que reproduce): ese clic no cuenta.
+      if (movido) {
+        const parar = (c: MouseEvent) => c.stopPropagation()
+        window.addEventListener('click', parar, { capture: true, once: true })
+        setTimeout(() => window.removeEventListener('click', parar, { capture: true }), 0)
+      }
       if (movido && ultimo) {
         const b = ultimo
         const capa = tipo === 'capa' ? timeline.capas?.find((c) => c.id === id) : undefined
-        historial.aplicar(
+        const dt = capa ? Math.min(capa.duracion, Math.max(0, reproductor.tiempo - capa.inicio)) : 0
+        if (modo === 'giro' && b.giro !== undefined) {
+          historial.aplicar(
+            tipo === 'texto'
+              ? cambiarTexto(timeline, id, { x: b.x, y: b.y, giro: b.giro })
+              : capa?.claves?.giro
+                ? ponerClaveCapa(timeline, id, 'giro', dt, b.giro, medios)
+                : b.fin && capa?.fin
+                  ? cambiarCapa(timeline, id, { fin: { ...capa.fin, giro: b.giro } }, medios)
+                  : cambiarCapa(timeline, id, { giro: b.giro }, medios)
+          )
+        } else if (modo === 'ancho' && tipo === 'capa' && b.ancho !== undefined) {
+          // Solo el tamaño (el sitio de la capa, o la distancia a lo que sigue, no cambia).
+          historial.aplicar(
+            capa?.claves?.ancho
+              ? ponerClaveCapa(timeline, id, 'ancho', dt, b.ancho, medios)
+              : b.fin && capa?.fin
+                ? cambiarCapa(timeline, id, { fin: { ...capa.fin, ancho: b.ancho } }, medios)
+                : cambiarCapa(timeline, id, { ancho: b.ancho }, medios)
+          )
+        } else if (b.tamano !== undefined) historial.aplicar(cambiarTexto(timeline, id, { tamano: b.tamano }))
+        else if (b.recorte) historial.aplicar(cambiarCapa(timeline, id, { recorte: b.recorte }, medios))
+        else historial.aplicar(
           tipo === 'capa'
             ? capa?.sigue && !b.fin
               ? // Una capa que sigue algo: arrastrarla cambia a qué distancia va de eso (el arrastre parte de su x, y).
@@ -543,7 +679,7 @@ export function Monitor({
                   left: `${x * 100}%`,
                   top: `${y * 100}%`,
                   width: `${ancho * 100}%`,
-                  transform: `translate(-50%, -50%) rotate(${e.giro}deg) scale(${e.escala})`,
+                  transform: `translate(-50%, -50%) rotate(${b && !b.fin && b.giro !== undefined ? b.giro : e.giro}deg) scale(${e.escala})`,
                   opacity: e.opacidad,
                   mixBlendMode: (MODOS_FUSION.find((m) => m.id === c.fusion)?.css ?? undefined) as React.CSSProperties['mixBlendMode'],
                   filter: desenfoqueCapaEn(timeline, c, reproductor.tiempo - c.inicio) > 0.005 ? `blur(${(desenfoqueCapaEn(timeline, c, reproductor.tiempo - c.inicio) * DESENFOQUE_MAX * cw).toFixed(2)}px)` : undefined
@@ -551,16 +687,24 @@ export function Monitor({
                 onClick={(ev) => ev.stopPropagation()}
                 onPointerDown={(ev) => arrastrar(ev, 'capa', c.id, { x: c.x, y: c.y, ancho: c.ancho })}
               >
-                {f.tipo === 'imagen' ? (
-                  <img src={f.url} alt="" draggable={false} />
-                ) : (
-                  <CapaVideo capa={c} url={f.url} tiempo={reproductor.tiempo} reproduciendo={reproductor.reproduciendo} largo={medios[c.fuente]} />
-                )}
-                {elegida && (
-                  <span
-                    className="monitor-capa-esquina"
-                    title="Arrastra para cambiar el tamaño"
-                    onPointerDown={(ev) => arrastrar(ev, 'capa', c.id, { x: c.x, y: c.y, ancho: c.ancho }, 'ancho')}
+                {/* Lo recortado no se ve y la imagen va volteada si lo pide: lo mismo que el MP4 (drawbox, hflip, vflip). */}
+                <div className="monitor-capa-medio" style={estiloMedioCapa(c, b?.recorte)}>
+                  {f.tipo === 'imagen' ? (
+                    <img src={f.url} alt="" draggable={false} />
+                  ) : (
+                    <CapaVideo capa={c} url={f.url} tiempo={reproductor.tiempo} reproduciendo={reproductor.reproduciendo} largo={medios[c.fuente]} />
+                  )}
+                </div>
+                {/* El marco de lo que se ve de la capa (sirve al imán aunque no esté elegida); con ella elegida, sus tiradores. */}
+                {(
+                  <TiradoresCapa
+                    recorte={b?.recorte ?? c.recorte}
+                    elegida={elegida}
+                    editable={elegida && !reproductor.reproduciendo}
+                    giro={b && !b.fin ? b.giro : undefined}
+                    onArrastrar={(ev, modo) =>
+                      arrastrar(ev, 'capa', c.id, modo === 'mover' ? { x: c.x, y: c.y, ancho: c.ancho } : { x, y, ancho, giro: e.giro, recorte: c.recorte }, modo)
+                    }
                   />
                 )}
               </div>
@@ -574,15 +718,19 @@ export function Monitor({
             if (r === 'filtros')
               return timeline.filtros && !vistaAhora ? <FiltrosVista key="filtros" filtros={timeline.filtros} tiempo={reproductor.tiempo} reproduciendo={reproductor.reproduciendo} ancho={cw} alto={ch} /> : null
             const b = borrador?.tipo === 'texto' && borrador.id === r.id ? borrador : null
-            const libre = b ?? (typeof r.x === 'number' && typeof r.y === 'number' ? { x: r.x, y: r.y } : null)
+            const propia = typeof r.x === 'number' && typeof r.y === 'number' ? { x: r.x, y: r.y } : null
+            // Agrandándolo, se queda donde estaba (arriba, al centro o abajo si no tiene sitio propio).
+            const libre = b && b.tamano === undefined ? b : propia
             const elegida = elegido?.tipo === 'texto' && elegido.id === r.id
             return (
               <span
                 key={r.id}
                 className={`monitor-rotulo ${libre ? 'libre' : r.posicion} ${r.sinCaja ? 'sin-caja' : ''} ${r.sinCaja && letraOscura(r) ? 'tinta' : ''} ${elegida ? 'is-elegida' : ''} ${r.detras ? 'detras' : ''}`}
+                data-texto={r.id}
                 style={{
-                  ...(libre ? { left: `${libre.x * 100}%`, top: `${libre.y * 100}%` } : {}),
-                  ...(r.tamano ? { fontSize: `calc(var(--rotulo) * ${r.tamano})` } : {}),
+                  ...(libre ? { left: `${libre.x * 100}%`, top: `${libre.y * 100}%`, ...anclajeRotulo(r, b?.giro) } : {}),
+                  ...estiloRotulo(r),
+                  ...((b?.tamano ?? r.tamano) ? { fontSize: `calc(var(--rotulo) * ${b?.tamano ?? r.tamano})` } : {}),
                   ...(r.color ? { color: r.color } : {}),
                   ...(r.caja && !r.sinCaja ? { background: r.caja } : {}),
                   ...(r.fuente && FUENTES_TEXTO[r.fuente]
@@ -594,23 +742,41 @@ export function Monitor({
                     : {})
                 }}
                 onClick={(e) => e.stopPropagation()}
-                onPointerDown={(e) => {
-                  // Sin posición libre todavía: parte de donde se ve ahora.
-                  let inicio = libre
-                  if (!inicio) {
-                    const caja = e.currentTarget.getBoundingClientRect()
-                    const cuadro = e.currentTarget.parentElement!.getBoundingClientRect()
-                    inicio = { x: (caja.left + caja.width / 2 - cuadro.left) / cuadro.width, y: (caja.top + caja.height / 2 - cuadro.top) / cuadro.height }
-                  }
-                  arrastrar(e, 'texto', r.id, inicio)
-                }}
+                onPointerDown={(e) => arrastrar(e, 'texto', r.id, libre ?? centroEnCuadro(e.currentTarget))}
               >
                 {reproductor.reproduciendo && r.animacion ? <TextoAnimado texto={r} dt={reproductor.tiempo - r.inicio} /> : <ConClave texto={r} />}
+                {elegida && !reproductor.reproduciendo && (
+                  <>
+                    <span
+                      className="monitor-tirador esquina se"
+                      title="Arrastra para cambiar el tamaño de la letra"
+                      onPointerDown={(e) => {
+                        const el = e.currentTarget.closest('.monitor-rotulo') as HTMLElement
+                        arrastrar(e, 'texto', r.id, { ...(propia ?? centroEnCuadro(el)), tamano: r.tamano ?? 1 }, 'ancho')
+                      }}
+                    />
+                    <span
+                      className="monitor-tirador giro"
+                      title="Arrastra para girarlo (con Mayús, de 15 en 15°)"
+                      onPointerDown={(e) => {
+                        const el = e.currentTarget.closest('.monitor-rotulo') as HTMLElement
+                        arrastrar(e, 'texto', r.id, { ...(propia ?? centroEnCuadro(el)), giro: r.giro ?? 0 }, 'giro')
+                      }}
+                    >
+                      {b?.giro !== undefined && <span className="monitor-grados">{Math.round(b.giro)}°</span>}
+                    </span>
+                  </>
+                )}
               </span>
             )
           })}
-          {guia.v && <span className="monitor-guia v" />}
-          {guia.h && <span className="monitor-guia h" />}
+          {verZona && <ZonaSegura />}
+          {guia.v.map((g) => (
+            <span key={`v${g.v}`} className={`monitor-guia v is-${g.tipo}`} style={{ left: `${g.v * 100}%` }} />
+          ))}
+          {guia.h.map((g) => (
+            <span key={`h${g.v}`} className={`monitor-guia h is-${g.tipo}`} style={{ top: `${g.v * 100}%` }} />
+          ))}
         </div>
       )}
       {cw > 0 && (vistaAhora || vistaLuego) && (
@@ -639,6 +805,19 @@ export function Monitor({
           }}
         >
           <Icon name="sliders" size={14} />
+        </button>
+      )}
+      {src && !vacia && (
+        <button
+          className={`monitor-medidores-boton monitor-zona-boton ${verZona ? 'is-on' : ''}`}
+          title="Zona segura: el recuadro de fuera (90 %) es lo que se ve siempre; el de dentro (80 %), donde van los textos y lo importante. Al arrastrar, las cosas se pegan a sus bordes (Alt para soltarlas). No sale en el video."
+          aria-pressed={verZona}
+          onClick={(e) => {
+            e.stopPropagation()
+            alternarZona()
+          }}
+        >
+          <Icon name="zonaSegura" size={14} />
         </button>
       )}
       {verMedidores && src && !vacia && !proyecto.demo && (
@@ -834,5 +1013,74 @@ function TextoAnimado({ texto, dt }: { texto: TextoTL; dt: number }) {
         )
       })}
     </>
+  )
+}
+
+/**
+ * Los tiradores de la capa elegida: las cuatro esquinas cambian su tamaño (sobre su centro), el de arriba la gira y
+ * los de los lados la recortan (como en Canva). Van sobre lo que se ve de ella (lo recortado no cuenta).
+ */
+function TiradoresCapa({
+  recorte,
+  elegida,
+  editable,
+  giro,
+  onArrastrar
+}: {
+  recorte: RecorteCapa | undefined
+  elegida: boolean
+  editable: boolean
+  /** Mientras se gira: el giro, para verlo en grados. */
+  giro: number | undefined
+  onArrastrar: (e: React.PointerEvent, modo: ModoArrastre) => void
+}) {
+  const r = recorte ?? { izq: 0, der: 0, arriba: 0, abajo: 0 }
+  const marco: React.CSSProperties = { left: `${r.izq * 100}%`, right: `${r.der * 100}%`, top: `${r.arriba * 100}%`, bottom: `${r.abajo * 100}%` }
+  return (
+    <span className={`monitor-capa-marco ${elegida ? 'is-elegida' : ''}`} style={marco}>
+      {editable && (
+        <>
+          {(['nw', 'ne', 'sw', 'se'] as const).map((k) => (
+            <span key={k} className={`monitor-tirador esquina ${k}`} title="Arrastra para cambiar el tamaño" onPointerDown={(e) => onArrastrar(e, 'ancho')} />
+          ))}
+          {(
+            [
+              ['izq', 'Arrastra para recortar por la izquierda'],
+              ['der', 'Arrastra para recortar por la derecha'],
+              ['arriba', 'Arrastra para recortar por arriba'],
+              ['abajo', 'Arrastra para recortar por abajo']
+            ] as const
+          ).map(([k, titulo]) => (
+            <span key={k} className={`monitor-tirador lado ${k}`} title={titulo} onPointerDown={(e) => onArrastrar(e, `recorte-${k}`)} />
+          ))}
+          <span className="monitor-tirador giro" title="Arrastra para girarla (con Mayús, de 15 en 15°)" onPointerDown={(e) => onArrastrar(e, 'giro')}>
+            {giro !== undefined && <span className="monitor-grados">{Math.round(giro)}°</span>}
+          </span>
+        </>
+      )}
+    </span>
+  )
+}
+
+/** La zona segura, como en Premiere y HyperFrames: acción (90 %) y títulos (80 %), con una marca en el medio de cada lado. */
+function ZonaSegura() {
+  const caja = (m: number) => {
+    const a = m * 100
+    const b = 100 - a
+    return (
+      <>
+        <rect x={a} y={a} width={b - a} height={b - a} />
+        <line x1={50} y1={a} x2={50} y2={a + 2} />
+        <line x1={50} y1={b} x2={50} y2={b - 2} />
+        <line x1={a} y1={50} x2={a + 1.2} y2={50} />
+        <line x1={b} y1={50} x2={b - 1.2} y2={50} />
+      </>
+    )
+  }
+  return (
+    <svg className="monitor-zona-segura" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
+      <g className="accion">{caja(ZONA_ACCION)}</g>
+      <g className="titulo">{caja(ZONA_TITULO)}</g>
+    </svg>
   )
 }

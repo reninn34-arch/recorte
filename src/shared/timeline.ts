@@ -408,7 +408,49 @@ export interface TextoTL {
   subtitulo?: boolean
   /** Va DETRÁS de lo que hay encima del video (de la persona recortada, sobre todo): el título por detrás de la cabeza. */
   detras?: boolean
+  /**
+   * Sin caja: el grosor del contorno de la letra, en fracción de su tamaño (0 a LIMITE_TRAZO). Con él o con `sombra`, la
+   * letra deja el halo negro de siempre y lleva solo esto (0 = sin contorno).
+   */
+  contorno?: number
+  /** El color del contorno (`#rrggbb`); sin él, negro. */
+  colorContorno?: string
+  /** Sin caja: lo que se separa la sombra de la letra (abajo a la derecha), en fracción de su tamaño (0 a LIMITE_TRAZO). */
+  sombra?: number
+  /** El color de la sombra (`#rrggbb`); sin él, negro. */
+  colorSombra?: string
+  /**
+   * Las líneas a la izquierda o a la derecha (sin ella, centradas). Solo con posición libre: `x` es entonces el borde
+   * izquierdo (o derecho) del texto, como el punto de anclaje de Premiere.
+   */
+  alineacion?: AlineacionTexto
+  /** El espacio de más entre letras, en fracción del tamaño (−0,1 a 0,5); sin él, 0. */
+  espaciado?: number
+  /** Todo en mayúsculas (el texto se guarda como se escribió). */
+  mayusculas?: boolean
+  /** 0 (invisible) a 1; sin ella, 1. */
+  opacidad?: number
+  /** Giro en grados, a favor del reloj (−180 a 180). Solo con posición libre: gira sobre su punto de anclaje. */
+  giro?: number
 }
+
+export type AlineacionTexto = 'izquierda' | 'derecha'
+/** Lo más grueso que puede ser el contorno o lo más lejos la sombra (en fracción del tamaño de la letra). */
+export const LIMITE_TRAZO = 0.25
+/** La eme de la letra en el monitor es el 93 % del tamaño del rótulo del MP4 (ver `letra` en el monitor): el contorno, la sombra y el espaciado se miden con ella. */
+export const EME_ROTULO = 0.93
+
+/**
+ * El contorno y la sombra de un rótulo sin caja, si se eligieron (si no, null: lleva el halo de siempre). Con caja no
+ * hay: en el MP4 el borde de una letra con caja es la caja.
+ */
+export function trazoTexto(t: Pick<TextoTL, 'sinCaja' | 'contorno' | 'sombra' | 'colorContorno' | 'colorSombra'>): { contorno: number; sombra: number; colorContorno: string; colorSombra: string } | null {
+  if (!t.sinCaja || (t.contorno === undefined && t.sombra === undefined)) return null
+  return { contorno: t.contorno ?? 0, sombra: t.sombra ?? 0, colorContorno: t.colorContorno ?? '#000000', colorSombra: t.colorSombra ?? '#000000' }
+}
+
+/** El texto como se ve (en mayúsculas si lo pide), lo mismo en el monitor y en el MP4. */
+export const textoVisible = (t: Pick<TextoTL, 'texto' | 'mayusculas'>): string => (t.mayusculas ? t.texto.toLocaleUpperCase('es') : t.texto)
 
 export type AnimacionTexto = 'palabras' | 'maquina' | 'pop' | 'subir' | 'pintar' | 'rotulo'
 export const ANIMACIONES_TEXTO: { id: AnimacionTexto; nombre: string }[] = [
@@ -523,10 +565,30 @@ export const LIMITES_TAMANO = [0.5, 6] as const
 const COLOR_HEX = /^#[0-9a-f]{6}$/i
 
 /** El estilo de un rótulo, limpio: lo neutro no se guarda. */
-function estiloTexto(t: Partial<TextoTL>): Pick<TextoTL, 'tamano' | 'color' | 'sinCaja' | 'fuente' | 'caja' | 'animacion' | 'pintado' | 'colorClave'> {
+/** Los campos de estilo de un rótulo (los que `estiloTexto` limpia). */
+const CAMPOS_ESTILO_TEXTO = ['tamano', 'color', 'sinCaja', 'fuente', 'caja', 'animacion', 'pintado', 'colorClave', 'contorno', 'colorContorno', 'sombra', 'colorSombra', 'alineacion', 'espaciado', 'mayusculas', 'opacidad', 'giro'] as const
+type EstiloTexto = Pick<TextoTL, (typeof CAMPOS_ESTILO_TEXTO)[number]>
+
+/** El estilo de un rótulo para copiarlo en otro (Copiar estilo / Pegar estilo). */
+export function estiloDeTexto(t: TextoTL): EstiloTexto {
+  return estiloTexto(t)
+}
+
+function estiloTexto(t: Partial<TextoTL>): EstiloTexto {
   const tamano = typeof t.tamano === 'number' && Number.isFinite(t.tamano) ? Math.round(pinza(t.tamano, LIMITES_TAMANO[0], LIMITES_TAMANO[1]) * 100) / 100 : 1
   const color = typeof t.color === 'string' && COLOR_HEX.test(t.color) ? t.color.toLowerCase() : '#ffffff'
+  const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+  const r = (v: number, d = 1000) => Math.round(v * d) / d
   return {
+    ...(num(t.contorno) ? { contorno: r(pinza(t.contorno, 0, LIMITE_TRAZO)) } : {}),
+    ...(typeof t.colorContorno === 'string' && COLOR_HEX.test(t.colorContorno) && t.colorContorno.toLowerCase() !== '#000000' ? { colorContorno: t.colorContorno.toLowerCase() } : {}),
+    ...(num(t.sombra) ? { sombra: r(pinza(t.sombra, 0, LIMITE_TRAZO)) } : {}),
+    ...(typeof t.colorSombra === 'string' && COLOR_HEX.test(t.colorSombra) && t.colorSombra.toLowerCase() !== '#000000' ? { colorSombra: t.colorSombra.toLowerCase() } : {}),
+    ...(t.alineacion === 'izquierda' || t.alineacion === 'derecha' ? { alineacion: t.alineacion } : {}),
+    ...(num(t.espaciado) && Math.abs(t.espaciado) > 0.002 ? { espaciado: r(pinza(t.espaciado, -0.1, 0.5)) } : {}),
+    ...(t.mayusculas === true ? { mayusculas: true } : {}),
+    ...(num(t.opacidad) && t.opacidad < 0.995 ? { opacidad: r(pinza(t.opacidad, 0, 1), 100) } : {}),
+    ...(num(t.giro) && Math.abs(t.giro) > 0.05 ? { giro: r(pinza(t.giro, -180, 180), 10) } : {}),
     ...(Math.abs(tamano - 1) > 0.005 ? { tamano } : {}),
     ...(color !== '#ffffff' ? { color } : {}),
     ...(t.sinCaja === true ? { sinCaja: true } : {}),
@@ -630,6 +692,40 @@ export interface CapaTL {
    * calcula el seguidor) más la distancia a la que va la capa de ese algo. Manda sobre x, y, `fin` y sus claves de x e y.
    */
   sigue?: { puntos: PuntoRecorrido[]; dx: number; dy: number }
+  /**
+   * Lo que se recorta de cada lado del medio, en fracción de su ancho (izq, der) o de su alto (arriba, abajo). La capa
+   * mide y se coloca como el medio entero (`ancho`, `x`, `y` son los suyos); lo recortado no se ve.
+   */
+  recorte?: RecorteCapa
+  /** Volteada de izquierda a derecha (espejo). */
+  voltearH?: boolean
+  /** Volteada de arriba abajo. */
+  voltearV?: boolean
+}
+
+export interface RecorteCapa {
+  izq: number
+  der: number
+  arriba: number
+  abajo: number
+}
+/** Lo que queda como mínimo de una capa recortada (en cada dirección). */
+export const MINIMO_RECORTE = 0.05
+
+/** El recorte válido de una capa (cada lado 0 a 0,95, dejando al menos el 5 %); sin nada recortado, undefined. */
+export function normalizarRecorte(entrada: unknown): RecorteCapa | undefined {
+  if (!entrada || typeof entrada !== 'object') return undefined
+  const e = entrada as Partial<Record<keyof RecorteCapa, unknown>>
+  const v = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? pinza(x, 0, 1 - MINIMO_RECORTE) : 0)
+  let izq = v(e.izq)
+  let der = v(e.der)
+  let arriba = v(e.arriba)
+  let abajo = v(e.abajo)
+  if (izq + der > 1 - MINIMO_RECORTE) der = Math.max(0, 1 - MINIMO_RECORTE - izq)
+  if (arriba + abajo > 1 - MINIMO_RECORTE) abajo = Math.max(0, 1 - MINIMO_RECORTE - arriba)
+  const r = (x: number) => Math.round(x * 1000) / 1000
+  ;[izq, der, arriba, abajo] = [izq, der, arriba, abajo].map(r)
+  return izq + der + arriba + abajo > 0.0005 ? { izq, der, arriba, abajo } : undefined
 }
 
 /** Los modos de fusión de una capa: el nombre en el monitor (CSS) y en el MP4 (blend de FFmpeg). */
@@ -1679,6 +1775,9 @@ export function normalizarCapas(entrada: unknown, total: number, medios: Record<
       ...(num(c.desenfoque, 0) > 0.005 ? { desenfoque: Math.round(pinza(num(c.desenfoque, 0), 0, 1) * 100) / 100 } : {}),
       ...(c.fusion && MODOS_FUSION.some((m) => m.id === c.fusion) ? { fusion: c.fusion } : {}),
       ...(normalizarSigue(c.sigue) ? { sigue: normalizarSigue(c.sigue) } : {}),
+      ...(normalizarRecorte(c.recorte) ? { recorte: normalizarRecorte(c.recorte) } : {}),
+      ...(c.voltearH === true ? { voltearH: true } : {}),
+      ...(c.voltearV === true ? { voltearV: true } : {}),
       ...(normalizarClavesCapa(c.claves, pinza(c.duracion, DURACION_MINIMA, Math.max(DURACION_MINIMA, total - inicio)))
         ? { claves: normalizarClavesCapa(c.claves, pinza(c.duracion, DURACION_MINIMA, Math.max(DURACION_MINIMA, total - inicio))) }
         : {})
@@ -2999,7 +3098,9 @@ export function cambiarTexto(tl: Timeline, id: string, cambio: Partial<Omit<Text
     ...tl,
     textos: tl.textos.map((x) => {
       if (x.id !== id) return x
-      const { tamano: _t, color: _c, sinCaja: _s, fuente: _f, caja: _k, x: _x, y: _y, animacion: _a, pintado: _p, tiempos: _ti, colorClave: _cc, ...base } = { ...x, ...cambio }
+      const junto: Partial<TextoTL> = { ...x, ...cambio }
+      for (const k of [...CAMPOS_ESTILO_TEXTO, 'x', 'y', 'tiempos'] as const) delete junto[k]
+      const base = junto as TextoTL
       // Elegir arriba, centro o abajo suelta la posición libre; mover el rótulo la fija.
       const libre = cambio.posicion !== undefined && cambio.x === undefined ? {} : posicionLibre({ ...x, ...cambio })
       const nuevo: TextoTL = { ...base, ...estiloTexto({ ...x, ...cambio }), ...libre }
@@ -3010,6 +3111,11 @@ export function cambiarTexto(tl: Timeline, id: string, cambio: Partial<Omit<Text
       if (tiempos) nuevo.tiempos = tiempos
       if (!nuevo.subtitulo) delete nuevo.subtitulo
       if (!nuevo.detras) delete nuevo.detras
+      // El giro y la alineación van sobre su punto de anclaje: sin posición libre no hay.
+      if (typeof nuevo.x !== 'number') {
+        delete nuevo.giro
+        delete nuevo.alineacion
+      }
       return nuevo
     })
   }

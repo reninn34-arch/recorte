@@ -138,6 +138,8 @@ import { EditorCurvas } from './EditorCurvas'
 import { Medidor, Mezclador, useNiveles } from './Mezclador'
 import { useMenuContextual, type OpcionMenu } from './MenuContextual'
 import { InspectorVoz, type GenerarVoz, type GrabarVoz } from './InspectorVoz'
+import { EstiloTexto } from './EstiloTexto'
+import { reanclarTexto, rotuloEnMonitor } from '../rotulos'
 
 /**
  * La timeline editable: regla, pista de video magnética, pista de textos y la voz
@@ -1272,6 +1274,41 @@ export function TimelineEditor({
 
   // ===== Teclado =====
 
+  /**
+   * Alt + flechas: mueve la capa o el texto elegido un poco (con Mayús, diez veces más). Teclas seguidas son un solo
+   * paso de deshacer. Un texto sin sitio propio lo toma donde se ve.
+   */
+  const ultimoFino = useRef(0)
+  function moverFino(tecla: string, mucho: boolean) {
+    // Una milésima del cuadro: más o menos un píxel de un video de 1080.
+    const paso = mucho ? 0.01 : 0.001
+    const dx = tecla === 'ArrowLeft' ? -paso : tecla === 'ArrowRight' ? paso : 0
+    const dy = tecla === 'ArrowUp' ? -paso : tecla === 'ArrowDown' ? paso : 0
+    let nueva = timeline
+    if (capaElegida) {
+      const c = capaElegida
+      if (c.sigue) nueva = cambiarCapa(timeline, c.id, { sigue: { ...c.sigue, dx: c.sigue.dx + dx, dy: c.sigue.dy + dy } }, medidas)
+      else {
+        const dt = Math.min(c.duracion, Math.max(0, tiempo - c.inicio))
+        const ahora = estadoCapa(c, dt, false)
+        nueva = timeline
+        for (const [p, v] of [['x', ahora.x + dx], ['y', ahora.y + dy]] as const) {
+          if ((p === 'x' ? dx : dy) === 0) continue
+          nueva = c.claves?.[p] ? ponerClaveCapa(nueva, c.id, p, dt, v, medidas) : cambiarCapa(nueva, c.id, { [p]: Math.min(1, Math.max(0, v)) }, medidas)
+        }
+      }
+    } else if (textoElegido) {
+      const base = reanclarTexto(textoElegido, textoElegido.alineacion, rotuloEnMonitor(textoElegido.id))
+      if (!base) return
+      nueva = cambiarTexto(timeline, textoElegido.id, { x: base.x + dx, y: base.y + dy })
+    }
+    if (nueva === timeline) return
+    const seguido = performance.now() - ultimoFino.current < 700
+    ultimoFino.current = performance.now()
+    if (seguido) historial.reemplazar(nueva)
+    else historial.aplicar(nueva)
+  }
+
   const teclas = useRef<(e: KeyboardEvent) => void>(() => {})
   teclas.current = (e: KeyboardEvent) => {
     if (esCampoDeTexto(e.target)) return
@@ -1322,6 +1359,7 @@ export function TimelineEditor({
     else if (tecla === 'k') reproduciendo && onAlternar()
     else if (tecla === 'l') (reproduciendo ? onBuscar(Math.min(total, tiempo + 5)) : onAlternar())
     else if (tecla === 'j') onBuscar(Math.max(0, tiempo - 5))
+    else if (e.altKey && e.key.startsWith('Arrow') && (capaElegida || textoElegido)) moverFino(e.key, e.shiftKey)
     else if (e.key === 'ArrowUp') saltar(cortes, false)
     else if (e.key === 'ArrowDown') saltar(cortes, true)
     else if (e.key === '+' || e.key === '=') setZoom((z) => Math.min(zoomMax, z * 1.25))
@@ -3311,9 +3349,33 @@ export function TimelineEditor({
                 />
               </label>
             ))}
-            <button className="btn small ghost" onClick={() => historial.aplicar(cambiarCapa(timeline, capaElegida.id, { x: 0.5, y: 0.5 }, medidas))}>
-              Centrar
-            </button>
+            <div className="ed-opciones" role="group" aria-label="Voltear y recortar">
+              <button className="chip" onClick={() => historial.aplicar(cambiarCapa(timeline, capaElegida.id, { x: 0.5, y: 0.5 }, medidas))}>
+                Centrar
+              </button>
+              <button
+                className={`chip ${capaElegida.voltearH ? 'is-on' : ''}`}
+                aria-pressed={capaElegida.voltearH === true}
+                title="Voltear de izquierda a derecha (espejo)"
+                onClick={() => historial.aplicar(cambiarCapa(timeline, capaElegida.id, { voltearH: !capaElegida.voltearH }, medidas))}
+              >
+                Voltear ↔
+              </button>
+              <button
+                className={`chip ${capaElegida.voltearV ? 'is-on' : ''}`}
+                aria-pressed={capaElegida.voltearV === true}
+                title="Voltear de arriba abajo"
+                onClick={() => historial.aplicar(cambiarCapa(timeline, capaElegida.id, { voltearV: !capaElegida.voltearV }, medidas))}
+              >
+                Voltear ↕
+              </button>
+              {capaElegida.recorte && (
+                <button className="chip" title="Vuelve a verse entera" onClick={() => historial.aplicar(cambiarCapa(timeline, capaElegida.id, { recorte: undefined }, medidas))}>
+                  Quitar el recorte
+                </button>
+              )}
+            </div>
+            <span className="tl-dim">En el monitor: las esquinas cambian el tamaño, el tirador redondo la gira y los de los lados la recortan. Alt + flechas la mueven un poco.</span>
             <label
               className="tl-ajuste en-linea"
               title="Escena 2.5D: la capa sigue a la cámara del clip de debajo (zoom, acercar y paneo). Lejos se mueve con el fondo; cerca, mucho más: así se nota la distancia."
@@ -3653,6 +3715,7 @@ export function TimelineEditor({
                 onChange={(e) => deslizar(cambiarTexto(timeline, textoElegido.id, { caja: e.target.value }))}
               />
             )}
+            <EstiloTexto texto={textoElegido} timeline={timeline} historial={historial} deslizar={deslizar} empezarAjuste={empezarAjuste} />
             <span className="tl-dim">
               {tc(textoElegido.inicio)} · {textoElegido.duracion.toFixed(1)} s
             </span>
@@ -3672,6 +3735,10 @@ export function TimelineEditor({
               <dd>Copiar, cortar y pegar en el cabezal</dd>
               <dt>Ctrl+D</dt>
               <dd>Duplicar el clip</dd>
+              <dt>Alt+flechas</dt>
+              <dd>Mover un poco la capa o el texto elegido (con Mayús, más)</dd>
+              <dt>Mayús al girar</dt>
+              <dd>Girar de 15 en 15° con el tirador redondo</dd>
               <dt>◆</dt>
               <dd>Junto a un ajuste del clip: pone un fotograma clave para animarlo</dd>
               <dt>Ctrl+clic</dt>

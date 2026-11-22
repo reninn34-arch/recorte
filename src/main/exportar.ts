@@ -34,6 +34,9 @@ import {
   letraOscura,
   escalaLetraAss,
   COLOR_PINTADO,
+  EME_ROTULO,
+  trazoTexto,
+  textoVisible,
   type CapaTL,
   type TextoTL,
   type FiltrosTL,
@@ -191,15 +194,40 @@ function escribirAss(
     ...textos.map((t) => {
       // El tamaño y el color propios del rótulo van como etiquetas sobre el estilo de su posición.
       const libre = typeof t.x === 'number' && typeof t.y === 'number'
+      // La eme de la letra en píxeles del MP4 (la del monitor): con ella se miden el contorno, la sombra y el espaciado.
+      const eme = tamRotulo * (t.tamano ?? 1) * EME_ROTULO
+      const px = (v: number) => Math.round(v * eme * 10) / 10
+      const trazo = trazoTexto(t)
+      const alfas = alfasAss(t)
+      // El punto de anclaje: el centro del texto o, alineado, su borde (el monitor deja 0,6 em de margen dentro de la caja).
+      const ax = libre ? Math.round(t.x! * ancho) : 0
+      const ay = libre ? Math.round(t.y! * alto) : 0
+      const margen = Math.round(0.6 * eme)
+      const anclaje = !libre
+        ? `\\an${ALINEACION[t.posicion]}`
+        : t.alineacion === 'izquierda'
+          ? `\\an4\\pos(${ax + margen},${ay})`
+          : t.alineacion === 'derecha'
+            ? `\\an6\\pos(${ax - margen},${ay})`
+            : `\\an5\\pos(${ax},${ay})`
       const etiquetas = [
-        libre ? `\\an5\\pos(${Math.round(t.x! * ancho)},${Math.round(t.y! * alto)})` : `\\an${ALINEACION[t.posicion]}`,
+        anclaje,
+        // Gira sobre su punto de anclaje, como en el monitor (en ASS el giro positivo va contra el reloj).
+        ...(libre && t.giro ? [`\\org(${ax},${ay})\\frz${Math.round(-t.giro * 10) / 10}`] : []),
         // Con la letra de cada rótulo, el mismo tamaño que en el monitor (cada letra mide su altura de línea distinto).
         ...(t.tamano || escalaLetraAss(t.fuente) !== 1 ? [`\\fs${Math.round(tamRotulo * (t.tamano ?? 1) * escalaLetraAss(t.fuente))}`] : []),
         ...(t.color ? [`\\1c${colorAss(t.color).replace('&H00', '&H')}&`] : []),
         // La caja de su color (con caja, el borde del estilo es la caja), opaca como en el monitor.
         ...(t.caja && !t.sinCaja ? [`\\3c${colorAss(t.caja).replace('&H00', '&H')}&`, '\\3a&H00&'] : []),
         // Letra oscura sin caja (tinta sobre papel): sin el borde ni la sombra negros, que la emborronan.
-        ...(t.sinCaja && letraOscura(t) ? ['\\bord0\\shad0'] : []),
+        ...(t.sinCaja && letraOscura(t) && !trazo ? ['\\bord0\\shad0'] : []),
+        // El contorno y la sombra elegidos (en vez del halo de siempre): fuera de la letra, como el monitor.
+        ...(trazo
+          ? [`\\bord${px(trazo.contorno)}\\3c${colorAss(trazo.colorContorno).replace('&H00', '&H')}&\\shad${px(trazo.sombra)}\\4c${colorAss(trazo.colorSombra).replace('&H00', '&H')}&`]
+          : []),
+        ...(t.espaciado ? [`\\fsp${px(t.espaciado)}`] : []),
+        // La transparencia de la letra, su borde y su sombra (o su caja), multiplicada por la opacidad del rótulo.
+        ...(t.opacidad !== undefined || trazo ? [`\\1a&H${alfas.letra}&\\3a&H${alfas.borde}&\\4a&H${alfas.sombra}&`] : []),
         // La letra: una fuente de Windows, la misma que dibuja el monitor.
         ...(t.fuente && FUENTES_TEXTO[t.fuente]
           ? [`\\fn${FUENTES_TEXTO[t.fuente].familia}`, FUENTES_TEXTO[t.fuente].negrita ? '\\b1' : '\\b0', FUENTES_TEXTO[t.fuente].cursiva ? '\\i1' : '\\i0']
@@ -210,14 +238,14 @@ function escribirAss(
       const conClave = t.animacion !== 'maquina' && t.animacion !== 'pintar'
       const base = colorAss(t.color ?? '#ffffff').replace('&H00', '&H')
       const clave = colorAss(t.colorClave ?? COLOR_PINTADO).replace('&H00', '&H')
-      const lineas = t.texto
+      const lineas = textoVisible(t)
         .split(/\r?\n/)
         .map((l) => escapar(l))
         .map((l) => (conClave ? l.replace(/\*([^*]+)\*/g, (_m, x: string) => `{\\1c${clave}&}${x}{\\1c${base}&}`) : l).replace(/\*/g, ''))
         .filter(Boolean)
         .join('\\N')
-      const { inicio: entrada, cuerpo } = animarAss(t, lineas, libre ? { x: Math.round(t.x! * ancho), y: Math.round(t.y! * alto), baja: Math.round(alto * 0.03) } : null)
-      return `Dialogue: 1,${tiempoAss(t.inicio)},${tiempoAss(t.inicio + t.duracion)},${nombreEstilo[t.posicion]}${t.sinCaja ? 'Libre' : ''},,0,0,0,,{${etiquetas}${entrada}}${cuerpo}`
+      const { inicio: entrada, cuerpo } = animarAss(t, lineas, libre ? { x: ax + (t.alineacion === 'izquierda' ? margen : t.alineacion === 'derecha' ? -margen : 0), y: ay, baja: Math.round(alto * 0.03) } : null)
+      return `Dialogue: 1,${tiempoAss(t.inicio)},${tiempoAss(t.inicio + t.duracion)},${nombreEstilo[t.posicion]}${t.sinCaja ? 'Libre' : ''},,0,0,0,,{${entrada.includes('\\move(') ? etiquetas.replace(/\\pos\([^)]*\)/, '') : etiquetas}${entrada}}${cuerpo}`
     })
   ].join('\n')
 
@@ -674,8 +702,22 @@ async function exportarTimelineAhora(
       : ''
     // La opacidad y el desenfoque animados: FFmpeg recibe su valor en cada cuadro (sendcmd), sin calcular píxel a píxel.
     const animados = ordenesCapa(carpeta, timeline, c, i, fps, anchoC)
+    // Volteada (espejo) y recortada: lo recortado queda transparente, con la capa del mismo tamaño (como el monitor).
+    const voltear = `${c.voltearH ? ',hflip' : ''}${c.voltearV ? ',vflip' : ''}`
+    const rc = c.recorte
+    const recorte = rc
+      ? [
+          rc.izq > 0 ? `drawbox=x=0:y=0:w='ceil(iw*${rc.izq})':h=ih:color=black@0:t=fill:replace=1` : '',
+          rc.der > 0 ? `drawbox=x='iw-ceil(iw*${rc.der})':y=0:w='ceil(iw*${rc.der})':h=ih:color=black@0:t=fill:replace=1` : '',
+          rc.arriba > 0 ? `drawbox=x=0:y=0:w=iw:h='ceil(ih*${rc.arriba})':color=black@0:t=fill:replace=1` : '',
+          rc.abajo > 0 ? `drawbox=x=0:y='ih-ceil(ih*${rc.abajo})':w=iw:h='ceil(ih*${rc.abajo})':color=black@0:t=fill:replace=1` : ''
+        ]
+          .filter(Boolean)
+          .map((x) => `,${x}`)
+          .join('')
+      : ''
     partes.push(
-      `[${k}:v]setpts=PTS-STARTPTS,fps=${fps},format=rgba${animados.ordenes},scale=w='max(2,trunc(${anchoC}*${en(ex.ancho, 't')}*${en(ex.escala, 't')}/2)*2)':h=-2:eval=frame:flags=bicubic${giro}${animados.opacidad}${animados.desenfoque ?? desenfoque(desenfoqueCapa(timeline, c), anchoC)}${fundido},setpts=PTS+${c.inicio.toFixed(3)}/TB[capa${i}]`
+      `[${k}:v]setpts=PTS-STARTPTS,fps=${fps},format=rgba${animados.ordenes}${voltear},scale=w='max(2,trunc(${anchoC}*${en(ex.ancho, 't')}*${en(ex.escala, 't')}/2)*2)':h=-2:eval=frame:flags=bicubic${recorte}${giro}${animados.opacidad}${animados.desenfoque ?? desenfoque(desenfoqueCapa(timeline, c), anchoC)}${fundido},setpts=PTS+${c.inicio.toFixed(3)}/TB[capa${i}]`
     )
     const salida = `[conCapa${i}]`
     const T = `(t-${c.inicio.toFixed(3)})`
@@ -1046,6 +1088,19 @@ export function filtrosFfmpeg(f: FiltrosTL, entrada: string, salida: string, anc
  * (cada una pasa de transparente a visible a su tiempo), con rebote (escala) o subiendo (\move con
  * posición libre; si no, un fundido). Devuelve etiquetas para el inicio y el texto ya etiquetado.
  */
+/**
+ * La transparencia (en hexadecimal de ASS: 00 opaca, FF invisible) de la letra, de su borde (o su caja) y de su sombra:
+ * las de siempre (la caja negra al 70 %, el halo) por la opacidad del rótulo.
+ */
+export function alfasAss(t: TextoTL): { letra: string; borde: string; sombra: string } {
+  const op = Math.min(1, Math.max(0, t.opacidad ?? 1))
+  const trazo = trazoTexto(t)
+  const hex = (base: number) => Math.round(255 - (255 - base) * op).toString(16).toUpperCase().padStart(2, '0')
+  const borde = trazo || t.sinCaja || t.caja ? 0 : 0x4d
+  const sombra = trazo ? 0 : t.sinCaja ? 0x80 : 0x4d
+  return { letra: hex(0), borde: hex(borde), sombra: hex(sombra) }
+}
+
 export function animarAss(t: TextoTL, lineas: string, libre: { x: number; y: number; baja: number } | null): { inicio: string; cuerpo: string } {
   const ms = (s: number) => Math.round(s * 1000)
   if (t.animacion === 'pop') {
@@ -1085,12 +1140,11 @@ export function animarAss(t: TextoTL, lineas: string, libre: { x: number; y: num
   }
   if (t.animacion !== 'palabras' && t.animacion !== 'maquina') return { inicio: '', cuerpo: lineas }
   // El borde y la caja siguen a la letra: con caja, su transparencia es la del estilo (o opaca si es de color).
-  const borde = t.sinCaja ? '00' : t.caja ? '00' : '4D'
-  const sombra = t.sinCaja ? '80' : '4D'
+  const { letra, borde, sombra } = alfasAss(t)
   const paso = pasoAnimacion(t)
   const palabras = tiemposPalabras(t)
   const oculta = '\\1a&HFF&\\3a&HFF&\\4a&HFF&'
-  const visible = `\\1a&H00&\\3a&H${borde}&\\4a&H${sombra}&`
+  const visible = `\\1a&H${letra}&\\3a&H${borde}&\\4a&H${sombra}&`
   // Se trocea sin romper los saltos de línea (\N) ni los espacios.
   const piezas = t.animacion === 'palabras' ? lineas.split(/(\\N|\s+)/) : lineas.split(/(\\N)|/)
   let n = 0
