@@ -40,6 +40,38 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.4.0',
+    fecha: '2026-11-22',
+    resumen: 'El editor ya anima como un estudio: entradas y salidas, fotogramas clave en los textos con curvas, esquinas, borde y sombra en las capas, y varias a la vez.',
+    novedades: [
+      {
+        icono: 'sparkles',
+        titulo: 'Entradas y salidas',
+        texto: 'Las capas se van fundiéndose, encogiéndose o por un lado, y los textos se funden, se encogen o se desenfocan. Tú eliges cuánto dura cada una. Dos entradas nuevas para textos: de borroso a nítido, entero o palabra a palabra.'
+      },
+      {
+        icono: 'type',
+        titulo: 'Textos con fotogramas clave',
+        texto: 'Anima el sitio, el tamaño, el giro y la opacidad de un texto con ◆, como en las capas: un título que cruza la pantalla, crece mientras se lee o se desvanece. Cada tramo con su curva: suave, lineal, acelera, frena o se pasa y vuelve.'
+      },
+      {
+        icono: 'image',
+        titulo: 'Esquinas, borde y sombra',
+        texto: 'Redondea una foto hasta hacerla un círculo, ponle un borde de color o una sombra debajo. Se ve igual en el editor y en el video.'
+      },
+      {
+        icono: 'layers',
+        titulo: 'Orden, ocultar, bloquear y copiar el estilo',
+        texto: 'Trae una capa al frente o mándala al fondo, oculta o bloquea una sola capa o un texto, duplícalo con Ctrl+D y pasa el estilo de uno a otro con Ctrl+Alt+C y Ctrl+Alt+V.'
+      },
+      {
+        icono: 'seleccion',
+        titulo: 'Varias a la vez',
+        texto: 'Con Ctrl + clic en el monitor eliges varias capas y textos: muévelos juntos, alinéalos o repártelos con el mismo espacio.'
+      }
+    ]
+  },
+  {
     version: '0.3.0',
     fecha: '2026-11-22',
     resumen: 'El editor gana las herramientas de capas y textos: estilo completo de la letra, tiradores para agrandar, girar y recortar, y guías con zona segura.',
