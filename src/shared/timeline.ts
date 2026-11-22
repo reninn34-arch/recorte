@@ -432,6 +432,24 @@ export interface TextoTL {
   opacidad?: number
   /** Giro en grados, a favor del reloj (−180 a 180). Solo con posición libre: gira sobre su punto de anclaje. */
   giro?: number
+  /** Cómo se va al terminar; sin ella, de golpe. */
+  salida?: SalidaTexto
+  /** Lo que dura su salida (0,1 a 2 s); sin ella, SALIDA_TEXTO_S. */
+  durSalida?: number
+  /** No se ve (ni en el monitor ni en el MP4), sin borrarlo. */
+  oculto?: boolean
+  /** No se mueve ni se cambia en la línea de tiempo ni en el monitor (se puede elegir y desbloquear). */
+  bloqueado?: boolean
+  /**
+   * Fotogramas clave: el sitio (x, y), el tamaño, el giro o la opacidad en ciertos segundos desde que aparece. Mandan
+   * sobre los fijos. Con claves de sitio o de giro, el texto tiene sitio propio.
+   */
+  claves?: ClavesTexto
+  /**
+   * Interno (no se guarda): los segundos que se le cortaron al final al sacar un trozo de la timeline (un cuadro, la
+   * vista previa, exportar entre la entrada y la salida). Su salida sigue donde iba: después de lo que se ve.
+   */
+  cola?: number
 }
 
 export type AlineacionTexto = 'izquierda' | 'derecha'
@@ -452,10 +470,12 @@ export function trazoTexto(t: Pick<TextoTL, 'sinCaja' | 'contorno' | 'sombra' | 
 /** El texto como se ve (en mayúsculas si lo pide), lo mismo en el monitor y en el MP4. */
 export const textoVisible = (t: Pick<TextoTL, 'texto' | 'mayusculas'>): string => (t.mayusculas ? t.texto.toLocaleUpperCase('es') : t.texto)
 
-export type AnimacionTexto = 'palabras' | 'maquina' | 'pop' | 'subir' | 'pintar' | 'rotulo'
+export type AnimacionTexto = 'palabras' | 'maquina' | 'pop' | 'subir' | 'pintar' | 'rotulo' | 'desenfoque' | 'palabras-desenfoque'
 export const ANIMACIONES_TEXTO: { id: AnimacionTexto; nombre: string }[] = [
   { id: 'rotulo', nombre: 'Rótulo (aparece y crece un poco)' },
   { id: 'palabras', nombre: 'Palabra a palabra' },
+  { id: 'palabras-desenfoque', nombre: 'Palabra a palabra, de borrosa a nítida' },
+  { id: 'desenfoque', nombre: 'De borroso a nítido' },
   { id: 'pintar', nombre: 'Pintar palabras' },
   { id: 'maquina', nombre: 'Letra a letra' },
   { id: 'pop', nombre: 'Con rebote' },
@@ -473,9 +493,43 @@ export function letraOscura(t: Pick<TextoTL, 'color'>): boolean {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.35
 }
 
+/** Las animaciones que sacan las palabras una a una, al ritmo de la voz si se sabe (con sus `tiempos`). */
+export const porPalabras = (a: AnimacionTexto | undefined): boolean => a === 'palabras' || a === 'palabras-desenfoque'
+
+/** Cómo se va un rótulo al terminar: fundiéndose, encogiéndose o desenfocándose. Sin ella, de golpe. */
+export type SalidaTexto = 'fundido' | 'encoger' | 'desenfoque'
+export const SALIDAS_TEXTO: { id: SalidaTexto; nombre: string }[] = [
+  { id: 'fundido', nombre: 'Se funde' },
+  { id: 'encoger', nombre: 'Se encoge' },
+  { id: 'desenfoque', nombre: 'Se desenfoca' }
+]
+/** Lo que dura la salida de un rótulo si no se dice (segundos). */
+export const SALIDA_TEXTO_S = 0.3
+/** Lo más borroso que llega a estar un rótulo al entrar o salir desenfocado, en fracción del tamaño de su letra. */
+export const DESENFOQUE_TEXTO = 0.3
+/** Lo que dura la salida de un rótulo: la suya, sin pasar de la mitad de lo que dura el rótulo. */
+export function durSalidaTexto(t: Pick<TextoTL, 'salida' | 'durSalida'>): number {
+  return t.salida ? (t.durSalida ?? SALIDA_TEXTO_S) : 0
+}
+/**
+ * Cómo está un rótulo al irse, `dt` segundos desde que empezó: su opacidad, su escala y su desenfoque (en fracción
+ * del tamaño de la letra). Lo mismo dibuja el MP4 (\fad, \fscx y \blur al final).
+ */
+export function salidaTexto(t: Pick<TextoTL, 'salida' | 'durSalida' | 'duracion' | 'cola'>, dt: number): { opacidad: number; escala: number; desenfoque: number } {
+  const d = durSalidaTexto(t)
+  if (!d) return { opacidad: 1, escala: 1, desenfoque: 0 }
+  // De 0 (empieza a irse) a 1 (se fue).
+  const p = Math.min(1, Math.max(0, 1 - (t.duracion + (t.cola ?? 0) - dt) / d))
+  return {
+    opacidad: 1 - p,
+    escala: t.salida === 'encoger' ? 1 - 0.6 * p : 1,
+    desenfoque: t.salida === 'desenfoque' ? DESENFOQUE_TEXTO * p : 0
+  }
+}
+
 /** Segundos entre palabra y palabra (o letra y letra) de un rótulo animado: lo mismo en el monitor y en el MP4. */
 export function pasoAnimacion(t: Pick<TextoTL, 'texto' | 'animacion'>): number {
-  if (t.animacion === 'palabras') return Math.min(0.22, 1.4 / Math.max(1, t.texto.split(/\s+/).filter(Boolean).length))
+  if (porPalabras(t.animacion)) return Math.min(0.22, 1.4 / Math.max(1, t.texto.split(/\s+/).filter(Boolean).length))
   if (t.animacion === 'maquina') return Math.min(0.045, 1.6 / Math.max(1, t.texto.replace(/\s/g, '').length))
   return 0
 }
@@ -512,7 +566,7 @@ export function tiemposPalabras(t: Pick<TextoTL, 'texto' | 'animacion' | 'tiempo
   let inicios: number[]
   // Negativos: palabras que ya se dijeron antes de que empiece este trozo (un cuadro suelto a mitad de la frase).
   if (t.tiempos && t.tiempos.length === n) inicios = t.tiempos.map((x) => Math.min(x, t.duracion))
-  else if (t.animacion === 'palabras') {
+  else if (porPalabras(t.animacion)) {
     const paso = pasoAnimacion(t)
     inicios = Array.from({ length: n }, (_, k) => k * paso)
   } else {
@@ -566,7 +620,7 @@ const COLOR_HEX = /^#[0-9a-f]{6}$/i
 
 /** El estilo de un rótulo, limpio: lo neutro no se guarda. */
 /** Los campos de estilo de un rótulo (los que `estiloTexto` limpia). */
-const CAMPOS_ESTILO_TEXTO = ['tamano', 'color', 'sinCaja', 'fuente', 'caja', 'animacion', 'pintado', 'colorClave', 'contorno', 'colorContorno', 'sombra', 'colorSombra', 'alineacion', 'espaciado', 'mayusculas', 'opacidad', 'giro'] as const
+const CAMPOS_ESTILO_TEXTO = ['tamano', 'color', 'sinCaja', 'fuente', 'caja', 'animacion', 'pintado', 'colorClave', 'contorno', 'colorContorno', 'sombra', 'colorSombra', 'alineacion', 'espaciado', 'mayusculas', 'opacidad', 'giro', 'salida', 'durSalida'] as const
 type EstiloTexto = Pick<TextoTL, (typeof CAMPOS_ESTILO_TEXTO)[number]>
 
 /** El estilo de un rótulo para copiarlo en otro (Copiar estilo / Pegar estilo). */
@@ -589,6 +643,8 @@ function estiloTexto(t: Partial<TextoTL>): EstiloTexto {
     ...(t.mayusculas === true ? { mayusculas: true } : {}),
     ...(num(t.opacidad) && t.opacidad < 0.995 ? { opacidad: r(pinza(t.opacidad, 0, 1), 100) } : {}),
     ...(num(t.giro) && Math.abs(t.giro) > 0.05 ? { giro: r(pinza(t.giro, -180, 180), 10) } : {}),
+    ...(t.salida && SALIDAS_TEXTO.some((s) => s.id === t.salida) ? { salida: t.salida } : {}),
+    ...(t.salida && num(t.durSalida) && Math.abs(t.durSalida - SALIDA_TEXTO_S) > 0.005 ? { durSalida: r(pinza(t.durSalida, DURACIONES_ANIMACION[0], DURACIONES_ANIMACION[1]), 100) } : {}),
     ...(Math.abs(tamano - 1) > 0.005 ? { tamano } : {}),
     ...(color !== '#ffffff' ? { color } : {}),
     ...(t.sinCaja === true ? { sinCaja: true } : {}),
@@ -623,6 +679,11 @@ export interface VozTL {
 /** Cómo entra una capa: con un pequeño rebote o fundiéndose; sin él, de golpe. */
 export type EntradaCapa = 'pop' | 'fundido' | 'izquierda' | 'derecha' | 'arriba' | 'abajo'
 export const ENTRADAS_CAPA: EntradaCapa[] = ['pop', 'fundido', 'izquierda', 'derecha', 'arriba', 'abajo']
+/** Cómo se va una capa al terminar: fundiéndose, encogiéndose o saliendo por un lado; sin ella, de golpe. */
+export type SalidaCapa = 'fundido' | 'encoger' | 'izquierda' | 'derecha' | 'arriba' | 'abajo'
+export const SALIDAS_CAPA: SalidaCapa[] = ['fundido', 'encoger', 'izquierda', 'derecha', 'arriba', 'abajo']
+/** Lo más corta y lo más larga que puede ser una entrada o una salida (segundos). */
+export const DURACIONES_ANIMACION = [0.1, 2] as const
 
 /** Dónde termina una capa que se mueve: va de su sitio, tamaño y giro de inicio a estos, suavemente. */
 export interface FinCapa {
@@ -650,6 +711,27 @@ export interface CapaTL {
   /** El ancho, en fracción del ancho del cuadro: 0.05 a 1 (1 = de borde a borde). */
   ancho: number
   entrada?: EntradaCapa
+  /** Cómo se va al terminar; sin ella, de golpe. */
+  salida?: SalidaCapa
+  /** Lo que dura la entrada y la salida (segundos); sin ellas, lo de cada tipo (pop 0,24, fundido 0,35, por un lado 0,45). */
+  durEntrada?: number
+  durSalida?: number
+  /** Interno (no se guarda), como en los textos: lo que se le cortó al final al sacar un trozo; la salida sigue donde iba. */
+  cola?: number
+  /** Su orden dentro de su pista: una más alta tapa a las de su misma pista (sin él, 0; a igual orden, la que empieza después). */
+  orden?: number
+  /** Las esquinas redondeadas: 0 rectas a 1 (redonda del todo: un círculo o una píldora). Sobre lo que se ve (tras el recorte). */
+  redondeo?: number
+  /** Un borde por dentro de lo que se ve: su grosor en fracción de su ancho visible (0 a 0,2), y su color (sin él, blanco). */
+  borde?: number
+  colorBorde?: string
+  /** Una sombra debajo, abajo a la derecha: 0 (nada) a 1 (fuerte), y su color (sin él, negro). */
+  sombraCapa?: number
+  colorSombraCapa?: string
+  /** No se ve (ni en el monitor ni en el MP4), sin borrarla. */
+  oculto?: boolean
+  /** No se mueve ni se cambia en la línea de tiempo ni en el monitor (se puede elegir y desbloquear). */
+  bloqueado?: boolean
   /** Si es un video: el segundo del medio desde donde se ve. */
   desde?: number
   /** Giro al empezar, en grados (positivo = a favor del reloj). */
@@ -711,6 +793,37 @@ export interface RecorteCapa {
 }
 /** Lo que queda como mínimo de una capa recortada (en cada dirección). */
 export const MINIMO_RECORTE = 0.05
+
+/** Las esquinas, el borde y la sombra de una capa, limpios (lo que está en 0 no se guarda). */
+export function normalizarMarco(c: Partial<CapaTL>): Pick<CapaTL, 'redondeo' | 'borde' | 'colorBorde' | 'sombraCapa' | 'colorSombraCapa'> {
+  const n = (v: unknown, max: number) => (typeof v === 'number' && Number.isFinite(v) && v > 0.004 ? Math.round(pinza(v, 0, max) * 1000) / 1000 : undefined)
+  const hex = (v: unknown) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : undefined)
+  const redondeo = n(c.redondeo, 1)
+  const borde = n(c.borde, LIMITE_BORDE_CAPA)
+  const sombra = n(c.sombraCapa, 1)
+  return {
+    ...(redondeo ? { redondeo } : {}),
+    ...(borde ? { borde, ...(hex(c.colorBorde) && hex(c.colorBorde) !== '#ffffff' ? { colorBorde: hex(c.colorBorde) } : {}) } : {}),
+    ...(sombra ? { sombraCapa: sombra, ...(hex(c.colorSombraCapa) && hex(c.colorSombraCapa) !== '#000000' ? { colorSombraCapa: hex(c.colorSombraCapa) } : {}) } : {})
+  }
+}
+/** Lo más grueso que puede ser el borde de una capa (en fracción de su ancho visible). */
+export const LIMITE_BORDE_CAPA = 0.2
+/** La sombra de una capa, con fuerza 1: cuánto se corre (abajo a la derecha), cuánto se difumina (sigma) y su opacidad. */
+export const SOMBRA_CAPA = { corre: 0.04, difumina: 0.05, opacidad: 0.6 }
+
+/**
+ * El marco de una capa en píxeles de lo que se ve (`ancho` × `alto`, ya recortado): el radio de las esquinas, el grosor
+ * del borde y la sombra. Lo mismo usan el monitor (CSS) y el MP4 (FFmpeg).
+ */
+export function marcoCapa(c: Pick<CapaTL, 'redondeo' | 'borde' | 'sombraCapa'>, ancho: number, alto: number): { radio: number; borde: number; corre: number; sigma: number } {
+  return {
+    radio: (c.redondeo ?? 0) * Math.min(ancho, alto) / 2,
+    borde: (c.borde ?? 0) * ancho,
+    corre: (c.sombraCapa ?? 0) * SOMBRA_CAPA.corre * ancho,
+    sigma: (c.sombraCapa ?? 0) * SOMBRA_CAPA.difumina * ancho
+  }
+}
 
 /** El recorte válido de una capa (cada lado 0 a 0,95, dejando al menos el 5 %); sin nada recortado, undefined. */
 export function normalizarRecorte(entrada: unknown): RecorteCapa | undefined {
@@ -800,12 +913,88 @@ function normalizarSigue(entrada: unknown): CapaTL['sigue'] | undefined {
   return { puntos, dx: ok(e.dx) ? pinza(e.dx, -2, 2) : 0, dy: ok(e.dy) ? pinza(e.dy, -2, 2) : 0 }
 }
 
+/** La timeline sin las capas y los textos ocultos (lo que se ve y se exporta). */
+export function sinOcultos(tl: Timeline): Timeline {
+  if (!tl.textos.some((x) => x.oculto) && !tl.capas?.some((x) => x.oculto)) return tl
+  const capas = (tl.capas ?? []).filter((x) => !x.oculto)
+  const { capas: _c, ...resto } = tl
+  return { ...resto, textos: tl.textos.filter((x) => !x.oculto), ...(capas.length ? { capas } : {}) }
+}
+
 /** Cuántas pistas de video hay encima de la principal. */
 export const PISTAS_ENCIMA = 3
 export const pistaDeCapa = (c: Pick<CapaTL, 'pista'>): number => c.pista ?? 1
 /** Las capas en el orden en que se pintan: primero las de la pista 1 y encima las de las pistas más altas. */
-export function capasEnOrden<T extends Pick<CapaTL, 'pista'>>(capas: T[]): T[] {
-  return capas.map((c, i) => ({ c, i })).sort((a, b) => pistaDeCapa(a.c) - pistaDeCapa(b.c) || a.i - b.i).map((x) => x.c)
+export function capasEnOrden<T extends Pick<CapaTL, 'pista' | 'orden'>>(capas: T[]): T[] {
+  return capas
+    .map((c, i) => ({ c, i }))
+    .sort((a, b) => pistaDeCapa(a.c) - pistaDeCapa(b.c) || (a.c.orden ?? 0) - (b.c.orden ?? 0) || a.i - b.i)
+    .map((x) => x.c)
+}
+
+/**
+ * Trae una capa al frente o la envía atrás dentro de su pista (como en Premiere o Canva): «frente» la pone encima de
+ * todas las de su pista, «atras» debajo, y «subir»/«bajar» la pasan por encima (o por debajo) de la siguiente que se
+ * cruza con ella en el tiempo.
+ */
+export function ordenarCapa(tl: Timeline, id: string, como: 'frente' | 'atras' | 'subir' | 'bajar', medios: Record<string, number>): Timeline {
+  const c = tl.capas?.find((x) => x.id === id)
+  if (!c) return tl
+  const cruzan = (x: CapaTL) => x.id !== id && pistaDeCapa(x) === pistaDeCapa(c) && x.inicio < c.inicio + c.duracion && c.inicio < x.inicio + x.duracion
+  const pila = capasEnOrden((tl.capas ?? []).filter((x) => x.id === id || cruzan(x)))
+  const k = pila.findIndex((x) => x.id === id)
+  const destino = como === 'frente' ? pila.length - 1 : como === 'atras' ? 0 : como === 'subir' ? Math.min(pila.length - 1, k + 1) : Math.max(0, k - 1)
+  if (destino === k) return tl
+  // La pila con la capa en su sitio nuevo, y cada una con su orden (0, 1, 2…).
+  const nueva = pila.filter((x) => x.id !== id)
+  nueva.splice(destino, 0, c)
+  const ordenes = new Map(nueva.map((x, i) => [x.id, i]))
+  return { ...tl, capas: normalizarCapas(tl.capas!.map((x) => (ordenes.has(x.id) ? { ...x, orden: ordenes.get(x.id)! } : x)), duracionTimeline(tl), medios) }
+}
+
+/** Lo que se copia del estilo de una capa (no su sitio ni su tiempo): tamaño, giro, recorte, volteo, mezcla y animación. */
+export const CAMPOS_ESTILO_CAPA = ['ancho', 'giro', 'recorte', 'voltearH', 'voltearV', 'fusion', 'desenfoque', 'entrada', 'salida', 'durEntrada', 'durSalida', 'redondeo', 'borde', 'colorBorde', 'sombraCapa', 'colorSombraCapa'] as const
+export type EstiloCapa = Partial<Pick<CapaTL, (typeof CAMPOS_ESTILO_CAPA)[number]>>
+export function estiloDeCapa(c: CapaTL): EstiloCapa {
+  return Object.fromEntries(CAMPOS_ESTILO_CAPA.map((k) => [k, c[k]])) as EstiloCapa
+}
+/** Le pone a una capa el estilo de otra (lo que la otra no tiene, se le quita: queda igual). */
+export function pegarEstiloCapa(tl: Timeline, id: string, estilo: EstiloCapa, medios: Record<string, number>): Timeline {
+  return cambiarCapa(tl, id, { ...Object.fromEntries(CAMPOS_ESTILO_CAPA.map((k) => [k, undefined])), ...estilo }, medios)
+}
+/** Le pone a un texto el estilo de otro (su letra, colores, caja, contorno, animación…), sin tocar lo que dice ni dónde está. */
+export function pegarEstiloTexto(tl: Timeline, id: string, estilo: Partial<TextoTL>): Timeline {
+  const vacio = Object.fromEntries(CAMPOS_ESTILO_TEXTO.filter((k) => k !== 'giro' && k !== 'alineacion').map((k) => [k, undefined]))
+  const { giro: _g, alineacion: _a, ...resto } = estilo
+  return cambiarTexto(tl, id, { ...vacio, ...resto })
+}
+
+/** Duplica una capa: la copia va justo después (si cabe) o a la vez, encima de ella. */
+export function duplicarCapa(tl: Timeline, id: string, medios: Record<string, number>): { timeline: Timeline; id: string } {
+  const c = tl.capas?.find((x) => x.id === id)
+  if (!c) return { timeline: tl, id }
+  const total = duracionTimeline(tl)
+  const despues = c.inicio + c.duracion
+  const nuevoIdCapa = nuevoId('capa')
+  const { id: _id, persona: _p, borrado: _b, cielo: _c, roto: _r, ...resto } = c
+  const copia: CapaTL = despues + DURACION_MINIMA <= total ? { ...resto, id: nuevoIdCapa, inicio: despues, duracion: Math.min(c.duracion, total - despues) } : { ...resto, id: nuevoIdCapa, orden: (c.orden ?? 0) + 1 }
+  const capas = normalizarCapas([...(tl.capas ?? []), copia], total, medios)
+  return capas.some((x) => x.id === nuevoIdCapa) ? { timeline: { ...tl, capas }, id: nuevoIdCapa } : { timeline: tl, id }
+}
+
+/** Duplica un texto: la copia va justo después (si cabe) o a la vez, un poco más abajo. */
+export function duplicarTexto(tl: Timeline, id: string): { timeline: Timeline; id: string } {
+  const t = tl.textos.find((x) => x.id === id)
+  if (!t) return { timeline: tl, id }
+  const total = duracionTimeline(tl)
+  const despues = t.inicio + t.duracion
+  const nuevoIdTexto = nuevoId('texto')
+  const { id: _id, subtitulo: _s, ...resto } = t
+  const cabe = despues + DURACION_MINIMA <= total
+  const copia: TextoTL = cabe
+    ? { ...resto, id: nuevoIdTexto, inicio: despues, duracion: Math.min(t.duracion, total - despues) }
+    : { ...resto, id: nuevoIdTexto, x: typeof t.x === 'number' ? t.x : 0.5, y: Math.min(0.95, (typeof t.y === 'number' ? t.y : t.posicion === 'arriba' ? 0.12 : t.posicion === 'centro' ? 0.5 : 0.86) + 0.08) }
+  return { timeline: { ...tl, textos: [...tl.textos, copia] }, id: nuevoIdTexto }
 }
 
 export type TipoAnimar =
@@ -1118,9 +1307,14 @@ export function borrarMarcador(tl: Timeline, id: string): Timeline {
  * quedan dichas y una entrada que ya pasó (letra a letra, pop, subir…) no se repite. Si no, al sacar un trozo de la
  * timeline (la vista previa, un cuadro, exportar entre la entrada y la salida) volvía a escribirse desde cero.
  */
-export function textoYaEmpezado(r: TextoTL, corte: number, original: TextoTL = r): TextoTL {
+export function textoYaEmpezado(r0: TextoTL, corte: number, original: TextoTL = r0): TextoTL {
+  // Sus fotogramas clave siguen donde iban (se corren lo que se le cortó).
+  const r: TextoTL =
+    r0.claves && corte > 0
+      ? { ...r0, claves: Object.fromEntries(Object.entries(r0.claves).map(([k, v]) => [k, (v ?? []).map((cl) => ({ ...cl, f: cl.f - corte }))])) as ClavesTexto }
+      : r0
   if (!r.animacion || corte <= 0) return r
-  if (r.animacion === 'palabras' || r.animacion === 'pintar') {
+  if (porPalabras(r.animacion) || r.animacion === 'pintar') {
     return { ...r, tiempos: tiemposPalabras(original).map((w) => Math.round((w.inicio - corte) * 1000) / 1000) }
   }
   const entra = r.animacion === 'maquina' ? pasoAnimacion(r) * r.texto.replace(/\s/g, '').length + APARECER_S : 0.35
@@ -1132,7 +1326,16 @@ export function textoYaEmpezado(r: TextoTL, corte: number, original: TextoTL = r
 export function soloTramo(tl: Timeline, a: number, b: number): Timeline {
   const total = duracionTimeline(tl)
   let r = tl
-  if (b < total - DURACION_MINIMA) r = extraerRango(r, b, total)
+  if (b < total - DURACION_MINIMA) {
+    // Lo que se acorta por el final no termina ahí: su salida (si tiene) sigue donde iba (`cola`).
+    const fin = new Map<string, number>([...tl.textos, ...(tl.capas ?? [])].filter((x) => x.salida).map((x) => [x.id, x.inicio + finReal(x)]))
+    const conCola = <T extends { id: string; inicio: number; duracion: number; cola?: number }>(x: T): T => {
+      const f = fin.get(x.id)
+      return f !== undefined && f - (x.inicio + x.duracion) > EPSILON ? { ...x, cola: f - (x.inicio + x.duracion) } : x
+    }
+    r = extraerRango(r, b, total)
+    r = { ...r, textos: r.textos.map(conCola), ...(r.capas ? { capas: r.capas.map(conCola) } : {}) }
+  }
   if (a > DURACION_MINIMA) r = extraerRango(r, 0, a)
   return r
 }
@@ -1421,7 +1624,7 @@ export function cambiarPista(tl: Timeline, id: PistaId, cambio: PistaTL): Timeli
  * MP4; la que se edita conserva todo. Los clips no cambian de sitio (la pista de video solo pierde su sonido).
  */
 export function timelineActiva(entrada: Timeline): Timeline {
-  const tl = conSubtitulosAnimados(entrada)
+  const tl = sinOcultos(conSubtitulosAnimados(entrada))
   const p = tl.pistas
   if (!p || !PISTAS.some((x) => p[x.id]?.oculta || (p[x.id]?.volumen ?? 1) !== 1)) return tl
   const { capas, voces, sonidos, musica, ajustesCapa, ...resto } = tl
@@ -1635,6 +1838,9 @@ export function normalizarTimeline(entrada: unknown, duracionFuente: number, otr
       posicion: t.posicion === 'arriba' || t.posicion === 'centro' ? t.posicion : 'abajo',
       ...(t.subtitulo === true ? { subtitulo: true } : {}),
       ...(t.detras === true ? { detras: true } : {}),
+      ...(t.oculto === true ? { oculto: true } : {}),
+      ...(t.bloqueado === true ? { bloqueado: true } : {}),
+      ...(normalizarClavesTexto(t.claves, duracion) ? { claves: normalizarClavesTexto(t.claves, duracion) } : {}),
       ...estiloTexto(t),
       ...posicionLibre(t),
       ...(() => {
@@ -1732,6 +1938,9 @@ export function normalizarCapas(entrada: unknown, total: number, medios: Record<
       y: Math.round(pinza(num(c.y, 0.5), 0, 1) * 1000) / 1000,
       ancho: Math.round(pinza(num(c.ancho, 0.3), 0.05, 2) * 1000) / 1000,
       ...(c.entrada && ENTRADAS_CAPA.includes(c.entrada) ? { entrada: c.entrada } : {}),
+      ...(c.salida && SALIDAS_CAPA.includes(c.salida) ? { salida: c.salida } : {}),
+      ...(c.entrada && typeof c.durEntrada === 'number' && Number.isFinite(c.durEntrada) ? { durEntrada: Math.round(pinza(c.durEntrada, DURACIONES_ANIMACION[0], DURACIONES_ANIMACION[1]) * 100) / 100 } : {}),
+      ...(c.salida && typeof c.durSalida === 'number' && Number.isFinite(c.durSalida) ? { durSalida: Math.round(pinza(c.durSalida, DURACIONES_ANIMACION[0], DURACIONES_ANIMACION[1]) * 100) / 100 } : {}),
       ...(typeof c.pista === 'number' && Math.round(c.pista) >= 2 ? { pista: Math.min(PISTAS_ENCIMA, Math.round(c.pista)) } : {}),
       ...(typeof c.desde === 'number' && c.desde > 0 ? { desde: Math.min(c.desde, Math.max(0, medios[c.fuente] - DURACION_MINIMA)) } : {}),
       ...(Math.abs(num(c.giro, 0)) > 0.05 ? { giro: Math.round(pinza(num(c.giro, 0), -720, 720) * 10) / 10 } : {}),
@@ -1778,6 +1987,10 @@ export function normalizarCapas(entrada: unknown, total: number, medios: Record<
       ...(normalizarRecorte(c.recorte) ? { recorte: normalizarRecorte(c.recorte) } : {}),
       ...(c.voltearH === true ? { voltearH: true } : {}),
       ...(c.voltearV === true ? { voltearV: true } : {}),
+      ...(typeof c.orden === 'number' && Number.isFinite(c.orden) && Math.round(c.orden) !== 0 ? { orden: Math.max(-999, Math.min(999, Math.round(c.orden))) } : {}),
+      ...(c.oculto === true ? { oculto: true } : {}),
+      ...(c.bloqueado === true ? { bloqueado: true } : {}),
+      ...normalizarMarco(c),
       ...(normalizarClavesCapa(c.claves, pinza(c.duracion, DURACION_MINIMA, Math.max(DURACION_MINIMA, total - inicio)))
         ? { claves: normalizarClavesCapa(c.claves, pinza(c.duracion, DURACION_MINIMA, Math.max(DURACION_MINIMA, total - inicio))) }
         : {})
@@ -2201,7 +2414,36 @@ export type ParametroClave = (typeof PARAMETROS_CLAVE)[number]
 export interface ClaveTL {
   f: number
   v: number
+  /** Cómo va de esta clave a la siguiente (sin ella, suave: arranca y llega despacio). */
+  curva?: CurvaClave
 }
+
+/** Las curvas de suavizado de un fotograma clave a otro (como en After Effects o HyperFrames). */
+export type CurvaClave = 'lineal' | 'suave' | 'acelera' | 'frena' | 'rebote'
+export const CURVAS_CLAVE: { id: CurvaClave; nombre: string; para: string }[] = [
+  { id: 'suave', nombre: 'Suave', para: 'arranca y llega despacio (la de siempre)' },
+  { id: 'lineal', nombre: 'Lineal', para: 'a la misma velocidad todo el tiempo' },
+  { id: 'acelera', nombre: 'Acelera', para: 'arranca despacio y llega rápido (para salir)' },
+  { id: 'frena', nombre: 'Frena', para: 'arranca rápido y llega despacio (para entrar)' },
+  { id: 'rebote', nombre: 'Se pasa y vuelve', para: 'llega, se pasa un poco y vuelve (con energía)' }
+]
+/** Cuánto ha avanzado (0 a 1, o un poco más en «rebote») a la fracción `k` del tramo, según su curva. */
+export function avanceCurva(curva: CurvaClave | undefined, k: number): number {
+  if (curva === 'lineal') return k
+  if (curva === 'acelera') return k * k * k
+  if (curva === 'frena') return 1 - (1 - k) ** 3
+  if (curva === 'rebote') return 1 + 2.70158 * (k - 1) ** 3 + 1.70158 * (k - 1) ** 2
+  return k * k * (3 - 2 * k)
+}
+/** La misma curva como expresión de FFmpeg (`k` es la expresión de la fracción del tramo). */
+function exprCurva(curva: CurvaClave | undefined, k: string): string {
+  if (curva === 'lineal') return k
+  if (curva === 'acelera') return `${k}*${k}*${k}`
+  if (curva === 'frena') return `(1-pow(1-${k},3))`
+  if (curva === 'rebote') return `(1+2.70158*pow(${k}-1,3)+1.70158*pow(${k}-1,2))`
+  return `${k}*${k}*(3-2*${k})`
+}
+const esCurva = (c: unknown): c is CurvaClave => typeof c === 'string' && c !== 'suave' && CURVAS_CLAVE.some((x) => x.id === c)
 export type ClavesClip = Partial<Record<ParametroClave, ClaveTL[]>>
 export const MAX_CLAVES = 12
 /** Dos claves más cerca que esto son la misma (un cuadro a 30 fps). */
@@ -2217,7 +2459,7 @@ function normalizarClaves(entrada: unknown): ClavesClip | undefined {
     const puntos: ClaveTL[] = []
     for (const x of [...lista].sort((a, b) => (a?.f ?? 0) - (b?.f ?? 0))) {
       if (!x || typeof x.f !== 'number' || typeof x.v !== 'number' || !Number.isFinite(x.f) || !Number.isFinite(x.v)) continue
-      const punto = { f: Math.round(Math.max(0, x.f) * 1000) / 1000, v: Math.round(pinza(x.v, min, max) * 1000) / 1000 }
+      const punto: ClaveTL = { f: Math.round(Math.max(0, x.f) * 1000) / 1000, v: Math.round(pinza(x.v, min, max) * 1000) / 1000, ...(esCurva(x.curva) ? { curva: x.curva } : {}) }
       // Dos en el mismo cuadro: vale la última.
       if (puntos.length && punto.f - puntos[puntos.length - 1].f < MISMA_CLAVE) puntos[puntos.length - 1] = punto
       else puntos.push(punto)
@@ -2235,7 +2477,7 @@ export function valorClave(lista: ClaveTL[], f: number): number {
     const b = lista[i + 1]
     if (f < b.f) {
       const k = (f - a.f) / (b.f - a.f)
-      return a.v + (b.v - a.v) * k * k * (3 - 2 * k)
+      return a.v + (b.v - a.v) * avanceCurva(a.curva, k)
     }
   }
   return lista[lista.length - 1].v
@@ -2259,7 +2501,7 @@ export function exprClave(lista: ClaveTL[], F: string): string {
     const a = lista[i]
     const b = lista[i + 1]
     const k = `((${F}-${n(a.f)})/${n(b.f - a.f)})`
-    e = `if(lt(${F},${n(b.f)}),${n(a.v)}+(${n(b.v - a.v)})*${k}*${k}*(3-2*${k}),${e})`
+    e = `if(lt(${F},${n(b.f)}),${n(a.v)}+(${n(b.v - a.v)})*${exprCurva(a.curva, k)},${e})`
   }
   return `if(lt(${F},${n(lista[0].f)}),${n(lista[0].v)},${e})`
 }
@@ -2322,7 +2564,7 @@ export function normalizarClavesCapa(entrada: unknown, duracion: number): Claves
     const puntos: ClaveTL[] = []
     for (const x of [...lista].sort((a, b) => (a?.f ?? 0) - (b?.f ?? 0))) {
       if (!x || typeof x.f !== 'number' || typeof x.v !== 'number' || !Number.isFinite(x.f) || !Number.isFinite(x.v)) continue
-      const punto = { f: Math.round(pinza(x.f, 0, duracion) * 1000) / 1000, v: Math.round(pinza(x.v, min, max) * 1000) / 1000 }
+      const punto: ClaveTL = { f: Math.round(pinza(x.f, 0, duracion) * 1000) / 1000, v: Math.round(pinza(x.v, min, max) * 1000) / 1000, ...(esCurva(x.curva) ? { curva: x.curva } : {}) }
       if (puntos.length && punto.f - puntos[puntos.length - 1].f < MISMA_CLAVE) puntos[puntos.length - 1] = punto
       else puntos.push(punto)
     }
@@ -2345,12 +2587,29 @@ export function ponerClaveCapa(tl: Timeline, id: string, parametro: ParametroCla
   const donde = pinza(dt, 0, c.duracion)
   const otras = (c.claves?.[parametro] ?? []).filter((x) => Math.abs(x.f - donde) >= MISMA_CLAVE)
   if (otras.length >= MAX_CLAVES) return tl
+  // Si ya había una ahí, conserva su curva.
+  const curva = (c.claves?.[parametro] ?? []).find((x) => Math.abs(x.f - donde) < MISMA_CLAVE)?.curva
   // La primera clave de un ajuste que se movía con `fin`: se deja una clave al empezar y otra al acabar, para no perder el recorrido.
   const recorrido =
     !otras.length && c.fin && parametro !== 'opacidad' && parametro !== 'desenfoque'
       ? [{ f: 0, v: valorCapaSinClave(c, parametro, 0) }, { f: c.duracion, v: valorCapaSinClave(c, parametro, c.duracion) }].filter((x) => Math.abs(x.f - donde) >= MISMA_CLAVE)
       : []
-  return cambiarCapa(tl, id, { claves: { ...(c.claves ?? {}), [parametro]: [...recorrido, ...otras, { f: donde, v }] } }, medios)
+  return cambiarCapa(tl, id, { claves: { ...(c.claves ?? {}), [parametro]: [...recorrido, ...otras, { f: donde, v, ...(curva ? { curva } : {}) }] } }, medios)
+}
+
+/** Cambia la curva con que una capa va de su clave en `dt` a la siguiente (de ese ajuste o, con `todas`, de todos). */
+export function curvaClaveCapa(tl: Timeline, id: string, parametro: ParametroClaveCapa | 'todas', dt: number, curva: CurvaClave, medios: Record<string, number>): Timeline {
+  const c = tl.capas?.find((x) => x.id === id)
+  if (!c?.claves) return tl
+  const claves = Object.fromEntries(
+    Object.entries(c.claves).map(([p, lista]) => [
+      p,
+      parametro !== 'todas' && p !== parametro
+        ? lista
+        : (lista ?? []).map((x) => (parametro === 'todas' || Math.abs(x.f - dt) < MISMA_CLAVE ? { f: x.f, v: x.v, ...(curva !== 'suave' ? { curva } : {}) } : x))
+    ])
+  ) as ClavesCapa
+  return cambiarCapa(tl, id, { claves }, medios)
 }
 
 /** Quita la clave de un ajuste de una capa en el segundo `dt` (o todas las de ese ajuste, sin `dt`). */
@@ -2366,6 +2625,117 @@ export function quitarClaveCapa(tl: Timeline, id: string, parametro: ParametroCl
 /** La clave de un ajuste de una capa que cae en el segundo `dt` (dentro de un cuadro), si la hay. */
 export function claveCapaEn(c: CapaTL, parametro: ParametroClaveCapa, dt: number): ClaveTL | undefined {
   return c.claves?.[parametro]?.find((x) => Math.abs(x.f - dt) < MISMA_CLAVE)
+}
+
+// ===== Fotogramas clave de los textos =====
+
+export const PARAMETROS_CLAVE_TEXTO = ['x', 'y', 'tamano', 'giro', 'opacidad'] as const
+export type ParametroClaveTexto = (typeof PARAMETROS_CLAVE_TEXTO)[number]
+export type ClavesTexto = Partial<Record<ParametroClaveTexto, ClaveTL[]>>
+const LIMITES_CLAVE_TEXTO: Record<ParametroClaveTexto, [number, number]> = { x: [-0.5, 1.5], y: [-0.5, 1.5], tamano: [0.5, 6], giro: [-720, 720], opacidad: [0, 1] }
+
+export function normalizarClavesTexto(entrada: unknown, duracion: number): ClavesTexto | undefined {
+  if (!entrada || typeof entrada !== 'object') return undefined
+  const salida: ClavesTexto = {}
+  for (const p of PARAMETROS_CLAVE_TEXTO) {
+    const lista = (entrada as Record<string, unknown>)[p]
+    if (!Array.isArray(lista)) continue
+    const [min, max] = LIMITES_CLAVE_TEXTO[p]
+    const puntos: ClaveTL[] = []
+    for (const x of [...lista].sort((a, b) => (a?.f ?? 0) - (b?.f ?? 0))) {
+      if (!x || typeof x.f !== 'number' || typeof x.v !== 'number' || !Number.isFinite(x.f) || !Number.isFinite(x.v)) continue
+      // Antes del principio (un texto cortado) se conserva: es de donde viene.
+      const punto: ClaveTL = { f: Math.round(Math.min(x.f, duracion) * 1000) / 1000, v: Math.round(pinza(x.v, min, max) * 1000) / 1000, ...(esCurva(x.curva) ? { curva: x.curva } : {}) }
+      if (puntos.length && punto.f - puntos[puntos.length - 1].f < MISMA_CLAVE) puntos[puntos.length - 1] = punto
+      else puntos.push(punto)
+    }
+    if (puntos.length) salida[p] = puntos.slice(0, MAX_CLAVES)
+  }
+  return Object.keys(salida).length ? salida : undefined
+}
+
+/** El sitio propio que toma un texto sin él (el centro de arriba, del centro o de abajo, como lo pone el monitor). */
+export function sitioDeTexto(t: Pick<TextoTL, 'x' | 'y' | 'posicion'>): { x: number; y: number } {
+  return typeof t.x === 'number' && typeof t.y === 'number' ? { x: t.x, y: t.y } : { x: 0.5, y: t.posicion === 'arriba' ? 0.12 : t.posicion === 'centro' ? 0.5 : 0.86 }
+}
+
+/**
+ * Cómo está un texto `dt` segundos después de aparecer, con sus fotogramas clave: su sitio (si tiene sitio propio), su
+ * tamaño, su giro y su opacidad. Lo mismo dibujan el monitor y el MP4 (un tramo por cuadro).
+ */
+export function estadoTexto(t: TextoTL, dt: number): { x?: number; y?: number; tamano: number; giro: number; opacidad: number } {
+  const k = t.claves
+  const v = (p: ParametroClaveTexto, fijo: number | undefined) => (k?.[p]?.length ? valorClave(k[p]!, dt) : fijo)
+  return {
+    x: v('x', t.x),
+    y: v('y', t.y),
+    tamano: v('tamano', t.tamano ?? 1) ?? 1,
+    giro: v('giro', t.giro ?? 0) ?? 0,
+    opacidad: v('opacidad', t.opacidad ?? 1) ?? 1
+  }
+}
+
+/** El texto tal como está en `dt` (con los valores de sus claves puestos como fijos, sin las claves). */
+export function textoEn(t: TextoTL, dt: number): TextoTL {
+  if (!t.claves) return t
+  const e = estadoTexto(t, dt)
+  const { claves: _c, ...resto } = t
+  return {
+    ...resto,
+    ...(typeof e.x === 'number' && typeof e.y === 'number' ? { x: e.x, y: e.y } : {}),
+    ...(Math.abs(e.tamano - 1) > 0.005 ? { tamano: e.tamano } : { tamano: undefined }),
+    ...(Math.abs(e.giro) > 0.05 ? { giro: e.giro } : { giro: undefined }),
+    ...(e.opacidad < 0.995 ? { opacidad: Math.max(0, e.opacidad) } : { opacidad: undefined })
+  }
+}
+
+/** Pone (o cambia) la clave de un parámetro de un texto en `dt`. Sitio y giro le dan sitio propio si no lo tenía. */
+export function ponerClaveTexto(tl: Timeline, id: string, p: ParametroClaveTexto, dt: number, v: number): Timeline {
+  const t = tl.textos.find((x) => x.id === id)
+  if (!t) return tl
+  const donde = pinza(dt, 0, t.duracion)
+  const lista = t.claves?.[p] ?? []
+  const otras = lista.filter((x) => Math.abs(x.f - donde) >= MISMA_CLAVE)
+  if (otras.length >= MAX_CLAVES) return tl
+  const curva = lista.find((x) => Math.abs(x.f - donde) < MISMA_CLAVE)?.curva
+  const sitio = (p === 'x' || p === 'y' || p === 'giro') && typeof t.x !== 'number' ? sitioDeTexto(t) : {}
+  return cambiarTexto(tl, id, { ...sitio, claves: { ...(t.claves ?? {}), [p]: [...otras, { f: donde, v, ...(curva ? { curva } : {}) }] } })
+}
+
+/** Quita la clave de un parámetro de un texto en `dt` (o todas, sin `dt`); sin ninguna, se queda fijo en lo que valía. */
+export function quitarClaveTexto(tl: Timeline, id: string, p: ParametroClaveTexto, dt?: number): Timeline {
+  const t = tl.textos.find((x) => x.id === id)
+  const lista = t?.claves?.[p]
+  if (!t || !lista) return tl
+  const quedan = dt === undefined ? [] : lista.filter((x) => Math.abs(x.f - dt) >= MISMA_CLAVE)
+  const fijo = quedan.length ? {} : { [p]: valorClave(lista, dt ?? 0) }
+  return cambiarTexto(tl, id, { ...fijo, claves: { ...t.claves, [p]: quedan } })
+}
+
+/** La curva con que un texto va de su clave en `dt` a la siguiente. */
+export function curvaClaveTexto(tl: Timeline, id: string, p: ParametroClaveTexto, dt: number, curva: CurvaClave): Timeline {
+  const t = tl.textos.find((x) => x.id === id)
+  if (!t?.claves?.[p]) return tl
+  return cambiarTexto(tl, id, { claves: { ...t.claves, [p]: t.claves[p]!.map((x) => (Math.abs(x.f - dt) < MISMA_CLAVE ? { f: x.f, v: x.v, ...(curva !== 'suave' ? { curva } : {}) } : x)) } })
+}
+
+/**
+ * Cambia un texto en el segundo `dt` desde que aparece: lo que tiene fotogramas clave (sitio, tamaño, giro, opacidad)
+ * se cambia en su clave de ahí; lo demás, fijo. Es lo que hacen el monitor y el panel al moverlo o ajustarlo.
+ */
+export function cambiarTextoEn(tl: Timeline, id: string, cambio: Partial<Omit<TextoTL, 'id'>>, dt: number): Timeline {
+  const t = tl.textos.find((x) => x.id === id)
+  if (!t?.claves) return cambiarTexto(tl, id, cambio)
+  let nueva = tl
+  const resto: Partial<Omit<TextoTL, 'id'>> = { ...cambio }
+  for (const p of PARAMETROS_CLAVE_TEXTO) {
+    const v = cambio[p]
+    if (t.claves[p]?.length && typeof v === 'number') {
+      nueva = ponerClaveTexto(nueva, id, p, dt, v)
+      delete resto[p]
+    }
+  }
+  return Object.keys(resto).length ? cambiarTexto(nueva, id, resto) : nueva
 }
 
 // ===== Efectos de clip: color, sepia, tono, negativo y desenfoque (iguales en el monitor y en el MP4) =====
@@ -3111,6 +3481,12 @@ export function cambiarTexto(tl: Timeline, id: string, cambio: Partial<Omit<Text
       if (tiempos) nuevo.tiempos = tiempos
       if (!nuevo.subtitulo) delete nuevo.subtitulo
       if (!nuevo.detras) delete nuevo.detras
+      if (!nuevo.oculto) delete nuevo.oculto
+      // Sus fotogramas clave, dentro de lo que dura (si cambió).
+      const claves = normalizarClavesTexto(nuevo.claves, nuevo.duracion)
+      if (claves) nuevo.claves = claves
+      else delete nuevo.claves
+      if (!nuevo.bloqueado) delete nuevo.bloqueado
       // El giro y la alineación van sobre su punto de anclaje: sin posición libre no hay.
       if (typeof nuevo.x !== 'number') {
         delete nuevo.giro
@@ -3376,6 +3752,7 @@ export function cambiarCapa(tl: Timeline, id: string, cambio: Partial<Omit<CapaT
       const nueva = { ...c, ...cambio }
       // `entrada: undefined` en el cambio la quita (entra de golpe); `fin: undefined`, el movimiento.
       if ('entrada' in cambio && !cambio.entrada) delete nueva.entrada
+      if ('salida' in cambio && !cambio.salida) delete nueva.salida
       if ('fin' in cambio && !cambio.fin) delete nueva.fin
       if ('animada' in cambio && !cambio.animada) delete nueva.animada
       if ('profundidad' in cambio && cambio.profundidad == null) delete nueva.profundidad
@@ -3404,12 +3781,32 @@ const frena = (p: number) => 1 - (1 - p) ** 3
 
 /** Dónde arranca una capa que entra desde un lado (fuera del cuadro). */
 export function origenLado(c: Pick<CapaTL, 'entrada' | 'ancho'>): { x?: number; y?: number } {
-  if (c.entrada === 'izquierda') return { x: -c.ancho / 2 - 0.02 }
-  if (c.entrada === 'derecha') return { x: 1 + c.ancho / 2 + 0.02 }
-  if (c.entrada === 'arriba') return { y: -0.35 }
-  if (c.entrada === 'abajo') return { y: 1.35 }
+  return fueraPor(c.entrada, c.ancho)
+}
+/** Adónde se va una capa que sale por un lado (fuera del cuadro). */
+export function destinoLado(c: Pick<CapaTL, 'salida' | 'ancho'>): { x?: number; y?: number } {
+  return fueraPor(c.salida, c.ancho)
+}
+function fueraPor(lado: string | undefined, ancho: number): { x?: number; y?: number } {
+  if (lado === 'izquierda') return { x: -ancho / 2 - 0.02 }
+  if (lado === 'derecha') return { x: 1 + ancho / 2 + 0.02 }
+  if (lado === 'arriba') return { y: -0.35 }
+  if (lado === 'abajo') return { y: 1.35 }
   return {}
 }
+
+/** Lo que dura la entrada de una capa: la suya o la de su tipo. */
+export function durEntradaCapa(c: Pick<CapaTL, 'entrada' | 'durEntrada'>): number {
+  if (!c.entrada) return 0
+  return c.durEntrada ?? (c.entrada === 'pop' ? 0.24 : c.entrada === 'fundido' ? 0.35 : ENTRADA_LADO_S)
+}
+/** Lo que dura la salida de una capa: la suya o la de su tipo. */
+export function durSalidaCapa(c: Pick<CapaTL, 'salida' | 'durSalida'>): number {
+  if (!c.salida) return 0
+  return c.durSalida ?? (c.salida === 'encoger' ? 0.24 : c.salida === 'fundido' ? 0.35 : ENTRADA_LADO_S)
+}
+/** Cuándo termina de verdad una capa o un texto (segundos desde que aparece): con lo que se le cortó al final. */
+export const finReal = (x: { duracion: number; cola?: number }): number => x.duracion + (x.cola ?? 0)
 
 /**
  * Dónde está una capa `dt` segundos después de aparecer: su recorrido (de su sitio a `fin`, suave) y
@@ -3432,9 +3829,17 @@ export function estadoCapa(c: CapaTL, dt: number, conEntrada = true): { x: numbe
   if (!conEntrada) return { x, y, ancho, giro, escala: 1, opacidad: vista, desenfoque }
   const lado = origenLado(c)
   if (lado.x !== undefined || lado.y !== undefined) {
-    const k = frena(pinza(dt / ENTRADA_LADO_S, 0, 1))
+    const k = frena(pinza(dt / durEntradaCapa(c), 0, 1))
     if (lado.x !== undefined) x = lado.x + (x - lado.x) * k
     if (lado.y !== undefined) y = lado.y + (y - lado.y) * k
+  }
+  // Sale por un lado: arranca despacio y se va acelerando (al revés que la entrada).
+  const destino = destinoLado(c)
+  if (destino.x !== undefined || destino.y !== undefined) {
+    const p = 1 - pinza((finReal(c) - dt) / durSalidaCapa(c), 0, 1)
+    const k = p * p * p
+    if (destino.x !== undefined) x = x + (destino.x - x) * k
+    if (destino.y !== undefined) y = y + (destino.y - y) * k
   }
   const { escala, opacidad } = animacionCapa(c, dt)
   return { x, y, ancho, giro, escala, opacidad: opacidad * vista, desenfoque }
@@ -3551,13 +3956,27 @@ export const MOVIMIENTOS_CAPA: { id: string; nombre: string; para: string; fin: 
 
 /** Cuánto ha crecido una capa en su entrada (0 a 1) y su opacidad, `dt` segundos después de aparecer. */
 export function animacionCapa(c: CapaTL, dt: number): { escala: number; opacidad: number } {
+  let escala = 1
+  let opacidad = 1
+  const de = durEntradaCapa(c)
   if (c.entrada === 'pop') {
-    // Entra pequeña, se pasa un poco y se asienta (como un «pop»), en 0,24 s.
-    const escala = dt < 0.13 ? 0.45 + (dt / 0.13) * 0.72 : dt < 0.24 ? 1.17 - ((dt - 0.13) / 0.11) * 0.17 : 1
-    return { escala, opacidad: Math.min(1, dt / 0.08) }
+    // Entra pequeña, se pasa un poco y se asienta (como un «pop»), en 0,24 s (o lo que dure su entrada).
+    const q = (dt * 0.24) / de
+    escala = q < 0.13 ? 0.45 + (q / 0.13) * 0.72 : q < 0.24 ? 1.17 - ((q - 0.13) / 0.11) * 0.17 : 1
+    opacidad = Math.min(1, q / 0.08)
+  } else if (c.entrada === 'fundido') opacidad = Math.min(1, dt / de)
+  const ds = durSalidaCapa(c)
+  if (ds) {
+    const queda = Math.max(0, finReal(c) - dt)
+    if (c.salida === 'fundido') opacidad *= Math.min(1, queda / ds)
+    if (c.salida === 'encoger') {
+      // Se encoge acelerando hasta desaparecer (lo último, fundiéndose).
+      const p = 1 - Math.min(1, queda / ds)
+      escala *= 1 - p * p * p
+      opacidad *= Math.min(1, queda / 0.08)
+    }
   }
-  if (c.entrada === 'fundido') return { escala: 1, opacidad: Math.min(1, dt / 0.35) }
-  return { escala: 1, opacidad: 1 }
+  return { escala, opacidad }
 }
 
 // ===== Efectos de sonido =====

@@ -43,12 +43,14 @@ export function estiloRotulo(t: TextoTL): React.CSSProperties {
 }
 
 /** Lo que se ve del medio de una capa: recortado y volteado. */
-export function estiloMedioCapa(c: Pick<CapaTL, 'recorte' | 'voltearH' | 'voltearV'>, recorte: RecorteCapa | undefined = c.recorte): React.CSSProperties | undefined {
+export function estiloMedioCapa(c: Pick<CapaTL, 'recorte' | 'voltearH' | 'voltearV'>, recorte: RecorteCapa | undefined = c.recorte, radio = 0): React.CSSProperties | undefined {
   const r = recorte
   const voltea = c.voltearH || c.voltearV
-  if (!r && !voltea) return undefined
+  if (!r && !voltea && radio <= 0) return undefined
+  const q = r ?? { izq: 0, der: 0, arriba: 0, abajo: 0 }
   return {
-    ...(r ? { clipPath: `inset(${r.arriba * 100}% ${r.der * 100}% ${r.abajo * 100}% ${r.izq * 100}%)` } : {}),
+    // Lo recortado no se ve y lo que queda, con sus esquinas redondeadas.
+    ...(r || radio > 0 ? { clipPath: `inset(${q.arriba * 100}% ${q.der * 100}% ${q.abajo * 100}% ${q.izq * 100}%${radio > 0 ? ` round ${radio.toFixed(2)}px` : ''})` } : {}),
     // El recorte va sobre la imagen ya volteada (como el MP4: hflip antes del recorte): el volteo va en el hijo.
     ...(voltea ? { ['--voltear' as string]: `scale(${c.voltearH ? -1 : 1}, ${c.voltearV ? -1 : 1})` } : {})
   }

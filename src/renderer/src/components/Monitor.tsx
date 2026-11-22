@@ -56,12 +56,20 @@ import {
   MODOS_FUSION,
   curvasDeClip,
   normalizarRecorte,
+  marcoCapa,
+  SOMBRA_CAPA,
+  porPalabras,
+  salidaTexto,
+  textoEn,
+  cambiarTextoEn,
+  DESENFOQUE_TEXTO,
   type RecorteCapa
 } from '../../../shared/timeline'
 import { useMusica, useSincronizar, useTamano, useVoces, type FuentesVista, type Historial, type Reproductor } from '../hooks/timeline'
 import type { Elegido } from './TimelineEditor'
 import { anclajeRotulo, centroEnCuadro, estiloMedioCapa, estiloRotulo } from '../rotulos'
 import { cajaEnCuadro, imanEje, objetivosIman, ZONA_ACCION, ZONA_TITULO, type Caja, type TipoGuia } from '../guias'
+import { moverPiezas, type Pieza } from '../grupo'
 
 /** Lo que se está moviendo en el monitor, antes de soltarlo: su sitio y su ancho. */
 type Borrador = {
@@ -83,6 +91,12 @@ type Borrador = {
 type ModoArrastre = 'mover' | 'ancho' | 'giro' | 'recorte-izq' | 'recorte-der' | 'recorte-arriba' | 'recorte-abajo'
 
 /** El giro elegido con el ratón: con Mayús, de 15 en 15; si no, se pega a 0, 90, 180 y −90 cuando está cerca. */
+/** Un color #rrggbb con transparencia, para CSS. */
+function conAlfa(hex: string, a: number): string {
+  const n = parseInt(hex.slice(1), 16)
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`
+}
+
 function giroConIman(grados: number, mayus: boolean): number {
   let g = ((((grados + 180) % 360) + 360) % 360) - 180
   if (mayus) g = Math.round(g / 15) * 15
@@ -114,6 +128,8 @@ export function Monitor({
   historial,
   elegido,
   onElegir,
+  varios = [],
+  onVarios,
   vistaPrevia
 }: {
   proyecto: Project
@@ -125,6 +141,9 @@ export function Monitor({
   historial: Historial
   elegido: Elegido
   onElegir: (e: Elegido) => void
+  /** Lo elegido de más con Ctrl o Mayús + clic (compartido con la línea de tiempo): se mueve junto. */
+  varios?: NonNullable<Elegido>[]
+  onVarios?: React.Dispatch<React.SetStateAction<NonNullable<Elegido>[]>>
   /** Los tramos ya renderizados: al reproducir, se ve ese video en vez de componer las capas en vivo. */
   vistaPrevia?: VistaPrevia | null
 }) {
@@ -138,7 +157,8 @@ export function Monitor({
   // Lo que se ve y suena: sin las pistas ocultas o silenciadas (lo que se edita es `timeline`, entera).
   const vista = useMemo(() => timelineActiva(timeline), [timeline])
   // Con el tramo ya renderizado, lo de encima viene en ese video: no se compone en vivo.
-  const rotulos = vistaAhora ? [] : textosEn(vista, reproductor.tiempo)
+  // Cada texto como está ahora (con sus fotogramas clave: sitio, tamaño, giro, opacidad).
+  const rotulos = vistaAhora ? [] : textosEn(vista, reproductor.tiempo).map((r) => textoEn(r, reproductor.tiempo - r.inicio))
   const vacia = timeline.clips.length === 0
   const musicaRef = useMusica(vista, reproductor, proyecto.transcript)
   const urlDe = useCallback((archivo: string) => mediaUrl(proyecto.id, archivo), [proyecto.id])
@@ -236,6 +256,10 @@ export function Monitor({
   const letra = Math.min(cw, ch) * (ch > cw ? 0.06 : 0.065) * 0.93
 
   const [borrador, setBorrador] = useState<Borrador>(null)
+  // Mientras se arrastra un grupo: lo que se corren los demás del grupo (el arrastrado va con su borrador).
+  const [desplazo, setDesplazo] = useState<{ ids: Set<string>; dx: number; dy: number } | null>(null)
+  const corrido = (id: string): React.CSSProperties => (desplazo?.ids.has(id) ? { translate: `${(desplazo.dx * cw).toFixed(1)}px ${(desplazo.dy * ch).toFixed(1)}px` } : {})
+  const enGrupo = (id: string) => varios.length > 1 && varios.some((v) => v.id === id)
   // Los medidores de color (forma de onda, vectorscopio, histograma): se recuerda si estaban abiertos.
   const [verMedidores, setVerMedidores] = useState(() => {
     try {
@@ -351,6 +375,19 @@ export function Monitor({
     if (e.button !== 0 || !cw) return
     e.preventDefault()
     e.stopPropagation()
+    // Ctrl o Mayús + clic: lo suma al grupo (o lo quita), como en la línea de tiempo.
+    if (modo === 'mover' && !fin && (e.ctrlKey || e.metaKey || e.shiftKey) && onVarios) {
+      onVarios((antes) => {
+        const base = antes.length || !elegido || elegido.tipo === 'musica' ? antes : [elegido]
+        return base.some((v) => v.id === id) ? base.filter((v) => v.id !== id) : [...base, { tipo, id }]
+      })
+      return
+    }
+    // Bloqueado: se elige, pero no se mueve ni se cambia.
+    if ((tipo === 'capa' ? timeline.capas?.find((c) => c.id === id) : timeline.textos.find((t) => t.id === id))?.bloqueado) {
+      onElegir({ tipo, id })
+      return
+    }
     const x0 = e.clientX
     const y0 = e.clientY
     let movido = false
@@ -365,6 +402,11 @@ export function Monitor({
     const caja = (e.currentTarget as HTMLElement).closest('.monitor-capa') as HTMLElement | null
     const [wCaja, hCaja] = [Math.max(1, caja?.offsetWidth ?? 1), Math.max(1, caja?.offsetHeight ?? 1)]
     const rad = ((inicio.giro ?? 0) * Math.PI) / 180
+    // Si es parte de un grupo (Ctrl + clic), se mueven todas las del grupo lo mismo.
+    const grupo: Pieza[] | null =
+      modo === 'mover' && !fin && varios.length > 1 && varios.some((v) => v.id === id)
+        ? varios.filter((v): v is Pieza => v.tipo === 'capa' || v.tipo === 'texto')
+        : null
     // Para el imán: dónde quedan los bordes de lo que se arrastra respecto a su punto de anclaje, y las demás cajas.
     const propio = (e.currentTarget as HTMLElement).closest('.monitor-capa, .monitor-rotulo') as HTMLElement | null
     const iman = (() => {
@@ -422,6 +464,7 @@ export function Monitor({
         y = iy.pos
         setGuia({ v: ix.guias, h: iy.guias })
       } else setGuia(SIN_GUIAS)
+      if (grupo) setDesplazo({ ids: new Set(grupo.map((p) => p.id).filter((g) => g !== id)), dx: x - inicio.x, dy: y - inicio.y })
       return { tipo, id, x, y, ...(inicio.ancho !== undefined ? { ancho: inicio.ancho } : {}), fin }
     }
     const alMover = (ev: PointerEvent) => {
@@ -448,20 +491,31 @@ export function Monitor({
       if (movido) ultimo = calcular(ev)
       setBorrador(null)
       setGuia(SIN_GUIAS)
+      setDesplazo(null)
       // Soltar fuera de lo que se arrastró dispara un clic en el monitor (que reproduce): ese clic no cuenta.
       if (movido) {
         const parar = (c: MouseEvent) => c.stopPropagation()
         window.addEventListener('click', parar, { capture: true, once: true })
         setTimeout(() => window.removeEventListener('click', parar, { capture: true }), 0)
       }
+      if (movido && ultimo && grupo) {
+        // El grupo entero, lo mismo que se movió el que se arrastró (lo bloqueado se queda).
+        const dx = ultimo.x - inicio.x
+        const dy = ultimo.y - inicio.y
+        historial.aplicar(moverPiezas(timeline, grupo.map((p) => ({ ...p, dx, dy })), reproductor.tiempo, medios))
+        return
+      }
       if (movido && ultimo) {
         const b = ultimo
         const capa = tipo === 'capa' ? timeline.capas?.find((c) => c.id === id) : undefined
         const dt = capa ? Math.min(capa.duracion, Math.max(0, reproductor.tiempo - capa.inicio)) : 0
+        // Un texto con fotogramas clave se cambia en su clave del cabezal.
+        const texto = tipo === 'texto' ? timeline.textos.find((t) => t.id === id) : undefined
+        const dtTexto = texto ? Math.min(texto.duracion, Math.max(0, reproductor.tiempo - texto.inicio)) : 0
         if (modo === 'giro' && b.giro !== undefined) {
           historial.aplicar(
             tipo === 'texto'
-              ? cambiarTexto(timeline, id, { x: b.x, y: b.y, giro: b.giro })
+              ? cambiarTextoEn(timeline, id, { x: b.x, y: b.y, giro: b.giro }, dtTexto)
               : capa?.claves?.giro
                 ? ponerClaveCapa(timeline, id, 'giro', dt, b.giro, medios)
                 : b.fin && capa?.fin
@@ -477,7 +531,7 @@ export function Monitor({
                 ? cambiarCapa(timeline, id, { fin: { ...capa.fin, ancho: b.ancho } }, medios)
                 : cambiarCapa(timeline, id, { ancho: b.ancho }, medios)
           )
-        } else if (b.tamano !== undefined) historial.aplicar(cambiarTexto(timeline, id, { tamano: b.tamano }))
+        } else if (b.tamano !== undefined) historial.aplicar(cambiarTextoEn(timeline, id, { tamano: b.tamano }, dtTexto))
         else if (b.recorte) historial.aplicar(cambiarCapa(timeline, id, { recorte: b.recorte }, medios))
         else historial.aplicar(
           tipo === 'capa'
@@ -489,7 +543,7 @@ export function Monitor({
               : b.fin && capa?.fin
               ? cambiarCapa(timeline, id, { fin: { ...capa.fin, x: b.x, y: b.y, ...(b.ancho !== undefined ? { ancho: b.ancho } : {}) } }, medios)
               : cambiarCapa(timeline, id, { x: b.x, y: b.y, ...(b.ancho !== undefined ? { ancho: b.ancho } : {}) }, medios)
-            : cambiarTexto(timeline, id, { x: b.x, y: b.y })
+            : cambiarTextoEn(timeline, id, { x: b.x, y: b.y }, dtTexto)
         )
       }
       onElegir({ tipo, id })
@@ -645,6 +699,13 @@ export function Monitor({
             const y = b && !b.fin ? b.y : e.y
             const ancho = b && !b.fin ? (b.ancho ?? e.ancho) : e.ancho
             const fin = editando && c.fin && !c.claves ? { ...c.fin, ...(b?.fin ? { x: b.x, y: b.y, ancho: b.ancho ?? c.fin.ancho } : {}) } : null
+            // Las esquinas, el borde y la sombra, en píxeles de lo que se ve de ella (como el MP4).
+            const rc = b?.recorte ?? c.recorte ?? { izq: 0, der: 0, arriba: 0, abajo: 0 }
+            const medio = proyecto.medios?.find((m) => m.id === c.fuente)
+            const aspecto = medio?.ancho && medio.alto ? medio.alto / medio.ancho : 1
+            const marco = marcoCapa(c, ancho * cw * (1 - rc.izq - rc.der), ancho * cw * aspecto * (1 - rc.arriba - rc.abajo))
+            const sombra = c.sombraCapa ? `drop-shadow(${marco.corre.toFixed(2)}px ${marco.corre.toFixed(2)}px ${(marco.sigma * 2).toFixed(2)}px ${conAlfa(c.colorSombraCapa ?? '#000000', SOMBRA_CAPA.opacidad)})` : ''
+            const borrosa = desenfoqueCapaEn(timeline, c, reproductor.tiempo - c.inicio)
             return (
               <div
                 key={c.id}
@@ -674,33 +735,50 @@ export function Monitor({
                   </>
                 )}
               <div
-                className={`monitor-capa ${elegida ? 'is-elegida' : ''}`}
+                className={`monitor-capa ${elegida ? 'is-elegida' : ''} ${enGrupo(c.id) ? 'en-grupo' : ''}`}
+                data-capa={c.id}
                 style={{
+                  ...corrido(c.id),
                   left: `${x * 100}%`,
                   top: `${y * 100}%`,
                   width: `${ancho * 100}%`,
                   transform: `translate(-50%, -50%) rotate(${b && !b.fin && b.giro !== undefined ? b.giro : e.giro}deg) scale(${e.escala})`,
                   opacity: e.opacidad,
                   mixBlendMode: (MODOS_FUSION.find((m) => m.id === c.fusion)?.css ?? undefined) as React.CSSProperties['mixBlendMode'],
-                  filter: desenfoqueCapaEn(timeline, c, reproductor.tiempo - c.inicio) > 0.005 ? `blur(${(desenfoqueCapaEn(timeline, c, reproductor.tiempo - c.inicio) * DESENFOQUE_MAX * cw).toFixed(2)}px)` : undefined
+                  filter: `${sombra}${borrosa > 0.005 ? ` blur(${(borrosa * DESENFOQUE_MAX * cw).toFixed(2)}px)` : ''}`.trim() || undefined
                 }}
                 onClick={(ev) => ev.stopPropagation()}
                 onPointerDown={(ev) => arrastrar(ev, 'capa', c.id, { x: c.x, y: c.y, ancho: c.ancho })}
               >
                 {/* Lo recortado no se ve y la imagen va volteada si lo pide: lo mismo que el MP4 (drawbox, hflip, vflip). */}
-                <div className="monitor-capa-medio" style={estiloMedioCapa(c, b?.recorte)}>
+                <div className="monitor-capa-medio" style={estiloMedioCapa(c, b?.recorte, marco.radio)}>
                   {f.tipo === 'imagen' ? (
                     <img src={f.url} alt="" draggable={false} />
                   ) : (
                     <CapaVideo capa={c} url={f.url} tiempo={reproductor.tiempo} reproduciendo={reproductor.reproduciendo} largo={medios[c.fuente]} />
                   )}
                 </div>
+                {/* El borde, por dentro de lo que se ve y con sus mismas esquinas. */}
+                {marco.borde > 0 && (
+                  <span
+                    className="monitor-capa-borde"
+                    style={{
+                      left: `${rc.izq * 100}%`,
+                      right: `${rc.der * 100}%`,
+                      top: `${rc.arriba * 100}%`,
+                      bottom: `${rc.abajo * 100}%`,
+                      borderWidth: `${marco.borde.toFixed(2)}px`,
+                      borderColor: c.colorBorde ?? '#ffffff',
+                      borderRadius: `${marco.radio.toFixed(2)}px`
+                    }}
+                  />
+                )}
                 {/* El marco de lo que se ve de la capa (sirve al imán aunque no esté elegida); con ella elegida, sus tiradores. */}
                 {(
                   <TiradoresCapa
                     recorte={b?.recorte ?? c.recorte}
                     elegida={elegida}
-                    editable={elegida && !reproductor.reproduciendo}
+                    editable={elegida && !reproductor.reproduciendo && !c.bloqueado}
                     giro={b && !b.fin ? b.giro : undefined}
                     onArrastrar={(ev, modo) =>
                       arrastrar(ev, 'capa', c.id, modo === 'mover' ? { x: c.x, y: c.y, ancho: c.ancho } : { x, y, ancho, giro: e.giro, recorte: c.recorte }, modo)
@@ -725,11 +803,13 @@ export function Monitor({
             return (
               <span
                 key={r.id}
-                className={`monitor-rotulo ${libre ? 'libre' : r.posicion} ${r.sinCaja ? 'sin-caja' : ''} ${r.sinCaja && letraOscura(r) ? 'tinta' : ''} ${elegida ? 'is-elegida' : ''} ${r.detras ? 'detras' : ''}`}
+                className={`monitor-rotulo ${libre ? 'libre' : r.posicion} ${r.sinCaja ? 'sin-caja' : ''} ${r.sinCaja && letraOscura(r) ? 'tinta' : ''} ${elegida || enGrupo(r.id) ? 'is-elegida' : ''} ${r.detras ? 'detras' : ''}`}
                 data-texto={r.id}
                 style={{
+                  ...corrido(r.id),
                   ...(libre ? { left: `${libre.x * 100}%`, top: `${libre.y * 100}%`, ...anclajeRotulo(r, b?.giro) } : {}),
                   ...estiloRotulo(r),
+                  ...(reproductor.reproduciendo && r.salida ? estiloSalida(r, reproductor.tiempo - r.inicio, libre ? String(anclajeRotulo(r, b?.giro).transform) : null) : {}),
                   ...((b?.tamano ?? r.tamano) ? { fontSize: `calc(var(--rotulo) * ${b?.tamano ?? r.tamano})` } : {}),
                   ...(r.color ? { color: r.color } : {}),
                   ...(r.caja && !r.sinCaja ? { background: r.caja } : {}),
@@ -745,7 +825,7 @@ export function Monitor({
                 onPointerDown={(e) => arrastrar(e, 'texto', r.id, libre ?? centroEnCuadro(e.currentTarget))}
               >
                 {reproductor.reproduciendo && r.animacion ? <TextoAnimado texto={r} dt={reproductor.tiempo - r.inicio} /> : <ConClave texto={r} />}
-                {elegida && !reproductor.reproduciendo && (
+                {elegida && !reproductor.reproduciendo && !r.bloqueado && (
                   <>
                     <span
                       className="monitor-tirador esquina se"
@@ -949,7 +1029,36 @@ function ConClave({ texto }: { texto: TextoTL }) {
   )
 }
 
+/**
+ * Un rótulo yéndose (salidaTexto): su opacidad (por la suya), su escala y su desenfoque. Se encoge hacia su punto de
+ * anclaje, como en el MP4 (arriba, abajo o su sitio propio).
+ */
+function estiloSalida(r: TextoTL, dt: number, transformLibre: string | null): React.CSSProperties {
+  const s = salidaTexto(r, dt)
+  // La escala va después de su colocación (translate): así se encoge sobre su punto, no sobre la caja sin colocar.
+  const base = transformLibre ?? (r.posicion === 'centro' ? 'translate(-50%, -50%)' : 'translateX(-50%)')
+  return {
+    opacity: (r.opacidad ?? 1) * s.opacidad,
+    ...(s.escala !== 1
+      ? { transform: `${base} scale(${s.escala.toFixed(4)})`, ...(!transformLibre && r.posicion !== 'centro' ? { transformOrigin: r.posicion === 'arriba' ? 'center top' : 'center bottom' } : {}) }
+      : {}),
+    ...(s.desenfoque > 0 ? { filter: `blur(${s.desenfoque.toFixed(3)}em)` } : {})
+  }
+}
+
+/** Lo que tarda cada palabra en pasar de borrosa a nítida (como el MP4: PALABRA_NITIDA_S en exportar.ts). */
+const PALABRA_NITIDA_S = 0.3
+
 function TextoAnimado({ texto, dt }: { texto: TextoTL; dt: number }) {
+  if (texto.animacion === 'desenfoque') {
+    // De borroso a nítido y apareciendo (\blur y \fad en el MP4).
+    const nitido = Math.min(1, dt / 0.35)
+    return (
+      <span style={{ display: 'inline-block', opacity: Math.min(1, dt / 0.25), filter: nitido < 1 ? `blur(${(DESENFOQUE_TEXTO * (1 - nitido)).toFixed(3)}em)` : undefined }}>
+        <ConClave texto={texto} />
+      </span>
+    )
+  }
   if (texto.animacion === 'pop' || texto.animacion === 'subir' || texto.animacion === 'rotulo') {
     const e =
       texto.animacion === 'pop'
@@ -995,7 +1104,7 @@ function TextoAnimado({ texto, dt }: { texto: TextoTL; dt: number }) {
   }
   // Palabra a palabra (con su color si está entre *asteriscos*) o letra a letra.
   const piezas =
-    texto.animacion === 'palabras'
+    porPalabras(texto.animacion)
       ? partesClave(texto.texto).flatMap((p) => p.texto.split(/(\s+)/).map((x) => ({ x, clave: p.clave })))
       : Array.from(sinMarcas(texto.texto)).map((x) => ({ x, clave: false }))
   let n = 0
@@ -1003,11 +1112,20 @@ function TextoAnimado({ texto, dt }: { texto: TextoTL; dt: number }) {
     <>
       {piezas.map(({ x, clave }, i) => {
         if (!x || /^\s+$/.test(x)) return x
-        const desde = texto.animacion === 'palabras' ? (tiempos[n]?.inicio ?? n * paso) : n * paso
+        const desde = porPalabras(texto.animacion) ? (tiempos[n]?.inicio ?? n * paso) : n * paso
         n++
-        const op = Math.max(0, Math.min(1, (dt - desde) / APARECER_S))
+        // De borrosa a nítida: aparece y se aclara a la vez (\blur en el MP4).
+        const nitida = texto.animacion === 'palabras-desenfoque'
+        const op = Math.max(0, Math.min(1, (dt - desde) / (nitida ? PALABRA_NITIDA_S : APARECER_S)))
         return (
-          <span key={i} style={{ opacity: op, ...(clave ? { color: texto.colorClave ?? COLOR_PINTADO } : {}) }}>
+          <span
+            key={i}
+            style={{
+              opacity: op,
+              ...(nitida && op < 1 ? { display: 'inline-block', filter: `blur(${(DESENFOQUE_TEXTO * (1 - op)).toFixed(3)}em)` } : {}),
+              ...(clave ? { color: texto.colorClave ?? COLOR_PINTADO } : {})
+            }}
+          >
             {x}
           </span>
         )

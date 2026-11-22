@@ -27,6 +27,19 @@ import {
   type FinCapa,
   cambiarFiltros,
   ENTRADAS_CAPA,
+  SALIDAS_CAPA,
+  ordenarCapa,
+  PARAMETROS_CLAVE_TEXTO,
+  ponerClaveTexto,
+  quitarClaveTexto,
+  curvaClaveTexto,
+  type ParametroClaveTexto,
+  CURVAS_CLAVE,
+  curvaClaveCapa,
+  type CurvaClave,
+  SALIDAS_TEXTO,
+  type SalidaCapa,
+  type SalidaTexto,
   FILTROS,
   TRANSICIONES,
   ANIMACIONES_TEXTO,
@@ -128,6 +141,11 @@ export type OperacionTL =
       mayusculas?: boolean
       opacidad?: number
       giro?: number
+      /** Cómo se va; 'golpe' la quita. */
+      salida?: SalidaTexto | 'golpe'
+      dur_salida?: number
+      oculto?: boolean
+      bloqueado?: boolean
     }
   | { op: 'borrar_texto'; texto_n: number }
   /** Lo que va encima del video: un medio de la biblioteca (por su id), en su sitio y su tamaño. */
@@ -168,7 +186,8 @@ export type OperacionTL =
   | { op: 'curva'; clip?: number; canal: CanalCurva; puntos: PuntoCurva[] }
   | { op: 'audio_clip'; clip: number; volumen?: number; entra?: number; sale?: number; limpio?: number }
   | { op: 'clave'; clip: number; parametro: ParametroClave; en: number; valor?: number; quitar?: boolean }
-  | { op: 'clave_capa'; capa_n: number; parametro: ParametroClaveCapa; en: number; valor?: number; quitar?: boolean }
+  | { op: 'clave_capa'; capa_n: number; parametro: ParametroClaveCapa; en: number; valor?: number; quitar?: boolean; curva?: CurvaClave }
+  | { op: 'clave_texto'; texto_n: number; parametro: ParametroClaveTexto; en: number; valor?: number; quitar?: boolean; curva?: CurvaClave }
   | { op: 'pista'; pista: PistaId; oculta?: boolean; bloqueada?: boolean }
   | { op: 'musica'; volumen?: number; ducking?: boolean }
   | { op: 'quitar_musica' }
@@ -273,6 +292,19 @@ type CamposCapa = {
   recorte?: { izq?: number; der?: number; arriba?: number; abajo?: number } | null
   voltear_h?: boolean
   voltear_v?: boolean
+  /** Cómo se va; 'corte' quita la salida. */
+  salida?: SalidaCapa | 'corte'
+  dur_entrada?: number
+  dur_salida?: number
+  oculto?: boolean
+  bloqueado?: boolean
+  /** Su lugar en la pila de su pista: al frente, al fondo, una más arriba o una más abajo. */
+  orden?: 'frente' | 'atras' | 'subir' | 'bajar'
+  redondeo?: number
+  borde?: number
+  color_borde?: string
+  sombra?: number
+  color_sombra?: string
 }
 
 /** Lo que se puede cambiar de una capa, validado (sin `inicio`). `fin: null` quita el movimiento. */
@@ -303,6 +335,17 @@ function camposCapa(x: Record<string, unknown>): CamposCapa {
           }
         : {}),
     ...(typeof x.voltear_h === 'boolean' ? { voltear_h: x.voltear_h } : {}),
+    ...(x.salida === 'corte' || (typeof x.salida === 'string' && SALIDAS_CAPA.includes(x.salida as SalidaCapa)) ? { salida: x.salida as SalidaCapa | 'corte' } : {}),
+    ...(num(x.dur_entrada) !== null ? { dur_entrada: num(x.dur_entrada)! } : {}),
+    ...(num(x.dur_salida) !== null ? { dur_salida: num(x.dur_salida)! } : {}),
+    ...(typeof x.oculto === 'boolean' ? { oculto: x.oculto } : {}),
+    ...(typeof x.bloqueado === 'boolean' ? { bloqueado: x.bloqueado } : {}),
+    ...(x.orden === 'frente' || x.orden === 'atras' || x.orden === 'subir' || x.orden === 'bajar' ? { orden: x.orden } : {}),
+    ...(num(x.redondeo) !== null ? { redondeo: num(x.redondeo)! } : {}),
+    ...(num(x.borde) !== null ? { borde: num(x.borde)! } : {}),
+    ...(typeof x.color_borde === 'string' && /^#[0-9a-f]{6}$/i.test(x.color_borde) ? { color_borde: x.color_borde } : {}),
+    ...(num(x.sombra) !== null ? { sombra: num(x.sombra)! } : {}),
+    ...(typeof x.color_sombra === 'string' && /^#[0-9a-f]{6}$/i.test(x.color_sombra) ? { color_sombra: x.color_sombra } : {}),
     ...(typeof x.voltear_v === 'boolean' ? { voltear_v: x.voltear_v } : {}),
     ...(x.entrada === 'corte' || (typeof x.entrada === 'string' && ENTRADAS_CAPA.includes(x.entrada as EntradaCapa)) ? { entrada: x.entrada as EntradaCapa | 'corte' } : {}),
     ...(x.fin === null || x.quieta === true
@@ -395,7 +438,11 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
             ...(num(x.espaciado) !== null ? { espaciado: num(x.espaciado)! } : {}),
             ...(typeof x.mayusculas === 'boolean' ? { mayusculas: x.mayusculas } : {}),
             ...(num(x.opacidad) !== null ? { opacidad: num(x.opacidad)! } : {}),
-            ...(num(x.giro) !== null ? { giro: num(x.giro)! } : {})
+            ...(num(x.giro) !== null ? { giro: num(x.giro)! } : {}),
+            ...(x.salida === 'golpe' || SALIDAS_TEXTO.some((s) => s.id === x.salida) ? { salida: x.salida as SalidaTexto | 'golpe' } : {}),
+            ...(num(x.dur_salida) !== null ? { dur_salida: num(x.dur_salida)! } : {}),
+            ...(typeof x.oculto === 'boolean' ? { oculto: x.oculto } : {}),
+            ...(typeof x.bloqueado === 'boolean' ? { bloqueado: x.bloqueado } : {})
           })
         }
         break
@@ -525,7 +572,32 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
         const valor = num(x.valor)
         const parametro = PARAMETROS_CLAVE_CAPA.find((p) => p === x.parametro)
         if (c !== null && en !== null && parametro && (valor !== null || x.quitar === true))
-          ops.push({ op: 'clave_capa', capa_n: c, parametro, en, ...(valor !== null ? { valor } : {}), ...(x.quitar === true ? { quitar: true } : {}) })
+          ops.push({
+            op: 'clave_capa',
+            capa_n: c,
+            parametro,
+            en,
+            ...(valor !== null ? { valor } : {}),
+            ...(x.quitar === true ? { quitar: true } : {}),
+            ...(typeof x.curva === 'string' && CURVAS_CLAVE.some((k) => k.id === x.curva) ? { curva: x.curva as CurvaClave } : {})
+          })
+        break
+      }
+      case 'clave_texto': {
+        const t = num(x.texto_n)
+        const en = num(x.en)
+        const valor = num(x.valor)
+        const parametro = PARAMETROS_CLAVE_TEXTO.find((p) => p === x.parametro)
+        if (t !== null && en !== null && parametro && (valor !== null || x.quitar === true))
+          ops.push({
+            op: 'clave_texto',
+            texto_n: t,
+            parametro,
+            en,
+            ...(valor !== null ? { valor } : {}),
+            ...(x.quitar === true ? { quitar: true } : {}),
+            ...(typeof x.curva === 'string' && CURVAS_CLAVE.some((k) => k.id === x.curva) ? { curva: x.curva as CurvaClave } : {})
+          })
         break
       }
       case 'clave': {
@@ -758,6 +830,10 @@ export function aplicarOperaciones(
         if (o.mayusculas !== undefined) cambio.mayusculas = o.mayusculas
         if (o.opacidad !== undefined) cambio.opacidad = o.opacidad
         if (o.giro !== undefined) cambio.giro = o.giro
+        if (o.salida !== undefined) cambio.salida = o.salida === 'golpe' ? undefined : o.salida
+        if (o.dur_salida !== undefined) cambio.durSalida = o.dur_salida
+        if (o.oculto !== undefined) cambio.oculto = o.oculto
+        if (o.bloqueado !== undefined) cambio.bloqueado = o.bloqueado
         // Girar o alinear pide un sitio propio: si no lo tiene, el del centro de su posición de siempre.
         if ((o.giro || (o.alineacion && o.alineacion !== 'centro')) && typeof t.x !== 'number' && cambio.x === undefined) {
           cambio.x = 0.5
@@ -930,6 +1006,7 @@ export function aplicarOperaciones(
           break
         }
         tl = cambiarCapa(tl, c.id, { ...(o.inicio !== undefined ? { inicio: o.inicio } : {}), ...cambioDeCapa(o, c) }, medios)
+        if (o.orden) tl = ordenarCapa(tl, c.id, o.orden, medios)
         cambios.push(`Cambié la capa ${o.capa_n}`)
         break
       }
@@ -998,11 +1075,28 @@ export function aplicarOperaciones(
         const nueva =
           o.quitar || o.valor === undefined
             ? quitarClaveCapa(tl, capa.id, o.parametro, o.en, medios)
-            : ponerClaveCapa(tl, capa.id, o.parametro, o.en, o.valor, medios)
+            : o.curva
+              ? curvaClaveCapa(ponerClaveCapa(tl, capa.id, o.parametro, o.en, o.valor, medios), capa.id, o.parametro, o.en, o.curva, medios)
+              : ponerClaveCapa(tl, capa.id, o.parametro, o.en, o.valor, medios)
         if (nueva === tl) fallos.push(`No pude ${o.quitar ? 'quitar' : 'poner'} esa clave en la capa ${o.capa_n}.`)
         else {
           tl = nueva
           cambios.push(o.quitar ? `Quité la clave de ${o.parametro} de la capa ${o.capa_n} en ${o.en} s` : `Capa ${o.capa_n}: ${o.parametro} = ${o.valor} en ${o.en} s`)
+        }
+        break
+      }
+      case 'clave_texto': {
+        const t = textoEn(o.texto_n)
+        if (!t) {
+          fallos.push(`No existe el texto ${o.texto_n}.`)
+          break
+        }
+        let nueva = o.quitar || o.valor === undefined ? quitarClaveTexto(tl, t.id, o.parametro, o.en) : ponerClaveTexto(tl, t.id, o.parametro, o.en, o.valor)
+        if (o.curva && !o.quitar) nueva = curvaClaveTexto(nueva, t.id, o.parametro, o.en, o.curva)
+        if (nueva === tl) fallos.push(`No pude ${o.quitar ? 'quitar' : 'poner'} esa clave en el texto ${o.texto_n}.`)
+        else {
+          tl = nueva
+          cambios.push(o.quitar ? `Quité la clave de ${o.parametro} del texto ${o.texto_n} en ${o.en} s` : `Texto ${o.texto_n}: ${o.parametro} = ${o.valor} en ${o.en} s`)
         }
         break
       }
@@ -1234,6 +1328,16 @@ function cambioDeCapa(o: CamposCapa, actual?: CapaTL): Partial<Omit<CapaTL, 'id'
     ...(o.desenfoque !== undefined ? { desenfoque: o.desenfoque } : {}),
     ...(o.recorte === null ? { recorte: undefined } : o.recorte ? { recorte: { izq: 0, der: 0, arriba: 0, abajo: 0, ...actual?.recorte, ...o.recorte } } : {}),
     ...(o.voltear_h !== undefined ? { voltearH: o.voltear_h } : {}),
+    ...(o.salida !== undefined ? { salida: o.salida === 'corte' ? undefined : o.salida } : {}),
+    ...(o.dur_entrada !== undefined ? { durEntrada: o.dur_entrada } : {}),
+    ...(o.dur_salida !== undefined ? { durSalida: o.dur_salida } : {}),
+    ...(o.oculto !== undefined ? { oculto: o.oculto } : {}),
+    ...(o.bloqueado !== undefined ? { bloqueado: o.bloqueado } : {}),
+    ...(o.redondeo !== undefined ? { redondeo: o.redondeo } : {}),
+    ...(o.borde !== undefined ? { borde: o.borde } : {}),
+    ...(o.color_borde !== undefined ? { colorBorde: o.color_borde } : {}),
+    ...(o.sombra !== undefined ? { sombraCapa: o.sombra } : {}),
+    ...(o.color_sombra !== undefined ? { colorSombraCapa: o.color_sombra } : {}),
     ...(o.voltear_v !== undefined ? { voltearV: o.voltear_v } : {}),
     ...(o.entrada !== undefined ? { entrada: o.entrada === 'corte' ? undefined : o.entrada } : {}),
     ...(o.fin === null ? { fin: undefined } : o.fin ? { fin: { ...base, ...o.fin } } : {})
@@ -1277,6 +1381,11 @@ export function describirTimelineParaAgente(
       t.mayusculas ? 'mayúsculas' : '',
       t.opacidad !== undefined ? `opacidad ${t.opacidad}` : '',
       t.giro ? `giro ${t.giro}°` : '',
+      t.animacion ? `entra: ${t.animacion}` : '',
+      t.salida ? `sale: ${t.salida}${t.durSalida ? ` (${t.durSalida} s)` : ''}` : '',
+      t.oculto ? 'OCULTO (no se ve)' : '',
+      t.claves ? `claves: ${Object.entries(t.claves).map(([k, l]) => `${k} ${(l ?? []).map((c) => `${c.v}@${c.f}s${c.curva ? ` ${c.curva}` : ''}`).join(' → ')}`).join('; ')}` : '',
+      t.bloqueado ? 'bloqueado' : '',
       t.subtitulo ? 'subtítulo' : ''
     ].filter(Boolean)
     const donde = typeof t.x === 'number' && typeof t.y === 'number' ? `en x ${t.x} y ${t.y}` : t.posicion
@@ -1302,6 +1411,14 @@ export function describirTimelineParaAgente(
           (c.pista ? `, pista ${c.pista}` : '') +
           (c.desenfoque ? `, desenfoque ${c.desenfoque}` : '') +
           (c.recorte ? `, recorte ${JSON.stringify(c.recorte)}` : '') +
+          (c.salida ? `, sale: ${c.salida}` : '') +
+          (c.orden ? `, orden ${c.orden} en su pista` : '') +
+          (c.redondeo ? `, esquinas ${c.redondeo}` : '') +
+          (c.borde ? `, borde ${c.borde} ${c.colorBorde ?? '#ffffff'}` : '') +
+          (c.sombraCapa ? `, sombra ${c.sombraCapa} ${c.colorSombraCapa ?? '#000000'}` : '') +
+          (c.oculto ? ', OCULTA (no se ve)' : '') +
+          (c.bloqueado ? ', bloqueada' : '') +
+          (c.durEntrada || c.durSalida ? `, dura la entrada ${c.durEntrada ?? 'normal'} y la salida ${c.durSalida ?? 'normal'}` : '') +
           (c.voltearH ? ', volteada ↔' : '') +
           (c.voltearV ? ', volteada ↕' : '') +
           (c.fin ? ` → termina en x ${c.fin.x} y ${c.fin.y}, ancho ${c.fin.ancho}${c.fin.giro ? `, giro ${c.fin.giro}°` : ''}` : '')
@@ -1382,7 +1499,8 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
   La misma op pone EFECTOS al clip: "desenfoque" 0 a 1 (0.35 para un fondo bajo un texto), "sepia" 0 a 1 (foto antigua), "tono" -180 a 180 (gira los colores), "invertir" 1 (negativo; 0 lo quita).
   Y un LOOK de color completo con "look" (sustituye al color y los efectos que tuviera): ${LOOKS.map((l) => `${l.id} (${l.para})`).join(', ')}. Para un flash en negativo: divide medio segundo y ponle "invertir":1.
 - {"op":"clave","clip":N,"parametro":"zoom|cx|cy|brillo|contraste|saturacion|escala|posx|posy|giro|exposicion|altas|sombras|blancos|negros|temperatura|tinte|desenfoque|sepia|tono","en":S,"valor":V}  FOTOGRAMA CLAVE: ese ajuste del clip N vale V en el segundo S (contado desde que empieza el clip) y cambia suave hasta la siguiente clave. Con dos o más claves animas a mano: un zoom que entra y vuelve a salir (zoom 1 en 0, 1.4 en 1.5, 1 en 3), el encuadre que va de una cara a otra (cx, cy), un fundido a oscuro (brillo 0 → -0.3), el color que se apaga (saturacion 1 → 0), la imagen que se achica a una esquina (escala 1 → 0.4 con posx/posy) o que gira (giro). Hasta 12 claves por ajuste. "quitar":true en vez de "valor" borra la de ese segundo.
-- {"op":"clave_capa","capa_n":N,"parametro":"x|y|ancho|giro|opacidad","en":S,"valor":V}  FOTOGRAMA CLAVE de una capa encima: en el segundo S (desde que aparece la capa) vale V, y cambia suave hasta la siguiente. x, y de -0.5 a 1.5 (fuera del cuadro para entrar o salir volando), ancho 0.05 a 2, giro en grados, opacidad 0 a 1. Así se hace un recorrido con curvas (varias claves de x e y), algo que crece y se encoge, un logo que aparece y se desvanece (opacidad 0 → 1 → 0). Mandan sobre "fin_x"… de anadir_capa. "quitar":true borra la de ese segundo.
+- {"op":"clave_capa","capa_n":N,"parametro":"x|y|ancho|giro|opacidad","en":S,"valor":V}  FOTOGRAMA CLAVE de una capa encima: en el segundo S (desde que aparece la capa) vale V, y cambia suave hasta la siguiente. x, y de -0.5 a 1.5 (fuera del cuadro para entrar o salir volando), ancho 0.05 a 2, giro en grados, opacidad 0 a 1. Así se hace un recorrido con curvas (varias claves de x e y), algo que crece y se encoge, un logo que aparece y se desvanece (opacidad 0 → 1 → 0). Mandan sobre "fin_x"… de anadir_capa. "quitar":true borra la de ese segundo. "curva" dice cómo va de esa clave a la siguiente: "suave" (la de siempre), "lineal", "acelera" (para salir), "frena" (para entrar) o "rebote" (llega, se pasa un poco y vuelve).
+- {"op":"clave_texto","texto_n":N,"parametro":"x|y|tamano|giro|opacidad","en":S,"valor":V,"curva":"…"}  FOTOGRAMA CLAVE de un texto: en el segundo S (desde que aparece el texto) vale V. x, y su sitio (-0.5 a 1.5: puede entrar o salir volando), tamano 0.5 a 6, giro en grados, opacidad 0 a 1. Así un título cruza la pantalla, crece mientras se lee o gira y se desvanece. Con la misma "curva" que las capas. "quitar":true borra la de ese segundo.
 - {"op":"audio_clip","clip":N,"volumen":V,"entra":S,"sale":S,"limpio":L}  el sonido de un clip de VIDEO: «volumen» 0 a 1.5 (1 como viene), «entra» y «sale» segundos de fundido de entrada y de salida (0 a 5), «limpio» 0 a 1 para quitar el ruido de fondo (zumbido, aire, siseo; 0.5 suele bastar). Solo los campos que cambian.
 - {"op":"lut","clip":N,"intensidad":0.6}  el LUT (.cube) que el usuario cargó en un clip: "intensidad" 0 a 1, "quitar":true lo quita, "de_clip":M copia el LUT del clip M a este (sin "clip", a todos). No puedes cargar un LUT nuevo: si lo pide, dile que lo cargue en el inspector del clip («Cargar un LUT»).
 - {"op":"curva","clip":N,"canal":"rgb|r|g|b","puntos":[[x,y],…]}  CURVAS de color dibujadas, como las de Lumetri: cada punto [entrada, salida] de 0 a 1 (los extremos 0,0 y 1,1 van solos), hasta 8. "rgb" es la luz (una S suave [[0.25,0.2],[0.75,0.8]] da contraste de cine; [[0.5,0.58]] aclara los medios); "r", "g", "b" cada canal (subir el azul en las sombras [[0.25,0.3]] da un look frío). "puntos":[] la quita. Sin "clip", a todos.
@@ -1396,7 +1514,7 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
 - {"op":"anadir_voz","inicio":T,"texto":"…","voz":"Kore"}  añade una frase de narración nueva en el segundo T (sin "voz", la de las demás frases).
 - {"op":"borrar_voz","voz_n":N}
 - {"op":"cambiar_texto","texto_n":N,"x":0.5,"y":0.3}  pone el rótulo donde quieras: x, y son su centro en fracción del cuadro (0 izquierda/arriba, 1 derecha/abajo). Para volver a arriba, centro o abajo, usa "posicion".
-- {"op":"cambiar_texto","texto_n":N,"sin_caja":true,"contorno":0.08,"color_contorno":"#000000","sombra":0.05,"color_sombra":"#000000","alineacion":"izquierda","espaciado":0.05,"mayusculas":true,"opacidad":0.9,"giro":-8}  más estilo: sin caja, "contorno" (grosor 0–0.25 del tamaño de la letra; 0 sin contorno) y "sombra" (lo que se separa, 0–0.25) con sus colores, en vez del halo oscuro de siempre (null vuelve al halo). "alineacion" izquierda, derecha o centro: con x, y, x es el borde de ese lado. "espaciado" entre letras (−0.1 a 0.5), "mayusculas", "opacidad" 0–1 y "giro" en grados a favor del reloj (−180 a 180; gira sobre su punto x, y).
+- {"op":"cambiar_texto","texto_n":N,"sin_caja":true,"contorno":0.08,"color_contorno":"#000000","sombra":0.05,"color_sombra":"#000000","alineacion":"izquierda","espaciado":0.05,"mayusculas":true,"opacidad":0.9,"giro":-8}  más estilo: sin caja, "contorno" (grosor 0–0.25 del tamaño de la letra; 0 sin contorno) y "sombra" (lo que se separa, 0–0.25) con sus colores, en vez del halo oscuro de siempre (null vuelve al halo). "alineacion" izquierda, derecha o centro: con x, y, x es el borde de ese lado. "espaciado" entre letras (−0.1 a 0.5), "mayusculas", "opacidad" 0–1 y "giro" en grados a favor del reloj (−180 a 180; gira sobre su punto x, y). "salida":"fundido|encoger|desenfoque|golpe" es cómo se va al terminar y "dur_salida" lo que tarda (0.1–2 s). Más entradas en "animacion": "desenfoque" (de borroso a nítido) y "palabras-desenfoque" (palabra a palabra, cada una de borrosa a nítida, al ritmo de "tiempos").
 - {"op":"anadir_capa","medio":"ID","inicio":T,"duracion":S,"x":0.5,"y":0.5,"ancho":0.25,"giro":0,"entrada":"pop|fundido|izquierda|derecha|arriba|abajo|corte"}  pone encima del video un medio de la biblioteca (un logo, un ícono, una foto, una toma de apoyo), por su id. x, y = su centro y ancho = su ancho, en fracción del cuadro; giro en grados. "pop" (por defecto) entra rebotando; úsalo para logos e íconos que aparecen cuando se nombran. "izquierda/derecha/arriba/abajo" entra deslizándose desde fuera. No tapes caras ni manos que importan.
   Para que SE MUEVA mientras está, di dónde termina: "fin_x","fin_y","fin_ancho","fin_giro" (lo que no pongas, igual que al empezar; se puede terminar fuera del cuadro, de -0.5 a 1.5). Va suave de un sitio al otro durante toda su duración. Ejemplos: un avión que cruza ("x":-0.2 → "fin_x":1.2), paralaje (un fondo que se desliza 0.04 y crece 1.05), una foto que se acerca ("fin_ancho" 1.3 veces el ancho), algo que gira ("fin_giro":15). Con "quieta":true deja de moverse.
   ESCENA 2.5D: "profundidad" de 0 a 1 hace que la capa siga a la cámara del clip de debajo (su zoom, acercamiento y paneo): 0 se mueve pegada al fondo, 1 (muy cerca) se mueve y crece 2,5 veces más. Así un paisaje armado con recortes (montañas 0.2, una casa 0.5, una bandera 0.6, la persona 0.4) se siente con distancia cuando la cámara se mueve. "profundidad":"fija" la vuelve a pegar a la pantalla (para logos y textos). "desenfoque" de 0 a 1: fuera de foco, para lo que está muy cerca (un primer plano) o muy lejos.
@@ -1419,7 +1537,7 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
 - {"op":"recortar_persona","clip":N}  SEPARA A LA PERSONA DEL FONDO en ese clip (tarda: unos 10 s por segundo de clip) y la pone encima de él, calzada. Con eso: (1) TEXTO DETRÁS DE LA PERSONA: un cambiar_texto o anadir_texto con "detras":true se ve por detrás de su cabeza y su cuerpo (el título grande que la persona tapa: úsalo con letra gruesa y grande, "tamano" 2 o más, sin caja, donde la persona lo tape en parte); (2) lo que pongas en las pistas 1 y 2 (anadir_pieza, anadir_capa) también queda detrás de ella; (3) FONDO DESENFOCADO O CAMBIADO: desenfoca el clip, o pon una imagen a pantalla completa en la pista 1, y la persona sigue nítida encima. Hazlo en clips donde se ve bien a la persona (no de muy lejos ni saliendo del cuadro). Si después cambias el recorte, el zoom o el color del clip, vuelve a pedirlo.
 - {"op":"subtitulos_animados","estilo":"subtitulos-rotulo","valores":{"colorClave":"#72f9fd"}}  SUBTÍTULOS ANIMADOS con HyperFrames: los textos de subtítulo (los que hiciste desde la voz) siguen siendo el guion y el estilo los dibuja encima, frase a frase y al ritmo de cada palabra; las palabras entre *asteriscos* van resaltadas. Estilos: subtitulos-rotulo (bloque oscuro, letra gruesa, la frase crece un poco; "colorCaja","colorTexto","colorClave","mayusculas","y","tamano"), subtitulos-pildora (palabra a palabra con la que suena sobre una píldora; "colorPildora","colorTexto","colorClave","mayusculas","y","tamano"), subtitulos-palabra (de a 1-3 palabras enormes al centro; "colorTexto","colorClave","porGrupo","y","tamano") y los que el usuario creó. "estilo":"ninguno" vuelve al texto simple. Si corriges un subtítulo con cambiar_texto, se vuelven a animar solos. Un texto que va con la voz pero no está marcado como subtítulo se marca con cambiar_texto "subtitulo":true (y anadir_texto acepta "subtitulo":true); "subtitulo":false lo saca.
 - {"op":"crear_pieza","peticion":"…","inicio":T,"duracion":S}  (solo en el chat de Recorte) una animación NUEVA a medida cuando ninguna de las de arriba sirve o el usuario pide algo distinto: describe con detalle cómo debe verse y moverse (estilo, ritmo, colores, qué textos lleva). La crea tu agente con HyperFrames en unos minutos, queda puesta en el segundo T y guardada para reusarla.
-- {"op":"cambiar_capa","capa_n":N, …los mismos campos…}  y {"op":"borrar_capa","capa_n":N}. También "recorte":{"izq":0.1,"der":0,"arriba":0.2,"abajo":0} (lo que se oculta de cada lado del medio, en fracción; la capa no se mueve ni cambia de tamaño; null lo quita), "voltear_h":true (espejo) y "voltear_v":true.
+- {"op":"cambiar_capa","capa_n":N, …los mismos campos…}  y {"op":"borrar_capa","capa_n":N}. También "recorte":{"izq":0.1,"der":0,"arriba":0.2,"abajo":0} (lo que se oculta de cada lado del medio, en fracción; la capa no se mueve ni cambia de tamaño; null lo quita), "voltear_h":true (espejo) y "voltear_v":true. "salida":"fundido|encoger|izquierda|derecha|arriba|abajo|corte" es cómo se va al terminar (corte: de golpe), y "dur_entrada" / "dur_salida" lo que duran la entrada y la salida (0.1–2 s). "orden":"frente|atras|subir|bajar" la pone encima o debajo de las demás de su pista. "redondeo" 0–1 (esquinas redondeadas; 1 = un círculo o una píldora: ideal para una foto de perfil), "borde" 0–0.2 (grosor por dentro, en fracción de su ancho) con "color_borde", y "sombra" 0–1 con "color_sombra". "oculto":true la esconde sin borrarla y "bloqueado":true evita que el usuario la mueva sin querer (también en cambiar_texto). Respeta lo que el usuario dejó bloqueado: no lo cambies salvo que te lo pida.
 - {"op":"transicion","clip":N,"tipo":"fundido|barrido-izquierda|barrido-derecha|barrido-arriba|barrido-abajo|zoom|desenfoque|destello|circulo|corte","duracion":0.45}  cómo entra el clip N sobre el anterior (sin "clip": en todos los cortes). Los barridos empujan la imagen hacia ese lado (como un paneo rápido); destello pasa por blanco; corte = sin transición. Con medida: un documental rápido usa cortes secos y alguna transición en los cambios de tema.
 - {"op":"filtros","grano":0.3,"polvo":0.2,"trama":0.4,"vineta":0.5,"parpadeo":0.1}  filtros para TODO el video, de 0 (nada) a 1 (fuerte): grano de película, polvo y rayas, trama de puntos de imprenta, viñeta (bordes oscuros) y parpadeo de proyector. Un 0 quita ese filtro. Para un aire de documental o de archivo: grano 0.3, polvo 0.2, viñeta 0.5; trama 0.4 para un aire de revista.
 - {"op":"anadir_sonido","sonido":"ID","inicio":T,"volumen":0.6}  un efecto de sonido de los que trae Recorte, por su id:

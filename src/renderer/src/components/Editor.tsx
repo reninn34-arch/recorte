@@ -102,6 +102,8 @@ export function Editor({
   const [panelInspector, setPanelInspector] = useState<HTMLElement | null>(null)
   const [panelTransporte, setPanelTransporte] = useState<HTMLElement | null>(null)
   const [elegido, setElegido] = useState<Elegido>(null)
+  // Lo elegido de más con Ctrl o Mayús + clic (en la línea de tiempo o en el monitor): se mueve, alinea y borra junto.
+  const [varios, setVarios] = useState<NonNullable<Elegido>[]>([])
   // El alto de la línea de tiempo (arrastrando el divisor); null: el de siempre.
   const [altoTL, setAltoTL] = useState<number | null>(() => {
     try {
@@ -672,6 +674,8 @@ export function Editor({
               elegido={elegido}
               onElegir={elegir}
               vistaPrevia={vistaPrevia}
+              varios={varios}
+              onVarios={setVarios}
             />
           </div>
           <div className="ed-transporte" ref={setPanelTransporte} />
@@ -859,6 +863,8 @@ export function Editor({
         historial={historial}
         elegido={elegido}
         onElegir={elegir}
+        varios={varios}
+        onVarios={setVarios}
         generarVoz={
           proyecto.demo
             ? undefined

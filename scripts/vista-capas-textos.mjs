@@ -80,11 +80,17 @@ try {
     clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 4 }],
     textos: [
       { id: 't1', inicio: 0, duracion: 4, texto: 'Contorno rojo', posicion: 'arriba', x: 0.06, y: 0.14, alineacion: 'izquierda', sinCaja: true, contorno: 0.08, colorContorno: '#ff2d2d', sombra: 0.06, colorSombra: '#1a1aff', tamano: 1.3 },
-      { id: 't2', inicio: 0, duracion: 4, texto: 'girado y espaciado', posicion: 'centro', x: 0.62, y: 0.5, giro: -14, espaciado: 0.12, mayusculas: true, tamano: 1.1 },
+      { id: 't2', inicio: 0, duracion: 4, texto: 'girado y espaciado', posicion: 'centro', x: 0.62, y: 0.5, giro: -14, espaciado: 0.12, mayusculas: true, tamano: 1.1, salida: 'desenfoque', durSalida: 2 },
       { id: 't3', inicio: 0, duracion: 4, texto: 'A la derecha\ny medio transparente', posicion: 'abajo', x: 0.95, y: 0.84, alineacion: 'derecha', opacidad: 0.55, caja: '#6a1b9a', fuente: 'titular' },
-      { id: 't4', inicio: 0, duracion: 4, texto: 'Sin caja, solo sombra', posicion: 'abajo', sinCaja: true, contorno: 0, sombra: 0.12, colorSombra: '#000000', fuente: 'gruesa' }
+      { id: 't4', inicio: 0, duracion: 4, texto: 'Sin caja, solo sombra', posicion: 'abajo', sinCaja: true, contorno: 0, sombra: 0.12, colorSombra: '#000000', fuente: 'gruesa', salida: 'encoger', durSalida: 2 },
+      // Con fotogramas clave: cruza hacia la derecha y crece.
+      { id: 't5', inicio: 0, duracion: 4, texto: 'CLAVES', posicion: 'centro', x: 0.3, y: 0.72, sinCaja: true, contorno: 0.06, colorContorno: '#000000', claves: { x: [{ f: 0, v: 0.3 }, { f: 4, v: 0.62, curva: 'lineal' }], tamano: [{ f: 0, v: 0.8 }, { f: 4, v: 1.8 }] } }
     ],
-    capas: [{ id: 'k1', fuente: medio, inicio: 0, duracion: 4, x: 0.2, y: 0.58, ancho: 0.22, giro: 20, voltearH: true, recorte: { izq: 0.1, der: 0.3, arriba: 0.15, abajo: 0 } }]
+    capas: [
+      { id: 'k1', fuente: medio, inicio: 0, duracion: 4, x: 0.2, y: 0.58, ancho: 0.22, giro: 20, voltearH: true, recorte: { izq: 0.1, der: 0.3, arriba: 0.15, abajo: 0 } },
+      // Esquinas redondeadas, borde amarillo y sombra (sobre lo que se ve, recortado).
+      { id: 'k2', fuente: medio, inicio: 0, duracion: 4, x: 0.84, y: 0.3, ancho: 0.2, redondeo: 0.6, borde: 0.04, colorBorde: '#ffcc00', sombraCapa: 0.9, recorte: { izq: 0, der: 0, arriba: 0.1, abajo: 0.1 } }
+    ]
   }
   await evaluar(`(async () => { const p = await window.recorte.abrirProyecto(${JSON.stringify(id)}); await window.recorte.guardarProyecto({ ...p, timeline: ${JSON.stringify(timeline)} }); location.reload() })()`).catch(() => {})
   await esperar(2500)
@@ -124,7 +130,14 @@ try {
   const monitor = await c.enviar('Page.captureScreenshot', { format: 'png', clip: { x: caja.x, y: caja.y, width: caja.w, height: caja.h, scale: 1 } })
   const pngMonitor = join(salida, 'monitor.png')
   writeFileSync(pngMonitor, Buffer.from(monitor.data, 'base64'))
-  const t = await evaluar(`(() => { const v = document.querySelector('.monitor-video'); return v ? v.currentTime : 0 })()`)
+  /** El segundo del cabezal, del código de tiempo de la línea de tiempo (hh:mm:ss:cuadros a 30 cuadros). */
+  const cabezal = async () => {
+    const tc = await evaluar(`document.querySelector('.tl-tc-grande')?.textContent ?? ''`)
+    const m = /(\d+):(\d+):(\d+):(\d+)/.exec(tc)
+    return m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number(m[4]) / 30 : 0
+  }
+  const t = await cabezal()
+  console.log(`cabezal en la primera comparación: ${t.toFixed(3)} s`)
   const cuadro = await evaluar(`window.recorte.exportarCuadro(${JSON.stringify(id)}, ${JSON.stringify(timeline)}, ${Math.max(0, t)})`)
   if (!cuadro.ok) throw new Error(cuadro.error)
   const pngMp4 = join(salida, 'mp4.png')
@@ -254,6 +267,127 @@ try {
   await evaluar(`document.getElementById('sin-textos').remove()`)
   const shotZona = await c.enviar('Page.captureScreenshot', { format: 'png', clip: { x: caja.x - 10, y: caja.y - 10, width: caja.w + 20, height: caja.h + 20, scale: 1 } })
   writeFileSync(join(salida, 'zona-segura.png'), Buffer.from(shotZona.data, 'base64'))
+
+  // ===== Bloquear, ocultar y duplicar una capa =====
+  const boton = (texto) => evaluar(`(() => { const b = [...document.querySelectorAll('.ed-inspector button')].find((x) => x.textContent.trim() === ${JSON.stringify(texto)}); if (b) b.click(); return Boolean(b) })()`)
+  const pulsar = async (key, code, vk, modifiers = 0) => {
+    await c.enviar('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode: vk, modifiers })
+    await c.enviar('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: vk, modifiers })
+  }
+  {
+    const cap = await centro('.monitor-capa')
+    await arrastre(cap.x, cap.y, cap.x, cap.y)
+    await esperar(300)
+    comprobar(await boton('Bloquear'), 'el panel de la capa tiene «Bloquear»')
+    await esperar(300)
+    const antesB = await capaDom()
+    const cap2 = await centro('.monitor-capa')
+    await arrastre(cap2.x, cap2.y, cap2.x + 60, cap2.y + 30)
+    const trasB = await capaDom()
+    comprobar(trasB.transform === antesB.transform && (await evaluar(`document.querySelector('.monitor-capa').style.left`)) === (await evaluar(`document.querySelector('.monitor-capa').style.left`)), 'bloqueada: arrastrarla no la mueve')
+    comprobar(!(await evaluar(`Boolean(document.querySelector('.monitor-capa .monitor-tirador'))`)), 'bloqueada: no muestra tiradores')
+    const izqAntesB = await evaluar(`document.querySelector('.monitor-capa').style.left`)
+    await arrastre(cap2.x, cap2.y, cap2.x + 60, cap2.y + 30)
+    comprobar((await evaluar(`document.querySelector('.monitor-capa').style.left`)) === izqAntesB, `bloqueada: sigue en ${izqAntesB}`)
+    await boton('Desbloquear')
+    await esperar(300)
+    // Ctrl+D: una capa más.
+    const nAntes = await evaluar(`document.querySelectorAll('.tl-capa').length`)
+    await pulsar('d', 'KeyD', 68, 2)
+    await esperar(400)
+    const nDespues = await evaluar(`document.querySelectorAll('.tl-capa').length`)
+    comprobar(nDespues === nAntes + 1, `Ctrl+D duplica la capa (${nAntes} → ${nDespues})`)
+    // Ocultar: deja de verse en el monitor; Ctrl+Z la devuelve.
+    const vistas = await evaluar(`document.querySelectorAll('.monitor-capa:not(.is-fin)').length`)
+    comprobar(await boton('Ocultar'), 'el panel tiene «Ocultar»')
+    await esperar(400)
+    const vistasOculta = await evaluar(`document.querySelectorAll('.monitor-capa:not(.is-fin)').length`)
+    comprobar(vistasOculta === vistas - 1, `oculta, no se ve en el monitor (${vistas} → ${vistasOculta})`)
+    for (let k = 0; k < 2; k++) {
+      await pulsar('z', 'KeyZ', 90, 2)
+      await esperar(250)
+    }
+    comprobar((await evaluar(`document.querySelectorAll('.tl-capa').length`)) === nAntes, 'Ctrl+Z deshace el ocultar y el duplicar')
+  }
+
+  // ===== Varias a la vez: Ctrl + clic en el monitor, moverlas juntas y alinearlas =====
+  {
+    const k1 = await centro('.monitor-capa[data-capa="k1"] > .monitor-capa-marco')
+    const k2 = await centro('.monitor-capa[data-capa="k2"] > .monitor-capa-marco')
+    await arrastre(k1.x, k1.y, k1.x, k1.y)
+    await raton('mouseMoved', k2.x, k2.y, { buttons: 0 })
+    await raton('mousePressed', k2.x, k2.y, { modifiers: 2 })
+    await raton('mouseReleased', k2.x, k2.y, { modifiers: 2 })
+    await esperar(400)
+    comprobar((await evaluar(`document.querySelectorAll('.monitor-capa.en-grupo').length`)) === 2, 'Ctrl + clic en el monitor: las dos capas quedan elegidas')
+    const lefts = () => evaluar(`['k1', 'k2'].map((id) => parseFloat(document.querySelector('.monitor-capa[data-capa="' + id + '"]').style.left))`)
+    const antesG = await lefts()
+    await arrastre(k2.x, k2.y, k2.x - 40, k2.y + 4)
+    await esperar(300)
+    const trasG = await lefts()
+    const d1 = trasG[0] - antesG[0]
+    const d2 = trasG[1] - antesG[1]
+    comprobar(d1 < -2 && Math.abs(d1 - d2) < 0.3, `arrastrar una mueve las dos lo mismo (${d1.toFixed(2)} % y ${d2.toFixed(2)} %)`)
+    comprobar(await boton('⇤ Izq.'), 'el panel de varias tiene «Alinear»')
+    await esperar(400)
+    const bordes = await evaluar(`['k1', 'k2'].map((id) => document.querySelector('.monitor-capa[data-capa="' + id + '"] > .monitor-capa-marco').getBoundingClientRect().left)`)
+    comprobar(Math.abs(bordes[0] - bordes[1]) < 1.5, `alineadas a la izquierda: sus bordes en ${bordes.map((b) => b.toFixed(1)).join(' y ')}`)
+    for (let k = 0; k < 2; k++) {
+      await c.enviar('Input.dispatchKeyEvent', { type: 'keyDown', key: 'z', code: 'KeyZ', windowsVirtualKeyCode: 90, modifiers: 2 })
+      await c.enviar('Input.dispatchKeyEvent', { type: 'keyUp', key: 'z', code: 'KeyZ', windowsVirtualKeyCode: 90, modifiers: 2 })
+      await esperar(250)
+    }
+    const vuelta = await lefts()
+    comprobar(Math.abs(vuelta[0] - antesG[0]) < 0.05 && Math.abs(vuelta[1] - antesG[1]) < 0.05, 'Ctrl+Z deshace el alinear y el mover del grupo')
+    const shotG = await c.enviar('Page.captureScreenshot', { format: 'png' })
+    writeFileSync(join(salida, 'grupo.png'), Buffer.from(shotG.data, 'base64'))
+    await raton('mouseMoved', 5, 5, { buttons: 0 })
+  }
+
+  // ===== Fotogramas clave de un texto: el panel muestra sus rombos =====
+  {
+    const t5 = await centro('.monitor-rotulo[data-texto="t5"]')
+    await arrastre(t5.x, t5.y, t5.x, t5.y)
+    await esperar(400)
+    const filas = await evaluar(`document.querySelectorAll('.ed-inspector .ed-fila-clave').length`)
+    comprobar(filas === 4, `el panel del texto muestra sus fotogramas clave (${filas} filas)`)
+    const animados = await evaluar(`document.querySelectorAll('.ed-inspector .ed-fila-clave .ed-clave.is-animado, .ed-inspector .ed-fila-clave .ed-clave.is-on').length`)
+    comprobar(animados === 2, `sitio y tamaño se ven animados (${animados})`)
+  }
+
+  // ===== Salidas, reproduciendo (solo se ven al reproducir, como las entradas) =====
+  // Los textos 2 y 4 se van en sus últimos 2 s (desenfocándose y encogiéndose): cambian despacio, así un cuadro de
+  // diferencia entre la captura y el segundo que se lee no importa.
+  const tecla = async (key, code, vk, modifiers = 0) => {
+    await c.enviar('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode: vk, modifiers })
+    await c.enviar('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: vk, modifiers })
+  }
+  await evaluar(`document.activeElement?.blur?.()`)
+  await tecla('Home', 'Home', 36)
+  await tecla('ArrowRight', 'ArrowRight', 39, 8)
+  await tecla('ArrowRight', 'ArrowRight', 39, 8)
+  await esperar(500)
+  await tecla(' ', 'Space', 32)
+  await esperar(1000)
+  const enVivo = await c.enviar('Page.captureScreenshot', { format: 'png', clip: { x: caja.x, y: caja.y, width: caja.w, height: caja.h, scale: 1 } })
+  const tVivo = await evaluar(`(() => { const v = [...document.querySelectorAll('.monitor-video, .monitor-vista video')].find((x) => x.style.visibility !== 'hidden' && !x.paused); return v ? { t: v.currentTime, vista: v.closest('.monitor-vista') !== null } : null })()`)
+  await tecla(' ', 'Space', 32)
+  if (!tVivo) comprobar(false, 'el monitor reproduce')
+  else {
+    const pngVivo = join(salida, 'salida-monitor.png')
+    writeFileSync(pngVivo, Buffer.from(enVivo.data, 'base64'))
+    // En la vista previa ya renderizada, su segundo es el del tramo: el de la timeline es el que dice el cabezal.
+    const tTl = await evaluar(`(() => { const t = document.querySelector('.tl-timecode, .tl-tiempo')?.textContent; return t ?? null })()`)
+    const segundo = tVivo.vista ? null : tVivo.t
+    const cuadroSalida = segundo !== null ? await evaluar(`window.recorte.exportarCuadro(${JSON.stringify(id)}, ${JSON.stringify(timeline)}, ${segundo})`) : null
+    if (cuadroSalida?.ok) {
+      ff(['-i', cuadroSalida.archivo, '-vf', `scale=${w}:${h}:flags=area`, join(salida, 'salida-mp4.png')])
+      ff(['-i', pngVivo, '-i', join(salida, 'salida-mp4.png'), '-filter_complex', `[0]scale=${w}:${h}[a];[a][1]hstack`, join(salida, 'salida-lado-a-lado.png')])
+      const r2 = spawnSync('ffmpeg', ['-v', 'error', '-i', pngVivo, '-i', join(salida, 'salida-mp4.png'), '-filter_complex', `[0]scale=${w}:${h},format=gray[a];[1]format=gray[b];[a][b]blend=all_mode=difference,scale=1:1:flags=area`, '-f', 'rawvideo', '-pix_fmt', 'gray', '-'])
+      console.log(`saliendo, en ${segundo.toFixed(2)} s: diferencia media monitor/MP4 ${r2.stdout[0]} de 255`)
+      rmSync(cuadroSalida.archivo, { force: true })
+    } else console.log(`saliendo: el monitor mostraba la vista previa ya renderizada (${tTl ?? ''}); no hay nada que comparar en vivo`)
+  }
 
   // exportarCuadro lo guarda en la carpeta de videos del usuario: se borra (y su carpeta, si quedó vacía).
   rmSync(cuadro.archivo, { force: true })

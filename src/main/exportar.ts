@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { escribirCube, leerCube, mezclarLut } from '../shared/lut'
 import { rutaScriptPython } from './transcribir'
@@ -19,7 +19,16 @@ import {
   referenciaParalaje,
   type AjustesClip,
   duracionTimeline,
-  ENTRADA_LADO_S,
+  durEntradaCapa,
+  durSalidaCapa,
+  destinoLado,
+  DESENFOQUE_TEXTO,
+  durSalidaTexto,
+  porPalabras,
+  finReal,
+  textoEn,
+  marcoCapa,
+  SOMBRA_CAPA,
   FUENTE_PRINCIPAL,
   FUENTES_TEXTO,
   origenLado,
@@ -191,7 +200,41 @@ function escribirAss(
   const eventos = [
     ...voz.map((b) => `Dialogue: 0,${tiempoAss(b.start)},${tiempoAss(b.end)},Voz,,0,0,0,,${escapar(b.texto)}`),
     // Un rótulo abajo empuja los subtítulos hacia arriba al compartir alineación: van en otra capa.
-    ...textos.map((t) => {
+    ...textos.flatMap((completo) => {
+      // Sin fotogramas clave: un solo evento. Con ellos: uno por cuadro en que cambia (con sus valores de ese momento),
+      // y las animaciones de entrada y salida corridas para que sigan donde iban.
+      if (!completo.claves) return [dialogo(completo, completo, completo.inicio, completo.inicio + completo.duracion, 0)]
+      const fps = proyecto.source.fps > 0 && proyecto.source.fps <= 60 ? Math.round(proyecto.source.fps) : 30
+      const n = Math.max(1, Math.ceil(completo.duracion * fps))
+      const lineas: string[] = []
+      let desde = 0
+      let firma = ''
+      let estado = textoEn(completo, 0)
+      for (let j = 0; j <= n; j++) {
+        // El tramo de cada cuadro va de medio cuadro antes a medio cuadro después (así redondear a centésimas no lo mueve).
+        const corte = j === n ? completo.duracion : Math.min(completo.duracion, (j + 0.5) / fps)
+        const e = textoEn(completo, Math.min(completo.duracion, j / fps))
+        const f = [e.x, e.y, e.tamano, e.giro, e.opacidad].map((v) => (typeof v === 'number' ? Math.round(v * 2000) : '-')).join(',')
+        if (j > 0 && f !== firma) {
+          lineas.push(dialogo(estado, completo, completo.inicio + desde, completo.inicio + Math.min(completo.duracion, (j - 0.5) / fps), desde))
+          desde = Math.min(completo.duracion, (j - 0.5) / fps)
+        }
+        if (j === 0 || f !== firma) {
+          estado = e
+          firma = f
+        }
+        if (j === n) lineas.push(dialogo(estado, completo, completo.inicio + desde, completo.inicio + corte, desde))
+      }
+      return lineas.filter(Boolean)
+    })
+  ].join('\n')
+
+  /**
+   * Un evento ASS de un rótulo: con los valores de `t` (fijos) de `a` a `b` (segundos de la timeline), y sus
+   * animaciones de entrada y salida, que son las de `completo`, desde `s` segundos después de que aparece.
+   */
+  function dialogo(t: TextoTL, completo: TextoTL, a: number, b: number, s: number): string {
+      if (b - a < 0.005) return ''
       // El tamaño y el color propios del rótulo van como etiquetas sobre el estilo de su posición.
       const libre = typeof t.x === 'number' && typeof t.y === 'number'
       // La eme de la letra en píxeles del MP4 (la del monitor): con ella se miden el contorno, la sombra y el espaciado.
@@ -244,10 +287,23 @@ function escribirAss(
         .map((l) => (conClave ? l.replace(/\*([^*]+)\*/g, (_m, x: string) => `{\\1c${clave}&}${x}{\\1c${base}&}`) : l).replace(/\*/g, ''))
         .filter(Boolean)
         .join('\\N')
-      const { inicio: entrada, cuerpo } = animarAss(t, lineas, libre ? { x: ax + (t.alineacion === 'izquierda' ? margen : t.alineacion === 'derecha' ? -margen : 0), y: ay, baja: Math.round(alto * 0.03) } : null)
-      return `Dialogue: 1,${tiempoAss(t.inicio)},${tiempoAss(t.inicio + t.duracion)},${nombreEstilo[t.posicion]}${t.sinCaja ? 'Libre' : ''},,0,0,0,,{${entrada.includes('\\move(') ? etiquetas.replace(/\\pos\([^)]*\)/, '') : etiquetas}${entrada}}${cuerpo}`
-    })
-  ].join('\n')
+      // Las animaciones son las del rótulo entero (con la opacidad de ahora); un rótulo cuyo sitio se anima no sube.
+      const anima: TextoTL = completo === t ? t : { ...completo, opacidad: t.opacidad, tamano: t.tamano }
+      const sitioAnimado = Boolean(completo.claves?.x || completo.claves?.y)
+      const pintarCorrido = s > 0 && completo.animacion === 'pintar'
+      const animado = animarAss(
+        pintarCorrido ? { ...anima, duracion: completo.duracion - s, tiempos: tiemposPalabras(completo).map((w) => Math.round((w.inicio - s) * 1000) / 1000) } : anima,
+        lineas,
+        libre && !sitioAnimado ? { x: ax + (t.alineacion === 'izquierda' ? margen : t.alineacion === 'derecha' ? -margen : 0), y: ay, baja: Math.round(alto * 0.03) } : null,
+        eme
+      )
+      // Troceado (con fotogramas clave): los tiempos de dentro son los del rótulo entero (también en el primer trozo, cuyo
+      // final no es el del rótulo: su fundido de salida se mide desde el final de verdad).
+      const troceado = Boolean(completo.claves)
+      const cuerpo = troceado && !pintarCorrido ? correrTiemposAss(animado.cuerpo, s, completo.duracion) : animado.cuerpo
+      const entrada = troceado ? correrTiemposAss(conSalidaAss(anima, animado.inicio, eme), s, completo.duracion) : conSalidaAss(anima, animado.inicio, eme)
+      return `Dialogue: 1,${tiempoAss(a)},${tiempoAss(b)},${nombreEstilo[t.posicion]}${t.sinCaja ? 'Libre' : ''},,0,0,0,,{${entrada.includes('\\move(') ? etiquetas.replace(/\\pos\([^)]*\)/, '') : etiquetas}${entrada}}${cuerpo}`
+  }
 
   const contenido = `[Script Info]
 ScriptType: v4.00+
@@ -691,12 +747,26 @@ async function exportarTimelineAhora(
     // Lo mismo que estadoCapa (el monitor), en expresiones de FFmpeg: `T` es el segundo de la capa.
     const ex = expresionesCapa(c, referenciaParalaje(timeline, c))
     const en = (expr: string, T: string) => expr.replace(/T/g, T)
-    const fundido = c.entrada === 'fundido' ? ',fade=t=in:st=0:d=0.35:alpha=1' : c.entrada === 'pop' ? ',fade=t=in:st=0:d=0.08:alpha=1' : ''
+    // La entrada y la salida que se funden (las mismas de animacionCapa).
+    const de = durEntradaCapa(c)
+    const ds = durSalidaCapa(c)
+    const fundido =
+      (c.entrada === 'fundido' ? `,fade=t=in:st=0:d=${n3(de)}:alpha=1` : c.entrada === 'pop' ? `,fade=t=in:st=0:d=${n3((0.08 * de) / 0.24)}:alpha=1` : '') +
+      (c.salida === 'fundido'
+        ? `,fade=t=out:st=${n3(Math.max(0, finReal(c) - ds))}:d=${n3(ds)}:alpha=1`
+        : c.salida === 'encoger'
+          ? `,fade=t=out:st=${n3(Math.max(0, finReal(c) - 0.08))}:d=0.08:alpha=1`
+          : '')
     // Con giro, la capa va en un lienzo cuadrado fijo (lo que ocupa en su punto más grande y girada).
     const gira = Boolean(c.giro) || Boolean(c.fin?.giro) || Boolean(c.claves?.giro)
     // Lo más grande que llega a ser (también por sus fotogramas clave).
     const anchoMax = Math.max(c.ancho, c.fin?.ancho ?? 0, ...(c.claves?.ancho ?? []).map((x) => x.v))
-    const lado = Math.ceil((anchoC * anchoMax * 1.17 * Math.hypot(1, aspectoDe(c.fuente)) + 4) / 2) * 2
+    // Esquinas, borde y sombra: la capa se trabaja a un tamaño fijo (el más grande que llega a tener) y luego se escala.
+    const marco = c.redondeo || c.borde || c.sombraCapa ? prepararMarco(c, i, Math.max(64, Math.round(anchoC * anchoMax)), aspectoDe(c.fuente), carpeta, fps) : null
+    for (const png of marco?.imagenes ?? []) entradas.push('-loop', '1', '-framerate', String(fps), '-t', c.duracion.toFixed(3), '-i', png)
+    const indicesMarco = (marco?.imagenes ?? []).map(() => n++)
+    const K = marco?.K ?? 1
+    const lado = Math.ceil((anchoC * anchoMax * K * 1.17 * Math.hypot(1, aspectoDe(c.fuente)) + 4) / 2) * 2
     const giro = gira
       ? `,pad=w=${lado}:h=${lado}:x='(ow-iw)/2':y='(oh-ih)/2':color=black@0:eval=frame,rotate=a='(${en(ex.giro, 't')})*PI/180':c=none:ow=${lado}:oh=${lado}`
       : ''
@@ -716,9 +786,42 @@ async function exportarTimelineAhora(
           .map((x) => `,${x}`)
           .join('')
       : ''
-    partes.push(
-      `[${k}:v]setpts=PTS-STARTPTS,fps=${fps},format=rgba${animados.ordenes}${voltear},scale=w='max(2,trunc(${anchoC}*${en(ex.ancho, 't')}*${en(ex.escala, 't')}/2)*2)':h=-2:eval=frame:flags=bicubic${recorte}${giro}${animados.opacidad}${animados.desenfoque ?? desenfoque(desenfoqueCapa(timeline, c), anchoC)}${fundido},setpts=PTS+${c.inicio.toFixed(3)}/TB[capa${i}]`
-    )
+    const despues = `${giro}${animados.opacidad}${animados.desenfoque ?? desenfoque(desenfoqueCapa(timeline, c), anchoC)}${fundido},setpts=PTS+${c.inicio.toFixed(3)}/TB[capa${i}]`
+    if (!marco) {
+      partes.push(
+        `[${k}:v]setpts=PTS-STARTPTS,fps=${fps},format=rgba${animados.ordenes}${voltear},scale=w='max(2,trunc(${anchoC}*${en(ex.ancho, 't')}*${en(ex.escala, 't')}/2)*2)':h=-2:eval=frame:flags=bicubic${recorte}${despues}`
+      )
+    } else {
+      // A su tamaño de trabajo, volteada y recortada; con sus esquinas, su borde y su sombra; y luego a su tamaño.
+      partes.push(`[${k}:v]setpts=PTS-STARTPTS,fps=${fps},format=rgba${animados.ordenes}${voltear},scale=${marco.W}:${marco.H}:flags=bicubic${recorte}[mpre${i}]`)
+      let etiqueta = `mpre${i}`
+      let j = 0
+      if (marco.mascara) {
+        const km = indicesMarco[j++]
+        partes.push(`[mpre${i}]split[mb1_${i}][mb2_${i}]`)
+        partes.push(`[mb1_${i}]alphaextract[mal${i}]`)
+        partes.push(`[${km}:v]format=gray[mmk${i}]`)
+        partes.push(`[mal${i}][mmk${i}]blend=all_mode=multiply:shortest=1[mal2_${i}]`)
+        partes.push(`[mb2_${i}][mal2_${i}]alphamerge[mred${i}]`)
+        etiqueta = `mred${i}`
+      }
+      if (marco.anillo) {
+        const kr = indicesMarco[j++]
+        partes.push(`[${kr}:v]format=rgba[man${i}]`)
+        partes.push(`[${etiqueta}][man${i}]overlay=format=auto:shortest=1,format=rgba[mbor${i}]`)
+        etiqueta = `mbor${i}`
+      }
+      if (marco.sombra) {
+        const s = marco.sombra
+        partes.push(`[${etiqueta}]pad=w=iw+${2 * s.margen}:h=ih+${2 * s.margen}:x=${s.margen}:y=${s.margen}:color=black@0,split[mq1_${i}][mq2_${i}]`)
+        partes.push(
+          `[mq1_${i}]lutrgb=r=${s.r}:g=${s.g}:b=${s.b},gblur=sigma=${n3(s.sigma)},colorchannelmixer=aa=${SOMBRA_CAPA.opacidad},pad=w=iw+${s.corre}:h=ih+${s.corre}:x=${s.corre}:y=${s.corre}:color=black@0,crop=w=iw-${s.corre}:h=ih-${s.corre}:x=0:y=0[msh${i}]`
+        )
+        partes.push(`[msh${i}][mq2_${i}]overlay=format=auto,format=rgba[msom${i}]`)
+        etiqueta = `msom${i}`
+      }
+      partes.push(`[${etiqueta}]format=rgba,scale=w='max(2,trunc(${anchoC}*${en(ex.ancho, 't')}*${en(ex.escala, 't')}*${n3(K)}/2)*2)':h=-2:eval=frame:flags=bicubic${despues}`)
+    }
     const salida = `[conCapa${i}]`
     const T = `(t-${c.inicio.toFixed(3)})`
     const donde = `x='${anchoC}*${en(ex.x, T)}-w/2':y='${altoC}*${en(ex.y, T)}-h/2':eval=frame:eof_action=pass:enable='between(t,${c.inicio.toFixed(3)},${(c.inicio + c.duracion).toFixed(3)})'`
@@ -947,6 +1050,71 @@ function desenfoque(valor: number, anchoC: number): string {
  * El recorrido de una capa en expresiones de FFmpeg (con `T` = segundos desde que aparece), igual
  * que `estadoCapa`: de su sitio a `fin` suavemente, la entrada desde un lado y el rebote del «pop».
  */
+/**
+ * Prepara las esquinas, el borde y la sombra de una capa para el MP4, a un tamaño de trabajo de `W` de ancho: las
+ * imágenes de su máscara (las esquinas redondeadas de lo que se ve) y de su borde, y lo que se corre y difumina su
+ * sombra. Los mismos números que el monitor (marcoCapa). `K` es cuánto más ancha queda con el margen de la sombra.
+ */
+function prepararMarco(
+  c: CapaTL,
+  i: number,
+  W0: number,
+  aspecto: number,
+  carpeta: string,
+  _fps: number
+): { W: number; H: number; K: number; imagenes: string[]; mascara: boolean; anillo: boolean; sombra: { margen: number; corre: number; sigma: number; r: number; g: number; b: number } | null } {
+  const W = par(W0)
+  const H = par(Math.max(2, Math.round(W * aspecto)))
+  const rc = c.recorte ?? { izq: 0, der: 0, arriba: 0, abajo: 0 }
+  const x0 = rc.izq * W
+  const x1 = W - rc.der * W
+  const y0 = rc.arriba * H
+  const y1 = H - rc.abajo * H
+  const m = marcoCapa(c, x1 - x0, y1 - y0)
+  const n = (v: number) => (Math.round(v * 1000) / 1000).toString()
+  // Dentro de un rectángulo con esquinas redondeadas (con medio píxel de suavizado en el borde), en el centro del píxel.
+  const dentro = (a: number, b: number, c2: number, d: number, r: number) => {
+    const R = Math.max(0.5, r)
+    const dx = `max(max(${n(a + R)}-(X+0.5),(X+0.5)-${n(c2 - R)}),0)`
+    const dy = `max(max(${n(b + R)}-(Y+0.5),(Y+0.5)-${n(d - R)}),0)`
+    return `clip(${n(R)}-hypot(${dx},${dy})+0.5,0,1)`
+  }
+  const generar = (nombre: string, formato: string, geq: string): string => {
+    const ruta = join(carpeta, nombre)
+    const r = spawnSync(rutaFfmpeg(), ['-v', 'error', '-y', '-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}`, '-vf', `format=${formato},geq=${geq}`, '-frames:v', '1', ruta], { windowsHide: true })
+    if (r.status !== 0) throw new Error(`No pude preparar el marco de una capa: ${String(r.stderr).trim().slice(-300)}`)
+    return ruta
+  }
+  const imagenes: string[] = []
+  const mascara = m.radio > 0.5
+  if (mascara) imagenes.push(generar(`marco-capa-${i}-mascara.png`, 'gray', `lum='255*${dentro(x0, y0, x1, y1, m.radio)}'`))
+  const anillo = m.borde > 0.05
+  if (anillo) {
+    const col = parseInt((c.colorBorde ?? '#ffffff').slice(1), 16)
+    const B = m.borde
+    const fuera = dentro(x0, y0, x1, y1, m.radio)
+    const adentro = dentro(x0 + B, y0 + B, x1 - B, y1 - B, Math.max(0, m.radio - B))
+    imagenes.push(generar(`marco-capa-${i}-borde.png`, 'rgba', `r=${(col >> 16) & 255}:g=${(col >> 8) & 255}:b=${col & 255}:a='255*clip(${fuera}-${adentro},0,1)'`))
+  }
+  let sombra = null
+  let K = 1
+  if (c.sombraCapa && m.sigma > 0) {
+    const col = parseInt((c.colorSombraCapa ?? '#000000').slice(1), 16)
+    const corre = Math.max(0, Math.round(m.corre))
+    const margen = Math.ceil((corre + 3 * m.sigma + 2) / 2) * 2
+    sombra = { margen, corre, sigma: m.sigma, r: (col >> 16) & 255, g: (col >> 8) & 255, b: col & 255 }
+    K = (W + 2 * margen) / W
+  }
+  return { W, H, K, imagenes, mascara, anillo, sombra }
+}
+
+/** El rebote del «pop» con su duración multiplicada por `s` (la escala en el segundo T de la capa). */
+function escalaPop(s: number): string {
+  const a = n3(0.13 * s)
+  const b = n3(0.24 * s)
+  return `if(lt(T,${a}),0.45+T/${a}*0.72,if(lt(T,${b}),1.17-(T-${a})/${n3(0.11 * s)}*0.17,1))`
+}
+
 export function expresionesCapa(
   c: CapaTL,
   ref: { inicio: number; largo: number; ajustes: Required<AjustesClip>; tramos?: { inicio: number; largo: number; ajustes: Required<AjustesClip> }[] } | null = null
@@ -970,9 +1138,14 @@ export function expresionesCapa(
   let x = c.sigue ? camino('x', c.sigue.dx) : k?.x ? `(${exprClave(k.x, 'T')})` : lerp(c.x, f?.x ?? c.x)
   let y = c.sigue ? camino('y', c.sigue.dy) : k?.y ? `(${exprClave(k.y, 'T')})` : lerp(c.y, f?.y ?? c.y)
   const lado = origenLado(c)
-  const K = `(1-pow(1-clip(T/${ENTRADA_LADO_S},0,1),3))`
+  const K = `(1-pow(1-clip(T/${n3(durEntradaCapa(c) || 1)},0,1),3))`
   if (lado.x !== undefined) x = `(${n3(lado.x)}+(${x}-(${n3(lado.x)}))*${K})`
   if (lado.y !== undefined) y = `(${n3(lado.y)}+(${y}-(${n3(lado.y)}))*${K})`
+  // La salida por un lado: acelerando hacia fuera (estadoCapa).
+  const destino = destinoLado(c)
+  const P = `pow(1-clip((${n3(finReal(c))}-T)/${n3(durSalidaCapa(c) || 1)},0,1),3)`
+  if (destino.x !== undefined) x = `(${x}+(${n3(destino.x)}-${x})*${P})`
+  if (destino.y !== undefined) y = `(${y}+(${n3(destino.y)}-${y})*${P})`
   let ancho = k?.ancho ? `(${exprClave(k.ancho, 'T')})` : lerp(c.ancho, f?.ancho ?? c.ancho)
   if (ref) {
     // Escena 2.5D (aplicarParalaje): la cámara del clip de debajo, de cuando aparece la capa a ahora.
@@ -1039,8 +1212,9 @@ export function expresionesCapa(
     y,
     ancho,
     giro: k?.giro ? `(${exprClave(k.giro, 'T')})` : lerp(c.giro ?? 0, f?.giro ?? c.giro ?? 0),
-    // El rebote del «pop»: entra al 45 %, se pasa al 117 % y se asienta en 0,24 s (animacionCapa).
-    escala: c.entrada === 'pop' ? 'if(lt(T,0.13),0.45+T/0.13*0.72,if(lt(T,0.24),1.17-(T-0.13)/0.11*0.17,1))' : '1'
+    // El rebote del «pop»: entra al 45 %, se pasa al 117 % y se asienta en 0,24 s (o lo que dure su entrada); al
+    // encogerse, se achica acelerando (animacionCapa).
+    escala: `(${c.entrada === 'pop' ? escalaPop(durEntradaCapa(c) / 0.24) : '1'})*(${c.salida === 'encoger' ? `1-pow(1-clip((${n3(finReal(c))}-T)/${n3(durSalidaCapa(c))},0,1),3)` : '1'})`
   }
 }
 
@@ -1101,8 +1275,54 @@ export function alfasAss(t: TextoTL): { letra: string; borde: string; sombra: st
   return { letra: hex(0), borde: hex(borde), sombra: hex(sombra) }
 }
 
-export function animarAss(t: TextoTL, lineas: string, libre: { x: number; y: number; baja: number } | null): { inicio: string; cuerpo: string } {
+/**
+ * Corre `s` segundos los tiempos de unas etiquetas ASS (\\t, \\move y el fundido \\fad, que pasa a \\fade): para un
+ * trozo de un rótulo que empieza `s` segundos después que él, y que lo de dentro siga donde iba. `duracion` es la
+ * del rótulo entero (el fundido de salida se mide desde su final).
+ */
+export function correrTiemposAss(etiquetas: string, s: number, duracion: number): string {
+  if (s < 0) return etiquetas
+  const d = Math.round(s * 1000)
+  const total = Math.round(duracion * 1000)
+  return etiquetas
+    .replace(/\\t\((-?\d+),(-?\d+)/g, (_m, a: string, b: string) => `\\t(${Number(a) - d},${Number(b) - d}`)
+    .replace(/\\move\(([^,()]+),([^,()]+),([^,()]+),([^,()]+),(-?\d+),(-?\d+)\)/g, (_m, x1, y1, x2, y2, t1: string, t2: string) => `\\move(${x1},${y1},${x2},${y2},${Number(t1) - d},${Number(t2) - d})`)
+    .replace(/\\fad\((\d+),(\d+)\)/g, (_m, i: string, o: string) => `\\fade(255,0,255,${-d},${Number(i) - d},${total - Number(o) - d},${total - d})`)
+}
+
+/** Lo que tarda cada palabra en pasar de borrosa a nítida («palabra a palabra, de borrosa a nítida»). */
+export const PALABRA_NITIDA_S = 0.3
+
+/**
+ * La salida de un rótulo en ASS, sobre las etiquetas de su entrada: se funde (\fad, con el fundido de entrada que ya
+ * tuviera), se encoge (\fscx) o se desenfoca (\blur) en sus últimos segundos. Lo mismo que salidaTexto (el monitor).
+ */
+export function conSalidaAss(t: TextoTL, inicio: string, eme: number): string {
+  const d = durSalidaTexto(t)
+  if (!d) return inicio
   const ms = (s: number) => Math.round(s * 1000)
+  // Se va al terminar de verdad (con lo que se le cortó al final, si se sacó un trozo).
+  const fin = ms(finReal(t))
+  const desde = fin - ms(d)
+  // Sin cortar, un \\fad de salida; cortado, la opacidad baja con \\t (el \\fad se mediría desde el corte).
+  const fad = /\\fad\((\d+),(\d+)\)/.exec(inicio)
+  let etiquetas = !t.cola
+    ? fad
+      ? inicio.replace(fad[0], `\\fad(${fad[1]},${ms(d)})`)
+      : `\\fad(0,${ms(d)})${inicio}`
+    : `${inicio}\\t(${desde},${fin},\\alpha&HFF&)`
+  if (t.salida === 'encoger') etiquetas += `\\t(${desde},${fin},\\fscx40\\fscy40)`
+  if (t.salida === 'desenfoque') etiquetas += `\\t(${desde},${fin},\\blur${Math.round(DESENFOQUE_TEXTO * eme * 10) / 10})`
+  return etiquetas
+}
+
+export function animarAss(t: TextoTL, lineas: string, libre: { x: number; y: number; baja: number } | null, eme = 60): { inicio: string; cuerpo: string } {
+  const ms = (s: number) => Math.round(s * 1000)
+  const borroso = Math.round(DESENFOQUE_TEXTO * eme * 10) / 10
+  if (t.animacion === 'desenfoque') {
+    // De borroso a nítido (y apareciendo), como el monitor.
+    return { inicio: `\\fad(250,0)\\blur${borroso}\\t(0,350,\\blur0)`, cuerpo: lineas }
+  }
   if (t.animacion === 'pop') {
     return { inicio: '\\fscx45\\fscy45\\fad(80,0)\\t(0,130,\\fscx117\\fscy117)\\t(130,240,\\fscx100\\fscy100)', cuerpo: lineas }
   }
@@ -1138,7 +1358,7 @@ export function animarAss(t: TextoTL, lineas: string, libre: { x: number; y: num
       .join('')
     return { inicio: `\\2c${base}&\\1c${pintado}&`, cuerpo }
   }
-  if (t.animacion !== 'palabras' && t.animacion !== 'maquina') return { inicio: '', cuerpo: lineas }
+  if (!porPalabras(t.animacion) && t.animacion !== 'maquina') return { inicio: '', cuerpo: lineas }
   // El borde y la caja siguen a la letra: con caja, su transparencia es la del estilo (o opaca si es de color).
   const { letra, borde, sombra } = alfasAss(t)
   const paso = pasoAnimacion(t)
@@ -1146,14 +1366,17 @@ export function animarAss(t: TextoTL, lineas: string, libre: { x: number; y: num
   const oculta = '\\1a&HFF&\\3a&HFF&\\4a&HFF&'
   const visible = `\\1a&H${letra}&\\3a&H${borde}&\\4a&H${sombra}&`
   // Se trocea sin romper los saltos de línea (\N) ni los espacios.
-  const piezas = t.animacion === 'palabras' ? lineas.split(/(\\N|\s+)/) : lineas.split(/(\\N)|/)
+  const nitida = t.animacion === 'palabras-desenfoque'
+  const piezas = porPalabras(t.animacion) ? lineas.split(/(\\N|\s+)/) : lineas.split(/(\\N)|/)
   let n = 0
   const cuerpo = piezas
     .filter((x) => x !== undefined && x !== '')
     .map((x) => {
       if (x === '\\N' || /^\s+$/.test(x)) return x
-      const a = t.animacion === 'palabras' ? ms(palabras[n]?.inicio ?? n * paso) : ms(n * paso)
+      const a = porPalabras(t.animacion) ? ms(palabras[n]?.inicio ?? n * paso) : ms(n * paso)
       n++
+      // De borrosa a nítida: la palabra aparece desenfocada y se aclara mientras se ve.
+      if (nitida) return `{${oculta}\\blur${borroso}\\t(${a},${a + ms(PALABRA_NITIDA_S)},${visible}\\blur0)}${x}`
       return `{${oculta}\\t(${a},${a + ms(APARECER_S)},${visible})}${x}`
     })
     .join('')

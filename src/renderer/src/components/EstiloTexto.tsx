@@ -1,6 +1,121 @@
-import { cambiarTexto, LIMITE_TRAZO, type AlineacionTexto, type TextoTL, type Timeline } from '../../../shared/timeline'
+import {
+  cambiarTexto,
+  cambiarTextoEn,
+  CURVAS_CLAVE,
+  curvaClaveTexto,
+  LIMITE_TRAZO,
+  ponerClaveTexto,
+  quitarClaveTexto,
+  textoEn,
+  type AlineacionTexto,
+  type CurvaClave,
+  type ParametroClaveTexto,
+  type TextoTL,
+  type Timeline
+} from '../../../shared/timeline'
 import type { Historial } from '../hooks/timeline'
 import { reanclarTexto, rotuloEnMonitor } from '../rotulos'
+
+/**
+ * Los fotogramas clave de un texto: su sitio, su tamaño, su giro y su opacidad. ◆ pone (o quita) la clave en el cabezal
+ * con lo que vale ahí; luego, en otro momento, se cambia (arrastrándolo en el monitor o aquí) y se mueve solo.
+ */
+function ClavesDelTexto({
+  t,
+  ahora,
+  dt,
+  timeline,
+  historial,
+  onBuscar
+}: {
+  t: TextoTL
+  ahora: TextoTL
+  dt: number
+  timeline: Timeline
+  historial: Historial
+  onBuscar: (t: number) => void
+}) {
+  const filas: { nombre: string; params: ParametroClaveTexto[]; valor: () => Partial<Record<ParametroClaveTexto, number>> }[] = [
+    {
+      nombre: 'Sitio',
+      params: ['x', 'y'],
+      valor: () => {
+        // Donde se ve ahora (sin sitio propio, el centro de su caja en el monitor).
+        const d = typeof ahora.x === 'number' && typeof ahora.y === 'number' ? { x: ahora.x, y: ahora.y } : (reanclarTexto(ahora, ahora.alineacion, rotuloEnMonitor(t.id)) ?? { x: 0.5, y: 0.5 })
+        return { x: d.x, y: d.y }
+      }
+    },
+    { nombre: 'Tamaño', params: ['tamano'], valor: () => ({ tamano: ahora.tamano ?? 1 }) },
+    { nombre: 'Giro', params: ['giro'], valor: () => ({ giro: ahora.giro ?? 0 }) },
+    { nombre: 'Opacidad', params: ['opacidad'], valor: () => ({ opacidad: ahora.opacidad ?? 1 }) }
+  ]
+  const cerca = (f: number) => Math.abs(f - dt) < 0.034
+  return (
+    <>
+      <span className="ed-seccion">Fotogramas clave</span>
+      <p className="tl-dim">Toca ◆ para animarlo: pon el cabezal en otro momento del texto, cámbialo (en el monitor o aquí) y se mueve solo.</p>
+      {filas.map((fila) => {
+        const lista = t.claves?.[fila.params[0]] ?? []
+        const aqui = lista.find((x) => cerca(x.f))
+        const anterior = [...lista].reverse().find((x) => x.f < dt - 0.02)
+        const siguiente = lista.find((x) => x.f > dt + 0.02)
+        return (
+          <div key={fila.nombre} className="ed-fila-clave">
+            <span className="tl-ajuste-nombre">{fila.nombre}</span>
+            <span className="ed-claves">
+              {lista.length > 0 && (
+                <button className="ed-clave-ir" disabled={!anterior} title="Ir a la clave anterior" aria-label={`Clave anterior de ${fila.nombre}`} onClick={() => anterior && onBuscar(t.inicio + anterior.f)}>
+                  ‹
+                </button>
+              )}
+              <button
+                className={`ed-clave ${aqui ? 'is-on' : lista.length ? 'is-animado' : ''}`}
+                aria-pressed={Boolean(aqui)}
+                title={aqui ? `Quitar este fotograma clave de ${fila.nombre.toLowerCase()}` : `Poner un fotograma clave de ${fila.nombre.toLowerCase()} en el cabezal`}
+                aria-label={aqui ? `Quitar la clave de ${fila.nombre}` : `Poner una clave de ${fila.nombre}`}
+                onClick={() => {
+                  let nueva = timeline
+                  if (aqui) for (const p of fila.params) nueva = quitarClaveTexto(nueva, t.id, p, aqui.f)
+                  else {
+                    const v = fila.valor()
+                    for (const p of fila.params) nueva = ponerClaveTexto(nueva, t.id, p, dt, v[p] ?? 0)
+                  }
+                  historial.aplicar(nueva)
+                }}
+              >
+                ◆
+              </button>
+              {lista.length > 0 && (
+                <button className="ed-clave-ir" disabled={!siguiente} title="Ir a la clave siguiente" aria-label={`Clave siguiente de ${fila.nombre}`} onClick={() => siguiente && onBuscar(t.inicio + siguiente.f)}>
+                  ›
+                </button>
+              )}
+              {aqui && siguiente && (
+                <select
+                  className="ed-curva"
+                  value={aqui.curva ?? 'suave'}
+                  title={`Cómo va ${fila.nombre.toLowerCase()} de esta clave a la siguiente`}
+                  aria-label={`Curva de ${fila.nombre} hasta la clave siguiente`}
+                  onChange={(e) => {
+                    let nueva = timeline
+                    for (const p of fila.params) nueva = curvaClaveTexto(nueva, t.id, p, aqui.f, e.target.value as CurvaClave)
+                    historial.aplicar(nueva)
+                  }}
+                >
+                  {CURVAS_CLAVE.map((x) => (
+                    <option key={x.id} value={x.id} title={x.para}>
+                      {x.nombre}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </span>
+          </div>
+        )
+      })}
+    </>
+  )
+}
 
 /**
  * El estilo fino de un rótulo en el inspector: alineación, mayúsculas, espaciado, opacidad, giro y, sin caja, su
@@ -11,20 +126,30 @@ export function EstiloTexto({
   timeline,
   historial,
   deslizar,
-  empezarAjuste
+  empezarAjuste,
+  tiempo,
+  onBuscar
 }: {
   texto: TextoTL
   timeline: Timeline
   historial: Historial
   deslizar: (nueva: Timeline) => void
   empezarAjuste: () => void
+  /** El cabezal (segundo de la timeline): lo que tiene fotogramas clave se ve y se cambia ahí. */
+  tiempo: number
+  onBuscar: (t: number) => void
 }) {
+  const dt = Math.min(t.duracion, Math.max(0, tiempo - t.inicio))
+  /** El texto como está en el cabezal (con sus claves). */
+  const ahora = textoEn(t, dt)
   const cambiar = (cambio: Partial<TextoTL>) => cambiarTexto(timeline, t.id, cambio)
+  /** Lo que puede tener claves (sitio, tamaño, giro, opacidad) se cambia en la clave del cabezal si la tiene. */
+  const cambiarAhora = (cambio: Partial<TextoTL>) => cambiarTextoEn(timeline, t.id, cambio, dt)
   /** Alinear (o girar) necesita un punto de anclaje: el texto se queda donde se ve y pasa a tener sitio propio. */
   const alinear = (a: AlineacionTexto | undefined) => {
-    const donde = reanclarTexto(t, a, rotuloEnMonitor(t.id))
+    const donde = reanclarTexto({ ...ahora, alineacion: t.alineacion }, a, rotuloEnMonitor(t.id))
     if (!donde) return
-    historial.aplicar(cambiar({ ...donde, alineacion: a }))
+    historial.aplicar(cambiarTextoEn(timeline, t.id, { ...donde, alineacion: a }, dt))
   }
   const libre = typeof t.x === 'number'
   const deslizador = (nombre: string, valor: number, min: number, max: number, paso: number, formato: string, alCambiar: (v: number) => Timeline, titulo?: string) => (
@@ -59,12 +184,13 @@ export function EstiloTexto({
         <span>MAYÚSCULAS</span>
       </label>
       {deslizador('Espaciado', t.espaciado ?? 0, -0.1, 0.5, 0.01, `${Math.round((t.espaciado ?? 0) * 100)}`, (v) => cambiar({ espaciado: v }), 'El espacio entre letras')}
-      {deslizador('Opacidad', t.opacidad ?? 1, 0, 1, 0.01, `${Math.round((t.opacidad ?? 1) * 100)} %`, (v) => cambiar({ opacidad: v }))}
-      {deslizador('Giro', t.giro ?? 0, -180, 180, 1, `${Math.round(t.giro ?? 0)}°`, (v) => {
+      {deslizador('Opacidad', ahora.opacidad ?? 1, 0, 1, 0.01, `${Math.round((ahora.opacidad ?? 1) * 100)} %`, (v) => cambiarAhora({ opacidad: v }))}
+      {deslizador('Giro', ahora.giro ?? 0, -180, 180, 1, `${Math.round(ahora.giro ?? 0)}°`, (v) => {
         // Sin sitio propio, primero lo toma (donde se ve): gira sobre él.
-        const donde = libre ? {} : (reanclarTexto(t, undefined, rotuloEnMonitor(t.id)) ?? {})
-        return cambiar({ ...donde, giro: v })
+        const donde = libre ? {} : (reanclarTexto(ahora, undefined, rotuloEnMonitor(t.id)) ?? {})
+        return cambiarAhora({ ...donde, giro: v })
       }, 'También se gira arrastrando el tirador redondo de arriba en el monitor')}
+      <ClavesDelTexto t={t} ahora={ahora} dt={dt} timeline={timeline} historial={historial} onBuscar={onBuscar} />
       {t.sinCaja && (
         <>
           <span className="ed-seccion">Contorno y sombra</span>

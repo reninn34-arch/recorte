@@ -139,6 +139,12 @@ import { Medidor, Mezclador, useNiveles } from './Mezclador'
 import { useMenuContextual, type OpcionMenu } from './MenuContextual'
 import { InspectorVoz, type GenerarVoz, type GrabarVoz } from './InspectorVoz'
 import { EstiloTexto } from './EstiloTexto'
+import { alinearPiezas, cajaDePieza, moverPiezas, type Alineacion, type Pieza } from '../grupo'
+import type { Caja } from '../guias'
+import { duplicarCapa, duplicarTexto, estiloDeCapa, estiloDeTexto, ordenarCapa, pegarEstiloCapa, pegarEstiloTexto, type EstiloCapa, type TextoTL } from '../../../shared/timeline'
+import { cambiarTextoEn, textoEn } from '../../../shared/timeline'
+import { LIMITE_BORDE_CAPA, CURVAS_CLAVE, curvaClaveCapa, type CurvaClave } from '../../../shared/timeline'
+import { DURACIONES_ANIMACION, durEntradaCapa, durSalidaCapa, durSalidaTexto, porPalabras, SALIDAS_TEXTO, type SalidaCapa, type SalidaTexto } from '../../../shared/timeline'
 import { reanclarTexto, rotuloEnMonitor } from '../rotulos'
 
 /**
@@ -223,6 +229,8 @@ export function TimelineEditor({
   historial,
   elegido,
   onElegir,
+  varios: variosFuera,
+  onVarios,
   exportar,
   importarMusica,
   generarVoz,
@@ -337,6 +345,9 @@ export function TimelineEditor({
   historial: Historial
   elegido: Elegido
   onElegir: (e: Elegido) => void
+  /** Lo elegido de más (Ctrl + clic), compartido con el monitor; sin él, la línea de tiempo lleva el suyo. */
+  varios?: NonNullable<Elegido>[]
+  onVarios?: React.Dispatch<React.SetStateAction<NonNullable<Elegido>[]>>
   exportar: ControlExportar
   /** Abre el selector de audio; devuelve la pista copiada al proyecto o null. */
   importarMusica: () => Promise<MusicaTL | null>
@@ -359,7 +370,9 @@ export function TimelineEditor({
   ponerSonido?: (incluido?: string) => Promise<{ archivo: string; nombre: string; duracion: number } | null>
 }) {
   // Selección múltiple: lo que se suma con Ctrl o Mayús + clic (además de lo elegido). Sirve para borrar varios de una vez.
-  const [varios, setVarios] = useState<NonNullable<Elegido>[]>([])
+  const [variosPropios, setVariosPropios] = useState<NonNullable<Elegido>[]>([])
+  const varios = variosFuera ?? variosPropios
+  const setVarios = onVarios ?? setVariosPropios
   const enVarios = (id: string) => varios.some((v) => v.id === id)
   /** Con Ctrl o Mayús, el clic suma o quita de la selección en vez de elegir. Devuelve si lo hizo. */
   function sumar(e: React.PointerEvent, cual: NonNullable<Elegido>): boolean {
@@ -505,6 +518,8 @@ export function TimelineEditor({
 
   const clipElegido = elegido?.tipo === 'clip' ? lista.find((t) => t.clip.id === elegido.id) : undefined
   const textoElegido = elegido?.tipo === 'texto' ? tl.textos.find((x) => x.id === elegido.id) : undefined
+  /** El texto elegido como está en el cabezal (con sus fotogramas clave). */
+  const textoAhora = textoElegido ? textoEn(textoElegido, Math.min(textoElegido.duracion, Math.max(0, tiempo - textoElegido.inicio))) : undefined
   const musicaElegida = elegido?.tipo === 'musica' ? tl.musica : undefined
   const fraseElegida = elegido?.tipo === 'voz' ? tl.voces?.find((v) => v.id === elegido.id) : undefined
   const capaElegida = elegido?.tipo === 'capa' ? tl.capas?.find((c) => c.id === elegido.id) : undefined
@@ -724,7 +739,8 @@ export function TimelineEditor({
     onElegir({ tipo: 'texto', id })
     const base = timeline
     const x = base.textos.find((t) => t.id === id)
-    if (!x) return
+    // Bloqueado: se elige, pero no se mueve.
+    if (!x || x.bloqueado) return
     const puntos = puntosIman(base, id)
     const fin = x.inicio + x.duracion
     arrastrar(
@@ -765,7 +781,7 @@ export function TimelineEditor({
     onElegir({ tipo: 'capa', id })
     const base = timeline
     const c = base.capas?.find((x) => x.id === id)
-    if (!c) return
+    if (!c || c.bloqueado) return
     const puntos = puntosIman(base)
     const fin = c.inicio + c.duracion
     arrastrar(e, (dx, ev) => {
@@ -920,6 +936,7 @@ export function TimelineEditor({
       return
     }
     if (!elegido) return
+    if ((textoElegido?.bloqueado && elegido.tipo === 'texto') || (capaElegida?.bloqueado && elegido.tipo === 'capa')) return
     if (elegido.tipo === 'clip') historial.aplicar(borrarClip(timeline, elegido.id))
     else if (elegido.tipo === 'musica') historial.aplicar(ponerMusica(timeline, undefined))
     else if (elegido.tipo === 'voz') historial.aplicar(borrarVoz(timeline, elegido.id))
@@ -987,6 +1004,23 @@ export function TimelineEditor({
             ›
           </button>
         )}
+        {/* En una clave con otra después: cómo va hasta ella (la curva de suavizado). */}
+        {aqui && siguiente && (
+          <select
+            className="ed-curva"
+            value={aqui.curva ?? 'suave'}
+            title={`Cómo va ${nombre.toLowerCase()} de esta clave a la siguiente`}
+            aria-label={`Curva de ${nombre} hasta la clave siguiente`}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => historial.aplicar(curvaClaveCapa(timeline, c.id, clave, aqui.f, e.target.value as CurvaClave, medidas))}
+          >
+            {CURVAS_CLAVE.map((x) => (
+              <option key={x.id} value={x.id} title={x.para}>
+                {x.nombre}
+              </option>
+            ))}
+          </select>
+        )}
       </span>
     )
   }
@@ -1012,6 +1046,44 @@ export function TimelineEditor({
 
   function accionDuplicar() {
     if (elegido?.tipo === 'clip') historial.aplicar(duplicarClip(timeline, elegido.id))
+    else if (elegido?.tipo === 'capa' || elegido?.tipo === 'texto') {
+      const r = elegido.tipo === 'capa' ? duplicarCapa(timeline, elegido.id, medidas) : duplicarTexto(timeline, elegido.id)
+      if (r.timeline === timeline) return
+      historial.aplicar(r.timeline)
+      onElegir({ tipo: elegido.tipo, id: r.id })
+    }
+  }
+
+  // ===== Copiar y pegar el estilo (como «Pegar atributos» de Premiere): de un texto a otro, de una capa a otra =====
+  const estiloCopiado = useRef<{ tipo: 'texto'; estilo: Partial<TextoTL> } | { tipo: 'capa'; estilo: EstiloCapa } | null>(null)
+  const [hayEstilo, setHayEstilo] = useState<'texto' | 'capa' | null>(null)
+  function copiarEstilo(): boolean {
+    if (textoElegido) estiloCopiado.current = { tipo: 'texto', estilo: estiloDeTexto(textoElegido) }
+    else if (capaElegida) estiloCopiado.current = { tipo: 'capa', estilo: estiloDeCapa(capaElegida) }
+    else return false
+    setHayEstilo(estiloCopiado.current.tipo)
+    return true
+  }
+  function pegarEstilo(): boolean {
+    const e = estiloCopiado.current
+    if (!e) return false
+    // A todos los elegidos de su tipo (Ctrl + clic), o al elegido.
+    const ids = (varios.length > 1 ? varios.filter((v) => v.tipo === e.tipo).map((v) => v.id) : elegido?.tipo === e.tipo ? [elegido.id] : [])
+    let nueva = timeline
+    for (const id of ids) {
+      const x = e.tipo === 'texto' ? nueva.textos.find((t) => t.id === id) : nueva.capas?.find((c) => c.id === id)
+      if (!x || x.bloqueado) continue
+      nueva = e.tipo === 'texto' ? pegarEstiloTexto(nueva, id, e.estilo) : pegarEstiloCapa(nueva, id, e.estilo, medidas)
+    }
+    if (nueva === timeline) return false
+    historial.aplicar(nueva)
+    return true
+  }
+  /** Ocultar o bloquear una capa o un texto (no la pista entera). */
+  function alternarEn(tipo: 'texto' | 'capa', id: string, campo: 'oculto' | 'bloqueado') {
+    const x = tipo === 'texto' ? timeline.textos.find((t) => t.id === id) : timeline.capas?.find((c) => c.id === id)
+    if (!x) return
+    historial.aplicar(tipo === 'texto' ? cambiarTexto(timeline, id, { [campo]: !x[campo] }) : cambiarCapa(timeline, id, { [campo]: !x[campo] }, medidas))
   }
 
   // ===== Copiar, cortar y pegar (lo elegido; se pega en el cabezal) =====
@@ -1113,8 +1185,8 @@ export function TimelineEditor({
   const [menuCtx, abrirMenu] = useMenuContextual()
   const [escuchandoVoz, setEscuchandoVoz] = useState(false)
   /** Las acciones de este momento: el menú las llama al hacer clic, cuando lo elegido ya cambió. */
-  const acciones = useRef({ accionCopiar, accionPegar, accionBorrar, accionDuplicar })
-  acciones.current = { accionCopiar, accionPegar, accionBorrar, accionDuplicar }
+  const acciones = useRef({ accionCopiar, accionPegar, accionBorrar, accionDuplicar, copiarEstilo, pegarEstilo })
+  acciones.current = { accionCopiar, accionPegar, accionBorrar, accionDuplicar, copiarEstilo, pegarEstilo }
   const copiarCortar: OpcionMenu[] = [
     { nombre: 'Copiar', atajo: 'Ctrl+C', accion: () => acciones.current.accionCopiar() },
     { nombre: 'Cortar', atajo: 'Ctrl+X', accion: () => acciones.current.accionCopiar() && acciones.current.accionBorrar() }
@@ -1198,6 +1270,31 @@ export function TimelineEditor({
         ? [{ nombre: 'Pegar en el cabezal', atajo: 'Ctrl+V', desactivada: !portapapeles.current, accion: () => acciones.current.accionPegar() }]
         : []),
       ...(cual.tipo === 'capa' ? [{ nombre: 'Ir a su principio', accion: () => onBuscar(tl.capas?.find((x) => x.id === cual.id)?.inicio ?? tiempo) }] : []),
+      ...(() => {
+        // Capas y textos: duplicar, el estilo, el orden (capas), ocultar y bloquear.
+        if (cual.tipo !== 'capa' && cual.tipo !== 'texto') return []
+        const tipo = cual.tipo
+        const x = tipo === 'capa' ? tl.capas?.find((c) => c.id === cual.id) : tl.textos.find((t) => t.id === cual.id)
+        if (!x) return []
+        return [
+          { tipo: 'separador' as const },
+          { nombre: 'Duplicar', atajo: 'Ctrl+D', desactivada: x.bloqueado, accion: () => acciones.current.accionDuplicar() },
+          { nombre: 'Copiar el estilo', atajo: 'Ctrl+Alt+C', accion: () => acciones.current.copiarEstilo() },
+          { nombre: 'Pegar el estilo', atajo: 'Ctrl+Alt+V', desactivada: hayEstilo !== tipo || x.bloqueado, accion: () => acciones.current.pegarEstilo() },
+          ...(tipo === 'capa'
+            ? [
+                { tipo: 'separador' as const },
+                { nombre: 'Traer al frente', accion: () => historial.aplicar(ordenarCapa(timeline, x.id, 'frente', medidas)) },
+                { nombre: 'Traer adelante', accion: () => historial.aplicar(ordenarCapa(timeline, x.id, 'subir', medidas)) },
+                { nombre: 'Enviar atrás', accion: () => historial.aplicar(ordenarCapa(timeline, x.id, 'bajar', medidas)) },
+                { nombre: 'Enviar al fondo', accion: () => historial.aplicar(ordenarCapa(timeline, x.id, 'atras', medidas)) }
+              ]
+            : []),
+          { tipo: 'separador' as const },
+          { nombre: x.oculto ? 'Mostrar' : 'Ocultar', accion: () => alternarEn(tipo, x.id, 'oculto') },
+          { nombre: x.bloqueado ? 'Desbloquear' : 'Bloquear', accion: () => alternarEn(tipo, x.id, 'bloqueado') }
+        ]
+      })(),
       ...(() => {
         // El sonido suelto (un efecto o el audio separado de un clip): dividir, volumen y volver a unirlo.
         if (cual.tipo !== 'sonido') return []
@@ -1298,9 +1395,10 @@ export function TimelineEditor({
         }
       }
     } else if (textoElegido) {
-      const base = reanclarTexto(textoElegido, textoElegido.alineacion, rotuloEnMonitor(textoElegido.id))
+      const dtT = Math.min(textoElegido.duracion, Math.max(0, tiempo - textoElegido.inicio))
+      const base = reanclarTexto(textoEn(textoElegido, dtT), textoElegido.alineacion, rotuloEnMonitor(textoElegido.id))
       if (!base) return
-      nueva = cambiarTexto(timeline, textoElegido.id, { x: base.x + dx, y: base.y + dy })
+      nueva = cambiarTextoEn(timeline, textoElegido.id, { x: base.x + dx, y: base.y + dy }, dtT)
     }
     if (nueva === timeline) return
     const seguido = performance.now() - ultimoFino.current < 700
@@ -1323,7 +1421,11 @@ export function TimelineEditor({
       setVarios(tl.clips.map((c) => ({ tipo: 'clip' as const, id: c.id })))
       if (!elegido || elegido.tipo !== 'clip') onElegir({ tipo: 'clip', id: tl.clips[0].id })
     }
-    else if (ctrl && tecla === 'c') {
+    else if (ctrl && e.altKey && tecla === 'c') {
+      if (!copiarEstilo()) return
+    } else if (ctrl && e.altKey && tecla === 'v') {
+      if (!pegarEstilo()) return
+    } else if (ctrl && tecla === 'c') {
       if (!accionCopiar()) return
     } else if (ctrl && tecla === 'x') {
       if (!accionCopiar()) return
@@ -1359,7 +1461,9 @@ export function TimelineEditor({
     else if (tecla === 'k') reproduciendo && onAlternar()
     else if (tecla === 'l') (reproduciendo ? onBuscar(Math.min(total, tiempo + 5)) : onAlternar())
     else if (tecla === 'j') onBuscar(Math.max(0, tiempo - 5))
-    else if (e.altKey && e.key.startsWith('Arrow') && (capaElegida || textoElegido)) moverFino(e.key, e.shiftKey)
+    else if (e.altKey && e.key.startsWith('Arrow') && (capaElegida || textoElegido)) {
+      if (!(capaElegida ?? textoElegido)?.bloqueado) moverFino(e.key, e.shiftKey)
+    }
     else if (e.key === 'ArrowUp') saltar(cortes, false)
     else if (e.key === 'ArrowDown') saltar(cortes, true)
     else if (e.key === '+' || e.key === '=') setZoom((z) => Math.min(zoomMax, z * 1.25))
@@ -2085,7 +2189,7 @@ export function TimelineEditor({
                 return (
                   <div
                     key={c.id}
-                    className={`tl-rotulo tl-capa ${(elegido?.tipo === 'capa' && elegido.id === c.id) || enVarios(c.id) ? 'is-elegido' : ''}`}
+                    className={`tl-rotulo tl-capa ${(elegido?.tipo === 'capa' && elegido.id === c.id) || enVarios(c.id) ? 'is-elegido' : ''} ${c.oculto ? 'is-oculto' : ''} ${c.bloqueado ? 'is-bloqueado' : ''}`}
                     style={{
                       left: c.inicio * pps,
                       width: Math.max(4, anchoCapa),
@@ -2097,7 +2201,7 @@ export function TimelineEditor({
                     title={`${nombre} · ${c.duracion.toFixed(1)} s`}
                   >
                     <span className="tl-asa izquierda" onPointerDown={(e) => arrastrarCapa(e, c.id, 'inicio')} />
-                    {anchoCapa > 30 && <span className="tl-clip-texto">{nombre}</span>}
+                    {anchoCapa > 30 && <span className="tl-clip-texto">{c.bloqueado ? '🔒 ' : ''}{c.oculto ? '(oculta) ' : ''}{nombre}</span>}
                     {c.claves &&
                       [...new Set(Object.values(c.claves).flatMap((l) => (l ?? []).map((x) => x.f)))].map((f) => (
                         <span key={f} className="tl-clave" style={{ left: f * pps }} />
@@ -2164,7 +2268,7 @@ export function TimelineEditor({
               {tl.textos.map((x) => (
                 <div
                   key={x.id}
-                  className={`tl-rotulo ${elegido?.id === x.id || enVarios(x.id) ? 'is-elegido' : ''}`}
+                  className={`tl-rotulo ${elegido?.id === x.id || enVarios(x.id) ? 'is-elegido' : ''} ${x.oculto ? 'is-oculto' : ''} ${x.bloqueado ? 'is-bloqueado' : ''}`}
                   style={{ left: x.inicio * pps, width: Math.max(4, x.duracion * pps) }}
                   onContextMenu={(e) => menuDe(e, { tipo: 'texto', id: x.id })}
                     onPointerDown={(e) => sumar(e, { tipo: 'texto', id: x.id }) || arrastrarTexto(e, x.id, 'mover')}
@@ -2172,7 +2276,11 @@ export function TimelineEditor({
                   title={x.texto.replace(/\*([^*]+)\*/g, '$1')}
                 >
                   <span className="tl-asa izquierda" onPointerDown={(e) => arrastrarTexto(e, x.id, 'inicio')} />
-                  <span className="tl-clip-texto">{x.texto ? conResaltes(x.texto) : 'Texto vacío'}</span>
+                  <span className="tl-clip-texto">{x.bloqueado ? '🔒 ' : ''}{x.oculto ? '(oculto) ' : ''}{x.texto ? conResaltes(x.texto) : 'Texto vacío'}</span>
+                  {x.claves &&
+                    [...new Set(Object.values(x.claves).flatMap((l) => (l ?? []).map((k) => k.f)))]
+                      .filter((f) => f >= 0 && f <= x.duracion)
+                      .map((f) => <span key={f} className="tl-clave" style={{ left: f * pps }} />)}
                   <span className="tl-asa derecha" onPointerDown={(e) => arrastrarTexto(e, x.id, 'fin')} />
                 </div>
               ))}
@@ -2427,11 +2535,22 @@ export function TimelineEditor({
         {varios.length > 1 ? (
           <div className="ed-vacio">
             <p>
-              Tienes {varios.length} elementos elegidos. Suma o quita con Ctrl + clic; un clic normal vuelve a elegir uno solo.
+              Tienes {varios.length} elementos elegidos. Suma o quita con Ctrl + clic (aquí o en el monitor); un clic normal vuelve a elegir uno solo. Arrastra uno en el monitor y se mueven todos.
             </p>
             <button className="btn small" onClick={accionBorrar}>
               <Icon name="trash" size={14} /> Borrar los {varios.length}
             </button>
+            {varios.some((v) => v.tipo === 'capa' || v.tipo === 'texto') && (
+              <PanelAlinear
+                onAlinear={(como) => {
+                  const piezas = varios.filter((v): v is Pieza => v.tipo === 'capa' || v.tipo === 'texto')
+                  const cajas = piezas.map((p) => ({ pieza: p, caja: cajaDePieza(p) })).filter((x): x is { pieza: Pieza; caja: Caja } => x.caja !== null)
+                  const nueva = moverPiezas(timeline, alinearPiezas(cajas, como), tiempo, medidas)
+                  if (nueva !== timeline) historial.aplicar(nueva)
+                }}
+                varias
+              />
+            )}
             {onAnidar && varios.every((v) => v.tipo === 'clip') && clipsSeguidos(timeline, varios.map((v) => v.id)) && (
               <button
                 className="btn small"
@@ -3164,6 +3283,35 @@ export function TimelineEditor({
               <option value="abajo">Sube desde abajo</option>
               <option value="corte">Aparece de golpe</option>
             </select></label>
+            {capaElegida.entrada && (
+              <DuracionAnimacion
+                nombre="Dura la entrada"
+                valor={durEntradaCapa(capaElegida)}
+                onCambio={(v) => deslizar(cambiarCapa(timeline, capaElegida.id, { durEntrada: v }, medidas))}
+                empezar={empezarAjuste}
+              />
+            )}
+            <label className="ed-campo"><span>Salida</span><select
+              value={capaElegida.salida ?? 'corte'}
+              title="Cómo se va al terminar"
+              onChange={(e) => historial.aplicar(cambiarCapa(timeline, capaElegida.id, { salida: e.target.value === 'corte' ? undefined : (e.target.value as SalidaCapa) }, medidas))}
+            >
+              <option value="corte">Se va de golpe</option>
+              <option value="fundido">Se funde</option>
+              <option value="encoger">Se encoge</option>
+              <option value="izquierda">Sale por la izquierda</option>
+              <option value="derecha">Sale por la derecha</option>
+              <option value="arriba">Sale por arriba</option>
+              <option value="abajo">Sale por abajo</option>
+            </select></label>
+            {capaElegida.salida && (
+              <DuracionAnimacion
+                nombre="Dura la salida"
+                valor={durSalidaCapa(capaElegida)}
+                onCambio={(v) => deslizar(cambiarCapa(timeline, capaElegida.id, { durSalida: v }, medidas))}
+                empezar={empezarAjuste}
+              />
+            )}
             <label className="ed-campo">
               <span>Fusión</span>
               <select
@@ -3375,6 +3523,61 @@ export function TimelineEditor({
                 </button>
               )}
             </div>
+            <span className="ed-seccion">Esquinas, borde y sombra</span>
+            <label className="tl-ajuste en-linea" title="0: rectas · 1: redonda del todo (un círculo o una píldora)">
+              <span>
+                Esquinas <b>{capaElegida.redondeo ? `${Math.round(capaElegida.redondeo * 100)} %` : 'rectas'}</b>
+              </span>
+              <input type="range" min={0} max={1} step={0.01} value={capaElegida.redondeo ?? 0} onPointerDown={empezarAjuste} onFocus={empezarAjuste} onChange={(e) => deslizar(cambiarCapa(timeline, capaElegida.id, { redondeo: Number(e.target.value) }, medidas))} />
+            </label>
+            <div className="ed-fila-color">
+              <label className="tl-ajuste en-linea" title="Un borde por dentro de lo que se ve">
+                <span>
+                  Borde <b>{capaElegida.borde ? `${Math.round(capaElegida.borde * 1000) / 10} %` : 'no'}</b>
+                </span>
+                <input type="range" min={0} max={LIMITE_BORDE_CAPA} step={0.002} value={capaElegida.borde ?? 0} onPointerDown={empezarAjuste} onFocus={empezarAjuste} onChange={(e) => deslizar(cambiarCapa(timeline, capaElegida.id, { borde: Number(e.target.value) }, medidas))} />
+              </label>
+              <input
+                type="color"
+                className="tl-color"
+                title="Color del borde"
+                value={capaElegida.colorBorde ?? '#ffffff'}
+                onPointerDown={empezarAjuste}
+                onChange={(e) => deslizar(cambiarCapa(timeline, capaElegida.id, { colorBorde: e.target.value, ...(capaElegida.borde ? {} : { borde: 0.02 }) }, medidas))}
+              />
+            </div>
+            <div className="ed-fila-color">
+              <label className="tl-ajuste en-linea" title="Una sombra debajo, abajo a la derecha">
+                <span>
+                  Sombra <b>{capaElegida.sombraCapa ? `${Math.round(capaElegida.sombraCapa * 100)} %` : 'no'}</b>
+                </span>
+                <input type="range" min={0} max={1} step={0.01} value={capaElegida.sombraCapa ?? 0} onPointerDown={empezarAjuste} onFocus={empezarAjuste} onChange={(e) => deslizar(cambiarCapa(timeline, capaElegida.id, { sombraCapa: Number(e.target.value) }, medidas))} />
+              </label>
+              <input
+                type="color"
+                className="tl-color"
+                title="Color de la sombra"
+                value={capaElegida.colorSombraCapa ?? '#000000'}
+                onPointerDown={empezarAjuste}
+                onChange={(e) => deslizar(cambiarCapa(timeline, capaElegida.id, { colorSombraCapa: e.target.value, ...(capaElegida.sombraCapa ? {} : { sombraCapa: 0.5 }) }, medidas))}
+              />
+            </div>
+            <PanelAlinear
+              onAlinear={(como) => {
+                const caja = cajaDePieza({ tipo: 'capa', id: capaElegida.id })
+                if (caja) historial.aplicar(moverPiezas(timeline, alinearPiezas([{ pieza: { tipo: 'capa', id: capaElegida.id }, caja }], como), tiempo, medidas))
+              }}
+            />
+            <PanelOrden
+              tipo="capa"
+              x={capaElegida}
+              hayEstilo={hayEstilo === 'capa'}
+              onOrden={(como) => historial.aplicar(ordenarCapa(timeline, capaElegida.id, como, medidas))}
+              onAlternar={(campo) => alternarEn('capa', capaElegida.id, campo)}
+              onDuplicar={accionDuplicar}
+              onCopiarEstilo={copiarEstilo}
+              onPegarEstilo={pegarEstilo}
+            />
             <span className="tl-dim">En el monitor: las esquinas cambian el tamaño, el tirador redondo la gira y los de los lados la recortan. Alt + flechas la mueven un poco.</span>
             <label
               className="tl-ajuste en-linea"
@@ -3603,17 +3806,17 @@ export function TimelineEditor({
             </select></label>
             <label className="tl-ajuste en-linea">
               <span>
-                Tamaño <b>{Math.round((textoElegido.tamano ?? 1) * 100)} %</b>
+                Tamaño <b>{Math.round((textoAhora?.tamano ?? 1) * 100)} %</b>
               </span>
               <input
                 type="range"
                 min={LIMITES_TAMANO[0]}
                 max={LIMITES_TAMANO[1]}
                 step={0.05}
-                value={textoElegido.tamano ?? 1}
+                value={textoAhora?.tamano ?? 1}
                 onPointerDown={empezarAjuste}
                 onFocus={empezarAjuste}
-                onChange={(e) => deslizar(cambiarTexto(timeline, textoElegido.id, { tamano: Number(e.target.value) }))}
+                onChange={(e) => deslizar(cambiarTextoEn(timeline, textoElegido.id, { tamano: Number(e.target.value) }, Math.max(0, tiempo - textoElegido.inicio)))}
               />
             </label>
             <label className="ed-campo"><span>Letra</span><select
@@ -3673,7 +3876,27 @@ export function TimelineEditor({
             ) : (
               <span className="tl-dim">Para resaltar una palabra en color, escríbela entre *asteriscos*.</span>
             )}
-            {(textoElegido.animacion === 'pintar' || textoElegido.animacion === 'palabras') && (
+            <label className="ed-campo"><span>Salida</span><select
+              value={textoElegido.salida ?? 'golpe'}
+              title="Cómo se va al terminar (se ve al reproducir)"
+              onChange={(e) => historial.aplicar(cambiarTexto(timeline, textoElegido.id, { salida: e.target.value === 'golpe' ? undefined : (e.target.value as SalidaTexto) }))}
+            >
+              <option value="golpe">Se va de golpe</option>
+              {SALIDAS_TEXTO.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.nombre}
+                </option>
+              ))}
+            </select></label>
+            {textoElegido.salida && (
+              <DuracionAnimacion
+                nombre="Dura la salida"
+                valor={durSalidaTexto(textoElegido)}
+                onCambio={(v) => deslizar(cambiarTexto(timeline, textoElegido.id, { durSalida: v }))}
+                empezar={empezarAjuste}
+              />
+            )}
+            {(textoElegido.animacion === 'pintar' || porPalabras(textoElegido.animacion)) && (
               <span className="tl-dim" title="Los subtítulos hechos desde la voz saben cuándo se dice cada palabra">
                 {textoElegido.tiempos ? 'Al ritmo de la voz' : 'Repartidas en lo que dura (hazlo desde la voz para que vaya con ella)'}
               </span>
@@ -3715,7 +3938,22 @@ export function TimelineEditor({
                 onChange={(e) => deslizar(cambiarTexto(timeline, textoElegido.id, { caja: e.target.value }))}
               />
             )}
-            <EstiloTexto texto={textoElegido} timeline={timeline} historial={historial} deslizar={deslizar} empezarAjuste={empezarAjuste} />
+            <EstiloTexto texto={textoElegido} timeline={timeline} historial={historial} deslizar={deslizar} empezarAjuste={empezarAjuste} tiempo={tiempo} onBuscar={onBuscar} />
+            <PanelAlinear
+              onAlinear={(como) => {
+                const caja = cajaDePieza({ tipo: 'texto', id: textoElegido.id })
+                if (caja) historial.aplicar(moverPiezas(timeline, alinearPiezas([{ pieza: { tipo: 'texto', id: textoElegido.id }, caja }], como), tiempo, medidas))
+              }}
+            />
+            <PanelOrden
+              tipo="texto"
+              x={textoElegido}
+              hayEstilo={hayEstilo === 'texto'}
+              onAlternar={(campo) => alternarEn('texto', textoElegido.id, campo)}
+              onDuplicar={accionDuplicar}
+              onCopiarEstilo={copiarEstilo}
+              onPegarEstilo={pegarEstilo}
+            />
             <span className="tl-dim">
               {tc(textoElegido.inicio)} · {textoElegido.duracion.toFixed(1)} s
             </span>
@@ -3781,6 +4019,91 @@ export function TimelineEditor({
 }
 
 /** Si un recorrido es el mismo que otro (para reconocer el movimiento elegido en el menú). */
+/** Alinear con el cuadro (una sola) o entre ellas (varias), y repartirlas. */
+function PanelAlinear({ onAlinear, varias = false }: { onAlinear: (como: Alineacion) => void; varias?: boolean }) {
+  const boton = (como: Alineacion, nombre: string, titulo: string) => (
+    <button className="chip" title={titulo} onClick={() => onAlinear(como)}>
+      {nombre}
+    </button>
+  )
+  const con = varias ? 'entre ellas' : 'con el cuadro'
+  return (
+    <div className="ed-campo" role="group" aria-label="Alinear">
+      <span>Alinear {con}</span>
+      <div className="ed-opciones">
+        {boton('izquierda', '⇤ Izq.', `A la izquierda, ${con}`)}
+        {boton('centro', '↔ Centro', `Al centro, ${con}`)}
+        {boton('derecha', 'Der. ⇥', `A la derecha, ${con}`)}
+        {boton('arriba', '⤒ Arriba', `Arriba, ${con}`)}
+        {boton('medio', '↕ Medio', `Al medio, ${con}`)}
+        {boton('abajo', 'Abajo ⤓', `Abajo, ${con}`)}
+        {varias && boton('repartir-h', 'Repartir ↔', 'El mismo espacio entre cada una, de izquierda a derecha (tres o más)')}
+        {varias && boton('repartir-v', 'Repartir ↕', 'El mismo espacio entre cada una, de arriba abajo (tres o más)')}
+      </div>
+    </div>
+  )
+}
+
+/** Orden (capas), ocultar, bloquear, duplicar y el estilo de una capa o un texto. */
+function PanelOrden({
+  tipo,
+  x,
+  hayEstilo,
+  onOrden,
+  onAlternar,
+  onDuplicar,
+  onCopiarEstilo,
+  onPegarEstilo
+}: {
+  tipo: 'capa' | 'texto'
+  x: { oculto?: boolean; bloqueado?: boolean }
+  hayEstilo: boolean
+  onOrden?: (como: 'frente' | 'atras' | 'subir' | 'bajar') => void
+  onAlternar: (campo: 'oculto' | 'bloqueado') => void
+  onDuplicar: () => void
+  onCopiarEstilo: () => void
+  onPegarEstilo: () => void
+}) {
+  return (
+    <>
+      {onOrden && (
+        <div className="ed-campo" role="group" aria-label="Orden">
+          <span>Orden en su pista</span>
+          <div className="ed-opciones">
+            <button className="chip" title="Encima de todas las de su pista" onClick={() => onOrden('frente')}>Al frente</button>
+            <button className="chip" title="Encima de la siguiente que se cruza con ella" onClick={() => onOrden('subir')}>Adelante</button>
+            <button className="chip" title="Debajo de la anterior que se cruza con ella" onClick={() => onOrden('bajar')}>Atrás</button>
+            <button className="chip" title="Debajo de todas las de su pista" onClick={() => onOrden('atras')}>Al fondo</button>
+          </div>
+        </div>
+      )}
+      <div className="ed-opciones" role="group" aria-label={tipo === 'capa' ? 'La capa' : 'El texto'}>
+        <button className={`chip ${x.oculto ? 'is-on' : ''}`} aria-pressed={Boolean(x.oculto)} title="No se ve en el monitor ni en el video, sin borrarlo" onClick={() => onAlternar('oculto')}>
+          {x.oculto ? 'Mostrar' : 'Ocultar'}
+        </button>
+        <button className={`chip ${x.bloqueado ? 'is-on' : ''}`} aria-pressed={Boolean(x.bloqueado)} title="Que no se mueva ni se cambie sin querer" onClick={() => onAlternar('bloqueado')}>
+          {x.bloqueado ? 'Desbloquear' : 'Bloquear'}
+        </button>
+        <button className="chip" title="Ctrl+D: la copia va justo después" disabled={x.bloqueado} onClick={onDuplicar}>Duplicar</button>
+        <button className="chip" title={`Ctrl+Alt+C: copia el estilo de ${tipo === 'capa' ? 'esta capa' : 'este texto'}`} onClick={onCopiarEstilo}>Copiar estilo</button>
+        <button className="chip" title={`Ctrl+Alt+V: le pone el estilo copiado (a varios con Ctrl + clic)`} disabled={!hayEstilo || x.bloqueado} onClick={onPegarEstilo}>Pegar estilo</button>
+      </div>
+    </>
+  )
+}
+
+/** Lo que dura una entrada o una salida, de 0,1 a 2 s. */
+function DuracionAnimacion({ nombre, valor, onCambio, empezar }: { nombre: string; valor: number; onCambio: (v: number) => void; empezar: () => void }) {
+  return (
+    <label className="tl-ajuste en-linea">
+      <span>
+        {nombre} <b>{valor.toFixed(2).replace('.', ',')} s</b>
+      </span>
+      <input type="range" min={DURACIONES_ANIMACION[0]} max={DURACIONES_ANIMACION[1]} step={0.05} value={valor} onPointerDown={empezar} onFocus={empezar} onChange={(e) => onCambio(Number(e.target.value))} />
+    </label>
+  )
+}
+
 function sinCambios(a: FinCapa, b: FinCapa): boolean {
   return Math.abs(a.x - b.x) < 0.002 && Math.abs(a.y - b.y) < 0.002 && Math.abs(a.ancho - b.ancho) < 0.002 && Math.abs(a.giro - b.giro) < 0.1
 }
