@@ -40,6 +40,33 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.3.0',
+    fecha: '2026-11-22',
+    resumen: 'El editor gana las herramientas de capas y textos: estilo completo de la letra, tiradores para agrandar, girar y recortar, y guías con zona segura.',
+    novedades: [
+      {
+        icono: 'type',
+        titulo: 'Textos con todo su estilo',
+        texto: 'Contorno y sombra con su color, alinear a la izquierda o a la derecha, espaciado entre letras, MAYÚSCULAS, opacidad y giro. Lo que ves en el editor sale igual en el video.'
+      },
+      {
+        icono: 'layers',
+        titulo: 'Agranda, gira y recorta en el monitor',
+        texto: 'Elige una capa: las esquinas cambian su tamaño, el tirador redondo la gira (con Mayús, de 15 en 15°) y los de los lados la recortan. También se voltea. A un texto lo agrandas y lo giras igual. Alt + flechas lo mueve un poco.'
+      },
+      {
+        icono: 'zonaSegura',
+        titulo: 'Guías y zona segura',
+        texto: 'Con el botón del monitor ves la zona segura (lo que siempre se ve y dónde van los textos). Al arrastrar, todo se pega a los bordes, al centro, a los tercios y a las otras capas. Alt lo suelta.'
+      },
+      {
+        icono: 'download',
+        titulo: 'Python, listo de una vez',
+        texto: 'Al bajar Python desde Ajustes se instalan también sus paquetes: separar a la persona, animar una imagen y transcribir funcionan sin otro paso.'
+      }
+    ]
+  },
+  {
     version: '0.2.2',
     fecha: '2026-11-21',
     resumen: 'En Mac, FFmpeg se baja en una versión probada: la más nueva fallaba al exportar capas con fundido.',
