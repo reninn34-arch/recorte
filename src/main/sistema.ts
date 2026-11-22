@@ -10,7 +10,7 @@ import { rutaFfmpeg } from './ffmpeg'
 import { buscarPython, rutaScriptPython } from './transcribir'
 import { edgeExe } from './vozgoogle'
 import { navegadorGoogle } from './edgeperfil'
-import { descargarHerramienta, PUEDE_BAJAR } from './herramientas'
+import { descargarHerramienta, PUEDE_BAJAR, pythonPropio } from './herramientas'
 import { matarArbol } from './ia'
 
 /**
@@ -96,7 +96,7 @@ async function herramientas(): Promise<Herramienta[]> {
     {
       id: 'python',
       nombre: 'Python',
-      descripcion: 'Corre la transcripción en tu equipo y el seguimiento de caras.',
+      descripcion: 'Corre la transcripción en tu equipo y el seguimiento de caras. Se instala con sus paquetes.',
       estado: py.ok ? 'ok' : 'falta',
       version: py.ok ? version(py.salida) : null,
       descargable: !py.ok && enWindows,
@@ -218,7 +218,23 @@ export async function instalarHerramienta(
   id: string,
   onProgreso: (pct: number, texto: string) => void = () => {}
 ): Promise<{ ok: boolean; error?: string }> {
-  if (id === 'ffmpeg' || id === 'python' || id === 'node') {
+  if (id === 'python') {
+    // Python y, en el mismo paso, sus paquetes: el Python propio va delante del del sistema, y sin NumPy ni OpenCV
+    // fallaría lo que los usa (transcribir, separar a la persona, animar una imagen, las caras).
+    try {
+      await descargarHerramienta('python', (pct, texto) => onProgreso(pct * 0.4, texto === 'Listo' ? 'Python bajado' : texto))
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+    const propio = pythonPropio()
+    if (!propio) return { ok: false, error: 'Bajé Python, pero no lo encuentro. Prueba otra vez.' }
+    onProgreso(0.4, 'Preparando faster-whisper, NumPy y OpenCV (unos minutos)')
+    const r = await pip({ cmd: propio, args: [] }, ['install', '-r', rutaScriptPython('requirements.txt')], (pct, texto) => onProgreso(0.4 + pct * 0.6, texto))
+    return r.ok
+      ? { ok: true }
+      : { ok: false, error: `Python quedó instalado, pero no pude poner sus paquetes (${r.error ?? 'pip falló'}). Pulsa «Instalar» en «Paquetes de Python» para intentarlo otra vez.` }
+  }
+  if (id === 'ffmpeg' || id === 'node') {
     try {
       await descargarHerramienta(id, onProgreso)
       return { ok: true }

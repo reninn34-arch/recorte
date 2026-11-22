@@ -32,18 +32,24 @@ const correr = (programa, args) => {
   return r.stdout + r.stderr
 }
 
+const { instalarHerramienta } = await import('../src/main/sistema.ts')
 const pasos = []
 for (const id of ['ffmpeg', 'python', 'node']) {
   const t0 = Date.now()
-  const r = await descargarHerramienta(id, (pct, texto) => {
+  const avance = (pct, texto) => {
     const n = Math.floor(pct * 4)
     if (!pasos.includes(id + n)) {
       pasos.push(id + n)
       console.log('  ' + id + ' ' + Math.round(pct * 100) + '% ' + texto)
     }
-  })
+  }
+  // Python, con el botón de Ajustes: lo baja y pone sus paquetes en el mismo paso.
+  if (id === 'python') {
+    const r = await instalarHerramienta('python', avance)
+    assert.ok(r.ok, 'Python y sus paquetes: ' + r.error)
+  } else await descargarHerramienta(id, avance)
   assert.ok(tieneHerramienta(id), id + ': quedó instalada')
-  console.log(id + ' ' + r.version + ' (' + Math.round((Date.now() - t0) / 1000) + ' s)')
+  console.log(id + ' (' + Math.round((Date.now() - t0) / 1000) + ' s)')
 }
 
 // FFmpeg: lo que usa toda la exportación (x264 y los subtítulos con libass) y FFprobe.
@@ -56,6 +62,10 @@ const python = pythonPropio()
 assert.ok(python, 'Python propio')
 assert.match(correr(python, ['--version']), /Python 3\.12\./, 'Python 3.12')
 assert.match(correr(python, ['-m', 'pip', '--version']), /pip /, 'Python trae pip')
+// Y sus paquetes, ya puestos al bajarlo. El Python propio va delante del del sistema: sin ellos, lo que usa NumPy u
+// OpenCV (separar a la persona, animar una imagen, las caras) fallaría en la app y en las demás pruebas, que también lo
+// usan (lo bajado queda en la carpeta temporal).
+assert.match(correr(python, ['-c', 'import numpy, cv2, faster_whisper, PIL; print("paquetes listos")']), /paquetes listos/, 'NumPy, OpenCV, faster-whisper y Pillow')
 // Node.js.
 const nodo = process.platform === 'win32' ? exe('node', 'node') : join(raiz, 'node', 'bin', 'node')
 assert.match(correr(nodo, ['--version']), /^v\d+\./, 'Node corre')
