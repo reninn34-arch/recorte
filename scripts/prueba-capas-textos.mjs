@@ -4,7 +4,7 @@
 // npm run prueba:capas-textos
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { exportarTimeline, alfasAss, animarAss, conSalidaAss } from '../src/main/exportar.ts'
@@ -133,6 +133,7 @@ const media = (img, x, y, w = 8, h = 8) => {
 const rojo = (c) => c[0] > 150 && c[1] < 90 && c[2] < 90
 const verde = (c) => c[1] > 150 && c[0] < 90
 const negro = (c) => c[0] < 40 && c[1] < 40 && c[2] < 40
+const blanca2 = (c) => c[0] > 200 && c[1] > 200 && c[2] > 200
 async function exportar(timeline, nombre) {
   const r = await exportarTimeline(proyecto, timeline, dir, { formato: 'original', subtitulos: false }, () => {}, join(dir, nombre))
   assert.equal(r.ok, true, r.error)
@@ -380,6 +381,63 @@ async function exportar(timeline, nombre) {
   const r = aplicarOperaciones(conClaves(), validarOperaciones([{ op: 'clave_capa', capa_n: 1, parametro: 'x', en: 0, valor: 0.2, curva: 'rebote' }]), { duracionFuente: 3, transcript: [], medios: { m1: 5 } })
   assert.equal(r.timeline.capas[0].claves.x[0].curva, 'rebote')
 }
+// ===== La caja de los textos: redondeada y de una pieza, como en el monitor =====
+{
+  const tt = normalizarTimeline(
+    { clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 3 }], textos: [{ id: 't', inicio: 0, duracion: 3, texto: 'Una tarjeta\ncon dos líneas', posicion: 'centro', x: 0.5, y: 0.5, caja: '#ff0000', tamano: 1.4 }] },
+    3,
+    medios
+  )
+  const img = cuadro(await exportar(tt, 'caja-redonda'), 1)
+  const ass = readFileSync(join(dir, 'rotulos-timeline.ass'), 'utf8')
+  assert.match(ass, /\\p1\}m \d+ 0 l \d+ 0 b /, 'la caja va como un dibujo redondeado')
+  // Lo rojo: un solo bloque (también entre las dos líneas), sin las esquinas.
+  let [x0, x1, y0, y1] = [W, 0, H, 0]
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++)
+      if (rojo(px(img, x, y))) [x0, x1, y0, y1] = [Math.min(x0, x), Math.max(x1, x), Math.min(y0, y), Math.max(y1, y)]
+  assert.ok(x1 > x0 && y1 > y0, 'se ve la caja')
+  assert.ok(rojo(px(img, Math.round((x0 + x1) / 2), Math.round((y0 + y1) / 2))) || !blanca2(px(img, Math.round((x0 + x1) / 2), Math.round((y0 + y1) / 2))), 'una sola pieza')
+  const esquinaFuera = px(img, x0 + 1, y0 + 1)
+  assert.ok(!rojo(esquinaFuera), `la esquina de la caja es redonda (${esquinaFuera})`)
+  assert.ok(rojo(px(img, x0 + 1, Math.round((y0 + y1) / 2))) && rojo(px(img, Math.round((x0 + x1) / 2), y0 + 1)), 'los lados son rectos')
+  // Entre las dos líneas también es caja (libass hacía una caja por línea, con un hueco).
+  let huecos = 0
+  const radio = Math.ceil(0.3 * Math.round(Math.min(W, H) * 0.065) * 1.4 * EME_ROTULO) + 2
+  for (let y = y0 + radio; y < y1 - radio; y++) if (!rojo(px(img, x0 + 3, y))) huecos++
+  assert.equal(huecos, 0, 'sin hueco entre las líneas')
+  // El margen del monitor: 0,6 em a los lados del texto (el texto blanco va dentro, con aire).
+  let [tx0, tx1] = [W, 0]
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (blanca2(px(img, x, y))) [tx0, tx1] = [Math.min(tx0, x), Math.max(tx1, x)]
+  const eme = Math.round(Math.min(W, H) * 0.065) * 1.4 * EME_ROTULO
+  assert.ok(Math.abs(tx0 - x0 - 0.6 * eme) < 0.2 * eme, `margen izquierdo ${tx0 - x0} px (el monitor deja ${Math.round(0.6 * eme)})`)
+}
+
+// ===== Letras propias del proyecto (como la Montserrat que trae el agente) =====
+{
+  const { registrarLetra, leerLetra } = await import('../src/main/letras.ts')
+  const anton = join(process.cwd(), 'python', 'fuentes', 'Anton-Regular.ttf')
+  assert.deepEqual(leerLetra(anton), { familia: 'Anton Regular', linea: 1.733, cursiva: false }, 'lee su nombre y su alto de línea (el mismo que la lista: 1,733)')
+  const letra = registrarLetra(dir, anton)
+  assert.match(letra.id, /^letra-[a-f0-9]{8}$/)
+  assert.ok(existsSync(join(dir, letra.archivo)), 'se copia a fuentes/ del proyecto')
+  // El mismo texto con la Anton de la lista («titular») y con la Anton propia: en el MP4, idénticos.
+  const con = (fuente, letras) =>
+    normalizarTimeline({ clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 3 }], textos: [{ id: 't', inicio: 0, duracion: 3, texto: 'MONTSERRAT', posicion: 'centro', sinCaja: true, fuente }], ...(letras ? { letras } : {}) }, 3, medios)
+  const propia = con(letra.id, [letra])
+  assert.equal(propia.textos[0].fuente, letra.id, 'el texto guarda la letra propia')
+  assert.deepEqual(normalizarTimeline(JSON.parse(JSON.stringify(propia)), 3, medios).letras, [letra], 'las letras sobreviven a normalizar')
+  const a = cuadro(await exportar(con('titular'), 'letra-lista'), 1)
+  const b = cuadro(await exportar(propia, 'letra-propia'), 1)
+  const ass = readFileSync(join(dir, 'rotulos-timeline.ass'), 'utf8')
+  assert.match(ass, /\\fnAnton Regular/, 'el MP4 la busca por su nombre')
+  let distintos = 0
+  for (let i = 0; i < a.length; i += 3) if (Math.abs(a[i] - b[i]) > 40) distintos++
+  assert.ok(distintos < 50, `la letra propia sale igual que la de la lista (${distintos} píxeles distintos)`)
+  // Sin la letra en la lista del proyecto, se ve con la normal (no se rompe).
+  assert.equal(normalizarTimeline({ clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 3 }], textos: [{ id: 't', inicio: 0, duracion: 3, texto: 'x', posicion: 'centro', fuente: 'letra-00000000' }] }, 3, medios).letras, undefined)
+}
+
 // ===== Alinear y repartir varias =====
 {
   const p = (id) => ({ tipo: 'capa', id })

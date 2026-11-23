@@ -59,6 +59,7 @@ import {
   marcoCapa,
   SOMBRA_CAPA,
   porPalabras,
+  letraDe,
   salidaTexto,
   textoEn,
   cambiarTextoEn,
@@ -681,6 +682,14 @@ export function Monitor({
         (vista.sonidos ?? []).map((s) => (
           <SonidoVista key={s.id} sonido={s} url={urlDe(s.archivo)} tiempo={reproductor.tiempo} reproduciendo={reproductor.reproduciendo} />
         ))}
+      {/* Las letras propias del proyecto (las de la marca, las que trae el agente): el mismo archivo que usa el MP4. */}
+      {timeline.letras?.length ? (
+        <style>
+          {timeline.letras
+            .map((l) => `@font-face { font-family: "Recorte ${l.id}"; src: url("${mediaUrl(proyecto.id, l.archivo)}"); font-display: block; }`)
+            .join(' ')}
+        </style>
+      ) : null}
       {cw > 0 && (
         <div className="monitor-cuadro" style={{ width: cw, height: ch, ['--rotulo' as string]: `${letra.toFixed(1)}px` }}>
           {capas.map((c) => {
@@ -809,17 +818,15 @@ export function Monitor({
                   ...corrido(r.id),
                   ...(libre ? { left: `${libre.x * 100}%`, top: `${libre.y * 100}%`, ...anclajeRotulo(r, b?.giro) } : {}),
                   ...estiloRotulo(r),
-                  ...(reproductor.reproduciendo && r.salida ? estiloSalida(r, reproductor.tiempo - r.inicio, libre ? String(anclajeRotulo(r, b?.giro).transform) : null) : {}),
+                  ...(reproductor.reproduciendo && (r.salida || animaEntero(r.animacion)) ? estiloAnimado(r, reproductor.tiempo - r.inicio, libre ? String(anclajeRotulo(r, b?.giro).transform) : null) : {}),
                   ...((b?.tamano ?? r.tamano) ? { fontSize: `calc(var(--rotulo) * ${b?.tamano ?? r.tamano})` } : {}),
                   ...(r.color ? { color: r.color } : {}),
                   ...(r.caja && !r.sinCaja ? { background: r.caja } : {}),
-                  ...(r.fuente && FUENTES_TEXTO[r.fuente]
-                    ? {
-                        fontFamily: `"${FUENTES_TEXTO[r.fuente].familia}", Arial, sans-serif`,
-                        fontWeight: FUENTES_TEXTO[r.fuente].negrita ? 700 : 400,
-                        fontStyle: FUENTES_TEXTO[r.fuente].cursiva ? 'italic' : 'normal'
-                      }
-                    : {})
+                  ...(() => {
+                    // La letra: una de la lista o una propia del proyecto (registrada abajo con @font-face).
+                    const f = letraDe(r.fuente, timeline.letras)
+                    return f ? { fontFamily: `"${f.css}", Arial, sans-serif`, fontWeight: f.negrita ? 700 : 400, fontStyle: f.cursiva ? 'italic' : 'normal' } : {}
+                  })()
                 }}
                 onClick={(e) => e.stopPropagation()}
                 onPointerDown={(e) => arrastrar(e, 'texto', r.id, libre ?? centroEnCuadro(e.currentTarget))}
@@ -1033,16 +1040,42 @@ function ConClave({ texto }: { texto: TextoTL }) {
  * Un rótulo yéndose (salidaTexto): su opacidad (por la suya), su escala y su desenfoque. Se encoge hacia su punto de
  * anclaje, como en el MP4 (arriba, abajo o su sitio propio).
  */
-function estiloSalida(r: TextoTL, dt: number, transformLibre: string | null): React.CSSProperties {
+/** Las entradas que mueven el rótulo entero (con su caja, como en el MP4): no las de palabra o letra a letra. */
+const animaEntero = (a: TextoTL['animacion']): boolean => a === 'pop' || a === 'rotulo' || a === 'subir' || a === 'desenfoque'
+
+/** Cómo está la entrada de un rótulo que se anima entero `dt` segundos después de aparecer (lo mismo que animarAss). */
+function entradaEntera(r: TextoTL, dt: number): { opacidad: number; escala: number; sube: number; desenfoque: number } {
+  if (r.animacion === 'pop') {
+    const e = dt < 0.13 ? 0.45 + (dt / 0.13) * 0.72 : dt < 0.24 ? 1.17 - ((dt - 0.13) / 0.11) * 0.17 : 1
+    return { opacidad: Math.min(1, dt / 0.08), escala: e, sube: 0, desenfoque: 0 }
+  }
+  if (r.animacion === 'rotulo') return { opacidad: Math.min(1, dt / 0.15), escala: 0.86 + 0.14 * Math.min(1, dt / 0.2), sube: 0, desenfoque: 0 }
+  if (r.animacion === 'subir') return { opacidad: Math.min(1, dt / 0.25), escala: 1, sube: Math.max(0, 1 - dt / 0.35), desenfoque: 0 }
+  if (r.animacion === 'desenfoque') return { opacidad: Math.min(1, dt / 0.25), escala: 1, sube: 0, desenfoque: DESENFOQUE_TEXTO * (1 - Math.min(1, dt / 0.35)) }
+  return { opacidad: 1, escala: 1, sube: 0, desenfoque: 0 }
+}
+
+/**
+ * Un rótulo entrando o yéndose, entero (la letra y su caja, como el MP4): su opacidad (por la suya), su escala, lo que
+ * sube y su desenfoque. Se escala sobre su punto de anclaje, después de colocarlo.
+ */
+function estiloAnimado(r: TextoTL, dt: number, transformLibre: string | null): React.CSSProperties {
   const s = salidaTexto(r, dt)
-  // La escala va después de su colocación (translate): así se encoge sobre su punto, no sobre la caja sin colocar.
+  const e = animaEntero(r.animacion) ? entradaEntera(r, dt) : { opacidad: 1, escala: 1, sube: 0, desenfoque: 0 }
+  const escala = s.escala * e.escala
   const base = transformLibre ?? (r.posicion === 'centro' ? 'translate(-50%, -50%)' : 'translateX(-50%)')
+  // Con caja, el MP4 la centra en su sitio (y la escala sobre su centro); sin caja, arriba o abajo se ancla en su borde.
+  const borde = !transformLibre && r.sinCaja && r.posicion !== 'centro'
+  const desenfoque = s.desenfoque + e.desenfoque
   return {
-    opacity: (r.opacidad ?? 1) * s.opacidad,
-    ...(s.escala !== 1
-      ? { transform: `${base} scale(${s.escala.toFixed(4)})`, ...(!transformLibre && r.posicion !== 'centro' ? { transformOrigin: r.posicion === 'arriba' ? 'center top' : 'center bottom' } : {}) }
+    opacity: (r.opacidad ?? 1) * s.opacidad * e.opacidad,
+    ...(escala !== 1 || e.sube > 0
+      ? {
+          transform: `${base}${e.sube > 0 ? ` translateY(${(e.sube * 0.6).toFixed(3)}em)` : ''}${escala !== 1 ? ` scale(${escala.toFixed(4)})` : ''}`,
+          ...(borde ? { transformOrigin: r.posicion === 'arriba' ? 'center top' : 'center bottom' } : {})
+        }
       : {}),
-    ...(s.desenfoque > 0 ? { filter: `blur(${s.desenfoque.toFixed(3)}em)` } : {})
+    ...(desenfoque > 0.0005 ? { filter: `blur(${desenfoque.toFixed(3)}em)` } : {})
   }
 }
 
@@ -1050,34 +1083,8 @@ function estiloSalida(r: TextoTL, dt: number, transformLibre: string | null): Re
 const PALABRA_NITIDA_S = 0.3
 
 function TextoAnimado({ texto, dt }: { texto: TextoTL; dt: number }) {
-  if (texto.animacion === 'desenfoque') {
-    // De borroso a nítido y apareciendo (\blur y \fad en el MP4).
-    const nitido = Math.min(1, dt / 0.35)
-    return (
-      <span style={{ display: 'inline-block', opacity: Math.min(1, dt / 0.25), filter: nitido < 1 ? `blur(${(DESENFOQUE_TEXTO * (1 - nitido)).toFixed(3)}em)` : undefined }}>
-        <ConClave texto={texto} />
-      </span>
-    )
-  }
-  if (texto.animacion === 'pop' || texto.animacion === 'subir' || texto.animacion === 'rotulo') {
-    const e =
-      texto.animacion === 'pop'
-        ? dt < 0.13
-          ? 0.45 + (dt / 0.13) * 0.72
-          : dt < 0.24
-            ? 1.17 - ((dt - 0.13) / 0.11) * 0.17
-            : 1
-        : texto.animacion === 'rotulo'
-          ? 0.86 + 0.14 * Math.min(1, dt / 0.2)
-          : 1
-    const sube = texto.animacion === 'subir' ? Math.max(0, 1 - dt / 0.35) : 0
-    const op = Math.min(1, dt / (texto.animacion === 'pop' ? 0.08 : texto.animacion === 'rotulo' ? 0.15 : 0.25))
-    return (
-      <span style={{ display: 'inline-block', transform: `translateY(${(sube * 0.6).toFixed(3)}em) scale(${e.toFixed(3)})`, opacity: op }}>
-        <ConClave texto={texto} />
-      </span>
-    )
-  }
+  // Las que mueven el rótulo entero las hace estiloAnimado sobre el rótulo (con su caja): aquí, la letra quieta.
+  if (animaEntero(texto.animacion)) return <ConClave texto={texto} />
   const paso = pasoAnimacion(texto)
   const tiempos = tiemposPalabras(texto)
   if (texto.animacion === 'pintar') {

@@ -5321,6 +5321,45 @@ def musica(animo=None, duracion=None, usar=None):
                    'promociones, tecnología o redes); `kit.py musica --usar <archivo>` la deja en medios/.'}
 
 
+def grafico(diseno, salida, ancho_video=1080):
+    """Un gráfico editable (tarjeta, rótulo con su caja, botón) dibujado por Recorte a un PNG con transparencia, para
+    ponerlo en "capas" con su diseño ("grafico"): así en el editor sus textos se pueden cambiar. `diseno` es un .json o el
+    JSON mismo. Recorte lo dibuja con Chromium (el mismo motor que su editor), así que se ve igual en los dos."""
+    import urllib.request
+    import urllib.error
+    datos = _R.get('grafico') or {}
+    if not datos.get('url') or not datos.get('token'):
+        raise SystemExit('Recorte no está abierto (o es una versión sin gráficos): no puedo dibujar el gráfico.')
+    texto = diseno
+    if os.path.isfile(diseno):
+        with open(diseno, encoding='utf-8-sig') as f:
+            texto = f.read()
+    try:
+        g = json.loads(texto)
+    except ValueError as e:
+        raise SystemExit(f'El diseño no es un JSON válido: {e}')
+    if isinstance(g, dict) and isinstance(g.get('grafico'), dict):
+        g = g['grafico']
+    destino = os.path.abspath(salida)
+    os.makedirs(os.path.dirname(destino), exist_ok=True)
+    cuerpo = json.dumps({'grafico': g, 'salida': destino, 'base': os.path.abspath(os.getcwd()), 'ancho_video': ancho_video}).encode('utf-8')
+    pedido = urllib.request.Request(datos['url'], data=cuerpo, method='POST', headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + datos['token']})
+    try:
+        with urllib.request.urlopen(pedido, timeout=60) as r:
+            res = json.loads(r.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        try:
+            motivo = json.loads(e.read().decode('utf-8')).get('error')
+        except Exception:
+            motivo = str(e)
+        raise SystemExit(f'No pude dibujar el gráfico: {motivo}')
+    except urllib.error.URLError:
+        raise SystemExit('Recorte no responde (¿se cerró?): no puedo dibujar el gráfico.')
+    rel = os.path.relpath(destino, os.getcwd()).replace(os.sep, '/')
+    return {'archivo': rel, 'ancho_px': res.get('ancho'), 'alto_px': res.get('alto'), 'ancho': res.get('ancho_capa'),
+            'capa': {'archivo': rel, 'grafico': res.get('grafico'), 'ancho': res.get('ancho_capa')}}
+
+
 def main():
     # En Windows la consola no es UTF-8: sin esto, las tildes de lo que se imprime llegan rotas al agente.
     for flujo in (sys.stdout, sys.stderr):
@@ -5476,6 +5515,10 @@ def main():
     mz.add_argument('mezcla', help='mezcla.json (lee la ayuda: `kit.py mezclar --help` o RECETA.md)')
     mo = sub.add_parser('modelos', help='los modelos 3D guardados de videos anteriores')
     mo.add_argument('--buscar')
+    gr = sub.add_parser('grafico', help='un gráfico editable (tarjeta, rótulo con caja, botón) a PNG, dibujado por Recorte')
+    gr.add_argument('diseno', help='un .json con el diseño (o el JSON mismo)')
+    gr.add_argument('--salida', required=True, help='el PNG, dentro de la carpeta de trabajo (p. ej. graficos/tarjeta-1.png)')
+    gr.add_argument('--ancho-video', type=int, default=1080, help='el ancho del video (1080 en vertical; 1920 en horizontal)')
     x = p.parse_args()
     if x.orden == 'palabras':
         print(json.dumps(palabras(x.transcripcion, x.guion, x.desde, x.salida), ensure_ascii=False))
@@ -5485,6 +5528,8 @@ def main():
         print(json.dumps(mezclar(x.mezcla), ensure_ascii=False))
     elif x.orden == 'modelos':
         print(json.dumps(modelos(x.buscar), ensure_ascii=False))
+    elif x.orden == 'grafico':
+        print(json.dumps(grafico(x.diseno, x.salida, x.ancho_video), ensure_ascii=False))
     elif x.orden == 'voz':
         voz(x.archivo, nueva=x.nueva)
     elif x.orden == 'medios':

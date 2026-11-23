@@ -29,17 +29,20 @@ try {
   transcripcion({ duration: 42, segments: [{ start: 0.5, end: 20, text: 'uno' }, { start: 20.3, end: 40, text: 'dos' }] })
   assert.equal(audiosSubidos(carpeta)[0].musica, false, 'es narración')
   writeFileSync(receta, JSON.stringify({}))
-  assert.match(subtitulosQueFaltan(receta, conAudio, 42, audiosSubidos(carpeta)) ?? '', /no trae "subtitulos"/)
+  // Sin subtítulos no es un problema: van solo si el usuario los pide (lo decide el agente).
+  assert.equal(subtitulosQueFaltan(receta, conAudio, 42, audiosSubidos(carpeta)), null, 'sin subtítulos: el usuario no los pidió')
   writeFileSync(receta, JSON.stringify(subs(10)))
   assert.match(subtitulosQueFaltan(receta, conAudio, 42, audiosSubidos(carpeta)) ?? '', /se habla hasta el 40\.0/)
   writeFileSync(receta, JSON.stringify(subs(39.5)))
   assert.equal(subtitulosQueFaltan(receta, conAudio, 45, audiosSubidos(carpeta)), null, 'con el cierre después, basta hasta donde se habla')
-  console.log('narración: pide subtítulos hasta donde se habla ✓')
+  console.log('narración: si lleva subtítulos, hasta donde se habla; sin ellos, también vale ✓')
 
   // 3. Un audio que no se pudo transcribir: como siempre, cuenta como narración.
   rmSync(join(vistazo, 'narracion-01.json'))
   writeFileSync(receta, JSON.stringify({}))
-  assert.match(subtitulosQueFaltan(receta, conAudio, 30, audiosSubidos(carpeta)) ?? '', /no trae "subtitulos"/)
+  assert.equal(subtitulosQueFaltan(receta, conAudio, 30, audiosSubidos(carpeta)), null)
+  writeFileSync(receta, JSON.stringify(subs(5)))
+  assert.match(subtitulosQueFaltan(receta, conAudio, 30, audiosSubidos(carpeta)) ?? '', /faltan los del final/, 'con subtítulos a medias, sí: que lleguen al final')
 
   // 4. Voz generada con música subida: la voz sí lleva subtítulos hasta el final.
   transcripcion({ duration: 19.83, segments: [{ start: 0, end: 1.86, text: 'You ready?' }] })

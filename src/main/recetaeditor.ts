@@ -27,6 +27,9 @@ import { resolverBinario } from './binarios'
 import { ejecutar } from './crear'
 import { buscarPython, rutaScriptPython } from './transcribir'
 import { duracionMedio, probeVideo } from './ffmpeg'
+import { registrarLetra } from './letras'
+import { normalizarGrafico } from '../shared/grafico'
+import type { LetraTL } from '../shared/timeline'
 
 /**
  * De la receta del agente al editor. El agente hace el video con el kit a partir de una
@@ -172,7 +175,18 @@ export async function proyectoDesdeReceta(
   // crecen despacio (un 6 %) y los rótulos van sin caja, con su letra y su color.
   const transicion = pinza(num(receta.transicion, 0.22), 0, 1.5)
   const colorTexto = typeof receta.color_texto === 'string' && /^#[0-9a-f]{6}$/i.test(receta.color_texto) ? receta.color_texto.toLowerCase() : undefined
-  const fuenteTexto = ({ fina: 'fina', normal: 'normal', negrita: 'normal', gruesa: 'gruesa' } as Record<string, string>)[String(receta.fuente ?? 'fina')] ?? 'fina'
+  // Las letras propias que trae el agente (un .ttf u .otf en su carpeta de trabajo, como la Montserrat de una marca): se
+  // copian al proyecto y los textos las usan, en vez de cambiarlas por una de la lista.
+  const letras: LetraTL[] = []
+  const letraPropia = (v: unknown): string | undefined => {
+    if (typeof v !== 'string' || !/\.(ttf|otf)$/i.test(v)) return undefined
+    const ruta = dentro(trabajo, v)
+    const letra = ruta ? registrarLetra(carpetaProyecto, ruta) : null
+    if (!letra) return undefined
+    if (!letras.some((l) => l.id === letra.id)) letras.push(letra)
+    return letra.id
+  }
+  const fuenteTexto = letraPropia(receta.fuente) ?? ({ fina: 'fina', normal: 'normal', negrita: 'normal', gruesa: 'gruesa' } as Record<string, string>)[String(receta.fuente ?? 'fina')] ?? 'fina'
   const estiloRotulo = { sinCaja: true, ...(colorTexto ? { color: colorTexto } : {}), ...(fuenteTexto !== 'normal' ? { fuente: fuenteTexto } : {}) }
   let editables = 0
   let fijos = 0
@@ -232,7 +246,7 @@ export async function proyectoDesdeReceta(
   // El kit mide la eme de la letra; el monitor dibuja la eme del rótulo al 93 % de ese 6 % (y el MP4 lo iguala).
   const tamEditor = (fraccion: number) => Math.round(pinza((fraccion * anchoK) / (Math.min(anchoK, altoK) * 0.06 * 0.93), 0.5, 6) * 100) / 100
   const hexDe = (v: unknown) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : undefined)
-  const letra = (v: unknown, defecto: string) => LETRA_EDITOR[String(v ?? defecto)] ?? LETRA_EDITOR[defecto] ?? 'normal'
+  const letra = (v: unknown, defecto: string) => letraPropia(v ?? defecto) ?? LETRA_EDITOR[String(v ?? defecto)] ?? LETRA_EDITOR[defecto] ?? 'normal'
   // Lo que el kit oscurece debajo de un título o una frase («oscurecer» 0 a 1): en el editor, una capa de ajuste en su
   // tramo (oscurece el video y las capas, no los textos). Si no, el título quedaba sobre la imagen clara.
   const oscurecidos: CapaAjusteTL[] = []
@@ -331,8 +345,9 @@ export async function proyectoDesdeReceta(
   const anchoReceta = num(receta.ancho, 1080)
   const altoReceta = num(receta.alto, 1920)
   // El kit mide en píxeles; el editor, relativo a su tamaño de rótulo (6 % del lado corto).
-  const tamSub = num(subs.tam, anchoReceta * 0.058) / (Math.min(anchoReceta, altoReceta) * 0.06)
-  const fuenteSub = ({ fina: 'fina', normal: 'normal', negrita: 'normal', gruesa: 'gruesa' } as Record<string, string>)[String(subs.fuente ?? receta.fuente ?? 'negrita')] ?? 'normal'
+  // El kit da la eme de la letra; el monitor dibuja la eme del rótulo al 93 % de su 6 % (como los títulos, tamEditor).
+  const tamSub = num(subs.tam, anchoReceta * 0.058) / (Math.min(anchoReceta, altoReceta) * 0.06 * 0.93)
+  const fuenteSub = letraPropia(subs.fuente ?? receta.fuente) ?? ({ fina: 'fina', normal: 'normal', negrita: 'normal', gruesa: 'gruesa' } as Record<string, string>)[String(subs.fuente ?? receta.fuente ?? 'negrita')] ?? 'normal'
   const estiloSub = {
     ...(hex(subs.color) && hex(subs.color) !== '#ffffff' ? { color: hex(subs.color) } : {}),
     ...(subs.caja === null || subs.caja === false ? { sinCaja: true } : hex(subs.caja) ? { caja: hex(subs.caja) } : {}),
@@ -449,8 +464,22 @@ export async function proyectoDesdeReceta(
           })()
         : null
     const medioAnimado = animada ? await medioDe(animada.ruta) : null
+    // Un gráfico editable del kit (`kit.py grafico`): sus letras e imágenes por archivo pasan a ser del proyecto.
+    let grafico = normalizarGrafico(x.grafico)
+    if (grafico) {
+      for (const e of grafico.elementos) {
+        if (e.tipo === 'texto' && e.fuente && /\.(ttf|otf)$/i.test(e.fuente)) e.fuente = letraPropia(e.fuente)
+        if (e.tipo === 'imagen' && e.medio !== 'logo') {
+          const r = dentro(trabajo, e.medio)
+          const m = r ? await medioDe(r) : null
+          if (m) e.medio = m.id
+        }
+      }
+      grafico = normalizarGrafico(grafico)
+    }
     capas.push({
       id: nuevoId('capa'),
+      ...(grafico ? { grafico } : {}),
       fuente: medioAnimado?.id ?? medio.id,
       ...(medioAnimado && animada ? { animada: { tipo: tipoAnimar as TipoAnimar, base: medio.id, escala: animada.escala } } : {}),
       inicio: a,
@@ -512,6 +541,7 @@ export async function proyectoDesdeReceta(
       ...(capas.length ? { capas } : {}),
       ...(sonidos.length ? { sonidos } : {}),
       ...(oscurecidos.length ? { ajustesCapa: oscurecidos } : {}),
+      ...(letras.length ? { letras } : {}),
       // Los filtros del kit (grano, polvo, trama, viñeta, parpadeo) siguen siendo filtros en el editor.
       ...(receta.filtros && typeof receta.filtros === 'object' ? { filtros: receta.filtros as Timeline['filtros'] } : {})
     },

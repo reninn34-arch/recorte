@@ -1,3 +1,4 @@
+import { normalizarGrafico, resumenGrafico, type Grafico } from './grafico'
 import {
   ajustarClip,
   ajustesDe,
@@ -29,6 +30,7 @@ import {
   ENTRADAS_CAPA,
   SALIDAS_CAPA,
   ordenarCapa,
+  esIdLetra,
   PARAMETROS_CLAVE_TEXTO,
   ponerClaveTexto,
   quitarClaveTexto,
@@ -50,6 +52,7 @@ import {
   dividir,
   duracionTimeline,
   FUENTE_PRINCIPAL,
+  FUENTE_NEGRO,
   moverClip,
   nuevoId,
   recortarClip,
@@ -150,6 +153,16 @@ export type OperacionTL =
   | { op: 'borrar_texto'; texto_n: number }
   /** Lo que va encima del video: un medio de la biblioteca (por su id), en su sitio y su tamaño. */
   | ({ op: 'anadir_capa'; medio: string; inicio: number } & CamposCapa)
+  /**
+   * Un gráfico editable (tarjeta, rótulo con caja, botón: src/shared/grafico.ts). El proceso principal lo dibuja antes de
+   * aplicar y deja aquí su medio y el ancho que le toca a su tamaño de diseño; sin medio, no se pudo dibujar.
+   */
+  | ({ op: 'anadir_grafico'; inicio: number; grafico: Grafico; medio?: string; anchoReal?: number } & CamposCapa)
+  /**
+   * Cambia el diseño de un gráfico ya puesto: `grafico` con lo que cambia (lo demás se queda) o `textos` con los textos
+   * nuevos en orden. El proceso principal arma el diseño final (`final`), lo dibuja y deja el medio y cuánto cambió su ancho.
+   */
+  | ({ op: 'cambiar_grafico'; capa_n: number; grafico?: Record<string, unknown>; textos?: string[]; final?: Grafico; medio?: string; escalaAncho?: number } & CamposCapa)
   /**
    * Una pieza animada (HyperFrames) con la marca. El proceso principal la anima antes de aplicar y deja aquí su medio
    * y lo que dura de verdad; sin medio, no se pudo animar.
@@ -422,7 +435,7 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
             color: typeof x.color === 'string' && /^#[0-9a-f]{6}$/i.test(x.color) ? x.color : undefined,
             sin_caja: typeof x.sin_caja === 'boolean' ? x.sin_caja : undefined,
             caja: typeof x.caja === 'string' && /^#[0-9a-f]{6}$/i.test(x.caja) ? x.caja : undefined,
-            fuente: typeof x.fuente === 'string' && x.fuente in FUENTES_TEXTO ? x.fuente : undefined,
+            fuente: typeof x.fuente === 'string' && (x.fuente in FUENTES_TEXTO || esIdLetra(x.fuente)) ? x.fuente : undefined,
             animacion: x.animacion === 'golpe' || ANIMACIONES_TEXTO.some((a) => a.id === x.animacion) ? (x.animacion as AnimacionTexto | 'golpe') : undefined,
             pintado: typeof x.pintado === 'string' && /^#[0-9a-f]{6}$/i.test(x.pintado) ? x.pintado : undefined,
             color_clave: typeof x.color_clave === 'string' && /^#[0-9a-f]{6}$/i.test(x.color_clave) ? x.color_clave : undefined,
@@ -463,6 +476,21 @@ export function validarOperaciones(crudo: unknown): OperacionTL[] {
         const i = num(x.inicio)
         if (i === null || typeof x.medio !== 'string' || !x.medio) break
         ops.push({ op: 'anadir_capa', medio: x.medio, inicio: i, ...camposCapa(x) })
+        break
+      }
+      case 'anadir_grafico': {
+        const i = num(x.inicio)
+        const g = normalizarGrafico(x.grafico)
+        if (i === null || !g) break
+        ops.push({ op: 'anadir_grafico', inicio: i, grafico: g, ...camposCapa(x) })
+        break
+      }
+      case 'cambiar_grafico': {
+        const n = num(x.capa_n)
+        const g = x.grafico && typeof x.grafico === 'object' && !Array.isArray(x.grafico) ? (x.grafico as Record<string, unknown>) : undefined
+        const textos = Array.isArray(x.textos) ? x.textos.filter((t): t is string => typeof t === 'string').map((t) => t.slice(0, 400)) : undefined
+        if (n === null || (!g && !textos?.length)) break
+        ops.push({ op: 'cambiar_grafico', capa_n: n, ...(g ? { grafico: g } : {}), ...(textos?.length ? { textos } : {}), ...camposCapa(x) })
         break
       }
       case 'anadir_pieza': {
@@ -867,6 +895,46 @@ export function aplicarOperaciones(
         const nueva = r.timeline.capas?.find((c) => c.id === r.id)
         tl = cambiarCapa(r.timeline, r.id, cambioDeCapa(resto, nueva), medios)
         cambios.push(`Puse encima «${o.medio}» en ${mmss(o.inicio)}`)
+        break
+      }
+      case 'anadir_grafico': {
+        if (!o.medio || !o.anchoReal) {
+          fallos.push(`No pude dibujar el gráfico «${resumenGrafico(o.grafico)}».`)
+          break
+        }
+        if (medios[o.medio] === undefined) medios[o.medio] = MAX_IMAGEN
+        const { op: _op, inicio, grafico, medio, anchoReal, ...campos } = o
+        const r = anadirCapa(
+          tl,
+          { fuente: medio, inicio, duracion: campos.duracion ?? 3, x: campos.x ?? 0.5, y: campos.y ?? 0.5, ancho: campos.ancho ?? anchoReal, pista: campos.pista ?? 3, grafico, entrada: 'pop' },
+          medios
+        )
+        if (r.timeline === tl) {
+          fallos.push('El gráfico cae fuera del video.')
+          break
+        }
+        const nueva = r.timeline.capas?.find((c) => c.id === r.id)
+        tl = cambiarCapa(r.timeline, r.id, cambioDeCapa(campos, nueva), medios)
+        cambios.push(`Puse el gráfico «${resumenGrafico(grafico)}» en ${mmss(inicio)}`)
+        break
+      }
+      case 'cambiar_grafico': {
+        const c = tl.capas?.[Math.round(o.capa_n) - 1]
+        if (!c?.grafico) {
+          fallos.push(c ? `La capa ${o.capa_n} no es un gráfico (usa cambiar_capa).` : `No existe la capa ${o.capa_n}.`)
+          break
+        }
+        if (!o.medio || !o.final) {
+          fallos.push(`No pude dibujar el gráfico de la capa ${o.capa_n}.`)
+          break
+        }
+        if (medios[o.medio] === undefined) medios[o.medio] = MAX_IMAGEN
+        const { op: _op, capa_n: _n, grafico: _g, textos: _t, final, medio, escalaAncho, ...campos } = o
+        const ancho = campos.ancho ?? Math.min(1, Math.max(0.05, c.ancho * (escalaAncho ?? 1)))
+        tl = cambiarCapa(tl, c.id, { fuente: medio, grafico: final, ancho }, medios)
+        const ya = tl.capas?.find((x) => x.id === c.id)
+        if (Object.keys(campos).length) tl = cambiarCapa(tl, c.id, cambioDeCapa(campos, ya), medios)
+        cambios.push(`Cambié el gráfico de la capa ${o.capa_n}: «${resumenGrafico(final)}»`)
         break
       }
       case 'anadir_pieza': {
@@ -1361,7 +1429,12 @@ export function describirTimelineParaAgente(
     const extra = tr.clip.ajustes
       ? ` [zoom ${a.zoom}, brillo ${a.brillo}, contraste ${a.contraste}, saturación ${a.saturacion}]`
       : ''
-    const origen = tr.clip.fuente === FUENTE_PRINCIPAL ? 'video principal' : (nombres[tr.clip.fuente] ?? 'otro medio')
+    const origen =
+      tr.clip.fuente === FUENTE_PRINCIPAL
+        ? 'video principal'
+        : tr.clip.fuente === FUENTE_NEGRO
+          ? 'negro (el usuario alargó el video para que lo de encima siga)'
+          : (nombres[tr.clip.fuente] ?? 'otro medio')
     lineas.push(
       `  ${tr.indice + 1}. timeline ${tr.inicio.toFixed(2)}–${tr.fin.toFixed(2)} ← ${origen} ${tr.clip.entrada.toFixed(2)}–${tr.clip.salida.toFixed(2)}${extra}${tr.clip.mudo ? ' (sin sonido)' : tr.clip.sonido ? ` (sonido: ${JSON.stringify(tr.clip.sonido)})` : ''}`
     )
@@ -1373,7 +1446,7 @@ export function describirTimelineParaAgente(
       t.tamano ? `tamaño ${t.tamano}` : '',
       t.color ? `color ${t.color}` : '',
       t.sinCaja ? 'sin caja' : t.caja ? `caja ${t.caja}` : '',
-      t.fuente ? `letra ${t.fuente}` : '',
+      t.fuente ? `letra ${tl.letras?.find((l) => l.id === t.fuente) ? `${t.fuente} (${tl.letras.find((l) => l.id === t.fuente)!.nombre})` : t.fuente}` : '',
       t.contorno !== undefined ? `contorno ${t.contorno}${t.colorContorno ? ` ${t.colorContorno}` : ''}` : '',
       t.sombra !== undefined ? `sombra ${t.sombra}${t.colorSombra ? ` ${t.colorSombra}` : ''}` : '',
       t.alineacion ? `alineado a la ${t.alineacion}` : '',
@@ -1392,6 +1465,7 @@ export function describirTimelineParaAgente(
     lineas.push(`  ${i + 1}. ${t.inicio.toFixed(2)}–${(t.inicio + t.duracion).toFixed(2)} ${donde}: «${t.texto.replace(/\n/g, ' / ')}»${estilo.length ? ` [${estilo.join(', ')}]` : ''}`)
   })
   if (tl.textos.length === 0) lineas.push('  (ninguno)')
+  if (tl.letras?.length) lineas.push(`Letras propias del proyecto (para "fuente" en cambiar_texto): ${tl.letras.map((l) => `${l.id} = ${l.nombre}`).join(', ')}.`)
   if (tl.subtitulosHF) {
     lineas.push(
       `Subtítulos animados con HyperFrames: estilo «${tl.subtitulosHF.pieza}» ${JSON.stringify(tl.subtitulosHF.valores)} (${subtitulosAlDia(tl) ? 'al día' : 'por volver a animar'}); los textos de subtítulo son su guion.`
@@ -1419,6 +1493,7 @@ export function describirTimelineParaAgente(
           (c.oculto ? ', OCULTA (no se ve)' : '') +
           (c.bloqueado ? ', bloqueada' : '') +
           (c.durEntrada || c.durSalida ? `, dura la entrada ${c.durEntrada ?? 'normal'} y la salida ${c.durSalida ?? 'normal'}` : '') +
+          (c.grafico ? `, GRÁFICO EDITABLE (cámbialo con cambiar_grafico): ${JSON.stringify(c.grafico)}` : '') +
           (c.voltearH ? ', volteada ↔' : '') +
           (c.voltearV ? ', volteada ↕' : '') +
           (c.fin ? ` → termina en x ${c.fin.x} y ${c.fin.y}, ancho ${c.fin.ancho}${c.fin.giro ? `, giro ${c.fin.giro}°` : ''}` : '')
@@ -1433,12 +1508,12 @@ export function describirTimelineParaAgente(
   if (tl.voces?.length) {
     lineas.push('Narración (frases de voz generadas, cada una con su audio):')
     tl.voces.forEach((v, i) =>
-      lineas.push(`  ${i + 1}. ${v.inicio.toFixed(2)}–${(v.inicio + v.duracion).toFixed(2)}${v.voz ? ` voz ${v.voz}` : ''}${v.volumen !== undefined ? ` volumen ${v.volumen}` : ''}: «${v.texto}»`)
+      lineas.push(`  ${i + 1}. ${v.inicio.toFixed(2)}–${(v.inicio + v.duracion).toFixed(2)}${v.voz ? ` voz ${v.voz}` : ''}${v.volumen !== undefined ? ` volumen ${v.volumen}` : ''}${v.desde !== undefined || v.largo !== undefined ? ' (pedazo: el usuario la dividió o recortó; suena solo parte de su texto)' : ''}: «${v.texto}»`)
     )
   }
   lineas.push(
     tl.musica
-      ? `Música: «${tl.musica.nombre}», volumen ${tl.musica.volumen.toFixed(2)}, ${tl.musica.ducking ? 'baja cuando hay voz' : 'volumen fijo'}.`
+      ? `Música: «${tl.musica.nombre}», volumen ${tl.musica.volumen.toFixed(2)}, ${tl.musica.ducking ? 'baja cuando hay voz' : 'volumen fijo'}${tl.musica.tramos ? `; el usuario la cortó: suena solo en ${tl.musica.tramos.map((m) => `${mmss(m.inicio)}–${mmss(m.inicio + m.duracion)}`).join(', ')}` : ''}.`
       : 'Música: ninguna (se pone con el botón «Música» o, por MCP, con poner_audio).'
   )
 
@@ -1520,6 +1595,15 @@ export const OPERACIONES_DOC = `Operaciones disponibles (los tiempos van en segu
   ESCENA 2.5D: "profundidad" de 0 a 1 hace que la capa siga a la cámara del clip de debajo (su zoom, acercamiento y paneo): 0 se mueve pegada al fondo, 1 (muy cerca) se mueve y crece 2,5 veces más. Así un paisaje armado con recortes (montañas 0.2, una casa 0.5, una bandera 0.6, la persona 0.4) se siente con distancia cuando la cámara se mueve. "profundidad":"fija" la vuelve a pegar a la pantalla (para logos y textos). "desenfoque" de 0 a 1: fuera de foco, para lo que está muy cerca (un primer plano) o muy lejos.
   FUSIÓN: "fusion" mezcla la capa con lo de debajo, como en Premiere: ${MODOS_FUSION.map((m) => `${m.id} (${m.para})`).join(', ')}; "normal" lo quita. Así una textura de papel con multiplicar, o luz, fuego y polvo sobre fondo negro con pantalla, se funden sin recortarlos.
   PISTAS: "pista" 1 a 3 es en qué pista de video de «Encima» va la capa (sin ella, la 1): las de una pista más alta tapan a las de abajo. Úsalo para apilar varias cosas a la vez (una toma de apoyo en la 1, un marco en la 2 y el logo en la 3).
+- {"op":"anadir_grafico","inicio":T,"duracion":S,"x":0.5,"y":0.5,"grafico":{…}}  pone un GRÁFICO EDITABLE: una tarjeta con palabra clave, un rótulo con su caja, un botón de llamada a la acción, un dato, el logo con un texto. Es TEXTO DE VERDAD con su caja diseñada (como los gráficos de Premiere o los textos de CapCut): el usuario cambia después las palabras, la letra y los colores en la pestaña «Gráficos». Úsalo en vez de una imagen hecha con el texto dentro. Entra con pop; lleva "entrada", "salida", "ancho" (sin él, su tamaño de diseño), claves… como cualquier capa.
+  "grafico": {"disposicion":"columna|fila","alinear":"izquierda|centro|derecha","separacion":12,"margenX":40,"margenY":28,"ancho":PX opcional,
+    "fondo":{"color":"#rrggbb","color2":"#rrggbb" (degradado, opcional),"angulo":90,"radio":24,"opacidad":1,"borde":0,"colorBorde":"#ffffff"} (sin fondo, solo los textos),
+    "acento":{"lado":"izquierda|arriba|abajo","color":"#rrggbb","grosor":12} (una barra de color, como en un rótulo de nombre),
+    "sombra":0.5,
+    "elementos":[{"tipo":"texto","texto":"PALABRA","tamano":84,"peso":900,"color":"#ffffff","fuente":"normal|gruesa|titular|… o el id de una letra propia","mayusculas":true,"espaciado":0.02,"contorno":3,"colorContorno":"#000000","caja":{"color":"#ffd60a","radio":12,"margenX":18,"margenY":4},"anchoMax":PX},
+                 {"tipo":"imagen","medio":"ID de una imagen de la biblioteca o logo","alto":120}]}
+  Las medidas van en píxeles de un cuadro de 1080 de ancho (un texto grande, 80–110; uno chico, 36–48). Usa los colores y la letra de la marca.
+- {"op":"cambiar_grafico","capa_n":N,"textos":["NUEVA","Otra línea"]}  cambia los textos de un gráfico ya puesto, en orden; o "grafico":{…} con solo lo que cambia (fondo, acento, sombra, alinear… o "elementos" enteros). Se vuelve a dibujar y queda en su sitio y a su escala.
 - {"op":"anadir_pieza","pieza":"ID","inicio":T,"duracion":S,"valores":{…}}  pone una PIEZA ANIMADA de diseño en movimiento (con los colores y el logo de la marca; se anima sola en unos segundos). Es lo que hace que un video se vea hecho por un editor de motion: úsalas con criterio, una por momento importante. "valores" cambia sus datos (colores #rrggbb, "marca" o "marca2"; sin ellos, los de la marca). Las piezas:
   titulo-impacto (2.6 s: abrir o cambiar de tema; "texto", "etiqueta" arriba opcional, "conFondo" true/false)
   rotulo-inferior (4 s: presentar a alguien o un lugar; "nombre", "cargo")

@@ -7,8 +7,9 @@ import { aplicarOperaciones, describirTimelineParaAgente, OPERACIONES_DOC, valid
 import type { EstadoUso, RenderResultado, TranscripcionResultado } from '../shared/api'
 import { COSTO_CLIP, ID_SEGURO, MAX_CLIPS_VEO, textoMuestra, VOCES_GEMINI, type Creacion, type PeticionCreacion } from '../shared/creacion'
 import { MODELOS_IMAGEN, modelosVideoVigentes, type PedidoFlow, type ResultadoFlow } from '../shared/flow'
-import { anadirCapa, anadirVoz, ANIMAR_CAPA, cambiarCapa, duracionesDeMedios, duracionTimeline, escalaAnimada, conSubtitulosAnimados, normalizarTimeline, ponerMusica, timelineInicial, ventanaTimeline, type Timeline, type TipoAnimar } from '../shared/timeline'
+import { anadirCapa, anadirVoz, ANIMAR_CAPA, cambiarCapa, duracionesDeMedios, duracionTimeline, escalaAnimada, conSubtitulosAnimados, normalizarTimeline, ponerMusica, timelineInicial, ventanaTimeline, type LetraTL, type Timeline, type TipoAnimar } from '../shared/timeline'
 import type { Project } from '../shared/types'
+import { prepararGraficos, type Grafico } from '../shared/grafico'
 
 /** Lo que se añade a un pedido de imagen «para recortar» (lo mismo que PARA_RECORTAR del kit). */
 const PARA_RECORTAR =
@@ -46,6 +47,8 @@ export interface ContextoMcp {
   donde?: (id: string) => string | undefined
   /** Trae la ventana de Recorte al frente con el proyecto abierto en el editor. */
   abrirEnApp: (id: string) => void
+  /** Dibuja un gráfico editable a un PNG de la biblioteca: su medio y el ancho de capa a su tamaño de diseño. */
+  dibujarGrafico?: (id: string, grafico: Grafico, letras?: LetraTL[]) => Promise<{ project: Project; medio: string; ancho: number; grafico: Grafico }>
   /** Quita el fondo liso de una imagen de la biblioteca y la agrega como medio nuevo. */
   quitarFondo: (id: string, medio: string) => Promise<{ project: Project; medio: string }>
   /** Las piezas animadas (HyperFrames) y animar una con sus datos: devuelve su medio para ponerla como capa. */
@@ -525,6 +528,15 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
             // Sin medio, la operación avisa que no se pudo.
           }
         }
+        // Los gráficos editables que pone o cambia: se dibujan antes de aplicar (quedan en la biblioteca).
+        if (ctx.dibujarGrafico && (ops as OperacionTL[]).some((o) => o.op === 'anadir_grafico' || o.op === 'cambiar_grafico')) {
+          const dibujar = ctx.dibujarGrafico
+          const tlBase = timelineDe(p)
+          const fallos = await prepararGraficos(ops as OperacionTL[], tlBase, (g) => dibujar(p.id, g, tlBase.letras), (m) => ctx.proyectos.get(p.id)?.medios?.find((x) => x.id === m)?.ancho)
+          if (fallos.length) falloPersona = [falloPersona, ...fallos].filter(Boolean).join(' ')
+          const fresco = ctx.proyectos.get(p.id)
+          if (fresco) p.medios = fresco.medios
+        }
         const antes = timelineDe(p)
         const r = aplicarOperaciones(antes, ops, { duracionFuente: p.source.duration, transcript: p.transcript, medios: duracionesDeMedios(p.medios) })
         if (r.timeline !== antes && r.cambios.length) {
@@ -772,7 +784,8 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
             if (r.cambios.length) (tl = r.timeline), hechos++
           } else {
             const v = tl.voces?.find((y) => y.id === a.voz)
-            if (!v) continue
+            // Una frase dividida o recortada se arregla en su archivo entero: rehacerla rompería sus pedazos.
+            if (!v || v.desde !== undefined || v.largo !== undefined) continue
             const r = await arreglarVoz(carpeta, v.archivo, a.accion, a.ventanas)
             tl = { ...tl, voces: tl.voces!.map((y) => (y.id === v.id ? { ...y, archivo: r.archivo, duracion: r.duracion } : y)) }
             hechos++

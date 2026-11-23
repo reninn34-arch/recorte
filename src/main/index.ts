@@ -4,7 +4,7 @@ import { AGENTES_CHAT_HERRAMIENTAS, turnoChatHerramientas } from './chatherramie
 import { usarArchivoMcp } from './adaptadoresagente'
 import { anadirHabilidad, carpetaHabilidadesUsuario, habilidadesConLecciones, leerLecciones, olvidarLeccion } from './habilidades'
 import { anadirEstilo, borrarEstilo, catalogoEstilos, crearEstilo, quitarEstilo, registrarCatalogo } from './estiloscatalogo'
-import { ANIMAR_CAPA, fuenteEnClip, tramos, zonaEn, frasesSubtitulos, huellaSubtitulos, subtitulosAlDia, duracionTimeline, duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, SONIDOS_INCLUIDOS, timelineInicial, timelineVacia, type Timeline } from '../shared/timeline'
+import { ANIMAR_CAPA, fuenteEnClip, tramos, zonaEn, frasesSubtitulos, huellaSubtitulos, subtitulosAlDia, duracionTimeline, duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, SONIDOS_INCLUIDOS, timelineInicial, timelineVacia, normalizarLetras, type LetraTL, type Timeline } from '../shared/timeline'
 import { randomUUID } from 'node:crypto'
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, join, resolve, sep } from 'node:path'
@@ -66,6 +66,9 @@ import { desfasePorSonido } from './multicam'
 import { prepararEscala } from './escala'
 import { arreglarVoz, revisarAudio } from './revisaraudio'
 import { listarPiezas, renderizarPieza } from './piezas'
+import { dibujarGrafico } from './graficos'
+import { servirGraficos } from './servidorgraficos'
+import { ANCHO_DISENO, normalizarGrafico, prepararGraficos, type Grafico } from '../shared/grafico'
 import { borrarPiezaPropia, crearPiezaConAgente } from './tallerpiezas'
 import { valoresConMarca, type PiezaAnimada, type ValoresPieza } from '../shared/piezas'
 import { atenderVoz, avisoVozFaltante, vozQueFalto } from './vozagente'
@@ -2212,6 +2215,36 @@ app.whenReady().then(() => {
     return { project: hecho.project, medio: hecho.agregados[0], duracion: r.duracion }
   }
   /**
+   * Dibuja un gráfico editable (src/shared/grafico.ts) a un PNG y lo deja en la biblioteca (el mismo diseño, el mismo
+   * medio). Devuelve el medio y el ancho que le toca a la capa (en fracción del cuadro) para verse a su tamaño de diseño.
+   */
+  async function dibujarGraficoEn(id: string, crudo: unknown, letras?: LetraTL[]): Promise<{ project: Project; medio: string; ancho: number; grafico: Grafico }> {
+    const p = proyectos.abrir(id)
+    if (!p) throw new Error('El proyecto ya no existe.')
+    const grafico = normalizarGrafico(crudo)
+    if (!grafico) throw new Error('El gráfico no lleva nada que se vea (ni un texto ni una imagen).')
+    const imagenes: Record<string, string> = {}
+    for (const e of grafico.elementos) {
+      if (e.tipo !== 'imagen') continue
+      const medio = p.medios?.find((m) => m.id === e.medio && m.tipo === 'imagen')
+      const ruta = e.medio === 'logo' ? p.brand.logo : medio?.ruta
+      if (ruta && existsSync(ruta)) imagenes[e.medio] = ruta
+    }
+    const anchoVideo = p.source.width || 1080
+    const escala = anchoVideo / ANCHO_DISENO
+    const d = await dibujarGrafico(proyectos.carpeta(id), grafico, { letras: normalizarLetras(letras ?? p.timeline?.letras), imagenes, escala })
+    const ancho = Math.min(1, Math.max(0.05, d.ancho / anchoVideo))
+    const ya = p.medios?.find((m) => m.ruta === d.ruta)
+    if (ya) return { project: p, medio: ya.id, ancho, grafico }
+    const hecho = await agregarRutas(id, [d.ruta])
+    if (!hecho.agregados.length) throw new Error(hecho.fallos[0] ?? 'No pude agregar el gráfico a la biblioteca.')
+    return { project: hecho.project, medio: hecho.agregados[0], ancho, grafico }
+  }
+  ipcMain.handle('grafico:dibujar', (_evento, id: unknown, grafico: unknown, letras: unknown) => {
+    if (typeof id !== 'string') throw new Error('Datos inválidos.')
+    return dibujarGraficoEn(id, grafico, Array.isArray(letras) ? (letras as LetraTL[]) : undefined)
+  })
+  /**
    * Anima los subtítulos con su estilo de HyperFrames: las frases salen de los textos de subtítulo (lo que se corrigió a
    * mano) y el render queda como un medio del proyecto. Devuelve la timeline con los subtítulos animados al día.
    */
@@ -3296,6 +3329,23 @@ No pude borrar el objeto: ${e instanceof Error ? e.message : String(e)}`
           }
           if (fallosPieza.length) turno.mensaje = `${turno.mensaje}\n\nNo pude animar: ${fallosPieza.join(' ')}`
         }
+        // Los gráficos editables que pone o cambia: se dibujan aquí y quedan en la biblioteca antes de aplicar.
+        if (turno.ok && turno.operaciones.some((o) => o.op === 'anadir_grafico' || o.op === 'cambiar_grafico')) {
+          const actual = proyectos.abrir(id) ?? proyecto
+          const base = normalizarTimeline(timeline, actual.source.duration, duracionesDeMedios(actual.medios))
+          const fallosGrafico = await prepararGraficos(
+            turno.operaciones,
+            base,
+            async (g) => {
+              const r = await dibujarGraficoEn(id, g, base.letras)
+              const { transcript: _t, ...ligero } = r.project
+              for (const w of BrowserWindow.getAllWindows()) w.webContents.send('proyecto:externo', { proyecto: ligero, quien: 'recorte', conTimeline: false })
+              return r
+            },
+            (m) => proyectos.abrir(id)?.medios?.find((x) => x.id === m)?.ancho
+          )
+          if (fallosGrafico.length) turno.mensaje = `${turno.mensaje}\n\nNo pude dibujar un gráfico: ${fallosGrafico.join(' ')}`
+        }
         // Los subtítulos animados: si quedan con estilo y no al día (lo eligió o corrigió textos), se animan aquí y el
         // render viaja en la operación (así entran al día en el mismo paso de deshacer).
         if (turno.ok && turno.operaciones.length) {
@@ -3541,6 +3591,8 @@ No pude animar los subtítulos (se animan al exportar): ${e instanceof Error ? e
       return creaciones.guardar(c)
     }).catch(() => {})
   }
+  // El kit del agente pide aquí el dibujo de sus gráficos editables (no tiene Chromium); solo dentro de las creaciones.
+  void servirGraficos(join(app.getPath('userData'), 'creaciones'), (g, o) => dibujarGrafico(o.base, g, { imagenes: {}, escala: o.escala, base: o.base, salida: o.salida })).catch(() => {})
   const mcp = iniciarMcpRecorte({
     proyectos,
     uso: () => usoAhora(),
@@ -3558,6 +3610,7 @@ No pude animar los subtítulos (se animan al exportar): ${e instanceof Error ? e
     abrirEnApp: (id) => alFrente('proyecto:abrir', id),
     quitarFondo: (id, medio) => quitarFondo(id, medio),
     piezas: { listar: listarPiezas, animar: animarPieza },
+    dibujarGrafico: (id, g, letras) => dibujarGraficoEn(id, g, letras),
     subtitulos: (id, tl) => subtitulosListos(id, tl),
     persona: async (id, tl, clip) => {
       const r = await recortarPersona(id, tl, clip)

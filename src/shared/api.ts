@@ -9,7 +9,8 @@ export interface HabilidadVista {
   origen: 'recorte' | 'usuario'
   aprendido: string[]
 }
-import type { MusicaTL, Timeline, LutClip } from './timeline'
+import type { LetraTL, MusicaTL, Timeline, LutClip } from './timeline'
+import type { Grafico } from './grafico'
 import type { ProblemaAudio } from './audio'
 import type { PiezaAnimada, ValoresPieza } from './piezas'
 import type { AjustesCreacion, Creacion, EstiloPropio, MensajeCreacion, ModeloAgente, PeticionCreacion } from './creacion'
@@ -551,6 +552,8 @@ export interface RecorteApi {
   onPiezasProgreso: (cb: (texto: string) => void) => () => void
   /** Anima una pieza con sus datos y la agrega a la biblioteca: devuelve su medio para ponerlo como capa. */
   animarPieza: (id: string, pieza: string, valores: ValoresPieza, duracion: number) => Promise<{ project: Project; medio: string; duracion: number }>
+  /** Dibuja un gráfico editable a un PNG de la biblioteca: el medio y el ancho de capa que le toca a su tamaño de diseño. */
+  dibujarGrafico: (id: string, grafico: Grafico, letras?: LetraTL[]) => Promise<{ project: Project; medio: string; ancho: number; grafico: Grafico }>
   /** Separa del fondo a la persona de un clip: el recorte (un medio con transparencia) y dónde va como capa. */
   recortarObjeto: (id: string, timeline: Timeline, clip: string) => Promise<{ project: Project; medio: string; inicio: number; duracion: number; clip: string }>
   cambiarCielo: (id: string, timeline: Timeline, clip: string, cielo: string) => Promise<{ project: Project; medio: string; inicio: number; duracion: number; clip: string }>

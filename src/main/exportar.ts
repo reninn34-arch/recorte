@@ -19,6 +19,7 @@ import {
   referenciaParalaje,
   type AjustesClip,
   duracionTimeline,
+  FUENTE_NEGRO,
   durEntradaCapa,
   durSalidaCapa,
   destinoLado,
@@ -27,6 +28,8 @@ import {
   porPalabras,
   finReal,
   textoEn,
+  letraDe,
+  type LetraTL,
   marcoCapa,
   SOMBRA_CAPA,
   FUENTE_PRINCIPAL,
@@ -72,9 +75,24 @@ import {
   DESENFOQUE_CLIP,
   exprClave,
   MODOS_FUSION,
-  curvasDeClip
+  curvasDeClip,
+  tramosMusica,
+  type TramoMusica
 } from '../shared/timeline'
 import type { OpcionesExport } from '../shared/api'
+
+/**
+ * La imagen negra del negro de relleno (el que alarga el video), del tamaño del video. Se hace una vez en la carpeta
+ * del proyecto.
+ */
+function negroDe(carpeta: string, ancho: number, alto: number): string | null {
+  const w = ancho > 0 ? Math.round(ancho / 2) * 2 : 1920
+  const h = alto > 0 ? Math.round(alto / 2) * 2 : 1080
+  const ruta = join(carpeta, `negro-${w}x${h}.png`)
+  if (existsSync(ruta)) return ruta
+  const r = spawnSync(rutaFfmpeg(), ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', `color=c=black:s=${w}x${h}`, '-frames:v', '1', ruta], { windowsHide: true })
+  return r.status === 0 && existsSync(ruta) ? ruta : null
+}
 import type { ClipSuggestion, Project } from '../shared/types'
 
 /** Igual que en el monitor (`DUCKING_FACTOR` de la interfaz): la música baja a un cuarto con voz. */
@@ -197,6 +215,10 @@ function escribirAss(
   ]
   const nombreEstilo: Record<PosicionTexto, string> = { arriba: 'RotuloArriba', centro: 'RotuloCentro', abajo: 'RotuloAbajo' }
 
+  // Las cajas de los rótulos, redondeadas y con el margen del monitor (libass solo sabe hacerlas cuadradas y por línea):
+  // lo que mide cada texto, medido con el mismo libass que lo dibuja. Si no se puede medir, la caja de siempre.
+  const anchosCaja = medirAnchosCaja(carpeta, textos.filter((t) => !t.sinCaja), ancho, alto, tamRotulo, timeline.letras)
+
   const eventos = [
     ...voz.map((b) => `Dialogue: 0,${tiempoAss(b.start)},${tiempoAss(b.end)},Voz,,0,0,0,,${escapar(b.texto)}`),
     // Un rótulo abajo empuja los subtítulos hacia arriba al compartir alineación: van en otra capa.
@@ -246,7 +268,12 @@ function escribirAss(
       const ax = libre ? Math.round(t.x! * ancho) : 0
       const ay = libre ? Math.round(t.y! * alto) : 0
       const margen = Math.round(0.6 * eme)
-      const anclaje = !libre
+      // Con caja: la caja es un dibujo aparte (redondeado, debajo) con las medidas del monitor, y el texto va centrado en ella.
+      const anchoTexto = !t.sinCaja ? anchosCaja?.get(claveAnchoCaja(completo)) : undefined
+      const caja = anchoTexto !== undefined ? cajaDeRotulo(t, anchoTexto * (t.tamano ?? 1), eme, ancho, alto) : null
+      const anclaje = caja && !libre
+        ? `\\an5\\pos(${Math.round(caja.cx)},${Math.round(caja.cy)})`
+        : !libre
         ? `\\an${ALINEACION[t.posicion]}`
         : t.alineacion === 'izquierda'
           ? `\\an4\\pos(${ax + margen},${ay})`
@@ -258,10 +285,12 @@ function escribirAss(
         // Gira sobre su punto de anclaje, como en el monitor (en ASS el giro positivo va contra el reloj).
         ...(libre && t.giro ? [`\\org(${ax},${ay})\\frz${Math.round(-t.giro * 10) / 10}`] : []),
         // Con la letra de cada rótulo, el mismo tamaño que en el monitor (cada letra mide su altura de línea distinto).
-        ...(t.tamano || escalaLetraAss(t.fuente) !== 1 ? [`\\fs${Math.round(tamRotulo * (t.tamano ?? 1) * escalaLetraAss(t.fuente))}`] : []),
+        ...(t.tamano || escalaLetraAss(t.fuente, timeline.letras) !== 1 ? [`\\fs${Math.round(tamRotulo * (t.tamano ?? 1) * escalaLetraAss(t.fuente, timeline.letras))}`] : []),
         ...(t.color ? [`\\1c${colorAss(t.color).replace('&H00', '&H')}&`] : []),
         // La caja de su color (con caja, el borde del estilo es la caja), opaca como en el monitor.
-        ...(t.caja && !t.sinCaja ? [`\\3c${colorAss(t.caja).replace('&H00', '&H')}&`, '\\3a&H00&'] : []),
+        ...(t.caja && !t.sinCaja && !caja ? [`\\3c${colorAss(t.caja).replace('&H00', '&H')}&`, '\\3a&H00&'] : []),
+        // Con la caja dibujada aparte, el texto va limpio (sin la caja cuadrada de libass).
+        ...(caja ? ['\\bord0\\shad0'] : []),
         // Letra oscura sin caja (tinta sobre papel): sin el borde ni la sombra negros, que la emborronan.
         ...(t.sinCaja && letraOscura(t) && !trazo ? ['\\bord0\\shad0'] : []),
         // El contorno y la sombra elegidos (en vez del halo de siempre): fuera de la letra, como el monitor.
@@ -272,9 +301,11 @@ function escribirAss(
         // La transparencia de la letra, su borde y su sombra (o su caja), multiplicada por la opacidad del rótulo.
         ...(t.opacidad !== undefined || trazo ? [`\\1a&H${alfas.letra}&\\3a&H${alfas.borde}&\\4a&H${alfas.sombra}&`] : []),
         // La letra: una fuente de Windows, la misma que dibuja el monitor.
-        ...(t.fuente && FUENTES_TEXTO[t.fuente]
-          ? [`\\fn${FUENTES_TEXTO[t.fuente].familia}`, FUENTES_TEXTO[t.fuente].negrita ? '\\b1' : '\\b0', FUENTES_TEXTO[t.fuente].cursiva ? '\\i1' : '\\i0']
-          : [])
+        ...(() => {
+          // La letra: una de la lista (de Windows o de las que trae Recorte) o una propia del proyecto, por su nombre.
+          const f = letraDe(t.fuente, timeline.letras)
+          return f ? [`\\fn${f.familia}`, f.negrita ? '\\b1' : '\\b0', f.cursiva ? '\\i1' : '\\i0'] : []
+        })()
       ].join('')
       // Cada línea del rótulo es una línea en el video.
       // Las palabras entre *asteriscos* van en su color (no en «letra a letra» ni «pintar», que trocean la letra).
@@ -294,7 +325,11 @@ function escribirAss(
       const animado = animarAss(
         pintarCorrido ? { ...anima, duracion: completo.duracion - s, tiempos: tiemposPalabras(completo).map((w) => Math.round((w.inicio - s) * 1000) / 1000) } : anima,
         lineas,
-        libre && !sitioAnimado ? { x: ax + (t.alineacion === 'izquierda' ? margen : t.alineacion === 'derecha' ? -margen : 0), y: ay, baja: Math.round(alto * 0.03) } : null,
+        libre && !sitioAnimado
+          ? { x: ax + (t.alineacion === 'izquierda' ? margen : t.alineacion === 'derecha' ? -margen : 0), y: ay, baja: Math.round(alto * 0.03) }
+          : caja && !sitioAnimado
+            ? { x: Math.round(caja.cx), y: Math.round(caja.cy), baja: Math.round(alto * 0.03) }
+            : null,
         eme
       )
       // Troceado (con fotogramas clave): los tiempos de dentro son los del rótulo entero (también en el primer trozo, cuyo
@@ -302,7 +337,23 @@ function escribirAss(
       const troceado = Boolean(completo.claves)
       const cuerpo = troceado && !pintarCorrido ? correrTiemposAss(animado.cuerpo, s, completo.duracion) : animado.cuerpo
       const entrada = troceado ? correrTiemposAss(conSalidaAss(anima, animado.inicio, eme), s, completo.duracion) : conSalidaAss(anima, animado.inicio, eme)
-      return `Dialogue: 1,${tiempoAss(a)},${tiempoAss(b)},${nombreEstilo[t.posicion]}${t.sinCaja ? 'Libre' : ''},,0,0,0,,{${entrada.includes('\\move(') ? etiquetas.replace(/\\pos\([^)]*\)/, '') : etiquetas}${entrada}}${cuerpo}`
+      const texto = `Dialogue: 1,${tiempoAss(a)},${tiempoAss(b)},${nombreEstilo[t.posicion]}${t.sinCaja || caja ? 'Libre' : ''},,0,0,0,,{${entrada.includes('\\move(') ? etiquetas.replace(/\\pos\([^)]*\)/, '') : etiquetas}${entrada}}${cuerpo}`
+      if (!caja) return texto
+      // La caja: el mismo sitio, giro y animación de entrada y salida que el texto (no las de cada palabra), debajo.
+      const an = libre && t.alineacion === 'izquierda' ? 4 : libre && t.alineacion === 'derecha' ? 6 : 5
+      const bx = Math.round(an === 4 ? caja.cx - caja.w / 2 : an === 6 ? caja.cx + caja.w / 2 : caja.cx)
+      const by = Math.round(caja.cy)
+      const tx = an === 4 ? ax + margen : an === 6 ? ax - margen : Math.round(caja.cx)
+      const color = colorAss(t.caja ?? '#000000').replace('&H00', '&H')
+      const entradaCaja = entrada
+        .replace(/\\[12]c&H[0-9A-Fa-f]+&/g, '')
+        .replace(/\\move\(([^,()]+),([^,()]+),([^,()]+),([^,()]+)((?:,-?\d+,-?\d+)?)\)/g, (_m, x1: string, y1: string, x2: string, y2: string, resto: string) =>
+          `\\move(${Number(x1) + bx - tx},${Number(y1) + by - Math.round(caja.cy)},${Number(x2) + bx - tx},${Number(y2) + by - Math.round(caja.cy)}${resto})`
+        )
+      const posCaja = entradaCaja.includes('\\move(') ? '' : `\\pos(${bx},${by})`
+      const giro = libre && t.giro ? `\\org(${ax},${ay})\\frz${Math.round(-t.giro * 10) / 10}` : ''
+      const dibujo = rectanguloRedondeado(caja.w, caja.h, caja.radio)
+      return `Dialogue: 0,${tiempoAss(a)},${tiempoAss(b)},${nombreEstilo[t.posicion]}Libre,,0,0,0,,{\\an${an}${posCaja}${giro}\\bord0\\shad0\\1c${color}&\\1a&H${alfas.borde}&${entradaCaja}\\p1}${dibujo}{\\p0}\n${texto}`
   }
 
   const contenido = `[Script Info]
@@ -355,6 +406,10 @@ async function exportarTimelineAhora(
   // De dónde sale cada clip: el video principal o un medio de la biblioteca.
   const fuenteDe = (f: string): { ruta: string; tipo: 'video' | 'imagen'; conAudio: boolean } | null => {
     if (f === FUENTE_PRINCIPAL) return { ruta: proyecto.source.path, tipo: 'video', conAudio: principalConAudio }
+    if (f === FUENTE_NEGRO) {
+      const ruta = negroDe(carpeta, proyecto.source.width, proyecto.source.height)
+      return ruta ? { ruta, tipo: 'imagen', conAudio: false } : null
+    }
     const m = proyecto.medios?.find((x) => x.id === f)
     return m && existsSync(m.ruta) ? { ruta: m.ruta, tipo: m.tipo, conAudio: m.conAudio } : null
   }
@@ -382,11 +437,13 @@ async function exportarTimelineAhora(
   const hayBus = conAudio || frases.length > 0 || efectos.length > 0
 
   // La música vive en la carpeta del proyecto; normalizarMusica ya validó la ruta.
-  let musica: { ruta: string; volumen: number; ducking: boolean } | null = null
+  let musica: { ruta: string; volumen: number; ducking: boolean; tramos?: TramoMusica[] } | null = null
   if (timeline.musica) {
     const ruta = join(carpeta, timeline.musica.archivo)
     if (!existsSync(ruta)) return { ok: false, error: `No encuentro la música «${timeline.musica.nombre}». Vuelve a añadirla.` }
-    musica = { ruta, volumen: timeline.musica.volumen, ducking: timeline.musica.ducking }
+    const trozos = timeline.musica.tramos ? tramosMusica(timeline) : undefined
+    // Cortada en trozos y sin ninguno dentro de lo que se exporta: no suena.
+    if (!trozos || trozos.length) musica = { ruta, volumen: timeline.musica.volumen, ducking: timeline.musica.ducking, ...(trozos ? { tramos: trozos } : {}) }
   }
 
   const { ancho, alto } = dimensiones(proyecto, opciones.formato, opciones.resolucion)
@@ -706,7 +763,8 @@ async function exportarTimelineAhora(
     frases.forEach((v, i) => {
       entradas.push('-i', join(carpeta, v.archivo))
       partes.push(
-        `[${n++}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=${(v.volumen ?? 1).toFixed(3)},adelay=${Math.round(v.inicio * 1000)}:all=1[fr${i}]`
+        // Su tramo del archivo (si se dividió o recortó), a su volumen y en su segundo.
+        `[${n++}:a]${v.desde !== undefined || v.largo !== undefined ? `atrim=start=${(v.desde ?? 0).toFixed(3)}:duration=${v.duracion.toFixed(3)},asetpts=PTS-STARTPTS,` : ''}aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=${(v.volumen ?? 1).toFixed(3)},adelay=${Math.round(v.inicio * 1000)}:all=1[fr${i}]`
       )
       etiquetas.push(`[fr${i}]`)
     })
@@ -718,7 +776,7 @@ async function exportarTimelineAhora(
       )
       etiquetas.push(`[ef${i}]`)
     })
-    partes.push(`${etiquetas.join('')}amix=inputs=${etiquetas.length}:duration=longest:normalize=0,apad,atrim=0:${duracion.toFixed(3)}${bus}`)
+    partes.push(`${etiquetas.join('')}amix=inputs=${etiquetas.length}:duration=longest:normalize=0,asetpts=N/SR/TB,apad,atrim=0:${duracion.toFixed(3)}${bus}`)
   }
   // Lo que va encima (imágenes, logos, íconos, tomas de apoyo): cada capa en su sitio, su tamaño y
   // su entrada, igual que en el monitor. Va debajo de los rótulos.
@@ -881,10 +939,22 @@ async function exportarTimelineAhora(
     const m = n++
     entradas.push('-stream_loop', '-1', '-i', musica.ruta)
     const formato = 'aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo'
-    partes.push(
-      `[${m}:a]${formato},atrim=0:${duracion.toFixed(3)},asetpts=PTS-STARTPTS,volume=${musica.volumen.toFixed(3)},` +
-        `afade=t=out:st=${Math.max(0, duracion - 1.5).toFixed(3)}:d=1.5[mus]`
-    )
+    const final = `volume=${musica.volumen.toFixed(3)},afade=t=out:st=${Math.max(0, duracion - 1.5).toFixed(3)}:d=1.5[mus]`
+    if (musica.tramos) {
+      // (Tras la mezcla, asetpts=N/SR/TB: con un solo trozo, atrim se comería el silencio que puso adelay.)
+      // En trozos (como clips de audio): cada uno, su tramo de la música repetida, en su segundo, con un fundido
+      // cortito en los bordes para que el corte no chasquee. Igual que en el monitor.
+      const k = musica.tramos.length
+      partes.push(`[${m}:a]${formato}${k > 1 ? `,asplit=${k}${musica.tramos.map((_, i) => `[mt${i}]`).join('')}` : '[mt0]'}`)
+      musica.tramos.forEach((t, i) => {
+        const borde = Math.min(0.03, t.duracion / 4).toFixed(3)
+        partes.push(
+          `[mt${i}]atrim=start=${(t.desde ?? 0).toFixed(3)}:duration=${t.duracion.toFixed(3)},asetpts=PTS-STARTPTS,` +
+            `afade=t=in:d=${borde},afade=t=out:st=${Math.max(0, t.duracion - Number(borde)).toFixed(3)}:d=${borde},adelay=${Math.round(t.inicio * 1000)}:all=1[mtr${i}]`
+        )
+      })
+      partes.push(`${musica.tramos.map((_, i) => `[mtr${i}]`).join('')}amix=inputs=${k}:duration=longest:normalize=0,asetpts=N/SR/TB,apad,atrim=0:${duracion.toFixed(3)},${final}`)
+    } else partes.push(`[${m}:a]${formato},atrim=0:${duracion.toFixed(3)},asetpts=PTS-STARTPTS,${final}`)
     const envolvente = musica.ducking ? envolventeDucking(timeline, proyecto) : null
     if (!hayBus) partes.push('[mus]anull[aout]')
     else if (envolvente) {
@@ -1290,6 +1360,119 @@ export function correrTiemposAss(etiquetas: string, s: number, duracion: number)
     .replace(/\\fad\((\d+),(\d+)\)/g, (_m, i: string, o: string) => `\\fade(255,0,255,${-d},${Number(i) - d},${total - Number(o) - d},${total - d})`)
 }
 
+// ===== La caja de los rótulos, como en el monitor =====
+// El monitor dibuja la caja de un rótulo con CSS (.monitor-rotulo): un fondo negro al 69 % (o del color de su caja),
+// 0,25 em de margen arriba y abajo y 0,6 em a los lados, líneas de 1,2 em y esquinas de 0,3 em. libass solo sabe una
+// caja cuadrada pegada a cada línea: en el MP4 la caja va como un dibujo aparte, con esas medidas.
+
+/** Las líneas de un rótulo tal como las escribe libass, sin colores (para medirlas). */
+const lineasPlanas = (t: TextoTL): string[] =>
+  textoVisible(t)
+    .split(/\r?\n/)
+    .map((l) => escapar(l).replace(/\*/g, ''))
+    .filter(Boolean)
+
+/** Lo que distingue el ancho de un rótulo a tamaño 1: sus líneas, su letra y su espaciado. */
+export function claveAnchoCaja(t: TextoTL): string {
+  return JSON.stringify([lineasPlanas(t), t.fuente ?? 'normal', t.espaciado ?? 0])
+}
+
+/**
+ * La caja de un rótulo en píxeles del MP4, como la del monitor: su centro, su ancho y alto y el radio de sus esquinas.
+ * `anchoTexto` es lo que mide su línea más larga (ya con su tamaño).
+ */
+export function cajaDeRotulo(t: TextoTL, anchoTexto: number, eme: number, ancho: number, alto: number): { cx: number; cy: number; w: number; h: number; radio: number } {
+  const lineas = Math.max(1, lineasPlanas(t).length)
+  const w = anchoTexto + 1.2 * eme
+  const h = lineas * 1.2 * eme + 0.5 * eme
+  const libre = typeof t.x === 'number' && typeof t.y === 'number'
+  let cx = ancho / 2
+  let cy = t.posicion === 'arriba' ? alto * 0.07 + h / 2 : t.posicion === 'abajo' ? alto * 0.91 - h / 2 : alto / 2
+  if (libre) {
+    // Su punto de anclaje: el centro, o el borde izquierdo o derecho de la caja si va alineado.
+    cx = t.x! * ancho + (t.alineacion === 'izquierda' ? w / 2 : t.alineacion === 'derecha' ? -w / 2 : 0)
+    cy = t.y! * alto
+  }
+  return { cx, cy, w, h, radio: Math.min(0.3 * eme, h / 2, w / 2) }
+}
+
+/** Un rectángulo de `w` × `h` con las esquinas redondeadas (radio `r`), como dibujo de ASS (\p1). */
+export function rectanguloRedondeado(w0: number, h0: number, r0: number): string {
+  const w = Math.max(1, Math.round(w0))
+  const h = Math.max(1, Math.round(h0))
+  const r = Math.max(0, Math.min(Math.round(r0), Math.floor(Math.min(w, h) / 2)))
+  if (r < 1) return `m 0 0 l ${w} 0 ${w} ${h} 0 ${h}`
+  // Cada esquina, un cuarto de círculo con una curva de Bézier (k: la distancia de sus puntos de control).
+  const k = Math.round(r * 0.4477)
+  return [
+    `m ${r} 0`,
+    `l ${w - r} 0`,
+    `b ${w - k} 0 ${w} ${k} ${w} ${r}`,
+    `l ${w} ${h - r}`,
+    `b ${w} ${h - k} ${w - k} ${h} ${w - r} ${h}`,
+    `l ${r} ${h}`,
+    `b ${k} ${h} 0 ${h - k} 0 ${h - r}`,
+    `l 0 ${r}`,
+    `b 0 ${k} ${k} 0 ${r} 0`
+  ].join(' ')
+}
+
+/**
+ * Lo que mide la línea más larga de cada rótulo con caja, a tamaño 1, en píxeles del MP4: se pinta cada uno con su
+ * caja cuadrada de libass (que va justo de lado a lado de la línea) en un cuadro aparte y se mide. Uno por cuadro, en
+ * un solo FFmpeg, a la mitad de tamaño. Si algo falla, null (y los rótulos llevan la caja de siempre).
+ */
+function medirAnchosCaja(carpeta: string, textos: TextoTL[], ancho: number, alto: number, tamRotulo: number, letras?: LetraTL[]): Map<string, number> | null {
+  const unicos = new Map<string, TextoTL>()
+  for (const t of textos) if (lineasPlanas(t).length) unicos.set(claveAnchoCaja(t), t)
+  if (!unicos.size) return new Map()
+  try {
+    const conLetras = letrasEn(carpeta)
+    const lista = [...unicos.entries()]
+    const eventos = lista.map(([, t], k) => {
+      const f = letraDe(t.fuente, letras)
+      const etiquetas = [
+        '\\an7\\pos(4,4)',
+        `\\fs${Math.round(tamRotulo * escalaLetraAss(t.fuente, letras))}`,
+        ...(f ? [`\\fn${f.familia}`, f.negrita ? '\\b1' : '\\b0', f.cursiva ? '\\i1' : '\\i0'] : []),
+        ...(t.espaciado ? [`\\fsp${Math.round(t.espaciado * tamRotulo * EME_ROTULO * 10) / 10}`] : [])
+      ].join('')
+      return `Dialogue: 0,${tiempoAss(k * 0.1)},${tiempoAss(k * 0.1 + 0.1)},M,,0,0,0,,{${etiquetas}}${lineasPlanas(t).join('\\N')}`
+    })
+    writeFileSync(
+      join(carpeta, 'medir-cajas.ass'),
+      `[Script Info]\nScriptType: v4.00+\nPlayResX: ${ancho}\nPlayResY: ${alto}\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: M,Arial,${tamRotulo},&HFF000000,&HFF000000,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,4,0,7,40,40,0,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n${eventos.join('\n')}\n`,
+      'utf8'
+    )
+    const cw = par(ancho / 2)
+    const ch = par(alto / 2)
+    const r = spawnSync(
+      rutaFfmpeg(),
+      ['-v', 'error', '-f', 'lavfi', '-i', `color=c=black:s=${cw}x${ch}:r=10:d=${(lista.length * 0.1 + 0.05).toFixed(2)}`, '-vf', `subtitles=medir-cajas.ass${conLetras ? ':fontsdir=fuentes' : ''},format=gray`, '-frames:v', String(lista.length), '-f', 'rawvideo', '-pix_fmt', 'gray', '-'],
+      { cwd: carpeta, windowsHide: true, maxBuffer: cw * ch * lista.length + (1 << 20) }
+    )
+    if (r.status !== 0 || r.stdout.length < cw * ch * lista.length) return null
+    const medidas = new Map<string, number>()
+    lista.forEach(([clave], k) => {
+      const base = k * cw * ch
+      let x0 = cw
+      let x1 = -1
+      for (let y = 0; y < ch; y++) {
+        const fila = base + y * cw
+        for (let x = 0; x < cw; x++) if (r.stdout[fila + x] > 128) {
+          if (x < x0) x0 = x
+          if (x > x1) x1 = x
+        }
+      }
+      // La caja cuadrada lleva 4 px de borde por cada lado (con 0, libass no la dibuja): se le quitan.
+      if (x1 >= x0) medidas.set(clave, Math.max(1, ((x1 - x0 + 1) * ancho) / cw - 8))
+    })
+    return medidas
+  } catch {
+    return null
+  }
+}
+
 /** Lo que tarda cada palabra en pasar de borrosa a nítida («palabra a palabra, de borrosa a nítida»). */
 export const PALABRA_NITIDA_S = 0.3
 
@@ -1390,8 +1573,9 @@ export function animarAss(t: TextoTL, lineas: string, libre: { x: number; y: num
 function letrasEn(carpeta: string): boolean {
   try {
     const origen = rutaScriptPython('fuentes')
-    if (!existsSync(origen)) return false
     const destino = join(carpeta, 'fuentes')
+    // Las letras propias del proyecto (las del agente) ya están en `fuentes/`: con ellas también hay que mirar ahí.
+    if (!existsSync(origen)) return existsSync(destino) && readdirSync(destino).some((n) => /\.(ttf|otf)$/i.test(n))
     mkdirSync(destino, { recursive: true })
     for (const n of readdirSync(origen)) if (n.endsWith('.ttf') && !existsSync(join(destino, n))) copyFileSync(join(origen, n), join(destino, n))
     return true

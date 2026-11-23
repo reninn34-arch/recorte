@@ -72,9 +72,9 @@ export function finDeLoGrabado(carpeta: string): number | null {
 }
 
 /**
- * Si el video lleva voz, la receta tiene que traer sus subtítulos (en `"subtitulos"`, editables) y llegar hasta el
- * final de lo que se dice. La música que subió el usuario no cuenta como voz. Devuelve el problema para que el agente
- * lo corrija, o null.
+ * Si el video lleva voz y subtítulos, los subtítulos tienen que llegar hasta el final de lo que se dice. Sin subtítulos
+ * no es un problema: van solo cuando el usuario los pide (o sus gustos lo dicen para ese tipo de video), y eso lo decide
+ * el agente. La música que subió el usuario no cuenta como voz. Devuelve el problema para que el agente lo corrija, o null.
  */
 export function subtitulosQueFaltan(rutaReceta: string, c: Creacion, duracion?: number, audios: AudioSubido[] = []): string | null {
   let r: { voz?: unknown[]; subtitulos?: { frases?: { hasta?: unknown }[] } }
@@ -91,9 +91,8 @@ export function subtitulosQueFaltan(rutaReceta: string, c: Creacion, duracion?: 
   const vozGenerada = Boolean(c.vozElegida) || (Array.isArray(r.voz) && r.voz.some((v) => !/narracion-\d+\.wav/.test(JSON.stringify(v))))
   if (!narracionSubida && !vozGenerada) return null
   const frases = Array.isArray(r.subtitulos?.frases) ? r.subtitulos!.frases! : []
-  if (!frases.length) {
-    return 'El video lleva voz pero la receta no trae "subtitulos": ponlos EN LA RECETA (ver «Subtítulos» en kit/RECETA.md), de principio a fin, y NO los quemes con un script propio (el usuario los edita en su editor). Vuelve a armar con el kit.'
-  }
+  // Sin subtítulos: el agente decidió que este video no los lleva (no los pidió el usuario).
+  if (!frases.length) return null
   const ultimo = Math.max(...frases.map((f) => (typeof f.hasta === 'number' ? f.hasta : 0)))
   // Solo la narración que subió el usuario: los subtítulos llegan hasta donde se habla en ella, no hasta el final del
   // video (puede haber música o un cierre después). Con un margen, por si la receta la desplaza.

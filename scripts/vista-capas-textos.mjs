@@ -3,7 +3,7 @@
 // Deja las dos imágenes lado a lado (y su diferencia) en la carpeta temporal y dice cuánto se parecen.
 // Uso: npm run build && node scripts/vista-capas-textos.mjs
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdirSync, rmSync, rmdirSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, rmSync, rmdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import electronPath from 'electron'
@@ -75,6 +75,10 @@ try {
   const id = ingesta.project.id
   const conLogo = await evaluar(`window.recorte.importarRutas(${JSON.stringify(id)}, [${JSON.stringify(logo)}])`)
   const medio = conLogo.agregados[0]
+  // Una letra propia del proyecto (como la Montserrat que trae el agente): Anton, copiada a fuentes/ del proyecto.
+  const letraId = 'letra-0a0b0c0d'
+  mkdirSync(join(datos, 'proyectos', id, 'fuentes'), { recursive: true })
+  copyFileSync(join(raiz, 'python', 'fuentes', 'Anton-Regular.ttf'), join(datos, 'proyectos', id, 'fuentes', 'Anton-propia.ttf'))
   const timeline = {
     version: 1,
     clips: [{ id: 'c1', fuente: 'principal', entrada: 0, salida: 4 }],
@@ -83,9 +87,12 @@ try {
       { id: 't2', inicio: 0, duracion: 4, texto: 'girado y espaciado', posicion: 'centro', x: 0.62, y: 0.5, giro: -14, espaciado: 0.12, mayusculas: true, tamano: 1.1, salida: 'desenfoque', durSalida: 2 },
       { id: 't3', inicio: 0, duracion: 4, texto: 'A la derecha\ny medio transparente', posicion: 'abajo', x: 0.95, y: 0.84, alineacion: 'derecha', opacidad: 0.55, caja: '#6a1b9a', fuente: 'titular' },
       { id: 't4', inicio: 0, duracion: 4, texto: 'Sin caja, solo sombra', posicion: 'abajo', sinCaja: true, contorno: 0, sombra: 0.12, colorSombra: '#000000', fuente: 'gruesa', salida: 'encoger', durSalida: 2 },
+      // Con una letra propia del proyecto.
+      { id: 't6', inicio: 0, duracion: 4, texto: 'LETRA PROPIA', posicion: 'arriba', x: 0.7, y: 0.92, sinCaja: true, tamano: 1.2, fuente: 'letra-0a0b0c0d' },
       // Con fotogramas clave: cruza hacia la derecha y crece.
       { id: 't5', inicio: 0, duracion: 4, texto: 'CLAVES', posicion: 'centro', x: 0.3, y: 0.72, sinCaja: true, contorno: 0.06, colorContorno: '#000000', claves: { x: [{ f: 0, v: 0.3 }, { f: 4, v: 0.62, curva: 'lineal' }], tamano: [{ f: 0, v: 0.8 }, { f: 4, v: 1.8 }] } }
     ],
+    letras: [{ id: 'letra-0a0b0c0d', nombre: 'Anton propia', familia: 'Anton Regular', archivo: 'fuentes/Anton-propia.ttf', linea: 1.733 }],
     capas: [
       { id: 'k1', fuente: medio, inicio: 0, duracion: 4, x: 0.2, y: 0.58, ancho: 0.22, giro: 20, voltearH: true, recorte: { izq: 0.1, der: 0.3, arriba: 0.15, abajo: 0 } },
       // Esquinas redondeadas, borde amarillo y sombra (sobre lo que se ve, recortado).
@@ -138,6 +145,9 @@ try {
   }
   const t = await cabezal()
   console.log(`cabezal en la primera comparación: ${t.toFixed(3)} s`)
+  const conLetra = await evaluar(`document.fonts.ready.then(() => document.fonts.check('20px "Recorte letra-0a0b0c0d"'))`)
+  console.log(`${conLetra ? 'bien' : 'MAL'}: el monitor cargó la letra propia del proyecto`)
+  if (!conLetra) process.exitCode = 1
   const cuadro = await evaluar(`window.recorte.exportarCuadro(${JSON.stringify(id)}, ${JSON.stringify(timeline)}, ${Math.max(0, t)})`)
   if (!cuadro.ok) throw new Error(cuadro.error)
   const pngMp4 = join(salida, 'mp4.png')

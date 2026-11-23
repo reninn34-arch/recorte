@@ -13,6 +13,7 @@ import { useMenuContextual } from './MenuContextual'
 import { PanelHistorial } from './PanelHistorial'
 import { PanelLimpieza } from './PanelLimpieza'
 import { PanelAudio } from './PanelAudio'
+import { PanelGraficos } from './PanelGraficos'
 import { PanelPiezas } from './PanelPiezas'
 import { SubtitulosAnimados } from './SubtitulosAnimados'
 
@@ -20,7 +21,7 @@ const CLAVE_ALTO_TL = 'recorte.altoLineaDeTiempo'
 import { mediaUrl } from '../media'
 import { describirDonde } from '../donde'
 import { useVistaPrevia } from '../hooks/vistaprevia'
-import { ajustarClip, anadirCapa, borrarCapa, duracionesDeMedios, ponerMusica, anadirSonido, sobrescribirClip, separarAudio, sonidoUnicoMulticam, inicioEscenaMulticam, anidarClips, clipsSeguidos, cambiarATramo, ubicar, capaNueva, cambiarCapa, cambiarFuente, escalaAnimada, type TipoAnimar, duracionTimeline, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, timelineActiva, type Timeline } from '../../../shared/timeline'
+import { ajustarClip, anadirCapa, borrarCapa, duracionesDeMedios, ponerMusica, anadirSonido, sobrescribirClip, separarAudio, sonidoUnicoMulticam, inicioEscenaMulticam, anidarClips, clipsSeguidos, cambiarATramo, ubicar, capaNueva, cambiarCapa, cambiarFuente, escalaAnimada, type TipoAnimar, duracionTimeline, DURACION_IMAGEN, insertarClip, MAX_IMAGEN, FUENTE_NEGRO, quitarFuente, timelineDesdeCortes, timelineDesdeReceta, timelineInicial, timelineVacia, timelineActiva, type Timeline } from '../../../shared/timeline'
 import { useHistorial, useReproductor, type FuentesVista } from '../hooks/timeline'
 import { Monitor } from './Monitor'
 import { MediosPanel } from './MediosPanel'
@@ -33,6 +34,13 @@ import type { PuenteEditor } from './ChatAgente'
  * herramientas bajo la línea de tiempo; el video manda.
  */
 
+
+/** Un cuadro negro del tamaño del video (el negro de relleno que alarga el video). */
+function urlNegro(ancho: number, alto: number): string {
+  const w = ancho > 0 ? Math.round(ancho) : 1920
+  const h = alto > 0 ? Math.round(alto) : 1080
+  return `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="#000"/></svg>`)}`
+}
 
 export function Editor({
   proyecto,
@@ -119,8 +127,10 @@ export function Editor({
   const fuentes = useMemo<FuentesVista>(() => {
     const lista: FuentesVista = { principal: { url: mediaUrl(proyecto.id, proyecto.proxy ?? 'fuente'), tipo: 'video' } }
     for (const m of proyecto.medios ?? []) lista[m.id] = { url: mediaUrl(proyecto.id, `medio/${m.id}`) + (m.proxy ? '?copia=1' : ''), tipo: m.tipo }
+    // El negro que alarga el video: un cuadro negro del tamaño del video.
+    lista[FUENTE_NEGRO] = { url: urlNegro(proyecto.source.width, proyecto.source.height), tipo: 'imagen' }
     return lista
-  }, [proyecto.id, proyecto.proxy, proyecto.medios])
+  }, [proyecto.id, proyecto.proxy, proyecto.medios, proyecto.source.width, proyecto.source.height])
   // Lo que suena y se ve es la timeline sin las pistas silenciadas (los clips no cambian de sitio).
   const activa = useMemo(() => timelineActiva(timeline), [timeline])
   const reproductor = useReproductor(activa, proyecto.id, fuentes)
@@ -145,21 +155,24 @@ export function Editor({
 
   const duracionDe = (fuente: string) => {
     if (fuente === 'principal') return proyecto.source.duration
+    if (fuente === FUENTE_NEGRO) return MAX_IMAGEN
     const m = proyecto.medios?.find((x) => x.id === fuente)
     return m ? (m.tipo === 'imagen' ? MAX_IMAGEN : m.duracion) : 0
   }
   /** Lo que dura cada medio (una imagen, lo que se quiera): para validar capas y clips. */
   const duraciones = useMemo(() => {
-    const d: Record<string, number> = { principal: proyecto.source.duration }
+    const d: Record<string, number> = { principal: proyecto.source.duration, [FUENTE_NEGRO]: MAX_IMAGEN }
     for (const m of proyecto.medios ?? []) d[m.id] = m.tipo === 'imagen' ? MAX_IMAGEN : m.duracion
     return d
   }, [proyecto.source.duration, proyecto.medios])
-  const nombreDe = (fuente: string) => (fuente === 'principal' ? proyecto.source.name : (proyecto.medios?.find((x) => x.id === fuente)?.nombre ?? '?'))
+  const nombreDe = (fuente: string) =>
+    fuente === 'principal' ? proyecto.source.name : fuente === FUENTE_NEGRO ? 'Negro' : (proyecto.medios?.find((x) => x.id === fuente)?.nombre ?? '?')
 
   /** La miniatura de cada fuente, para verla dentro de sus clips en la línea de tiempo. */
   const miniaturaDe = (fuente: string): string | undefined => {
     if (proyecto.demo) return undefined
     if (fuente === 'principal') return proyecto.thumbnail ? mediaUrl(proyecto.id, proyecto.thumbnail) : undefined
+    if (fuente === FUENTE_NEGRO) return urlNegro(proyecto.source.width, proyecto.source.height)
     const m = proyecto.medios?.find((x) => x.id === fuente)
     if (!m) return undefined
     return m.tipo === 'imagen' ? mediaUrl(proyecto.id, `medio/${m.id}`) : m.miniatura ? mediaUrl(proyecto.id, m.miniatura) : undefined
@@ -800,6 +813,23 @@ export function Editor({
           ...(proyecto.demo
             ? []
             : [
+                {
+                  id: 'graficos',
+                  nombre: 'Gráficos',
+                  icono: 'type' as const,
+                  contenido: (
+                    <PanelGraficos
+                      proyecto={proyecto}
+                      timeline={timeline}
+                      historial={historial}
+                      tiempo={reproductor.tiempo}
+                      capaElegida={elegido?.tipo === 'capa' ? timeline.capas?.find((c) => c.id === elegido.id) : undefined}
+                      onMedios={onMedios}
+                      onElegirCapa={(id) => elegir({ tipo: 'capa', id })}
+                      onAviso={onAviso}
+                    />
+                  )
+                },
                 {
                   id: 'animadas',
                   nombre: 'Animadas',

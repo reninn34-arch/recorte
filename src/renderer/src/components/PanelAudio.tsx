@@ -56,7 +56,8 @@ export function PanelAudio({
       return aplicarOperaciones(tl, a.ops, { duracionFuente: proyecto.source.duration, transcript: proyecto.transcript, medios: duracionesDeMedios(proyecto.medios) }).timeline
     }
     const v = tl.voces?.find((y) => y.id === a.voz)
-    if (!v) return tl
+    // Una frase dividida o recortada se arregla en su archivo entero: rehacerla rompería sus pedazos.
+    if (!v || v.desde !== undefined || v.largo !== undefined) return tl
     const r = await window.recorte.arreglarVoz(proyecto.id, v.archivo, a.accion, a.ventanas)
     return { ...tl, voces: tl.voces!.map((y) => (y.id === v.id ? { ...y, archivo: r.archivo, duracion: r.duracion } : y)) }
   }

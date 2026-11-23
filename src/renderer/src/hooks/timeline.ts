@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { duracionTimeline, tramos, tramosDeVoces, ubicar, vozEnTimeline, type Timeline , velocidadDe, clipEnFuente, velocidadEnFuente } from '../../../shared/timeline'
+import { duracionTimeline, tramos, tramosDeVoces, tramosMusica, ubicar, vozEnTimeline, type Timeline , velocidadDe, clipEnFuente, velocidadEnFuente } from '../../../shared/timeline'
 import type { TranscriptSegment } from '../../../shared/types'
 
 const LIMITE_HISTORIAL = 200
@@ -424,6 +424,9 @@ export function useMusica(
   )
   const total = duracionTimeline(timeline)
   const { tiempo, reproduciendo } = reproductor
+  // El trozo de música que suena en el cabezal (sin cortar, uno de todo el video).
+  const trozos = useMemo(() => tramosMusica(timeline), [timeline])
+  const trozo = trozos.find((t) => tiempo >= t.inicio && tiempo < t.inicio + t.duracion)
 
   // Volumen: el de la pista, bajado con voz, y fundido en el último tramo.
   useEffect(() => {
@@ -434,19 +437,20 @@ export function useMusica(
     audio.volume = Math.max(0, Math.min(1, musica.volumen * (hablando ? DUCKING_FACTOR : 1) * fundido))
   }, [tiempo, voz, musica, total])
 
-  // Arranca, para y se corrige si se desvía del reloj de la timeline.
+  // Arranca, para y se corrige si se desvía del reloj de la timeline. Fuera de sus trozos, calla.
   useEffect(() => {
     const audio = audioRef.current
     if (!audio || !musica) return
-    if (!reproduciendo) {
+    if (!reproduciendo || !trozo) {
       audio.pause()
       return
     }
     const largo = audio.duration
-    const esperado = Number.isFinite(largo) && largo > 0 ? tiempo % largo : tiempo
+    const propio = (trozo.desde ?? 0) + (tiempo - trozo.inicio)
+    const esperado = Number.isFinite(largo) && largo > 0 ? propio % largo : propio
     if (Math.abs(audio.currentTime - esperado) > 0.3) audio.currentTime = esperado
     if (audio.paused) void audio.play().catch(() => {})
-  }, [reproduciendo, tiempo, musica])
+  }, [reproduciendo, tiempo, musica, trozo])
 
   return audioRef
 }
@@ -469,7 +473,7 @@ export function useVoces(timeline: Timeline, reproductor: Reproductor, urlDe: (a
       if (!audio.paused) audio.pause()
       return
     }
-    const esperado = tiempo - frase.inicio
+    const esperado = tiempo - frase.inicio + (frase.desde ?? 0)
     if (actual.current !== frase.archivo) {
       actual.current = frase.archivo
       audio.src = urlDe(frase.archivo)

@@ -121,6 +121,15 @@ NUNCA los pegues con un script aparte: así quedan en las pistas «Encima» y «
   foto que **se acerca** o algo que **gira**. Para una escena por capas: fondo como foto, y encima cada pieza recortada (PNG
   sin fondo) entrando en su momento, desde su lado, con un «pop» de sonido.
   Solo imágenes (un PNG con transparencia queda mejor). Que no tape caras ni subtítulos.
+- **Tarjetas, palabras clave, rótulos con caja, botones: GRÁFICOS EDITABLES, nunca una imagen con el texto dentro.**
+  Escribe el diseño en un .json y `python kit/kit.py grafico graficos/tarjeta-1.json --salida graficos/tarjeta-1.png
+  --ancho-video 1080` (Recorte lo dibuja). Devuelve `"capa"`: ponla en `"capas"` con su `desde`, `hasta`, `x`, `y`
+  (lleva `archivo`, `grafico` y `ancho`). Así en el editor el usuario cambia sus textos, letra y colores. El diseño (px de
+  un cuadro de 1080 de ancho): `{"disposicion":"columna|fila","alinear":"centro","separacion":10,"margenX":48,"margenY":30,
+  "fondo":{"color":"#0a6cf0","color2":"#00c2a8","angulo":90,"radio":32},"acento":{"lado":"izquierda","color":"#ffd60a","grosor":12},
+  "sombra":0.5,"elementos":[{"tipo":"texto","texto":"PALABRA","tamano":88,"peso":900,"color":"#ffffff","fuente":"fuentes/Marca.ttf",
+  "mayusculas":true},{"tipo":"texto","texto":"la frase","tamano":40,"peso":400,"color":"#ffffff","caja":{"color":"#ffd60a","radio":12,"margenX":18,"margenY":4}},
+  {"tipo":"imagen","medio":"entrada/logo.png","alto":120}]}`. `fuente`: `normal`, `gruesa`, `titular`… o un .ttf de tu carpeta.
 - `sonido`: uno de los 34 que trae Recorte (`python kit/kit.py sonidos` da la lista con para qué sirve cada uno y lo que
   dura; `--tipo` filtra). O `archivo` con uno propio. `volumen` por defecto 0.6. Los hay de seis tipos:
   - **transiciones**: `whoosh` (un cambio rápido), `swish` (algo corto que pasa), `reversa` (el aire que se recoge antes de

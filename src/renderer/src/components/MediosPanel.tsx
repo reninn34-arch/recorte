@@ -1,3 +1,4 @@
+import { esDibujoGrafico } from '../../../shared/grafico'
 import { DURACION_IMAGEN, TIPO_ARRASTRE_MEDIO } from '../../../shared/timeline'
 import type { MedioProyecto, Project } from '../../../shared/types'
 import { Icon } from '../Icons'
@@ -31,7 +32,8 @@ export function MediosPanel({
   onPoner: (fuente: string, donde: 'final' | 'cabezal' | 'encima') => void
   onQuitar: (medio: MedioProyecto) => void
 }) {
-  const medios = proyecto.medios ?? []
+  // Los dibujos de los gráficos no: se cambian desde su capa (pestaña Gráficos).
+  const medios = (proyecto.medios ?? []).filter((m) => !esDibujoGrafico(m.ruta))
   const [menu, abrirMenu] = useMenuContextual()
   /** Clic derecho en un medio: todo lo que se puede hacer con él. */
   const menuDe = (e: React.MouseEvent, fuente: string, m?: MedioProyecto) =>

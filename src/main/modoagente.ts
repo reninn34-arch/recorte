@@ -1,3 +1,4 @@
+import { datosServidorGraficos } from './servidorgraficos'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from 'node:path'
 import { COSTO_CLIP, MAX_CLIPS_VEO, VOCES_GEMINI, type Creacion } from '../shared/creacion'
@@ -112,7 +113,9 @@ function copiarKit(trabajo: string): boolean {
   if (existsSync(join(sonidos, 'catalogo.json'))) biblioteca.sonidos = sonidos
   writeFileSync(join(destino, 'biblioteca.json'), JSON.stringify(biblioteca), 'utf8')
   // El FFmpeg de Recorte, aunque no esté en el PATH del agente.
-  writeFileSync(join(destino, 'rutas.json'), JSON.stringify({ ffmpeg: resolverBinario('ffmpeg'), ffprobe: resolverBinario('ffprobe') }))
+  // Y dónde pedirle a Recorte el dibujo de un gráfico editable (`kit.py grafico`): el kit no tiene Chromium.
+  const grafico = datosServidorGraficos()
+  writeFileSync(join(destino, 'rutas.json'), JSON.stringify({ ffmpeg: resolverBinario('ffmpeg'), ffprobe: resolverBinario('ffprobe'), ...(grafico ? { grafico } : {}) }))
   return true
 }
 
@@ -263,9 +266,13 @@ No hay duración por defecto: NO recortes a 30 s (ni a ninguna cifra) si el usua
   aparece justo al nombrarlo, en el orden en que lo dice; si señala con la mano, ponlo donde señala (cerca, sin tapar el dedo).
 - **Nada tapa la cara ni las manos.** En los planos cerrados (la cara cerca de la cámara), sube o aparta los rótulos e
   íconos. Mira los fotogramas para comprobarlo.
-- **Subtítulos limpios.** Nunca dos a la vez en pantalla (cada bloque termina cuando empieza el siguiente) y nunca se
-  salen del cuadro: si una frase no cabe, parte el bloque o achica la letra. Corrige lo que la transcripción entienda mal.
-  Si el video lleva voz, lleva subtítulos de PRINCIPIO A FIN (todas las escenas, también las que cambies después).
+- **Subtítulos, solo si los pide.** Lleva subtítulos cuando el usuario los pide para este video, o cuando lo que sabes de
+  él dice que los quiere para ESTE tipo de video. Si no, no los pongas: en una promo o un anuncio, las palabras clave van
+  en rótulos o tarjetas, no la frase entera abajo. Cuando el usuario diga que un video va con o sin subtítulos, apréndelo
+  con el tipo de video («En sus promos con tarjetas no quiere subtítulos»), para hacerlo igual en los siguientes.
+- **Subtítulos limpios (si los lleva).** Nunca dos a la vez en pantalla (cada bloque termina cuando empieza el siguiente)
+  y nunca se salen del cuadro: si una frase no cabe, parte el bloque o achica la letra. Corrige lo que la transcripción
+  entienda mal. Si los lleva, van de PRINCIPIO A FIN de lo que se dice (también en las escenas que cambies después).
 - **Textos editables, nunca quemados.** Subtítulos y rótulos van EN LA RECETA (\`"subtitulos"\` y \`rotulo\` o momentos
   \`texto\`, ver kit/RECETA.md), no dibujados con un script propio sobre el video: así el usuario los cambia uno a uno en
   el editor (texto, letra, color, caja). Si haces algo que el kit no tiene, que el texto siga yendo en la receta.
@@ -392,7 +399,7 @@ ni la cambies, y el video dura lo que ella (más el cierre). Recorta solo el sil
 - Cada escena dura lo que su frase: usa los tiempos de la transcripción para poner cada imagen, clip y texto en su segundo.
 - Corrige lo que la transcripción entendió mal según el sentido (p. ej. «para tu casa» → «para tu caso»).
 - En la receta del kit va como una sola entrada de voz: \`"voz": [{ "archivo": "vistazo/narracion-01.wav", "en": 0 }]\`.
-- Los subtítulos (en \`"subtitulos"\` de la receta) con los tiempos de las palabras del .json, restando lo que recortes del principio.`)
+- Si lleva subtítulos (ver «Subtítulos, solo si los pide»), van en \`"subtitulos"\` de la receta con los tiempos de las palabras del .json, restando lo que recortes del principio.`)
   }
   return partes.join('\n\n')
 }
@@ -1121,7 +1128,7 @@ export async function revisarYPublicar(
   let limpio: string | undefined
   const rutaReceta = tipo === 'video' ? recetaEntregada(carpeta, hallado.entrega.receta) : null
   if (rutaReceta) {
-    // Con voz, los subtítulos van en la receta (editables) y de principio a fin.
+    // Si lleva subtítulos, van en la receta (editables) y de principio a fin de lo que se dice.
     const faltan = subtitulosQueFaltan(rutaReceta, c, info.duracion, audiosSubidos(carpeta))
     if (faltan) return { problemas: [faltan] }
     try {

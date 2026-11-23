@@ -55,6 +55,8 @@ import {
   duplicarClip,
   duracionTimeline,
   DURACION_MINIMA,
+  finSinNegro,
+  conNegroHasta,
   moverClip,
   puntosIman,
   recortarClip,
@@ -125,7 +127,7 @@ import {
   PISTAS_SONIDOS,
   deslizarContenido,
   desplazarClip,
-  type ColorMarcador, unirAudio, dividirSonido,
+  type ColorMarcador, unirAudio, dividirSonido, dividirVoz, dividirMusica, cambiarTramoMusica, borrarTramoMusica, tramosMusica,
   CANALES_CURVA,
   type LutClip
 } from '../../../shared/timeline'
@@ -146,6 +148,7 @@ import { cambiarTextoEn, textoEn } from '../../../shared/timeline'
 import { LIMITE_BORDE_CAPA, CURVAS_CLAVE, curvaClaveCapa, type CurvaClave } from '../../../shared/timeline'
 import { DURACIONES_ANIMACION, durEntradaCapa, durSalidaCapa, durSalidaTexto, porPalabras, SALIDAS_TEXTO, type SalidaCapa, type SalidaTexto } from '../../../shared/timeline'
 import { reanclarTexto, rotuloEnMonitor } from '../rotulos'
+import { resumenGrafico } from '../../../shared/grafico'
 
 /**
  * La timeline editable: regla, pista de video magnética, pista de textos y la voz
@@ -766,13 +769,47 @@ export function TimelineEditor({
 
   // ===== Narración: cada frase se mueve suelta =====
 
-  function arrastrarFrase(e: React.PointerEvent, id: string) {
+  function arrastrarFrase(e: React.PointerEvent, id: string, modo: 'mover' | 'inicio' | 'fin' = 'mover') {
     onElegir({ tipo: 'voz', id })
     const base = timeline
     const v = base.voces?.find((x) => x.id === id)
     if (!v) return
     const puntos = puntosIman(base)
+    if (modo !== 'mover') {
+      // Recortar por los bordes, como un sonido: el principio corre `desde` dentro del archivo, y el final se
+      // puede volver a alargar hasta donde acaba el archivo.
+      const desde0 = v.desde ?? 0
+      const largo = v.largo ?? desde0 + v.duracion
+      arrastrar(e, (dx) => {
+        if (modo === 'inicio') {
+          const d = Math.max(-desde0, -v.inicio, Math.min(v.duracion - DURACION_MINIMA, iman(v.inicio + dx, puntos) - v.inicio))
+          return cambiarVoz(base, id, { inicio: v.inicio + d, duracion: v.duracion - d, desde: desde0 + d, largo })
+        }
+        const fin = Math.min(v.inicio + largo - desde0, Math.max(v.inicio + DURACION_MINIMA, iman(v.inicio + v.duracion + dx, puntos)))
+        return cambiarVoz(base, id, { duracion: fin - v.inicio, largo })
+      })
+      return
+    }
     arrastrar(e, (dx) => cambiarVoz(base, id, { inicio: iman(v.inicio + dx, puntos) }))
+  }
+
+  /** Mueve un trozo de música o le recorta un borde (la música se repite: se alarga hasta el final del video). */
+  function arrastrarMusica(e: React.PointerEvent, id: string, modo: 'mover' | 'inicio' | 'fin') {
+    e.stopPropagation()
+    onElegir({ tipo: 'musica', id })
+    const base = timeline
+    const m = tramosMusica(base).find((x) => x.id === id)
+    if (!m) return
+    const puntos = puntosIman(base)
+    const desde0 = m.desde ?? 0
+    arrastrar(e, (dx) => {
+      if (modo === 'mover') return cambiarTramoMusica(base, id, { inicio: Math.max(0, iman(m.inicio + dx, puntos)) })
+      if (modo === 'inicio') {
+        const d = Math.max(-desde0, -m.inicio, Math.min(m.duracion - DURACION_MINIMA, iman(m.inicio + dx, puntos) - m.inicio))
+        return cambiarTramoMusica(base, id, { inicio: m.inicio + d, duracion: m.duracion - d, desde: desde0 + d })
+      }
+      return cambiarTramoMusica(base, id, { duracion: Math.max(DURACION_MINIMA, iman(m.inicio + m.duracion + dx, puntos) - m.inicio) })
+    })
   }
 
   // ===== Encima del video y efectos de sonido: sueltos, como los rótulos =====
@@ -784,6 +821,11 @@ export function TimelineEditor({
     if (!c || c.bloqueado) return
     const puntos = puntosIman(base)
     const fin = c.inicio + c.duracion
+    // Llevarla más allá del final alarga el video con negro (como en CapCut); si ya lo alargaba y vuelve, el negro
+    // se acorta con ella. El negro es un clip más de la pista de video: se ve, se recorta y se borra.
+    const finVideo = finSinNegro(base)
+    const alargando = fin > finVideo + 1e-3
+    const conNegro = (nuevoFin: number) => (alargando || nuevoFin > finVideo + 1e-3 ? conNegroHasta(base, nuevoFin, id) : base)
     arrastrar(e, (dx, ev) => {
       if (modo === 'mover') {
         // Arriba o abajo cambia de pista (la más alta tapa a las demás).
@@ -793,13 +835,15 @@ export function TimelineEditor({
         const pegadoFin = iman(inicio + c.duracion, puntos)
         if (pegadoInicio !== inicio) inicio = pegadoInicio
         else if (pegadoFin !== inicio + c.duracion) inicio = pegadoFin - c.duracion
-        return cambiarCapa(base, id, { inicio: Math.max(0, inicio), pista }, medidas)
+        inicio = Math.max(0, inicio)
+        return cambiarCapa(conNegro(inicio + c.duracion), id, { inicio, pista }, medidas)
       }
       if (modo === 'inicio') {
         const inicio = Math.max(0, Math.min(iman(c.inicio + dx, puntos), fin - DURACION_MINIMA))
         return cambiarCapa(base, id, { inicio, duracion: fin - inicio }, medidas)
       }
-      return cambiarCapa(base, id, { duracion: iman(fin + dx, puntos) - c.inicio }, medidas)
+      const nuevoFin = Math.max(c.inicio + DURACION_MINIMA, iman(fin + dx, puntos))
+      return cambiarCapa(conNegro(nuevoFin), id, { duracion: nuevoFin - c.inicio }, medidas)
     })
   }
 
@@ -899,13 +943,17 @@ export function TimelineEditor({
   // ===== Acciones =====
 
   function accionDividir() {
-    // Con un sonido suelto elegido (como el audio separado), S lo divide a él en el cabezal.
-    if (elegido?.tipo === 'sonido') {
-      const r = dividirSonido(timeline, elegido.id, tiempo)
-      if (r.timeline !== timeline) {
-        historial.aplicar(r.timeline)
-        return
-      }
+    // Con un audio elegido (un sonido suelto, una frase de la narración o la música), S lo divide a él en el cabezal,
+    // no al video. Si el cabezal no está sobre él, no corta nada (como en Premiere con la pista elegida).
+    if (elegido?.tipo === 'sonido' || elegido?.tipo === 'voz' || elegido?.tipo === 'musica') {
+      const r =
+        elegido.tipo === 'sonido'
+          ? dividirSonido(timeline, elegido.id, tiempo)
+          : elegido.tipo === 'voz'
+            ? dividirVoz(timeline, elegido.id, tiempo)
+            : dividirMusica(timeline, tiempo)
+      if (r.timeline !== timeline) historial.aplicar(r.timeline)
+      return
     }
     historial.aplicar(dividir(timeline, tiempo))
   }
@@ -938,7 +986,7 @@ export function TimelineEditor({
     if (!elegido) return
     if ((textoElegido?.bloqueado && elegido.tipo === 'texto') || (capaElegida?.bloqueado && elegido.tipo === 'capa')) return
     if (elegido.tipo === 'clip') historial.aplicar(borrarClip(timeline, elegido.id))
-    else if (elegido.tipo === 'musica') historial.aplicar(ponerMusica(timeline, undefined))
+    else if (elegido.tipo === 'musica') historial.aplicar(tramosMusica(timeline).length > 1 ? borrarTramoMusica(timeline, elegido.id) : ponerMusica(timeline, undefined))
     else if (elegido.tipo === 'voz') historial.aplicar(borrarVoz(timeline, elegido.id))
     else if (elegido.tipo === 'capa') historial.aplicar(borrarCapa(timeline, elegido.id))
     else if (elegido.tipo === 'sonido') historial.aplicar(borrarSonido(timeline, elegido.id))
@@ -1262,7 +1310,7 @@ export function TimelineEditor({
       ])
       return
     }
-    const nombres: Record<string, string> = { texto: 'Texto', capa: 'Capa', sonido: 'Sonido', voz: 'Frase de voz', ajuste: 'Capa de ajuste' }
+    const nombres: Record<string, string> = { texto: 'Texto', capa: 'Capa', sonido: 'Sonido', voz: 'Frase de voz', ajuste: 'Capa de ajuste', musica: 'Música' }
     abrirMenu(e, [
       { tipo: 'titulo', nombre: nombres[cual.tipo] ?? '' },
       ...(cual.tipo === 'texto' || cual.tipo === 'capa' || cual.tipo === 'sonido' ? copiarCortar : []),
@@ -1293,6 +1341,41 @@ export function TimelineEditor({
           { tipo: 'separador' as const },
           { nombre: x.oculto ? 'Mostrar' : 'Ocultar', accion: () => alternarEn(tipo, x.id, 'oculto') },
           { nombre: x.bloqueado ? 'Desbloquear' : 'Bloquear', accion: () => alternarEn(tipo, x.id, 'bloqueado') }
+        ]
+      })(),
+      ...(() => {
+        // Una frase de la narración: dividirla en el punto del clic.
+        if (cual.tipo !== 'voz') return []
+        const v = tl.voces?.find((x) => x.id === cual.id)
+        if (!v) return []
+        return [
+          { tipo: 'separador' as const },
+          {
+            nombre: 'Dividir aquí',
+            atajo: 'S',
+            desactivada: !(t > v.inicio + DURACION_MINIMA && t < v.inicio + v.duracion - DURACION_MINIMA),
+            accion: () => {
+              const r = dividirVoz(timeline, v.id, t)
+              if (r.timeline !== timeline) historial.aplicar(r.timeline)
+            }
+          }
+        ]
+      })(),
+      ...(() => {
+        // Un trozo de música: dividirlo en el punto del clic.
+        if (cual.tipo !== 'musica') return []
+        const m = tramosMusica(tl).find((x) => x.id === cual.id)
+        if (!m) return []
+        return [
+          {
+            nombre: 'Dividir aquí',
+            atajo: 'S',
+            desactivada: !(t > m.inicio + DURACION_MINIMA && t < m.inicio + m.duracion - DURACION_MINIMA),
+            accion: () => {
+              const r = dividirMusica(timeline, t)
+              if (r.timeline !== timeline) historial.aplicar(r.timeline)
+            }
+          }
         ]
       })(),
       ...(() => {
@@ -1701,10 +1784,14 @@ export function TimelineEditor({
                   <span className="ed-seccion">Añadir un texto</span>
                   <p className="tl-dim">Entra en el cabezal. Después lo mueves en el monitor y lo ajustas a la derecha.</p>
                   <div className="ed-rejilla">
-                    {Object.entries(FUENTES_TEXTO).map(([clave, f]) => (
-                      <button key={clave} className="ed-tarjeta" disabled={total <= 0} onClick={() => accionTexto(clave)} title={`Añadir un texto con la letra ${f.nombre} (T)`}>
-                        <b style={{ fontFamily: f.familia }}>Aa</b>
-                        <span>{f.nombre}</span>
+                    {[
+                      ...Object.entries(FUENTES_TEXTO).map(([clave, f]) => ({ clave, nombre: f.nombre, css: f.familia })),
+                      // Las letras propias del proyecto (las de la marca, las que trajo el agente).
+                      ...(tl.letras ?? []).map((l) => ({ clave: l.id, nombre: l.nombre, css: `Recorte ${l.id}` }))
+                    ].map(({ clave, nombre, css }) => (
+                      <button key={clave} className="ed-tarjeta" disabled={total <= 0} onClick={() => accionTexto(clave)} title={`Añadir un texto con la letra ${nombre} (T)`}>
+                        <b style={{ fontFamily: `"${css}"` }}>Aa</b>
+                        <span>{nombre}</span>
                       </button>
                     ))}
                   </div>
@@ -2185,7 +2272,7 @@ export function TimelineEditor({
               )}
               {(tl.capas ?? []).map((c) => {
                 const anchoCapa = c.duracion * pps
-                const nombre = nombreDe ? nombreDe(c.fuente) : 'Capa'
+                const nombre = c.grafico ? `Gráfico · ${resumenGrafico(c.grafico)}` : nombreDe ? nombreDe(c.fuente) : 'Capa'
                 return (
                   <div
                     key={c.id}
@@ -2298,8 +2385,10 @@ export function TimelineEditor({
                     onContextMenu={(e) => menuDe(e, { tipo: 'voz', id: v.id })}
                     onPointerDown={(e) => sumar(e, { tipo: 'voz', id: v.id }) || arrastrarFrase(e, v.id)}
                   >
-                    {urlDe && v.archivo && <Onda url={urlDe(v.archivo)} duracion={v.duracion} />}
+                    {urlDe && v.archivo && <Onda url={urlDe(v.archivo)} duracion={v.duracion} desde={v.desde ?? 0} />}
                     {anchoFrase > 30 && <span className="tl-clip-texto">{v.texto || 'Narración'}</span>}
+                    <span className="tl-asa izquierda" onPointerDown={(e) => arrastrarFrase(e, v.id, 'inicio')} />
+                    <span className="tl-asa derecha" onPointerDown={(e) => arrastrarFrase(e, v.id, 'fin')} />
                   </div>
                 )
               })}
@@ -2358,21 +2447,26 @@ export function TimelineEditor({
 
             <div className={`tl-carril musica ${clasePista('musica')}`} onPointerDown={arrastrarCabezal}>
               {tl.musica ? (
+                tramosMusica(tl).map((m, i) => (
                 <div
-                  className={`tl-musica ${elegido?.tipo === 'musica' ? 'is-elegido' : ''}`}
-                  style={{ left: 0, width: Math.max(4, total * pps) }}
-                  onPointerDown={(e) => {
-                    e.stopPropagation()
-                    onElegir({ tipo: 'musica', id: 'musica' })
-                  }}
-                  title={tl.musica.nombre}
+                  key={m.id}
+                  className={`tl-musica ${elegido?.tipo === 'musica' && elegido.id === m.id ? 'is-elegido' : ''}`}
+                  style={{ left: m.inicio * pps, width: Math.max(4, m.duracion * pps - (tl.musica!.tramos ? 1 : 0)) }}
+                  onContextMenu={(e) => menuDe(e, { tipo: 'musica', id: m.id })}
+                  onPointerDown={(e) => (tl.musica!.tramos ? arrastrarMusica(e, m.id, 'mover') : (e.stopPropagation(), onElegir({ tipo: 'musica', id: m.id })))}
+                  title={`${tl.musica!.nombre} · ${m.duracion.toFixed(1)} s`}
                 >
-                  {urlDe && <Onda url={urlDe(tl.musica.archivo)} duracion={total} />}
-                  <span className="tl-clip-texto">
-                    <Icon name="music" size={11} /> {tl.musica.nombre} · {Math.round(tl.musica.volumen * 100)} %
-                    {tl.musica.ducking ? ' · baja con la voz' : ''}
-                  </span>
+                  {urlDe && <Onda url={urlDe(tl.musica!.archivo)} duracion={m.duracion} desde={m.desde ?? 0} />}
+                  {(i === 0 || m.duracion * pps > 60) && (
+                    <span className="tl-clip-texto">
+                      <Icon name="music" size={11} /> {tl.musica!.nombre} · {Math.round(tl.musica!.volumen * 100)} %
+                      {tl.musica!.ducking ? ' · baja con la voz' : ''}
+                    </span>
+                  )}
+                  <span className="tl-asa izquierda" onPointerDown={(e) => arrastrarMusica(e, m.id, 'inicio')} />
+                  <span className="tl-asa derecha" onPointerDown={(e) => arrastrarMusica(e, m.id, 'fin')} />
                 </div>
+                ))
               ) : (
                 <button
                   className="tl-vacio tl-vacio-boton"
@@ -2405,7 +2499,9 @@ export function TimelineEditor({
                   : clipElegido
                   ? `Clip ${clipElegido.indice + 1}`
                   : capaElegida
-                    ? 'Capa encima'
+                    ? capaElegida.grafico
+                      ? 'Gráfico'
+                      : 'Capa encima'
                     : sonidoElegido
                       ? 'Sonido'
                       : musicaElegida
@@ -3266,7 +3362,8 @@ export function TimelineEditor({
         ) : capaElegida ? (
           <>
             <Icon name="layers" size={14} />
-            <b className="tl-musica-nombre">{nombreDe ? nombreDe(capaElegida.fuente) : 'Capa'}</b>
+            <b className="tl-musica-nombre">{capaElegida.grafico ? resumenGrafico(capaElegida.grafico) : nombreDe ? nombreDe(capaElegida.fuente) : 'Capa'}</b>
+            {capaElegida.grafico && <p className="tl-dim">Sus textos, letra y colores se cambian en la pestaña «Gráficos» (a la izquierda).</p>}
             <label className="ed-campo"><span>Entrada</span><select
               value={capaElegida.entrada ?? 'corte'}
               title="Cómo aparece"
@@ -3827,6 +3924,11 @@ export function TimelineEditor({
               {Object.entries(FUENTES_TEXTO).map(([clave, f]) => (
                 <option key={clave} value={clave} style={{ fontFamily: f.familia }}>
                   {f.nombre}
+                </option>
+              ))}
+              {(tl.letras ?? []).map((l) => (
+                <option key={l.id} value={l.id} style={{ fontFamily: `"Recorte ${l.id}"` }}>
+                  {l.nombre} (del proyecto)
                 </option>
               ))}
             </select></label>

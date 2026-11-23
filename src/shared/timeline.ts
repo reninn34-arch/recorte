@@ -1,4 +1,5 @@
 import type { RecetaEdicion, TranscriptSegment } from './types'
+import { normalizarGrafico, type Grafico } from './grafico'
 
 /**
  * La timeline: la pieza central del editor. La interfaz y los agentes trabajan sobre
@@ -366,6 +367,18 @@ export interface MusicaTL {
   volumen: number
   /** Si baja sola mientras hay voz. */
   ducking: boolean
+  /**
+   * Los trozos donde suena, si se dividió o recortó (como clips de audio). Sin ellos suena en todo el video.
+   * `desde` es el segundo de la música (que se repite) con el que empieza el trozo.
+   */
+  tramos?: TramoMusica[]
+}
+
+export interface TramoMusica {
+  id: string
+  inicio: number
+  duracion: number
+  desde?: number
 }
 
 export type PosicionTexto = 'arriba' | 'centro' | 'abajo'
@@ -391,7 +404,7 @@ export interface TextoTL {
    */
   x?: number
   y?: number
-  /** La letra (una clave de FUENTES_TEXTO); sin ella, la normal. */
+  /** La letra (una clave de FUENTES_TEXTO o el id de una letra propia del proyecto, `letras`); sin ella, la normal. */
   fuente?: string
   /** Cómo aparece: palabra a palabra, letra a letra (máquina), con rebote (pop), subiendo o pintando cada palabra. Sin ella, de golpe. */
   animacion?: AnimacionTexto
@@ -610,9 +623,55 @@ export const FUENTES_TEXTO: Record<string, { nombre: string; familia: string; ne
  * el tamaño como la altura de línea de la letra (de su parte más alta a la más baja, «linea» en ems) y el monitor como
  * su eme; el tamaño de los rótulos está medido con Arial (1,117). Con Anton (1,733) el MP4 la dejaba a un 65 %.
  */
-export function escalaLetraAss(fuente: string | undefined): number {
-  const f = fuente ? FUENTES_TEXTO[fuente] : undefined
+export function escalaLetraAss(fuente: string | undefined, letras?: LetraTL[]): number {
+  const f = letraDe(fuente, letras)
   return f ? f.linea / FUENTES_TEXTO.normal.linea : 1
+}
+
+/**
+ * Una letra propia del proyecto: un .ttf u .otf (la de una marca, la que trae el agente) copiado a `fuentes/` del
+ * proyecto. El monitor la carga con @font-face y el MP4 (libass) la busca por su nombre en esa carpeta.
+ */
+export interface LetraTL {
+  /** `letra-` y la huella del archivo. */
+  id: string
+  /** Cómo se ve en la lista de letras. */
+  nombre: string
+  /** Su nombre completo dentro del archivo (con él la encuentra libass). */
+  familia: string
+  /** Dentro de la carpeta del proyecto (`fuentes/…`). */
+  archivo: string
+  /** Su alto de línea en emes (como lo mide libass): para que salga del mismo tamaño que en el monitor. */
+  linea: number
+  cursiva?: boolean
+}
+export const esIdLetra = (v: unknown): v is string => typeof v === 'string' && /^letra-[a-f0-9]{8}$/.test(v)
+
+/** Las letras propias válidas (con su archivo dentro de `fuentes/`). */
+export function normalizarLetras(entrada: unknown): LetraTL[] {
+  const salida: LetraTL[] = []
+  for (const x of Array.isArray(entrada) ? (entrada as Partial<LetraTL>[]) : []) {
+    if (!x || !esIdLetra(x.id) || typeof x.archivo !== 'string' || !/^fuentes\/[\w.-]+\.(ttf|otf)$/i.test(x.archivo) || typeof x.familia !== 'string' || !x.familia.trim()) continue
+    if (salida.some((l) => l.id === x.id)) continue
+    const linea = typeof x.linea === 'number' && x.linea > 0.5 && x.linea < 4 ? x.linea : 1.2
+    salida.push({ id: x.id, nombre: (typeof x.nombre === 'string' && x.nombre.trim() ? x.nombre : x.familia).slice(0, 60), familia: x.familia.slice(0, 80), archivo: x.archivo, linea, ...(x.cursiva ? { cursiva: true } : {}) })
+  }
+  return salida.slice(0, 20)
+}
+
+/**
+ * La letra de un texto: una de la lista (FUENTES_TEXTO) o una propia del proyecto. Para el monitor, `css` es la familia
+ * con que la registra @font-face; para el MP4, `familia` es su nombre real.
+ */
+export function letraDe(
+  fuente: string | undefined,
+  letras: LetraTL[] | undefined
+): { nombre: string; familia: string; css: string; negrita: boolean; cursiva: boolean; linea: number; archivo?: string } | undefined {
+  if (!fuente) return undefined
+  const fija = FUENTES_TEXTO[fuente]
+  if (fija) return { nombre: fija.nombre, familia: fija.familia, css: fija.familia, negrita: fija.negrita, cursiva: Boolean(fija.cursiva), linea: fija.linea }
+  const propia = letras?.find((l) => l.id === fuente)
+  return propia ? { nombre: propia.nombre, familia: propia.familia, css: `Recorte ${propia.id}`, negrita: false, cursiva: Boolean(propia.cursiva), linea: propia.linea, archivo: propia.archivo } : undefined
 }
 
 export const LIMITES_TAMANO = [0.5, 6] as const
@@ -649,7 +708,7 @@ function estiloTexto(t: Partial<TextoTL>): EstiloTexto {
     ...(color !== '#ffffff' ? { color } : {}),
     ...(t.sinCaja === true ? { sinCaja: true } : {}),
     ...(typeof t.caja === 'string' && COLOR_HEX.test(t.caja) ? { caja: t.caja.toLowerCase() } : {}),
-    ...(typeof t.fuente === 'string' && t.fuente !== 'normal' && t.fuente in FUENTES_TEXTO ? { fuente: t.fuente } : {}),
+    ...(typeof t.fuente === 'string' && t.fuente !== 'normal' && (t.fuente in FUENTES_TEXTO || esIdLetra(t.fuente)) ? { fuente: t.fuente } : {}),
     ...(t.animacion && ANIMACIONES_TEXTO.some((a) => a.id === t.animacion) ? { animacion: t.animacion } : {}),
     ...(typeof t.pintado === 'string' && COLOR_HEX.test(t.pintado) && t.pintado.toLowerCase() !== COLOR_PINTADO ? { pintado: t.pintado.toLowerCase() } : {}),
     ...(typeof t.colorClave === 'string' && COLOR_HEX.test(t.colorClave) ? { colorClave: t.colorClave.toLowerCase() } : {})
@@ -674,6 +733,10 @@ export interface VozTL {
   volumen?: number
   /** La voz de Gemini con la que se generó, si se sabe. */
   voz?: string
+  /** Desde qué segundo del archivo suena (al recortarle el principio o dividirla); sin él, desde 0. */
+  desde?: number
+  /** Lo que dura el archivo entero (hasta dónde se puede volver a alargar); sin él, desde + duracion. */
+  largo?: number
 }
 
 /** Cómo entra una capa: con un pequeño rebote o fundiéndose; sin él, de golpe. */
@@ -745,6 +808,11 @@ export interface CapaTL {
   animada?: { tipo: TipoAnimar; base: FuenteId; escala?: number }
   /** Si es una pieza animada (HyperFrames): cuál y con qué datos, para cambiarlos y volver a animarla. */
   pieza?: { id: string; valores: Record<string, string | number | boolean> }
+  /**
+   * Un gráfico editable (una tarjeta, un rótulo con su caja, un botón): su diseño. `fuente` es su dibujo (un PNG que
+   * hace Recorte con Chromium); al cambiar el diseño se vuelve a dibujar. Ver src/shared/grafico.ts.
+   */
+  grafico?: Grafico
   /**
    * La persona de un clip, separada de su fondo (un WebM con transparencia del clip tal como se ve): va encima del
    * mismo clip, así lo que quede entre los dos (títulos, logos, textos «detrás») se ve detrás de la persona.
@@ -1108,6 +1176,8 @@ export interface Timeline {
   voces?: VozTL[]
   /** Lo que va encima del video (imágenes, logos, íconos, tomas de apoyo). */
   capas?: CapaTL[]
+  /** Las letras propias del proyecto (las de una marca, las que trae el agente). */
+  letras?: LetraTL[]
   /** Efectos de sonido sueltos. */
   sonidos?: SonidoTL[]
   /** Las pistas ocultas, silenciadas o bloqueadas. */
@@ -1403,9 +1473,14 @@ export function extraerRango(tl: Timeline, a: number, b: number): Timeline {
   const voces = lista(cortada.voces, false)
   const capas = lista(cortada.capas, true, capaSinCabeza)
   const sonidos = lista(cortada.sonidos, false)
+  // La música cortada en trozos: los trozos se corren como los clips; uno que pierde su principio sigue donde iba.
+  const musica = cortada.musica?.tramos
+    ? { ...cortada.musica, tramos: lista(cortada.musica.tramos, true, (r, corte) => ({ ...r, desde: (r.desde ?? 0) + corte })) }
+    : cortada.musica
   return conClips(
     {
       ...resto,
+      ...(musica ? { musica } : {}),
       textos: lista(cortada.textos, true, textoSinCabeza),
       ...(voces.length ? { voces } : {}),
       ...(capas.length ? { capas } : {}),
@@ -1793,7 +1868,7 @@ export function normalizarTimeline(entrada: unknown, duracionFuente: number, otr
     if (!c || typeof c.entrada !== 'number' || typeof c.salida !== 'number') continue
     const fuente = typeof c.fuente === 'string' && c.fuente ? c.fuente : FUENTE_PRINCIPAL
     // Un clip de un medio que ya no está en el proyecto se descarta.
-    const limite = fuente === FUENTE_PRINCIPAL ? duracionFuente : otras[fuente]
+    const limite = fuente === FUENTE_PRINCIPAL ? duracionFuente : fuente === FUENTE_NEGRO ? MAX_IMAGEN : otras[fuente]
     if (limite === undefined) continue
     const e = pinza(c.entrada, 0, limite)
     const s = pinza(c.salida, 0, limite)
@@ -1863,6 +1938,7 @@ export function normalizarTimeline(entrada: unknown, duracionFuente: number, otr
     ...(capas.length ? { capas } : {}),
     ...(sonidos.length ? { sonidos } : {}),
     ...(filtros ? { filtros } : {}),
+    ...(normalizarLetras(crudo.letras).length ? { letras: normalizarLetras(crudo.letras) } : {}),
     ...(normalizarPistas(crudo.pistas) ? { pistas: normalizarPistas(crudo.pistas) } : {}),
     ...(normalizarMarcadores(crudo.marcadores, total).length ? { marcadores: normalizarMarcadores(crudo.marcadores, total) } : {}),
     ...(normalizarAjustesCapa(crudo.ajustesCapa, total).length ? { ajustesCapa: normalizarAjustesCapa(crudo.ajustesCapa, total) } : {}),
@@ -1976,6 +2052,7 @@ export function normalizarCapas(entrada: unknown, total: number, medios: Record<
             }
           }
         : {}),
+      ...(normalizarGrafico(c.grafico) ? { grafico: normalizarGrafico(c.grafico)! } : {}),
       ...(c.persona && typeof c.persona.clip === 'string' && c.persona.clip ? { persona: { clip: c.persona.clip.slice(0, 80) } } : {}),
       ...(c.borrado && typeof c.borrado.clip === 'string' && c.borrado.clip ? { borrado: { clip: c.borrado.clip.slice(0, 80) } } : {}),
       ...(c.cielo && typeof c.cielo.clip === 'string' && c.cielo.clip ? { cielo: { clip: c.cielo.clip.slice(0, 80) } } : {}),
@@ -2036,7 +2113,9 @@ export function normalizarVoces(entrada: unknown, total: number): VozTL[] {
       archivo: v.archivo,
       texto: typeof v.texto === 'string' ? v.texto.slice(0, 600) : '',
       ...(typeof v.volumen === 'number' && Number.isFinite(v.volumen) && Math.abs(v.volumen - 1) > 1e-3 ? { volumen: pinza(v.volumen, 0, 1.5) } : {}),
-      ...(typeof v.voz === 'string' && v.voz ? { voz: v.voz.slice(0, 40) } : {})
+      ...(typeof v.voz === 'string' && v.voz ? { voz: v.voz.slice(0, 40) } : {}),
+      ...(typeof v.desde === 'number' && v.desde > 0.001 ? { desde: Math.round(v.desde * 1000) / 1000 } : {}),
+      ...(typeof v.largo === 'number' && v.largo > 0 ? { largo: Math.round(v.largo * 1000) / 1000 } : {})
     })
   }
   return voces.sort((a, b) => a.inicio - b.inicio)
@@ -2066,8 +2145,85 @@ export function normalizarMusica(entrada: unknown): MusicaTL | undefined {
     archivo: m.archivo,
     nombre: typeof m.nombre === 'string' && m.nombre ? m.nombre.slice(0, 120) : m.archivo.slice(6),
     volumen: typeof m.volumen === 'number' && Number.isFinite(m.volumen) ? pinza(m.volumen, 0, 1) : 0.35,
-    ducking: m.ducking !== false
+    ducking: m.ducking !== false,
+    ...(Array.isArray(m.tramos) ? { tramos: normalizarTramosMusica(m.tramos) } : {})
   }
+}
+
+function normalizarTramosMusica(entrada: unknown[]): TramoMusica[] {
+  const vistos = new Set<string>()
+  const tramos: TramoMusica[] = []
+  for (const t of entrada as Partial<TramoMusica>[]) {
+    if (!t || typeof t.inicio !== 'number' || typeof t.duracion !== 'number' || !Number.isFinite(t.inicio) || !(t.duracion >= DURACION_MINIMA / 2)) continue
+    let id = typeof t.id === 'string' && t.id ? t.id.slice(0, 60) : nuevoId('musica')
+    if (vistos.has(id)) id = nuevoId('musica')
+    vistos.add(id)
+    tramos.push({
+      id,
+      inicio: Math.round(Math.max(0, t.inicio) * 1000) / 1000,
+      duracion: Math.round(t.duracion * 1000) / 1000,
+      ...(typeof t.desde === 'number' && t.desde > 0.001 ? { desde: Math.round(t.desde * 1000) / 1000 } : {})
+    })
+  }
+  return tramos.sort((a, b) => a.inicio - b.inicio)
+}
+
+/** Dónde suena la música: sus trozos, o uno solo de todo el video (id «musica») si nunca se cortó. */
+export function tramosMusica(tl: Timeline): TramoMusica[] {
+  if (!tl.musica) return []
+  if (tl.musica.tramos) return tramosQueCaben(tl.musica.tramos, duracionTimeline(tl))
+  return [{ id: 'musica', inicio: 0, duracion: duracionTimeline(tl) }]
+}
+
+/** Los trozos de música que caben en la timeline (los que empiezan después del final se van; el último se acorta). */
+function tramosQueCaben(tramos: TramoMusica[], total: number): TramoMusica[] {
+  return tramos
+    .filter((t) => t.inicio < total - DURACION_MINIMA / 2)
+    .map((t) => (t.inicio + t.duracion > total ? { ...t, duracion: total - t.inicio } : t))
+}
+
+function conTramosMusica(tl: Timeline, tramos: TramoMusica[]): Timeline {
+  if (!tl.musica) return tl
+  const lista = tramosQueCaben(normalizarTramosMusica(tramos), duracionTimeline(tl))
+  // Sin trozos no queda música.
+  if (!lista.length) return ponerMusica(tl, undefined)
+  return { ...tl, musica: { ...tl.musica, tramos: lista } }
+}
+
+/** Divide la música en el segundo `t` (en el trozo que suena ahí): quedan dos que siguen sonando igual. */
+export function dividirMusica(tl: Timeline, t: number): { timeline: Timeline; id?: string } {
+  const tramos = tramosMusica(tl)
+  const x = tramos.find((m) => t > m.inicio && t < m.inicio + m.duracion)
+  if (!x) return { timeline: tl }
+  const primero = t - x.inicio
+  if (primero < DURACION_MINIMA || x.duracion - primero < DURACION_MINIMA) return { timeline: tl }
+  const nuevo: TramoMusica = { id: nuevoId('musica'), inicio: t, duracion: x.duracion - primero, desde: (x.desde ?? 0) + primero }
+  return { timeline: conTramosMusica(tl, tramos.flatMap((m) => (m.id === x.id ? [{ ...m, duracion: primero }, nuevo] : [m]))), id: nuevo.id }
+}
+
+/** Mueve un trozo de música o le recorta un borde. La música se repite: se puede alargar hasta el final del video. */
+export function cambiarTramoMusica(tl: Timeline, id: string, cambio: Partial<Omit<TramoMusica, 'id'>>): Timeline {
+  const tramos = tramosMusica(tl)
+  if (!tramos.some((m) => m.id === id)) return tl
+  const total = duracionTimeline(tl)
+  return conTramosMusica(
+    tl,
+    tramos.map((m) => {
+      if (m.id !== id) return m
+      const n = { ...m, ...cambio }
+      n.inicio = pinza(n.inicio, 0, Math.max(0, total - DURACION_MINIMA))
+      n.duracion = pinza(n.duracion, DURACION_MINIMA, Math.max(DURACION_MINIMA, total - n.inicio))
+      if ((n.desde ?? 0) < 0) n.desde = 0
+      return n
+    })
+  )
+}
+
+/** Quita un trozo de música; si era el último, la música entera. */
+export function borrarTramoMusica(tl: Timeline, id: string): Timeline {
+  const tramos = tramosMusica(tl)
+  if (!tramos.some((m) => m.id === id)) return tl
+  return conTramosMusica(tl, tramos.filter((m) => m.id !== id))
 }
 
 // ===== Leer =====
@@ -3038,6 +3194,23 @@ export function subtitulosDesdeVoz(
   // está bien escrito); sin ella, repartidas en lo que dura.
   for (const v of tl.voces ?? []) {
     const lista = v.texto.split(/\s+/).filter(Boolean)
+    const d0 = v.desde ?? 0
+    const largoV = v.largo ?? d0 + v.duracion
+    if (d0 > 0.001 || v.duracion < largoV - 0.001) {
+      // Un pedazo de la frase (dividida o recortada): solo las palabras de su tramo del archivo, corridas a su sitio.
+      const todas = palabrasVoces?.[v.archivo] ?? []
+      const texto = lista.length ? lista : todas.map((w) => w.texto)
+      texto.forEach((t, k) => {
+        const w = todas.length
+          ? todas[Math.min(todas.length - 1, Math.floor((k * todas.length) / texto.length))]
+          : { inicio: (largoV * k) / texto.length, fin: (largoV * (k + 1)) / texto.length }
+        if (w.inicio < d0 - 0.05 || w.inicio >= d0 + v.duracion) return
+        const inicio = v.inicio + Math.max(0, w.inicio - d0)
+        const fin = v.inicio + Math.min(v.duracion, w.fin - d0)
+        palabras.push({ texto: t, inicio, fin: Math.max(inicio + 0.05, fin) })
+      })
+      continue
+    }
     const oidas = (palabrasVoces?.[v.archivo] ?? []).filter((w) => w.inicio < v.duracion)
     if (oidas.length) {
       const texto = lista.length ? lista : oidas.map((w) => w.texto)
@@ -3434,6 +3607,45 @@ export function insertarClip(
   return { timeline: base, id: clip.id }
 }
 
+/**
+ * El negro de relleno de la pista de video: un clip negro, como una foto, que alarga el video. Lo pone estirar una
+ * capa más allá del final (como en CapCut): la foto de encima sigue y el video dura hasta donde acaba ella.
+ */
+export const FUENTE_NEGRO: FuenteId = 'negro'
+
+/** El final de lo que se ve en la pista de video sin el negro de relleno del final. */
+export function finSinNegro(tl: Timeline): number {
+  let n = tl.clips.length
+  while (n > 0 && tl.clips[n - 1].fuente === FUENTE_NEGRO) n--
+  return tl.clips.slice(0, n).reduce((t, c) => t + largo(c), 0)
+}
+
+/**
+ * Deja el negro del final justo para que el video llegue hasta `fin`, y hasta donde acaba lo demás de encima (capas y
+ * textos, menos la capa `sin`, que es la que se está moviendo). Si todo cabe en el video, el negro sobra y se quita.
+ * Solo toca el negro de relleno del final, nunca los clips de verdad.
+ */
+export function conNegroHasta(tl: Timeline, fin: number, sin?: string): Timeline {
+  let n = tl.clips.length
+  while (n > 0 && tl.clips[n - 1].fuente === FUENTE_NEGRO) n--
+  const quitados = tl.clips.slice(n)
+  const real = tl.clips.slice(0, n)
+  const hasta = real.reduce((t, c) => t + largo(c), 0)
+  if (!real.length) return tl
+  let necesario = fin
+  for (const c of tl.capas ?? []) if (c.id !== sin) necesario = Math.max(necesario, c.inicio + c.duracion)
+  for (const x of tl.textos) necesario = Math.max(necesario, x.inicio + x.duracion)
+  // Un audio que empieza en el negro no se queda fuera.
+  for (const a of [...(tl.voces ?? []), ...(tl.sonidos ?? [])]) necesario = Math.max(necesario, a.inicio + DURACION_MINIMA)
+  const falta = Math.round(Math.min(MAX_IMAGEN, necesario - hasta) * 1000) / 1000
+  const clips =
+    falta >= DURACION_MINIMA
+      ? [...real, { ...(quitados[0] ?? {}), id: quitados[0]?.id ?? nuevoId('clip'), fuente: FUENTE_NEGRO, entrada: 0, salida: falta }]
+      : real
+  if (clips.length === tl.clips.length && clips.every((c, i) => c === tl.clips[i] || (c.id === tl.clips[i].id && Math.abs(largo(c) - largo(tl.clips[i])) < 1e-4))) return tl
+  return conClips(tl, clips)
+}
+
 /** Lo que puede durar cada medio del proyecto (para validar y recortar sus clips). */
 export function duracionesDeMedios(medios?: { id: string; tipo: 'video' | 'imagen'; duracion: number }[]): Record<string, number> {
   return Object.fromEntries((medios ?? []).map((m) => [m.id, m.tipo === 'imagen' ? MAX_IMAGEN : m.duracion]))
@@ -3509,11 +3721,37 @@ export function tramosDeVoces(tl: Timeline): { inicio: number; fin: number }[] {
 }
 
 /** Cambia una frase (su segundo, su volumen, su texto o su audio). Siempre empieza dentro de la timeline. */
+/** Una frase sin su recorte (para cuando cambia su audio). */
+export function sinRecorteVoz(v: VozTL): VozTL {
+  const { desde: _d, largo: _l, ...resto } = v
+  return resto
+}
+
+/** Divide una frase de la narración en el segundo `t`: quedan dos que siguen sonando igual. */
+export function dividirVoz(tl: Timeline, id: string, t: number): { timeline: Timeline; id?: string } {
+  const v = tl.voces?.find((x) => x.id === id)
+  if (!v) return { timeline: tl }
+  const primero = t - v.inicio
+  if (primero < DURACION_MINIMA || v.duracion - primero < DURACION_MINIMA) return { timeline: tl }
+  const largo = v.largo ?? (v.desde ?? 0) + v.duracion
+  const nuevo: VozTL = { ...v, id: nuevoId('voz'), inicio: t, duracion: v.duracion - primero, desde: (v.desde ?? 0) + primero, largo }
+  const voces = normalizarVoces(
+    tl.voces!.flatMap((x) => (x.id === id ? [{ ...x, duracion: primero, largo }, nuevo] : [x])),
+    duracionTimeline(tl)
+  )
+  return { timeline: { ...tl, voces }, id: nuevo.id }
+}
+
 export function cambiarVoz(tl: Timeline, id: string, cambio: Partial<Omit<VozTL, 'id'>>): Timeline {
   if (!tl.voces?.some((v) => v.id === id)) return tl
   const total = duracionTimeline(tl)
   const voces = normalizarVoces(
-    tl.voces.map((v) => (v.id === id ? { ...v, ...cambio, inicio: pinza((cambio.inicio ?? v.inicio), 0, Math.max(0, total - DURACION_MINIMA)) } : v)),
+    tl.voces.map((v) => {
+      if (v.id !== id) return v
+      // Un audio nuevo (la frase rehecha) suena entero: el recorte del anterior no vale para él.
+      const base = cambio.archivo && cambio.archivo !== v.archivo ? sinRecorteVoz(v) : v
+      return { ...base, ...cambio, inicio: pinza(cambio.inicio ?? v.inicio, 0, Math.max(0, total - DURACION_MINIMA)) }
+    }),
     total
   )
   return { ...tl, voces }
@@ -4012,9 +4250,11 @@ export function dividirSonido(tl: Timeline, id: string, t: number): { timeline: 
   if (!s) return { timeline: tl }
   const primero = t - s.inicio
   if (primero < DURACION_MINIMA || s.duracion - primero < DURACION_MINIMA) return { timeline: tl }
-  const nuevo: SonidoTL = { ...s, id: nuevoId('sonido'), inicio: t, duracion: s.duracion - primero, desde: (s.desde ?? 0) + primero }
+  // Los dos recuerdan lo que dura el archivo: el primero se puede volver a alargar hasta donde iba.
+  const largo = s.largo ?? (s.desde ?? 0) + s.duracion
+  const nuevo: SonidoTL = { ...s, id: nuevoId('sonido'), inicio: t, duracion: s.duracion - primero, desde: (s.desde ?? 0) + primero, largo }
   const sonidos = normalizarSonidos(
-    tl.sonidos!.flatMap((x) => (x.id === id ? [{ ...x, duracion: primero }, nuevo] : [x])),
+    tl.sonidos!.flatMap((x) => (x.id === id ? [{ ...x, duracion: primero, largo }, nuevo] : [x])),
     duracionTimeline(tl)
   )
   return { timeline: { ...tl, sonidos }, id: nuevo.id }
@@ -4112,6 +4352,11 @@ export function ventanaTimeline(tl: Timeline, desde: number, hasta: number): Tim
     const fin = Math.min(x.inicio + x.duracion, b)
     return fin - ini > 0.01 ? { ...x, inicio: ini - a, duracion: fin - ini } : null
   }
+  // Un audio que ya sonaba antes de la ventana sigue desde donde iba (no vuelve a empezar).
+  const dentroAudio = <T extends { inicio: number; duracion: number; desde?: number }>(x: T): T | null => {
+    const d = dentro(x)
+    return d && x.inicio < a ? { ...d, desde: (x.desde ?? 0) + (a - x.inicio) } : d
+  }
   const capas = (tl.capas ?? []).map((c) => {
     const d = dentro(c)
     if (!d) return null
@@ -4149,8 +4394,8 @@ export function ventanaTimeline(tl: Timeline, desde: number, hasta: number): Tim
         return textoYaEmpezado(d, a - x.inicio, x)
       })
       .filter((x): x is TextoTL => x !== null),
-    ...(tl.voces?.length ? { voces: tl.voces.map(dentro).filter((x): x is VozTL => x !== null) } : {}),
+    ...(tl.voces?.length ? { voces: tl.voces.map(dentroAudio).filter((x): x is VozTL => x !== null) } : {}),
     capas: capas.filter((x): x is CapaTL => x !== null),
-    ...(tl.sonidos?.length ? { sonidos: tl.sonidos.map(dentro).filter((x): x is SonidoTL => x !== null) } : {})
+    ...(tl.sonidos?.length ? { sonidos: tl.sonidos.map(dentroAudio).filter((x): x is SonidoTL => x !== null) } : {})
   }
 }
