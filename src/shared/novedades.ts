@@ -40,6 +40,33 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.4.1',
+    fecha: '2026-11-23',
+    resumen: 'El editor corta el audio como uno serio, la foto de encima alarga el video y llegan los gráficos con texto editable.',
+    novedades: [
+      {
+        icono: 'scissors',
+        titulo: 'Cortar el audio',
+        texto: 'Divide con S una frase de la narración, un sonido o la música (no el video), recórtalos por los bordes, muévelos y borra un trozo. Un pedazo recortado se vuelve a estirar hasta donde llegaba su audio. Lo que oyes en el editor es lo que suena en el MP4.'
+      },
+      {
+        icono: 'image',
+        titulo: 'Una foto que alarga el video',
+        texto: 'Estira una imagen de encima más allá del final y el video dura hasta donde acaba ella, con negro detrás. Si la acortas, el negro se va con ella. Sirve para que el video llegue hasta que termine la música.'
+      },
+      {
+        icono: 'layers',
+        titulo: 'Gráficos con texto editable',
+        texto: 'Tarjetas, rótulos con su caja y botones hechos de textos que cambias cuando quieras, con tus propias letras. Se ven igual en el editor y en el video.'
+      },
+      {
+        icono: 'type',
+        titulo: 'Subtítulos solo si los pides',
+        texto: 'El agente ya no pone subtítulos a todo lo que lleva voz: los pone cuando los pides, y aprende en qué tipo de videos los quieres.'
+      }
+    ]
+  },
+  {
     version: '0.4.0',
     fecha: '2026-11-22',
     resumen: 'El editor ya anima como un estudio: entradas y salidas, fotogramas clave en los textos con curvas, esquinas, borde y sombra en las capas, y varias a la vez.',
