@@ -40,6 +40,38 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.4.2',
+    fecha: '2026-11-23',
+    resumen: 'El editor se maneja como uno serio: números que se arrastran, la línea de cada fotograma clave, 37 transiciones y el volumen en LUFS.',
+    novedades: [
+      {
+        icono: 'sliders',
+        titulo: 'Ajustes que se arrastran',
+        texto: 'En el panel de la derecha, cada ajuste es una fila con su número: arrástralo a los lados para cambiarlo (con Mayús, fino), haz clic para escribirlo o muévelo con las flechas. La ↺ lo devuelve a como venía.'
+      },
+      {
+        icono: 'key',
+        titulo: 'La línea de cada fotograma clave',
+        texto: 'Debajo de un ajuste animado ves sus rombos y cómo cambia el valor. Arrastra un rombo para moverlo en el tiempo, haz doble clic para quitarlo y clic en la línea para llevar el cabezal ahí.'
+      },
+      {
+        icono: 'film',
+        titulo: '37 transiciones',
+        texto: 'Pasar por negro, tapar y destapar, cortinas, barridos suaves, reloj, puertas, persianas, iris, aplastar y más, en cinco familias y con una muestra que se mueve. Se ven como un bloque en el corte que estiras desde su borde, y en el editor se ven igual que en el MP4.'
+      },
+      {
+        icono: 'volumen',
+        titulo: 'Escuchar una pista sola y medir en LUFS',
+        texto: 'La «S» de cada pista de audio deja sonar solo esa mientras editas (el MP4 suena entero). El mezclador mide la sonoridad en LUFS, como las redes, que dejan los videos en −14.'
+      },
+      {
+        icono: 'clock',
+        titulo: 'Barra de zoom y código de tiempo',
+        texto: 'Debajo de la línea de tiempo, una barra que recorres arrastrando y que acerca o aleja desde sus bordes. Y un clic en el código de tiempo deja escribir a qué momento ir.'
+      }
+    ]
+  },
+  {
     version: '0.4.1',
     fecha: '2026-11-23',
     resumen: 'El editor corta el audio como uno serio, la foto de encima alarga el video y llegan los gráficos con texto editable.',
