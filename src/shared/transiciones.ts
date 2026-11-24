@@ -24,6 +24,8 @@ export interface CapaTransicion {
   /** Desenfoque horizontal (fracción del ancho del cuadro) y su corrimiento a la izquierda. */
   desenfoqueX: number
   visible: boolean
+  /** Desde dónde escala (fracciones del cuadro); sin él, el centro. */
+  origen?: [number, number]
 }
 
 export interface VistaTransicion {
@@ -66,7 +68,7 @@ function enTabla(tabla: number[], q: number): number {
   return tabla[i] + (tabla[i + 1] - tabla[i]) * (x - i)
 }
 
-export function vistaTransicion(tipo: TransicionClip | undefined, q0: number): VistaTransicion {
+export function vistaTransicion(tipo: TransicionClip | undefined, q0: number, ancho = 1920, alto = 1080): VistaTransicion {
   const q = pinza(q0, 0, 1)
   const P = 1 - q
   const entra = quieta()
@@ -221,7 +223,9 @@ export function vistaTransicion(tipo: TransicionClip | undefined, q0: number): V
     case 'zoom': {
       // El anterior se mete en el centro (zoom ×1/zf) y el siguiente aparece fundiéndose.
       const zf = smoothstep(0.5, 1, P)
-      sale.escalaX = sale.escalaY = 1 / Math.max(zf, 0.01)
+      sale.escalaX = sale.escalaY = 1 / Math.max(zf, 0.0005)
+      // FFmpeg toma el píxel de ceil(u·(w−1)): el que queda justo a la derecha y abajo del centro.
+      sale.origen = [(Math.ceil(0.5 * (ancho - 1)) + 0.5) / ancho, (Math.ceil(0.5 * (alto - 1)) + 0.5) / alto]
       entra.opacidad = 1 - smoothstep(0, 0.5, P)
       return v
     }

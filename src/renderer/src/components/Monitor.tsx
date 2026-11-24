@@ -235,7 +235,7 @@ export function Monitor({
   const z = cam.z
   // La transición de entrada: el clip entra sobre negro (en el render, sobre el clip anterior), con su tipo
   // (fundido, barrido, zoom, desenfoque, destello, círculo).
-  const tr = clipActual?.fundido && ubicado && ubicado.indice > 0 && enClip < clipActual.fundido ? vistaTransicion(clipActual.transicion, enClip / clipActual.fundido) : null
+  const tr = clipActual?.fundido && ubicado && ubicado.indice > 0 && enClip < clipActual.fundido ? vistaTransicion(clipActual.transicion, enClip / clipActual.fundido, proyecto.source.width || 1920, proyecto.source.height || 1080) : null
   // Debajo (o encima) queda el último cuadro del clip anterior, quieto y ya con su color, como en el MP4. Mientras no
   // está hecho, una foto anterior se ve tal cual y un video, en negro.
   const salidas = useCuadrosSalida(proyecto, timeline)

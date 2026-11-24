@@ -14,6 +14,7 @@ export function estiloCapaTransicion(c: CapaTransicion, idFiltro: string, ancho:
       mover || escalar
         ? `${mover ? `translate(${((c.x - c.desenfoqueX / 2) * 100).toFixed(3)}%, ${(c.y * 100).toFixed(3)}%) ` : ''}${escalar ? `scale(${c.escalaX.toFixed(4)}, ${c.escalaY.toFixed(4)})` : ''}`.trim()
         : undefined,
+    transformOrigin: c.origen ? `${(c.origen[0] * 100).toFixed(4)}% ${(c.origen[1] * 100).toFixed(4)}%` : undefined,
     clipPath: c.recorte,
     maskImage: c.mascara,
     WebkitMaskImage: c.mascara,

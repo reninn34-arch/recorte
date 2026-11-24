@@ -9,6 +9,12 @@ import { duracionTimeline, tramos } from '../shared/timeline'
 import { exportarTimeline } from './exportar'
 import { rutaFfmpeg } from './ffmpeg'
 
+/**
+ * Un cuadro del MP4 (BT.709, rango de video) a JPG con su color tal cual: el JPG se lee como BT.601 de rango completo,
+ * y sin convertirlo bien sale más saturado que el video.
+ */
+const A_JPG = ['-vf', 'scale=in_color_matrix=bt709:in_range=tv:out_color_matrix=bt601:out_range=pc', '-pix_fmt', 'yuvj420p', '-q:v', '2']
+
 interface Almacen {
   get(id: string): Project | null
   carpeta(id: string): string
@@ -78,7 +84,7 @@ export class VistaPrevia {
       if (!r.ok || !r.output || !existsSync(r.output)) return null
       mkdirSync(this.carpeta(id), { recursive: true })
       const codigo = await new Promise<number | null>((ok) => {
-        const hijo = spawn(rutaFfmpeg(), ['-v', 'error', '-y', '-i', r.output!, '-frames:v', '1', '-q:v', '3', final], { windowsHide: true })
+        const hijo = spawn(rutaFfmpeg(), ['-v', 'error', '-y', '-i', r.output!, '-frames:v', '1', ...A_JPG, final], { windowsHide: true })
         hijo.on('error', () => ok(null))
         hijo.on('close', ok)
       })
@@ -123,7 +129,7 @@ export class VistaPrevia {
       if (!r.ok || !r.output || !existsSync(r.output)) return null
       mkdirSync(this.carpeta(id), { recursive: true })
       const codigo = await new Promise<number | null>((ok) => {
-        const hijo = spawn(rutaFfmpeg(), ['-v', 'error', '-y', '-sseof', '-0.5', '-i', r.output!, '-vf', 'scale=in_color_matrix=bt709:in_range=tv:out_color_matrix=bt601:out_range=pc', '-pix_fmt', 'yuvj420p', '-update', '1', '-q:v', '2', final], { windowsHide: true })
+        const hijo = spawn(rutaFfmpeg(), ['-v', 'error', '-y', '-sseof', '-0.5', '-i', r.output!, '-update', '1', ...A_JPG, final], { windowsHide: true })
         hijo.on('error', () => ok(null))
         hijo.on('close', ok)
       })
