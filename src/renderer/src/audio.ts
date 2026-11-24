@@ -29,6 +29,46 @@ interface Cadena {
 const grafos = new WeakMap<HTMLMediaElement, Grafo>()
 
 /**
+ * El bus del medidor de sonoridad (LUFS, la norma EBU R128 / ITU-R BS.1770): todo lo que suena entra aquí, pasa por
+ * el filtro de ponderación K (un realce de agudos y un corte de graves) y se mide canal por canal.
+ */
+export interface BusLufs {
+  izq: AnalyserNode
+  der: AnalyserNode
+}
+let busLufs: (BusLufs & { entrada: GainNode }) | null = null
+function busDe(ctx: BaseAudioContext): BusLufs & { entrada: GainNode } {
+  if (busLufs) return busLufs
+  const entrada = ctx.createGain()
+  entrada.channelCount = 2
+  entrada.channelCountMode = 'explicit'
+  entrada.channelInterpretation = 'speakers'
+  const realce = ctx.createBiquadFilter()
+  realce.type = 'highshelf'
+  realce.frequency.value = 1681.97
+  realce.gain.value = 4
+  const corte = ctx.createBiquadFilter()
+  corte.type = 'highpass'
+  corte.frequency.value = 38.13
+  corte.Q.value = 0.5
+  const separar = ctx.createChannelSplitter(2)
+  const izq = ctx.createAnalyser()
+  const der = ctx.createAnalyser()
+  izq.fftSize = der.fftSize = 2048
+  entrada.connect(realce)
+  realce.connect(corte)
+  corte.connect(separar)
+  separar.connect(izq, 0)
+  separar.connect(der, 1)
+  busLufs = { entrada, izq, der }
+  return busLufs
+}
+/** Los analizadores del medidor de sonoridad (null hasta que suene algo por el contexto de audio). */
+export function analizadoresLufs(): BusLufs | null {
+  return busLufs
+}
+
+/**
  * El grafo de un elemento (lo crea la primera vez). Solo con el contexto en marcha: conectado a uno pausado, el elemento
  * se quedaría mudo. Sin marcha, lo pide y devuelve null (se vuelve a intentar).
  */
@@ -48,6 +88,7 @@ export function grafoDe(el: HTMLMediaElement): Grafo | null {
     fuente.connect(salida)
     salida.connect(contexto.destination)
     salida.connect(analizador)
+    salida.connect(busDe(contexto).entrada)
     const g: Grafo = { fuente, salida, analizador }
     grafos.set(el, g)
     return g

@@ -1622,6 +1622,16 @@ export function ponerClaveRampa(tl: Timeline, id: string, f: number, v: number):
   return conClips(tl, clips)
 }
 
+/** Mueve en el tiempo una clave de la rampa de velocidad. */
+export function moverClaveRampa(tl: Timeline, id: string, de: number, a: number): Timeline {
+  const clips = tl.clips.map((c) => {
+    if (c.id !== id || !c.rampa) return c
+    const lista = normalizarRampa(moverClaveEnLista(c.rampa, de, pinza(a, c.entrada, c.salida)))
+    return lista ? { ...c, rampa: lista } : c
+  })
+  return conClips(tl, clips)
+}
+
 /** Quita una clave de la rampa (o toda la rampa, sin `f`): el clip vuelve a su velocidad fija. */
 export function quitarClaveRampa(tl: Timeline, id: string, f?: number): Timeline {
   const clips = tl.clips.map((c) => {
@@ -1657,6 +1667,11 @@ export interface PistaTL {
   bloqueada?: boolean
   /** El volumen de toda la pista (el fader del mezclador), 0 a 2; 1 sin cambio. Solo en las pistas de audio. */
   volumen?: number
+  /**
+   * Escuchar solo esta pista de audio (la «S» de los editores): las demás se callan en el editor mientras se
+   * escucha. Es para revisar: el MP4 lo suena todo igual.
+   */
+  solo?: boolean
 }
 
 /** Hasta dónde sube el fader de una pista (200 %, +6 dB). */
@@ -1678,10 +1693,12 @@ function normalizarPistas(entrada: unknown): Timeline['pistas'] | undefined {
     const x = (entrada as Record<string, PistaTL | undefined>)[p.id]
     const volumen =
       p.audio && typeof x?.volumen === 'number' && Number.isFinite(x.volumen) ? Math.round(pinza(x.volumen, 0, MAX_VOLUMEN_PISTA) * 100) / 100 : 1
-    if (x?.oculta === true || x?.bloqueada === true || Math.abs(volumen - 1) > 1e-3)
+    const solo = p.audio && x?.solo === true
+    if (x?.oculta === true || x?.bloqueada === true || solo || Math.abs(volumen - 1) > 1e-3)
       pistas[p.id] = {
         ...(x?.oculta === true ? { oculta: true } : {}),
         ...(x?.bloqueada === true ? { bloqueada: true } : {}),
+        ...(solo ? { solo: true } : {}),
         ...(Math.abs(volumen - 1) > 1e-3 ? { volumen } : {})
       }
   }
@@ -1698,9 +1715,15 @@ export function cambiarPista(tl: Timeline, id: PistaId, cambio: PistaTL): Timeli
  * La timeline tal como se ve y suena: sin lo de las pistas ocultas o silenciadas. Es la que usan el monitor y el
  * MP4; la que se edita conserva todo. Los clips no cambian de sitio (la pista de video solo pierde su sonido).
  */
-export function timelineActiva(entrada: Timeline): Timeline {
+export function timelineActiva(entrada: Timeline, opciones: { conSolo?: boolean } = {}): Timeline {
   const tl = sinOcultos(conSubtitulosAnimados(entrada))
-  const p = tl.pistas
+  // Con alguna pista en «solo» (solo en el editor), las demás pistas de audio se callan.
+  const enSolo = opciones.conSolo && PISTAS.some((x) => x.audio && tl.pistas?.[x.id]?.solo)
+  const p = enSolo
+    ? (Object.fromEntries(
+        PISTAS.map((x) => [x.id, x.audio && !tl.pistas?.[x.id]?.solo ? { ...(tl.pistas?.[x.id] ?? {}), oculta: true } : tl.pistas?.[x.id]])
+      ) as NonNullable<Timeline['pistas']>)
+    : tl.pistas
   if (!p || !PISTAS.some((x) => p[x.id]?.oculta || (p[x.id]?.volumen ?? 1) !== 1)) return tl
   const { capas, voces, sonidos, musica, ajustesCapa, ...resto } = tl
   // El fader de cada pista multiplica el volumen de todo lo suyo (así el monitor y el MP4 lo oyen igual).
@@ -2781,6 +2804,34 @@ export function quitarClaveCapa(tl: Timeline, id: string, parametro: ParametroCl
 /** La clave de un ajuste de una capa que cae en el segundo `dt` (dentro de un cuadro), si la hay. */
 export function claveCapaEn(c: CapaTL, parametro: ParametroClaveCapa, dt: number): ClaveTL | undefined {
   return c.claves?.[parametro]?.find((x) => Math.abs(x.f - dt) < MISMA_CLAVE)
+}
+
+/** Lleva la clave que está en `de` hasta `a` dentro de su lista: conserva su valor y su curva; si cae encima de otra, la sustituye. */
+export function moverClaveEnLista(lista: ClaveTL[], de: number, a: number): ClaveTL[] {
+  const k = lista.find((x) => Math.abs(x.f - de) < MISMA_CLAVE)
+  if (!k) return lista
+  const resto = lista.filter((x) => x !== k && Math.abs(x.f - a) >= MISMA_CLAVE)
+  return [...resto, { ...k, f: a }].sort((x, y) => x.f - y.f)
+}
+
+/** Mueve en el tiempo un fotograma clave de un ajuste del clip (dentro del trozo de fuente que usa). */
+export function moverClave(tl: Timeline, id: string, parametro: ParametroClave, de: number, a: number): Timeline {
+  return {
+    ...tl,
+    clips: tl.clips.map((c) => {
+      const lista = c.claves?.[parametro]
+      if (c.id !== id || !lista) return c
+      return conClaves(c, { ...c.claves, [parametro]: moverClaveEnLista(lista, de, pinza(a, c.entrada, c.salida)) })
+    })
+  }
+}
+
+/** Mueve en el tiempo un fotograma clave de un ajuste de una capa (dentro de lo que dura). */
+export function moverClaveCapa(tl: Timeline, id: string, parametro: ParametroClaveCapa, de: number, a: number, medios: Record<string, number>): Timeline {
+  const c = tl.capas?.find((x) => x.id === id)
+  const lista = c?.claves?.[parametro]
+  if (!c || !lista) return tl
+  return cambiarCapa(tl, id, { claves: { ...c.claves, [parametro]: moverClaveEnLista(lista, de, pinza(a, 0, c.duracion)) } }, medios)
 }
 
 // ===== Fotogramas clave de los textos =====
@@ -3918,6 +3969,18 @@ export function ponerClaveVolumen(tl: Timeline, id: string, f: number, v: number
     clips: tl.clips.map((c) => {
       if (c.id !== id) return c
       const lista = normalizarClavesVolumen([...(c.clavesVolumen ?? []).filter((x) => Math.abs(x.f - f) >= MISMA_CLAVE), { f, v }])
+      return lista ? { ...c, clavesVolumen: lista } : c
+    })
+  }
+}
+
+/** Mueve en el tiempo una clave de volumen del clip. */
+export function moverClaveVolumen(tl: Timeline, id: string, de: number, a: number): Timeline {
+  return {
+    ...tl,
+    clips: tl.clips.map((c) => {
+      if (c.id !== id || !c.clavesVolumen) return c
+      const lista = normalizarClavesVolumen(moverClaveEnLista(c.clavesVolumen, de, pinza(a, c.entrada, c.salida)))
       return lista ? { ...c, clavesVolumen: lista } : c
     })
   }

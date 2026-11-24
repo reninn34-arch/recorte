@@ -132,7 +132,7 @@ export function Editor({
     return lista
   }, [proyecto.id, proyecto.proxy, proyecto.medios, proyecto.source.width, proyecto.source.height])
   // Lo que suena y se ve es la timeline sin las pistas silenciadas (los clips no cambian de sitio).
-  const activa = useMemo(() => timelineActiva(timeline), [timeline])
+  const activa = useMemo(() => timelineActiva(timeline, { conSolo: true }), [timeline])
   const reproductor = useReproductor(activa, proyecto.id, fuentes)
   // Los tramos pesados ya renderizados: el monitor los reproduce sin componerlos en vivo.
   const vistaPrevia = useVistaPrevia(proyecto, timeline, reproductor.reproduciendo, reproductor.tiempo)

@@ -156,7 +156,7 @@ export function Monitor({
   const src = proyecto.demo ? undefined : mediaUrl(proyecto.id, proyecto.proxy ?? 'fuente')
   const enImagen = Boolean(reproductor.imagen)
   // Lo que se ve y suena: sin las pistas ocultas o silenciadas (lo que se edita es `timeline`, entera).
-  const vista = useMemo(() => timelineActiva(timeline), [timeline])
+  const vista = useMemo(() => timelineActiva(timeline, { conSolo: true }), [timeline])
   // Con el tramo ya renderizado, lo de encima viene en ese video: no se compone en vivo.
   // Cada texto como está ahora (con sus fotogramas clave: sitio, tamaño, giro, opacidad).
   const rotulos = vistaAhora ? [] : textosEn(vista, reproductor.tiempo).map((r) => textoEn(r, reproductor.tiempo - r.inicio))

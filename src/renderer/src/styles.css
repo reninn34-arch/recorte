@@ -3792,3 +3792,64 @@ button { cursor: pointer; }
 /* Una capa que es parte de un grupo (Ctrl + clic): su marco a la vista. */
 .monitor-capa.en-grupo > .monitor-capa-marco { outline: 2px dashed var(--accent, #7aa2ff); }
 .ed-fila-clave { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 11.5px; }
+
+/* El número de un ajuste que se arrastra o se escribe (en vez del deslizador grande). */
+.aj-valor-caja { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; flex-shrink: 0; }
+.aj-valor { color: var(--blue); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; cursor: ew-resize; user-select: none; padding: 1px 4px; border-radius: 4px; border-bottom: 1px dotted color-mix(in srgb, var(--blue) 55%, transparent); touch-action: none; }
+.aj-valor:hover, .aj-valor.is-arrastrando { background: var(--panel-3); color: #a9dbff; }
+.aj-valor:focus-visible { outline: 1px solid var(--blue); outline-offset: 1px; }
+.aj-valor.is-off { color: var(--dim); cursor: default; border-bottom-color: transparent; }
+.con-claves .aj-valor { color: var(--accent-2); border-bottom-color: color-mix(in srgb, var(--accent-2) 55%, transparent); }
+.aj-editar { width: 70px; padding: 1px 5px; border: 1px solid var(--blue); border-radius: 4px; background: var(--bg); color: var(--text); font: inherit; font-variant-numeric: tabular-nums; text-align: right; }
+.aj-editar:focus { outline: none; }
+.aj-volver { display: grid; place-items: center; width: 16px; height: 16px; padding: 0; border: none; border-radius: 3px; background: none; color: var(--dim); font-size: 12px; line-height: 1; }
+.aj-volver:hover:not(:disabled) { background: var(--panel-3); color: var(--text); }
+/* Filas densas: el nombre a la izquierda y su número a la derecha, en una línea. */
+.tl-ajuste.aj { flex-direction: row; align-items: center; min-height: 22px; padding: 1px 0; }
+.tl-ajuste.aj > span:first-child { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ed-insp .tl-ajustes:has(> .aj), .ed-insp .tl-detalle:has(> .aj) { gap: 4px; }
+.ed-grupo > .tl-ajuste.aj { padding-left: 12px; }
+
+/* La mini línea de un ajuste animado: sus rombos, la forma del valor y el cabezal. */
+.aj-carril { position: relative; height: 18px; margin: 0 0 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); cursor: pointer; touch-action: none; }
+.ed-grupo > .aj-carril { margin-left: 12px; }
+.aj-carril:hover { border-color: var(--line-2); }
+.aj-carril-curva { position: absolute; left: 0; top: 2px; width: 100%; height: calc(100% - 4px); pointer-events: none; }
+.aj-carril-curva polyline { fill: none; stroke: color-mix(in srgb, var(--accent-2) 55%, transparent); stroke-width: 1.3; vector-effect: non-scaling-stroke; }
+.aj-carril-cabezal { position: absolute; top: -1px; bottom: -1px; width: 1px; margin-left: -0.5px; background: var(--blue); pointer-events: none; }
+.aj-carril-clave { position: absolute; top: 50%; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; padding: 0; border: 1px solid var(--ink); border-radius: 1px; background: var(--accent-2); transform: rotate(45deg); cursor: ew-resize; }
+.aj-carril-clave:hover { background: #ffb08f; }
+.aj-carril-clave.is-aqui { background: var(--accent); }
+.aj-carril-clave:focus-visible { outline: 1px solid var(--blue); outline-offset: 1px; }
+
+/* «S»: escuchar solo esa pista de audio. */
+.tl-pista-solo { font-size: 10px; font-weight: 700; line-height: 1; }
+.tl-pista-boton.tl-pista-solo.is-on { background: #e8c547; color: var(--ink); }
+/* La barra de zoom de debajo de la línea de tiempo: la ventana es lo que se ve. */
+.tl-barra-zoom-fila { display: flex; flex-shrink: 0; padding: 3px 8px 4px 0; background: var(--panel); border-top: 1px solid var(--line); }
+.tl-barra-zoom-fila::before { content: ''; width: var(--ancho-nombres, 128px); flex-shrink: 0; }
+.tl-barra-zoom { position: relative; flex: 1; height: 12px; border-radius: 6px; background: var(--bg); cursor: pointer; }
+.tl-barra-zoom-cabezal { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--blue); pointer-events: none; z-index: 1; }
+.tl-barra-zoom-ventana { position: absolute; top: 1px; bottom: 1px; min-width: 14px; border-radius: 5px; background: var(--line-2); cursor: grab; }
+.tl-barra-zoom-ventana:hover { background: #46503a; }
+.tl-barra-zoom-ventana:active { cursor: grabbing; }
+.tl-barra-zoom-tirador { position: absolute; top: 0; bottom: 0; width: 7px; border-radius: 5px; background: var(--muted); cursor: ew-resize; opacity: 0.55; }
+.tl-barra-zoom-tirador:hover { opacity: 1; background: var(--text); }
+.tl-barra-zoom-tirador.izq { left: 0; }
+.tl-barra-zoom-tirador.der { right: 0; }
+
+/* Sonoridad (LUFS) en el mezclador y junto al medidor de la barra. */
+.mezclador-lufs { width: 104px; border-color: color-mix(in srgb, #e8c547 35%, var(--line)); }
+.lufs-barra { position: relative; width: 10px; height: 140px; border-radius: 2px; overflow: hidden; background: linear-gradient(to top, #12351f 0 65%, #3a3512 65% 72%, #3d1616 72% 100%); }
+.lufs-relleno { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(to top, #3fd47a 0 65%, #e8c547 65% 72%, #ff6b6b 72% 100%); background-size: 100% 140px; background-position: bottom; transition: height 60ms linear; }
+.lufs-meta { position: absolute; left: -2px; right: -2px; height: 2px; margin-bottom: -1px; background: var(--text); }
+.lufs-datos { display: grid; grid-template-columns: auto 1fr; align-content: start; gap: 4px 6px; margin: 0; font-size: 11px; }
+.lufs-datos dt { color: var(--dim); font-weight: 700; }
+.lufs-datos dd { margin: 0; font-family: var(--mono); color: var(--text); font-variant-numeric: tabular-nums; text-align: right; }
+.lufs-reiniciar { border: none; background: none; padding: 0; color: var(--muted); font-size: 10.5px; }
+.lufs-reiniciar:hover { color: var(--text); text-decoration: underline; }
+.tl-lufs { margin-left: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Cabeceras de pista con «S»: un poco más anchas para que quepa el nombre entero. */
+.ed .tl-nombres { width: 150px; }
+.tl-barra-zoom-fila::before { width: 150px; }

@@ -137,7 +137,7 @@ import type { Historial } from '../hooks/timeline'
 import { Icon, type IconName } from '../Icons'
 import { Onda } from './Onda'
 import { EditorCurvas } from './EditorCurvas'
-import { Medidor, Mezclador, useNiveles } from './Mezclador'
+import { Medidor, Mezclador, textoLufs, useNiveles, useSonoridad } from './Mezclador'
 import { useMenuContextual, type OpcionMenu } from './MenuContextual'
 import { InspectorVoz, type GenerarVoz, type GrabarVoz } from './InspectorVoz'
 import { EstiloTexto } from './EstiloTexto'
@@ -149,6 +149,10 @@ import { LIMITE_BORDE_CAPA, CURVAS_CLAVE, curvaClaveCapa, type CurvaClave } from
 import { DURACIONES_ANIMACION, durEntradaCapa, durSalidaCapa, durSalidaTexto, porPalabras, SALIDAS_TEXTO, type SalidaCapa, type SalidaTexto } from '../../../shared/timeline'
 import { reanclarTexto, rotuloEnMonitor } from '../rotulos'
 import { resumenGrafico } from '../../../shared/grafico'
+import { ValorArrastrable } from './ValorArrastrable'
+import { CarrilClaves } from './CarrilClaves'
+import { BarraZoom } from './BarraZoom'
+import { moverClave, moverClaveCapa, moverClaveRampa, moverClaveVolumen } from '../../../shared/timeline'
 
 /**
  * La timeline editable: regla, pista de video magnética, pista de textos y la voz
@@ -474,6 +478,7 @@ export function TimelineEditor({
   const [capaSiguiendo, setCapaSiguiendo] = useState<string | null>(null)
   const [avisoCapa, setAvisoCapa] = useState('')
   const niveles = useNiveles(reproduciendo || mezclador)
+  const [sonoridad, reiniciarSonoridad] = useSonoridad(reproduciendo)
   const cuadro = 1 / Math.max(1, Math.round(fps))
   const [, forzar] = useState(0)
   const [anchoVisible, setAnchoVisible] = useState(800)
@@ -1586,7 +1591,20 @@ export function TimelineEditor({
     setZoom((z) => Math.min(zoomMax, Math.max(1, z * (e.deltaY < 0 ? 1.25 : 0.8))))
   }
 
-  const valorZoom = zoomMax > 1 ? Math.round((Math.log(zoom) / Math.log(zoomMax)) * 100) : 0
+  /** Enseña de `t0` a `t1` (la barra de zoom): el zoom que hace falta y el desplazamiento hasta `t0`. */
+  function verTramo(t0: number, t1: number) {
+    const el = scrollRef.current
+    if (!el) return
+    const base = Math.max(120, anchoVisible - 40) / escala.current
+    const z = Math.min(zoomMax, Math.max(1, el.clientWidth / Math.max(0.05, t1 - t0) / base))
+    if (Math.abs(z - zoom) < 1e-9) {
+      el.scrollLeft = t0 * pps
+      return
+    }
+    anclaZoom.current = { t: t0, x: 0 }
+    setZoom(z)
+  }
+
 
   // La imagen con la que se ve cada efecto: la del clip elegido, o la primera de la línea de tiempo.
   const vistaEfecto = miniaturaDe?.(clipElegido?.clip.fuente ?? tl.clips[0]?.fuente ?? 'principal')
@@ -1607,7 +1625,7 @@ export function TimelineEditor({
   return (
     <div className="tl">
       {menuCtx}
-      {mezclador && <Mezclador timeline={timeline} historial={historial} niveles={niveles} onCerrar={() => setMezclador(false)} />}
+      {mezclador && <Mezclador timeline={timeline} historial={historial} niveles={niveles} sonoridad={sonoridad} onReiniciarSonoridad={reiniciarSonoridad} onCerrar={() => setMezclador(false)} />}
       {paneles.transporte &&
         createPortal(
           <>
@@ -1966,21 +1984,22 @@ export function TimelineEditor({
                         })}
                       </div>
                       {FILTROS.map((f) => (
-                        <label key={f.id} className="tl-ajuste" title={`Para ${f.para}`}>
+                        <div key={f.id} className="tl-ajuste aj" title={`Para ${f.para}`}>
                           <span>
-                            {f.nombre} <b>{Math.round((tl.filtros?.[f.id] ?? 0) * 100)} %</b>
+                            {f.nombre}
+                            <ValorArrastrable
+                              nombre={f.nombre}
+                              valor={tl.filtros?.[f.id] ?? 0}
+                              min={0}
+                              max={1}
+                              paso={0.01}
+                              formato={(v) => `${Math.round(v * 100)} %`}
+                              porDefecto={0}
+                              onEmpezar={empezarAjuste}
+                              onCambio={(v) => deslizar(cambiarFiltros(timeline, { [f.id]: v }))}
+                            />
                           </span>
-                          <input
-                            type="range"
-                            min={0}
-                            max={1}
-                            step={0.01}
-                            value={tl.filtros?.[f.id] ?? 0}
-                            onPointerDown={empezarAjuste}
-                            onFocus={empezarAjuste}
-                            onChange={(e) => deslizar(cambiarFiltros(timeline, { [f.id]: Number(e.target.value) }))}
-                          />
-                        </label>
+                        </div>
                       ))}
                     </details>
                   )}
@@ -2084,19 +2103,13 @@ export function TimelineEditor({
         >
           <Icon name="mezclador" size={15} />
           <Medidor horizontal nivel={niveles.general} />
+          {reproduciendo && Number.isFinite(sonoridad.corta) && sonoridad.corta > -70 && (
+            <span className="tl-lufs" title="Sonoridad de los últimos 3 s (las redes dejan los videos en −14 LUFS)">
+              {textoLufs(sonoridad.corta)} LUFS
+            </span>
+          )}
         </button>
-        <label className="tl-zoom" title="Acercar (Ctrl+rueda)">
-          <Icon name="search" size={14} />
-          <input
-            type="range"
-            min={0}
-            max={100}
-            value={valorZoom}
-            disabled={zoomMax <= 1}
-            onChange={(e) => setZoom(Math.pow(zoomMax, Number(e.target.value) / 100))}
-          />
-        </label>
-        <button className="tl-boton" onClick={ajustar} title="Ver toda la línea de tiempo">
+        <button className="tl-boton" onClick={ajustar} title="Ver toda la línea de tiempo (para acercar: la barra de debajo, Ctrl+rueda o + y −)">
           Ajustar
         </button>
       </div>
@@ -2138,6 +2151,21 @@ export function TimelineEditor({
                 >
                   <Icon name={p.audio ? (estado?.oculta ? 'volumen-no' : 'volumen') : estado?.oculta ? 'ojo-no' : 'ojo'} size={12} />
                 </button>
+                {p.audio && (
+                  <button
+                    className={`tl-pista-boton tl-pista-solo ${estado?.solo ? 'is-on' : ''}`}
+                    onClick={() => historial.aplicar(cambiarPista(timeline, p.id, { solo: !estado?.solo }))}
+                    title={
+                      estado?.solo
+                        ? `Dejar de escuchar solo ${p.nombre}`
+                        : `Escuchar solo ${p.nombre}: las demás pistas de audio se callan en el editor (el MP4 suena entero)`
+                    }
+                    aria-label={estado?.solo ? `Dejar de escuchar solo ${p.nombre}` : `Escuchar solo ${p.nombre}`}
+                    aria-pressed={Boolean(estado?.solo)}
+                  >
+                    S
+                  </button>
+                )}
                 <button
                   className={`tl-pista-boton ${estado?.bloqueada ? 'is-on' : ''}`}
                   onClick={() => historial.aplicar(cambiarPista(timeline, p.id, { bloqueada: !estado?.bloqueada }))}
@@ -2487,6 +2515,9 @@ export function TimelineEditor({
             <span className="tl-cabezal" style={{ left: Math.min(tiempo, total) * pps }} />
           </div>
         </div>
+      </div>
+      <div className="tl-barra-zoom-fila">
+        <BarraZoom scrollRef={scrollRef} pps={pps} duracion={Math.max(total, 1)} cabezal={tiempo} onVer={verTramo} onAjustar={ajustar} />
       </div>
 
       {paneles.inspector &&
@@ -2884,21 +2915,21 @@ export function TimelineEditor({
                           ...(z.modo === 'desenfoque' ? ([['fuerza', 'Fuerza', 0.1, 1]] as const) : [])
                         ] as const
                       ).map(([clave, nombre, min, max]) => (
-                        <label key={clave} className="tl-ajuste">
+                        <div key={clave} className="tl-ajuste aj">
                           <span>
-                            {nombre} <b>{Math.round(z[clave] * 100)} %</b>
+                            {nombre}
+                            <ValorArrastrable
+                              nombre={nombre}
+                              valor={z[clave]}
+                              min={min}
+                              max={max}
+                              paso={0.005}
+                              formato={(v) => `${Math.round(v * 100)} %`}
+                              onEmpezar={empezarAjuste}
+                              onCambio={(v) => cambiar({ [clave]: v }, true)}
+                            />
                           </span>
-                          <input
-                            type="range"
-                            min={min}
-                            max={max}
-                            step={0.005}
-                            value={z[clave]}
-                            onPointerDown={empezarAjuste}
-                            onFocus={empezarAjuste}
-                            onChange={(e) => cambiar({ [clave]: Number(e.target.value) }, true)}
-                          />
-                        </label>
+                        </div>
                       ))}
                     </div>
                   )
@@ -2920,8 +2951,9 @@ export function TimelineEditor({
                     const aqui = rampa.find((x) => Math.abs(x.f - fuenteEnCabezal) < 0.034)
                     const v = rampa.length ? velocidadEnFuente(clipElegido.clip, fuenteEnCabezal) : velocidadDe(clipElegido.clip)
                     return (
-                      <label
-                        className={`tl-ajuste ${rampa.length ? 'con-claves' : ''}`}
+                      <>
+                      <div
+                        className={`tl-ajuste aj ${rampa.length ? 'con-claves' : ''}`}
                         title={
                           rampa.length
                             ? 'Rampa de velocidad: el valor es el del cabezal. Mueve el cabezal y cambia la velocidad para poner otra clave. El sonido del clip se calla.'
@@ -2953,25 +2985,39 @@ export function TimelineEditor({
                               </button>
                             </span>
                           </span>
-                          <b>{v.toFixed(2).replace(/\.?0+$/, '')}×</b>
+                          <ValorArrastrable
+                            nombre="Velocidad"
+                            valor={v}
+                            min={LIMITES_VELOCIDAD[0]}
+                            max={LIMITES_VELOCIDAD[1]}
+                            paso={0.05}
+                            formato={(x) => `${x.toFixed(2).replace(/\.?0+$/, '')}×`}
+                            porDefecto={rampa.length ? undefined : 1}
+                            onEmpezar={empezarAjuste}
+                            onCambio={(x) =>
+                              deslizar(
+                                rampa.length
+                                  ? ponerClaveRampa(timeline, clipElegido.clip.id, fuenteEnCabezal, x)
+                                  : cambiarVelocidad(timeline, clipElegido.clip.id, x)
+                              )
+                            }
+                          />
                         </span>
-                        <input
-                          type="range"
-                          min={LIMITES_VELOCIDAD[0]}
-                          max={LIMITES_VELOCIDAD[1]}
-                          step={0.05}
-                          value={v}
-                          onPointerDown={empezarAjuste}
-                          onFocus={empezarAjuste}
-                          onChange={(e) =>
-                            deslizar(
-                              rampa.length
-                                ? ponerClaveRampa(timeline, clipElegido.clip.id, fuenteEnCabezal, Number(e.target.value))
-                                : cambiarVelocidad(timeline, clipElegido.clip.id, Number(e.target.value))
-                            )
-                          }
+                      </div>
+                      {rampa.length > 0 && (
+                        <CarrilClaves
+                          claves={rampa}
+                          desde={clipElegido.clip.entrada}
+                          hasta={clipElegido.clip.salida}
+                          cabezal={fuenteEnCabezal}
+                          nombre="Velocidad"
+                          onIr={(f) => onBuscar(clipElegido.inicio + clipEnFuente(clipElegido.clip, f))}
+                          onEmpezar={empezarAjuste}
+                          onMover={(de, a) => historial.aplicar(moverClaveRampa(timeline, clipElegido.clip.id, de, a))}
+                          onQuitar={(f) => historial.aplicar(quitarClaveRampa(timeline, clipElegido.clip.id, f))}
                         />
-                      </label>
+                      )}
+                      </>
                     )
                   })()}
                   {!clipElegido.clip.rampa && <div className="ed-opciones">
@@ -3015,7 +3061,8 @@ export function TimelineEditor({
                     const aqui = claves.find((x) => Math.abs(x.f - fuenteEnCabezal) < 0.034)
                     const valor = claves.length ? valorClave(claves, fuenteEnCabezal) : sonidoDe(clipElegido.clip)[clave]
                     return (
-                      <label key={clave} className={`tl-ajuste en-linea ${claves.length ? 'con-claves' : ''}`} title={ayuda}>
+                      <Fragment key={clave}>
+                      <div className={`tl-ajuste aj en-linea ${claves.length ? 'con-claves' : ''}`} title={ayuda}>
                         <span>
                           <span className="tl-ajuste-nombre">
                             {nombre}
@@ -3043,25 +3090,39 @@ export function TimelineEditor({
                               </span>
                             )}
                           </span>
-                          <b>{formato(valor)}</b>
+                          <ValorArrastrable
+                            nombre={nombre}
+                            valor={valor}
+                            min={min}
+                            max={max}
+                            paso={paso}
+                            formato={formato}
+                            porDefecto={claves.length ? undefined : clave === 'volumen' ? 1 : 0}
+                            onEmpezar={empezarAjuste}
+                            onCambio={(v) =>
+                              deslizar(
+                                claves.length
+                                  ? ponerClaveVolumen(timeline, clipElegido.clip.id, fuenteEnCabezal, v)
+                                  : ajustarSonidoClip(timeline, clipElegido.clip.id, { [clave]: v })
+                              )
+                            }
+                          />
                         </span>
-                        <input
-                          type="range"
-                          min={min}
-                          max={max}
-                          step={paso}
-                          value={valor}
-                          onPointerDown={empezarAjuste}
-                          onFocus={empezarAjuste}
-                          onChange={(e) =>
-                            deslizar(
-                              claves.length
-                                ? ponerClaveVolumen(timeline, clipElegido.clip.id, fuenteEnCabezal, Number(e.target.value))
-                                : ajustarSonidoClip(timeline, clipElegido.clip.id, { [clave]: Number(e.target.value) })
-                            )
-                          }
+                      </div>
+                      {claves.length > 0 && (
+                        <CarrilClaves
+                          claves={claves}
+                          desde={clipElegido.clip.entrada}
+                          hasta={clipElegido.clip.salida}
+                          cabezal={fuenteEnCabezal}
+                          nombre={nombre}
+                          onIr={(f) => onBuscar(clipElegido.inicio + clipEnFuente(clipElegido.clip, f))}
+                          onEmpezar={empezarAjuste}
+                          onMover={(de, a) => historial.aplicar(moverClaveVolumen(timeline, clipElegido.clip.id, de, a))}
+                          onQuitar={(f) => historial.aplicar(quitarClaveVolumen(timeline, clipElegido.clip.id, f))}
                         />
-                      </label>
+                      )}
+                      </Fragment>
                     )
                   })}
                 </>
@@ -3172,7 +3233,8 @@ export function TimelineEditor({
                 const anterior = [...lista].reverse().find((x) => x.f < fuenteEnCabezal - 0.02)
                 const siguiente = lista.find((x) => x.f > fuenteEnCabezal + 0.02)
                 return (
-                  <label key={clave} className={`tl-ajuste ${lista.length ? 'con-claves' : ''}`}>
+                  <Fragment key={clave}>
+                  <div className={`tl-ajuste aj ${lista.length ? 'con-claves' : ''}`}>
                     <span>
                       <span className="tl-ajuste-nombre">
                         {nombre}
@@ -3212,19 +3274,33 @@ export function TimelineEditor({
                           </span>
                         )}
                       </span>
-                      <b>{formato(valor)}</b>
+                      <ValorArrastrable
+                        nombre={nombre}
+                        valor={valor}
+                        min={min}
+                        max={max}
+                        paso={paso}
+                        formato={formato}
+                        porDefecto={lista.length ? undefined : LIMITES_AJUSTES[clave as keyof AjustesClip][2]}
+                        onEmpezar={empezarAjuste}
+                        onCambio={(v) => ajustarImagen({ [clave]: v })}
+                      />
                     </span>
-                    <input
-                      type="range"
-                      min={min}
-                      max={max}
-                      step={paso}
-                      value={valor}
-                      onPointerDown={empezarAjuste}
-                      onFocus={empezarAjuste}
-                      onChange={(e) => ajustarImagen({ [clave]: Number(e.target.value) })}
+                  </div>
+                  {esClave(clave) && lista.length > 0 && (
+                    <CarrilClaves
+                      claves={lista}
+                      desde={clipElegido.clip.entrada}
+                      hasta={clipElegido.clip.salida}
+                      cabezal={fuenteEnCabezal}
+                      nombre={nombre}
+                      onIr={(f) => onBuscar(aTimeline(f))}
+                      onEmpezar={empezarAjuste}
+                      onMover={(de, a) => historial.aplicar(moverClave(timeline, clipElegido.clip.id, clave, de, a))}
+                      onQuitar={(f) => historial.aplicar(quitarClave(timeline, clipElegido.clip.id, clave, f))}
                     />
-                  </label>
+                  )}
+                  </Fragment>
                 )
               })}
                 </details>
@@ -3242,21 +3318,22 @@ export function TimelineEditor({
                   <span className="ed-lut-nombre" title={clipElegido.clip.lut.archivo}>
                     {clipElegido.clip.lut.nombre}
                   </span>
-                  <label className="tl-ajuste">
+                  <div className="tl-ajuste aj">
                     <span>
-                      Intensidad <b>{Math.round(clipElegido.clip.lut.intensidad * 100)} %</b>
+                      Intensidad
+                      <ValorArrastrable
+                        nombre="Intensidad del LUT"
+                        valor={clipElegido.clip.lut.intensidad}
+                        min={0}
+                        max={1}
+                        paso={0.01}
+                        formato={(v) => `${Math.round(v * 100)} %`}
+                        porDefecto={1}
+                        onEmpezar={empezarAjuste}
+                        onCambio={(v) => deslizar(ponerLut(timeline, clipElegido.clip.id, { ...clipElegido.clip.lut!, intensidad: v }))}
+                      />
                     </span>
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={clipElegido.clip.lut.intensidad}
-                      onPointerDown={empezarAjuste}
-                      onFocus={empezarAjuste}
-                      onChange={(e) => deslizar(ponerLut(timeline, clipElegido.clip.id, { ...clipElegido.clip.lut!, intensidad: Number(e.target.value) }))}
-                    />
-                  </label>
+                  </div>
                   {timeline.clips.length > 1 && (
                     <button className="btn small ghost" onClick={() => historial.aplicar(ponerLut(timeline, null, clipElegido.clip.lut))} title="El mismo LUT y la misma intensidad en todos los clips">
                       Ponerlo en todos los clips
@@ -3514,54 +3591,80 @@ export function TimelineEditor({
               const lista = capaElegida.claves?.[clave] ?? []
               const valor = estadoCapa(capaElegida, dt, false)[clave === 'opacidad' ? 'opacidad' : clave]
               return (
-                <label key={clave} className={`tl-ajuste en-linea ${lista.length ? 'con-claves' : ''}`}>
+                <Fragment key={clave}>
+                <div className={`tl-ajuste aj en-linea ${lista.length ? 'con-claves' : ''}`}>
                   <span>
                     <span className="tl-ajuste-nombre">
                       {nombre}
                       <RomboCapa clave={clave} nombre={nombre} dt={dt} valor={valor} />
                     </span>
-                    <b>{formato(valor)}</b>
+                    <ValorArrastrable
+                      nombre={nombre}
+                      valor={valor}
+                      min={min}
+                      max={max}
+                      paso={paso}
+                      formato={formato}
+                      porDefecto={lista.length ? undefined : clave === 'opacidad' ? 1 : clave === 'desenfoque' ? 0 : undefined}
+                      onEmpezar={empezarAjuste}
+                      onCambio={(v) =>
+                        deslizar(
+                          lista.length || clave === 'opacidad'
+                            ? ponerClaveCapa(timeline, capaElegida.id, clave, dt, v, medidas)
+                            : cambiarCapa(timeline, capaElegida.id, { [clave]: v }, medidas)
+                        )
+                      }
+                    />
                   </span>
-                  <input
-                    type="range"
-                    min={min}
-                    max={max}
-                    step={paso}
-                    value={valor}
-                    onPointerDown={empezarAjuste}
-                    onFocus={empezarAjuste}
-                    onChange={(e) => {
-                      const v = Number(e.target.value)
-                      deslizar(
-                        lista.length || clave === 'opacidad'
-                          ? ponerClaveCapa(timeline, capaElegida.id, clave, dt, v, medidas)
-                          : cambiarCapa(timeline, capaElegida.id, { [clave]: v }, medidas)
-                      )
-                    }}
+                </div>
+                {lista.length > 0 && (
+                  <CarrilClaves
+                    claves={lista}
+                    desde={0}
+                    hasta={capaElegida.duracion}
+                    cabezal={dt}
+                    nombre={nombre}
+                    onIr={(f) => onBuscar(capaElegida.inicio + f)}
+                    onEmpezar={empezarAjuste}
+                    onMover={(de, a) => historial.aplicar(moverClaveCapa(timeline, capaElegida.id, clave, de, a, medidas))}
+                    onQuitar={(f) => historial.aplicar(quitarClaveCapa(timeline, capaElegida.id, clave, f, medidas))}
                   />
-                </label>
+                )}
+                </Fragment>
               )
             })}
-            {capaElegida.claves?.giro ? (
-              <label className="tl-ajuste en-linea con-claves">
+            {capaElegida.claves?.giro?.length ? (
+              <>
+              <div className="tl-ajuste aj en-linea con-claves">
                 <span>
                   <span className="tl-ajuste-nombre">
                     Giro
                     <RomboCapa clave="giro" nombre="Giro" dt={Math.min(capaElegida.duracion, Math.max(0, tiempo - capaElegida.inicio))} valor={estadoCapa(capaElegida, Math.max(0, tiempo - capaElegida.inicio), false).giro} />
                   </span>
-                  <b>{Math.round(estadoCapa(capaElegida, Math.max(0, tiempo - capaElegida.inicio), false).giro)}°</b>
+                  <ValorArrastrable
+                    nombre="Giro"
+                    valor={estadoCapa(capaElegida, Math.max(0, tiempo - capaElegida.inicio), false).giro}
+                    min={-180}
+                    max={180}
+                    paso={1}
+                    formato={(v) => `${Math.round(v)}°`}
+                    onEmpezar={empezarAjuste}
+                    onCambio={(v) => deslizar(ponerClaveCapa(timeline, capaElegida.id, 'giro', Math.min(capaElegida.duracion, Math.max(0, tiempo - capaElegida.inicio)), v, medidas))}
+                  />
                 </span>
-                <input
-                  type="range"
-                  min={-180}
-                  max={180}
-                  step={1}
-                  value={estadoCapa(capaElegida, Math.max(0, tiempo - capaElegida.inicio), false).giro}
-                  onPointerDown={empezarAjuste}
-                  onFocus={empezarAjuste}
-                  onChange={(e) => deslizar(ponerClaveCapa(timeline, capaElegida.id, 'giro', Math.min(capaElegida.duracion, Math.max(0, tiempo - capaElegida.inicio)), Number(e.target.value), medidas))}
-                />
-              </label>
+              </div>
+              <CarrilClaves
+                claves={capaElegida.claves.giro}
+                desde={0}
+                hasta={capaElegida.duracion}
+                cabezal={Math.min(capaElegida.duracion, Math.max(0, tiempo - capaElegida.inicio))}
+                nombre="Giro"
+                onIr={(f) => onBuscar(capaElegida.inicio + f)}
+                onEmpezar={empezarAjuste}
+                onMover={(de, a) => historial.aplicar(moverClaveCapa(timeline, capaElegida.id, 'giro', de, a, medidas))}
+                onQuitar={(f) => historial.aplicar(quitarClaveCapa(timeline, capaElegida.id, 'giro', f, medidas))}
+              />
+              </>
             ) : null}
             {!capaElegida.claves?.giro && (
               [
@@ -3569,30 +3672,29 @@ export function TimelineEditor({
                 ...(capaElegida.fin ? ([['giroFin', 'Giro al terminar', capaElegida.fin.giro]] as const) : [])
               ] as const
             ).map(([clave, nombre, valor]) => (
-              <label key={clave} className="tl-ajuste en-linea">
+              <div key={clave} className="tl-ajuste aj en-linea">
                 <span>
                   <span className="tl-ajuste-nombre">
                     {nombre}
                     {clave === 'giro' && <RomboCapa clave="giro" nombre="Giro" dt={Math.min(capaElegida.duracion, Math.max(0, tiempo - capaElegida.inicio))} valor={valor} />}
                   </span>
-                  <b>{Math.round(valor)}°</b>
+                  <ValorArrastrable
+                    nombre={nombre}
+                    valor={valor}
+                    min={-180}
+                    max={180}
+                    paso={1}
+                    formato={(v) => `${Math.round(v)}°`}
+                    porDefecto={0}
+                    onEmpezar={empezarAjuste}
+                    onCambio={(g) =>
+                      deslizar(
+                        cambiarCapa(timeline, capaElegida.id, clave === 'giro' ? { giro: g } : { fin: { ...capaElegida.fin!, giro: g } }, medidas)
+                      )
+                    }
+                  />
                 </span>
-                <input
-                  type="range"
-                  min={-180}
-                  max={180}
-                  step={1}
-                  value={valor}
-                  onPointerDown={empezarAjuste}
-                  onFocus={empezarAjuste}
-                  onChange={(e) => {
-                    const g = Number(e.target.value)
-                    deslizar(
-                      cambiarCapa(timeline, capaElegida.id, clave === 'giro' ? { giro: g } : { fin: { ...capaElegida.fin!, giro: g } }, medidas)
-                    )
-                  }}
-                />
-              </label>
+              </div>
             ))}
             <div className="ed-opciones" role="group" aria-label="Voltear y recortar">
               <button className="chip" onClick={() => historial.aplicar(cambiarCapa(timeline, capaElegida.id, { x: 0.5, y: 0.5 }, medidas))}>
@@ -3621,19 +3723,39 @@ export function TimelineEditor({
               )}
             </div>
             <span className="ed-seccion">Esquinas, borde y sombra</span>
-            <label className="tl-ajuste en-linea" title="0: rectas · 1: redonda del todo (un círculo o una píldora)">
+            <div className="tl-ajuste aj en-linea" title="0: rectas · 1: redonda del todo (un círculo o una píldora)">
               <span>
-                Esquinas <b>{capaElegida.redondeo ? `${Math.round(capaElegida.redondeo * 100)} %` : 'rectas'}</b>
+                Esquinas
+                <ValorArrastrable
+                  nombre="Esquinas"
+                  valor={capaElegida.redondeo ?? 0}
+                  min={0}
+                  max={1}
+                  paso={0.01}
+                  formato={(v) => (v ? `${Math.round(v * 100)} %` : 'rectas')}
+                  porDefecto={0}
+                  onEmpezar={empezarAjuste}
+                  onCambio={(v) => deslizar(cambiarCapa(timeline, capaElegida.id, { redondeo: v }, medidas))}
+                />
               </span>
-              <input type="range" min={0} max={1} step={0.01} value={capaElegida.redondeo ?? 0} onPointerDown={empezarAjuste} onFocus={empezarAjuste} onChange={(e) => deslizar(cambiarCapa(timeline, capaElegida.id, { redondeo: Number(e.target.value) }, medidas))} />
-            </label>
+            </div>
             <div className="ed-fila-color">
-              <label className="tl-ajuste en-linea" title="Un borde por dentro de lo que se ve">
+              <div className="tl-ajuste aj en-linea" title="Un borde por dentro de lo que se ve">
                 <span>
-                  Borde <b>{capaElegida.borde ? `${Math.round(capaElegida.borde * 1000) / 10} %` : 'no'}</b>
+                  Borde
+                  <ValorArrastrable
+                    nombre="Borde"
+                    valor={capaElegida.borde ?? 0}
+                    min={0}
+                    max={LIMITE_BORDE_CAPA}
+                    paso={0.002}
+                    formato={(v) => (v ? `${Math.round(v * 1000) / 10} %` : 'no')}
+                    porDefecto={0}
+                    onEmpezar={empezarAjuste}
+                    onCambio={(v) => deslizar(cambiarCapa(timeline, capaElegida.id, { borde: v }, medidas))}
+                  />
                 </span>
-                <input type="range" min={0} max={LIMITE_BORDE_CAPA} step={0.002} value={capaElegida.borde ?? 0} onPointerDown={empezarAjuste} onFocus={empezarAjuste} onChange={(e) => deslizar(cambiarCapa(timeline, capaElegida.id, { borde: Number(e.target.value) }, medidas))} />
-              </label>
+              </div>
               <input
                 type="color"
                 className="tl-color"
@@ -3644,12 +3766,22 @@ export function TimelineEditor({
               />
             </div>
             <div className="ed-fila-color">
-              <label className="tl-ajuste en-linea" title="Una sombra debajo, abajo a la derecha">
+              <div className="tl-ajuste aj en-linea" title="Una sombra debajo, abajo a la derecha">
                 <span>
-                  Sombra <b>{capaElegida.sombraCapa ? `${Math.round(capaElegida.sombraCapa * 100)} %` : 'no'}</b>
+                  Sombra
+                  <ValorArrastrable
+                    nombre="Sombra"
+                    valor={capaElegida.sombraCapa ?? 0}
+                    min={0}
+                    max={1}
+                    paso={0.01}
+                    formato={(v) => (v ? `${Math.round(v * 100)} %` : 'no')}
+                    porDefecto={0}
+                    onEmpezar={empezarAjuste}
+                    onCambio={(v) => deslizar(cambiarCapa(timeline, capaElegida.id, { sombraCapa: v }, medidas))}
+                  />
                 </span>
-                <input type="range" min={0} max={1} step={0.01} value={capaElegida.sombraCapa ?? 0} onPointerDown={empezarAjuste} onFocus={empezarAjuste} onChange={(e) => deslizar(cambiarCapa(timeline, capaElegida.id, { sombraCapa: Number(e.target.value) }, medidas))} />
-              </label>
+              </div>
               <input
                 type="color"
                 className="tl-color"
@@ -3676,27 +3808,25 @@ export function TimelineEditor({
               onPegarEstilo={pegarEstilo}
             />
             <span className="tl-dim">En el monitor: las esquinas cambian el tamaño, el tirador redondo la gira y los de los lados la recortan. Alt + flechas la mueven un poco.</span>
-            <label
-              className="tl-ajuste en-linea"
+            <div
+              className="tl-ajuste aj en-linea"
               title="Escena 2.5D: la capa sigue a la cámara del clip de debajo (zoom, acercar y paneo). Lejos se mueve con el fondo; cerca, mucho más: así se nota la distancia."
             >
               <span>
-                Profundidad <b>{capaElegida.profundidad == null ? 'fija' : capaElegida.profundidad < 0.2 ? 'lejos' : capaElegida.profundidad < 0.6 ? 'media' : 'cerca'}</b>
+                Profundidad
+                <ValorArrastrable
+                  nombre="Profundidad"
+                  valor={capaElegida.profundidad ?? -0.05}
+                  min={-0.05}
+                  max={1}
+                  paso={0.05}
+                  formato={(v) => (v < 0 ? 'fija' : v < 0.2 ? 'lejos' : v < 0.6 ? 'media' : 'cerca')}
+                  porDefecto={-0.05}
+                  onEmpezar={empezarAjuste}
+                  onCambio={(v) => deslizar(cambiarCapa(timeline, capaElegida.id, { profundidad: v < 0 ? undefined : v }, medidas))}
+                />
               </span>
-              <input
-                type="range"
-                min={-0.05}
-                max={1}
-                step={0.05}
-                value={capaElegida.profundidad ?? -0.05}
-                onPointerDown={empezarAjuste}
-                onFocus={empezarAjuste}
-                onChange={(e) => {
-                  const v = Number(e.target.value)
-                  deslizar(cambiarCapa(timeline, capaElegida.id, { profundidad: v < 0 ? undefined : v }, medidas))
-                }}
-              />
-            </label>
+            </div>
             {onAnimarCapa && (capaElegida.animada || medios?.find((m) => m.id === capaElegida.fuente)?.tipo === 'imagen') && (
               <label className="ed-campo"><span>Animación</span><select
                 value={capaElegida.animada?.tipo ?? 'quieta'}
@@ -3775,21 +3905,22 @@ export function TimelineEditor({
                   desenfoque: 'Desenfoque'
                 }
                 return (
-                  <label key={k} className="tl-ajuste">
+                  <div key={k} className="tl-ajuste aj">
                     <span>
-                      {nombres[k]} <b>{Math.round(v * 100) / 100}</b>
+                      {nombres[k]}
+                      <ValorArrastrable
+                        nombre={nombres[k]}
+                        valor={v}
+                        min={min}
+                        max={max}
+                        paso={0.01}
+                        formato={(x) => String(Math.round(x * 100) / 100)}
+                        porDefecto={neutro}
+                        onEmpezar={empezarAjuste}
+                        onCambio={(x) => deslizar(cambiarAjusteCapa(timeline, ajusteElegido.id, { ajustes: { ...ajusteElegido.ajustes, [k]: x } }))}
+                      />
                     </span>
-                    <input
-                      type="range"
-                      min={min}
-                      max={max}
-                      step={0.01}
-                      value={v}
-                      onPointerDown={empezarAjuste}
-                      onFocus={empezarAjuste}
-                      onChange={(e) => deslizar(cambiarAjusteCapa(timeline, ajusteElegido.id, { ajustes: { ...ajusteElegido.ajustes, [k]: Number(e.target.value) } }))}
-                    />
-                  </label>
+                  </div>
                 )
               })}
             </div>
@@ -3802,21 +3933,22 @@ export function TimelineEditor({
           <>
             <Icon name="sparkles" size={14} />
             <b className="tl-musica-nombre">{sonidoElegido.nombre}</b>
-            <label className="tl-ajuste en-linea">
+            <div className="tl-ajuste aj en-linea">
               <span>
-                Volumen <b>{Math.round((sonidoElegido.volumen ?? VOLUMEN_SONIDO) * 100)} %</b>
+                Volumen
+                <ValorArrastrable
+                  nombre="Volumen"
+                  valor={sonidoElegido.volumen ?? VOLUMEN_SONIDO}
+                  min={0}
+                  max={1.5}
+                  paso={0.01}
+                  formato={(v) => `${Math.round(v * 100)} %`}
+                  porDefecto={VOLUMEN_SONIDO}
+                  onEmpezar={empezarAjuste}
+                  onCambio={(v) => deslizar(cambiarSonido(timeline, sonidoElegido.id, { volumen: v }))}
+                />
               </span>
-              <input
-                type="range"
-                min={0}
-                max={1.5}
-                step={0.01}
-                value={sonidoElegido.volumen ?? VOLUMEN_SONIDO}
-                onPointerDown={empezarAjuste}
-                onFocus={empezarAjuste}
-                onChange={(e) => deslizar(cambiarSonido(timeline, sonidoElegido.id, { volumen: Number(e.target.value) }))}
-              />
-            </label>
+            </div>
             <span className="tl-dim">
               {tc(sonidoElegido.inicio)} · {sonidoElegido.duracion.toFixed(1)} s
             </span>
@@ -3829,21 +3961,21 @@ export function TimelineEditor({
           <>
             <Icon name="music" size={14} />
             <b className="tl-musica-nombre">{musicaElegida.nombre}</b>
-            <label className="tl-ajuste en-linea">
+            <div className="tl-ajuste aj en-linea">
               <span>
-                Volumen <b>{Math.round(musicaElegida.volumen * 100)} %</b>
+                Volumen
+                <ValorArrastrable
+                  nombre="Volumen de la música"
+                  valor={musicaElegida.volumen}
+                  min={0}
+                  max={1}
+                  paso={0.01}
+                  formato={(v) => `${Math.round(v * 100)} %`}
+                  onEmpezar={empezarAjuste}
+                  onCambio={(v) => deslizar(cambiarMusica(timeline, { volumen: v }))}
+                />
               </span>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={musicaElegida.volumen}
-                onPointerDown={empezarAjuste}
-                onFocus={empezarAjuste}
-                onChange={(e) => deslizar(cambiarMusica(timeline, { volumen: Number(e.target.value) }))}
-              />
-            </label>
+            </div>
             <label className="tl-check">
               <input
                 type="checkbox"
@@ -3901,21 +4033,22 @@ export function TimelineEditor({
               <option value="centro">Centro</option>
               <option value="abajo">Abajo</option>
             </select></label>
-            <label className="tl-ajuste en-linea">
+            <div className="tl-ajuste aj en-linea">
               <span>
-                Tamaño <b>{Math.round((textoAhora?.tamano ?? 1) * 100)} %</b>
+                Tamaño
+                <ValorArrastrable
+                  nombre="Tamaño del texto"
+                  valor={textoAhora?.tamano ?? 1}
+                  min={LIMITES_TAMANO[0]}
+                  max={LIMITES_TAMANO[1]}
+                  paso={0.05}
+                  formato={(v) => `${Math.round(v * 100)} %`}
+                  porDefecto={1}
+                  onEmpezar={empezarAjuste}
+                  onCambio={(v) => deslizar(cambiarTextoEn(timeline, textoElegido.id, { tamano: v }, Math.max(0, tiempo - textoElegido.inicio)))}
+                />
               </span>
-              <input
-                type="range"
-                min={LIMITES_TAMANO[0]}
-                max={LIMITES_TAMANO[1]}
-                step={0.05}
-                value={textoAhora?.tamano ?? 1}
-                onPointerDown={empezarAjuste}
-                onFocus={empezarAjuste}
-                onChange={(e) => deslizar(cambiarTextoEn(timeline, textoElegido.id, { tamano: Number(e.target.value) }, Math.max(0, tiempo - textoElegido.inicio)))}
-              />
-            </label>
+            </div>
             <label className="ed-campo"><span>Letra</span><select
               value={textoElegido.fuente ?? 'normal'}
               title="La letra"
@@ -4197,12 +4330,21 @@ function PanelOrden({
 /** Lo que dura una entrada o una salida, de 0,1 a 2 s. */
 function DuracionAnimacion({ nombre, valor, onCambio, empezar }: { nombre: string; valor: number; onCambio: (v: number) => void; empezar: () => void }) {
   return (
-    <label className="tl-ajuste en-linea">
+    <div className="tl-ajuste aj en-linea">
       <span>
-        {nombre} <b>{valor.toFixed(2).replace('.', ',')} s</b>
+        {nombre}
+        <ValorArrastrable
+          nombre={nombre}
+          valor={valor}
+          min={DURACIONES_ANIMACION[0]}
+          max={DURACIONES_ANIMACION[1]}
+          paso={0.05}
+          formato={(v) => `${v.toFixed(2).replace('.', ',')} s`}
+          onEmpezar={empezar}
+          onCambio={onCambio}
+        />
       </span>
-      <input type="range" min={DURACIONES_ANIMACION[0]} max={DURACIONES_ANIMACION[1]} step={0.05} value={valor} onPointerDown={empezar} onFocus={empezar} onChange={(e) => onCambio(Number(e.target.value))} />
-    </label>
+    </div>
   )
 }
 

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { cambiarPista, MAX_VOLUMEN_PISTA, PISTAS, type PistaId, type Timeline } from '../../../shared/timeline'
 import type { Historial } from '../hooks/timeline'
 import { Icon } from '../Icons'
-import { grafoDe } from '../audio'
+import { analizadoresLufs, grafoDe } from '../audio'
 
 /**
  * El mezclador de audio (como el de pistas de Premiere): un fader por pista de audio, con su medidor de nivel, y el
@@ -80,6 +80,82 @@ export function useNiveles(activo: boolean): Niveles {
   return niveles
 }
 
+/**
+ * La sonoridad de lo que suena, en LUFS (EBU R128): momentánea (los últimos 400 ms), corta (3 s) e integrada (desde
+ * que empezó a sonar, con las puertas de la norma: lo de menos de −70 LUFS y lo de 10 LU por debajo de la media no cuenta).
+ * Las redes la dejan en −14; la tele, en −23.
+ */
+export interface Sonoridad {
+  momentanea: number
+  corta: number
+  integrada: number
+}
+const SIN_SONORIDAD: Sonoridad = { momentanea: -Infinity, corta: -Infinity, integrada: -Infinity }
+const lufsDe = (potencia: number) => (potencia > 1e-10 ? -0.691 + 10 * Math.log10(potencia) : -Infinity)
+
+export function useSonoridad(activo: boolean): [Sonoridad, () => void] {
+  const [sonoridad, setSonoridad] = useState<Sonoridad>(SIN_SONORIDAD)
+  // Bloques de unos 50 ms (potencia y cuándo) y los de 400 ms para la integrada (cada 100 ms, como pide la norma).
+  const bloques = useRef<{ t: number; p: number }[]>([])
+  const integrada = useRef<number[]>([])
+  const ultimoPaso = useRef(0)
+  const reiniciar = () => {
+    bloques.current = []
+    integrada.current = []
+    setSonoridad(SIN_SONORIDAD)
+  }
+  useEffect(() => {
+    if (!activo) return
+    const datos = new Float32Array(2048)
+    let id = 0
+    let vivo = true
+    const potenciaDe = (a: AnalyserNode) => {
+      const n = Math.min(datos.length, a.fftSize)
+      a.getFloatTimeDomainData(datos)
+      let suma = 0
+      for (let i = 0; i < n; i++) suma += datos[i] * datos[i]
+      return suma / n
+    }
+    const media = (desde: number) => {
+      const xs = bloques.current.filter((b) => b.t >= desde)
+      return xs.length ? xs.reduce((s, b) => s + b.p, 0) / xs.length : 0
+    }
+    const medir = () => {
+      if (!vivo) return
+      const bus = analizadoresLufs()
+      const ahora = performance.now()
+      if (bus) {
+        bloques.current.push({ t: ahora, p: potenciaDe(bus.izq) + potenciaDe(bus.der) })
+        bloques.current = bloques.current.filter((b) => b.t > ahora - 3000)
+        if (ahora - ultimoPaso.current >= 100) {
+          ultimoPaso.current = ahora
+          const m = media(ahora - 400)
+          if (lufsDe(m) > -70) integrada.current.push(m)
+        }
+        const puerta = integrada.current.length ? lufsDe(integrada.current.reduce((s, x) => s + x, 0) / integrada.current.length) - 10 : -Infinity
+        const pasan = integrada.current.filter((x) => lufsDe(x) > puerta)
+        setSonoridad({
+          momentanea: lufsDe(media(ahora - 400)),
+          corta: lufsDe(media(ahora - 3000)),
+          integrada: pasan.length ? lufsDe(pasan.reduce((s, x) => s + x, 0) / pasan.length) : -Infinity
+        })
+      }
+      id = window.setTimeout(medir, 50)
+    }
+    medir()
+    return () => {
+      vivo = false
+      clearTimeout(id)
+    }
+  }, [activo])
+  return [sonoridad, reiniciar]
+}
+
+/** Un valor de LUFS para leer: «−14.2» o «—» si no suena nada. */
+export function textoLufs(v: number): string {
+  return Number.isFinite(v) && v > -70 ? `${v < 0 ? '−' : ''}${Math.abs(v).toFixed(1)}` : '—'
+}
+
 /** Un medidor vertical u horizontal: verde, amarillo desde −12 dB y rojo desde −3 dB. */
 export function Medidor({ nivel, horizontal = false }: { nivel?: number; horizontal?: boolean }) {
   const db = aDb(nivel ?? 0)
@@ -92,7 +168,21 @@ export function Medidor({ nivel, horizontal = false }: { nivel?: number; horizon
   )
 }
 
-export function Mezclador({ timeline, historial, niveles, onCerrar }: { timeline: Timeline; historial: Historial; niveles: Niveles; onCerrar: () => void }) {
+export function Mezclador({
+  timeline,
+  historial,
+  niveles,
+  sonoridad,
+  onReiniciarSonoridad,
+  onCerrar
+}: {
+  timeline: Timeline
+  historial: Historial
+  niveles: Niveles
+  sonoridad: Sonoridad
+  onReiniciarSonoridad: () => void
+  onCerrar: () => void
+}) {
   const [borrador, setBorrador] = useState<Partial<Record<PistaId, number>>>({})
   return (
     <div className="mezclador" role="dialog" aria-label="Mezclador de audio">
@@ -153,6 +243,27 @@ export function Mezclador({ timeline, historial, niveles, onCerrar }: { timeline
             <Medidor nivel={niveles.general} />
           </div>
           <span className="mezclador-nombre">General</span>
+        </div>
+        <div className="mezclador-canal mezclador-lufs" title="Sonoridad (LUFS): las redes dejan los videos en −14 y la tele en −23. Si la integrada pasa mucho de −14, la red le bajará el volumen.">
+          <b>{textoLufs(sonoridad.corta)}</b>
+          <div className="mezclador-tira">
+            <span className="lufs-barra">
+              <span className="lufs-relleno" style={{ height: `${Math.max(0, Math.min(1, (sonoridad.corta + 40) / 40)) * 100}%` }} />
+              <span className="lufs-meta" style={{ bottom: `${((-14 + 40) / 40) * 100}%` }} title="−14 LUFS: lo de las redes" />
+            </span>
+            <dl className="lufs-datos">
+              <dt>M</dt>
+              <dd title="Momentánea: los últimos 400 ms">{textoLufs(sonoridad.momentanea)}</dd>
+              <dt>S</dt>
+              <dd title="Corta: los últimos 3 s">{textoLufs(sonoridad.corta)}</dd>
+              <dt>I</dt>
+              <dd title="Integrada: desde que empezó a sonar">{textoLufs(sonoridad.integrada)}</dd>
+            </dl>
+          </div>
+          <button className="lufs-reiniciar" onClick={onReiniciarSonoridad} title="Volver a medir la integrada desde ahora">
+            Reiniciar
+          </button>
+          <span className="mezclador-nombre">LUFS</span>
         </div>
       </div>
     </div>
