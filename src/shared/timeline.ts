@@ -94,26 +94,89 @@ export const LIMITES_SONIDO_CLIP = {
 /** Cómo entra un clip sobre el anterior (con `fundido` = lo que dura). Sin tipo, un fundido cruzado. */
 export type TransicionClip =
   | 'fundido'
+  | 'a-negro'
+  | 'destello'
+  | 'gris'
+  | 'desenfoque'
   | 'barrido-izquierda'
   | 'barrido-derecha'
   | 'barrido-arriba'
   | 'barrido-abajo'
-  | 'zoom'
-  | 'desenfoque'
-  | 'destello'
+  | 'tapar-izquierda'
+  | 'tapar-derecha'
+  | 'tapar-arriba'
+  | 'tapar-abajo'
+  | 'destapar-izquierda'
+  | 'destapar-derecha'
+  | 'destapar-arriba'
+  | 'destapar-abajo'
+  | 'cortina-izquierda'
+  | 'cortina-derecha'
+  | 'cortina-arriba'
+  | 'cortina-abajo'
+  | 'suave-izquierda'
+  | 'suave-derecha'
+  | 'suave-arriba'
+  | 'suave-abajo'
+  | 'reloj'
   | 'circulo'
+  | 'circulo-cierra'
+  | 'abrir-vertical'
+  | 'cerrar-vertical'
+  | 'abrir-horizontal'
+  | 'cerrar-horizontal'
+  | 'iris-negro'
+  | 'cuadro-negro'
+  | 'zoom'
+  | 'aplastar-vertical'
+  | 'aplastar-horizontal'
 
-/** Las transiciones, con su nombre y la de FFmpeg (`xfade`) que la hace en el MP4. */
-export const TRANSICIONES: { id: TransicionClip; nombre: string; xfade: string }[] = [
-  { id: 'fundido', nombre: 'Fundido', xfade: 'fade' },
-  { id: 'barrido-izquierda', nombre: 'Barrido ←', xfade: 'slideleft' },
-  { id: 'barrido-derecha', nombre: 'Barrido →', xfade: 'slideright' },
-  { id: 'barrido-arriba', nombre: 'Barrido ↑', xfade: 'slideup' },
-  { id: 'barrido-abajo', nombre: 'Barrido ↓', xfade: 'slidedown' },
-  { id: 'zoom', nombre: 'Zoom', xfade: 'zoomin' },
-  { id: 'desenfoque', nombre: 'Desenfoque', xfade: 'hblur' },
-  { id: 'destello', nombre: 'Destello', xfade: 'fadewhite' },
-  { id: 'circulo', nombre: 'Círculo', xfade: 'circleopen' }
+/** Las familias de transiciones (las carpetas del panel, como las de Premiere). */
+export type GrupoTransicion = 'Disolver' | 'Deslizar' | 'Barrer' | 'Formas' | 'Movimiento'
+export const GRUPOS_TRANSICION: GrupoTransicion[] = ['Disolver', 'Deslizar', 'Barrer', 'Formas', 'Movimiento']
+
+/**
+ * Las transiciones, con su nombre, su familia y la de FFmpeg (`xfade`) que la hace en el MP4. El monitor reproduce
+ * la misma fórmula de cada una (ver transiciones.ts), así que se ven igual en los dos.
+ */
+export const TRANSICIONES: { id: TransicionClip; nombre: string; grupo: GrupoTransicion; xfade: string; para: string }[] = [
+  { id: 'fundido', nombre: 'Fundido', grupo: 'Disolver', xfade: 'fade', para: 'el paso suave de siempre' },
+  { id: 'a-negro', nombre: 'Pasar por negro', grupo: 'Disolver', xfade: 'fadeblack', para: 'cerrar un tema y abrir otro' },
+  { id: 'destello', nombre: 'Pasar por blanco', grupo: 'Disolver', xfade: 'fadewhite', para: 'un flash, un recuerdo' },
+  { id: 'gris', nombre: 'Por blanco y negro', grupo: 'Disolver', xfade: 'fadegrays', para: 'pierde el color y entra el siguiente' },
+  { id: 'desenfoque', nombre: 'Desenfoque', grupo: 'Disolver', xfade: 'hblur', para: 'un salto de tiempo suave' },
+  { id: 'barrido-izquierda', nombre: 'Empujar ←', grupo: 'Deslizar', xfade: 'slideleft', para: 'el siguiente empuja al anterior' },
+  { id: 'barrido-derecha', nombre: 'Empujar →', grupo: 'Deslizar', xfade: 'slideright', para: 'el siguiente empuja al anterior' },
+  { id: 'barrido-arriba', nombre: 'Empujar ↑', grupo: 'Deslizar', xfade: 'slideup', para: 'el siguiente empuja al anterior' },
+  { id: 'barrido-abajo', nombre: 'Empujar ↓', grupo: 'Deslizar', xfade: 'slidedown', para: 'el siguiente empuja al anterior' },
+  { id: 'tapar-izquierda', nombre: 'Tapar ←', grupo: 'Deslizar', xfade: 'coverleft', para: 'el siguiente entra por encima' },
+  { id: 'tapar-derecha', nombre: 'Tapar →', grupo: 'Deslizar', xfade: 'coverright', para: 'el siguiente entra por encima' },
+  { id: 'tapar-arriba', nombre: 'Tapar ↑', grupo: 'Deslizar', xfade: 'coverup', para: 'el siguiente entra por encima' },
+  { id: 'tapar-abajo', nombre: 'Tapar ↓', grupo: 'Deslizar', xfade: 'coverdown', para: 'el siguiente entra por encima' },
+  { id: 'destapar-izquierda', nombre: 'Destapar ←', grupo: 'Deslizar', xfade: 'revealleft', para: 'el anterior se va y deja ver el siguiente' },
+  { id: 'destapar-derecha', nombre: 'Destapar →', grupo: 'Deslizar', xfade: 'revealright', para: 'el anterior se va y deja ver el siguiente' },
+  { id: 'destapar-arriba', nombre: 'Destapar ↑', grupo: 'Deslizar', xfade: 'revealup', para: 'el anterior se va y deja ver el siguiente' },
+  { id: 'destapar-abajo', nombre: 'Destapar ↓', grupo: 'Deslizar', xfade: 'revealdown', para: 'el anterior se va y deja ver el siguiente' },
+  { id: 'cortina-izquierda', nombre: 'Cortina ←', grupo: 'Barrer', xfade: 'wipeleft', para: 'un borde recto que barre el cuadro' },
+  { id: 'cortina-derecha', nombre: 'Cortina →', grupo: 'Barrer', xfade: 'wiperight', para: 'un borde recto que barre el cuadro' },
+  { id: 'cortina-arriba', nombre: 'Cortina ↑', grupo: 'Barrer', xfade: 'wipeup', para: 'un borde recto que barre el cuadro' },
+  { id: 'cortina-abajo', nombre: 'Cortina ↓', grupo: 'Barrer', xfade: 'wipedown', para: 'un borde recto que barre el cuadro' },
+  { id: 'suave-izquierda', nombre: 'Barrido suave ←', grupo: 'Barrer', xfade: 'smoothleft', para: 'un borde difuminado que barre' },
+  { id: 'suave-derecha', nombre: 'Barrido suave →', grupo: 'Barrer', xfade: 'smoothright', para: 'un borde difuminado que barre' },
+  { id: 'suave-arriba', nombre: 'Barrido suave ↑', grupo: 'Barrer', xfade: 'smoothup', para: 'un borde difuminado que barre' },
+  { id: 'suave-abajo', nombre: 'Barrido suave ↓', grupo: 'Barrer', xfade: 'smoothdown', para: 'un borde difuminado que barre' },
+  { id: 'reloj', nombre: 'Reloj', grupo: 'Barrer', xfade: 'radial', para: 'gira como una aguja' },
+  { id: 'circulo', nombre: 'Círculo que abre', grupo: 'Formas', xfade: 'circleopen', para: 'el siguiente sale del centro' },
+  { id: 'circulo-cierra', nombre: 'Círculo que cierra', grupo: 'Formas', xfade: 'circleclose', para: 'el anterior se cierra hacia el centro' },
+  { id: 'abrir-vertical', nombre: 'Puertas que abren', grupo: 'Formas', xfade: 'vertopen', para: 'se abre desde el centro hacia los lados' },
+  { id: 'cerrar-vertical', nombre: 'Puertas que cierran', grupo: 'Formas', xfade: 'vertclose', para: 'se cierra desde los lados' },
+  { id: 'abrir-horizontal', nombre: 'Persiana que abre', grupo: 'Formas', xfade: 'horzopen', para: 'se abre desde el centro hacia arriba y abajo' },
+  { id: 'cerrar-horizontal', nombre: 'Persiana que cierra', grupo: 'Formas', xfade: 'horzclose', para: 'se cierra desde arriba y abajo' },
+  { id: 'iris-negro', nombre: 'Iris por negro', grupo: 'Formas', xfade: 'circlecrop', para: 'de cine mudo: se cierra en un círculo y abre el siguiente' },
+  { id: 'cuadro-negro', nombre: 'Cuadro por negro', grupo: 'Formas', xfade: 'rectcrop', para: 'se cierra en un rectángulo y abre el siguiente' },
+  { id: 'zoom', nombre: 'Zoom', grupo: 'Movimiento', xfade: 'zoomin', para: 'se mete en el centro y aparece el siguiente' },
+  { id: 'aplastar-vertical', nombre: 'Aplastar ↕', grupo: 'Movimiento', xfade: 'squeezeh', para: 'el anterior se aplasta hacia la línea del centro' },
+  { id: 'aplastar-horizontal', nombre: 'Aplastar ↔', grupo: 'Movimiento', xfade: 'squeezev', para: 'el anterior se aplasta hacia el centro' }
 ]
 
 /** Lo que se le puede cambiar a la imagen de un clip. Los valores neutros no cambian nada. */
@@ -3104,50 +3167,6 @@ export function fundirClip(tl: Timeline, id: string | null, segundos: number, ti
       const t = tipo ?? tipoAntes
       return d >= 0.1 ? { ...resto, fundido: d, ...(t && t !== 'fundido' ? { transicion: t } : {}) } : resto
     })
-  }
-}
-
-/**
- * Cómo se ve en el monitor el clip que entra con su transición, `p` de 0 (empieza) a 1 (ya entró):
- * desplazamiento, escala, desenfoque, opacidad, recorte en círculo y un velo blanco (destello).
- */
-export function vistaTransicion(
-  tipo: TransicionClip | undefined,
-  p: number
-): {
-  x: number
-  y: number
-  escala: number
-  desenfoque: number
-  opacidad: number
-  circulo: number | null
-  blanco: number
-  /** El clip anterior, debajo: cómo sale (se empuja en un barrido, se acerca en el zoom, se queda en un fundido). */
-  previo: { x: number; y: number; escala: number; opacidad: number }
-} {
-  const q = pinza(p, 0, 1)
-  const e = 1 - (1 - q) ** 3
-  const quieto = { x: 0, y: 0, escala: 1, opacidad: 1 }
-  const base = { x: 0, y: 0, escala: 1, desenfoque: 0, opacidad: 1, circulo: null as number | null, blanco: 0, previo: quieto }
-  switch (tipo) {
-    case 'barrido-izquierda':
-      return { ...base, x: 1 - e, previo: { ...quieto, x: -e } }
-    case 'barrido-derecha':
-      return { ...base, x: -(1 - e), previo: { ...quieto, x: e } }
-    case 'barrido-arriba':
-      return { ...base, y: 1 - e, previo: { ...quieto, y: -e } }
-    case 'barrido-abajo':
-      return { ...base, y: -(1 - e), previo: { ...quieto, y: e } }
-    case 'zoom':
-      return { ...base, escala: 1.25 - 0.25 * e, opacidad: q, previo: { ...quieto, escala: 1 + 0.35 * e } }
-    case 'desenfoque':
-      return { ...base, desenfoque: (1 - q) * 14, opacidad: Math.min(1, q * 1.6) }
-    case 'destello':
-      return { ...base, opacidad: q < 0.5 ? 0 : 1, blanco: 1 - Math.abs(2 * q - 1), previo: { ...quieto, opacidad: q < 0.5 ? 1 : 0 } }
-    case 'circulo':
-      return { ...base, circulo: e }
-    default:
-      return { ...base, opacidad: q }
   }
 }
 

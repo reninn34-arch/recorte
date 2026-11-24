@@ -536,6 +536,8 @@ export interface RecorteApi {
   vistaPausar: (id: string) => Promise<void>
   /** El cuadro fijo del monitor en pausa para lo que no se pinta en vivo (el color por zonas): su clave y su archivo. */
   vistaCuadro: (id: string, timeline: Timeline, t: number) => Promise<{ clave: string; archivo: string } | null>
+  /** El último cuadro del clip que sale en la transición del clip `indice` (quieto debajo, como en el MP4). */
+  vistaSalida: (id: string, timeline: Timeline, indice: number) => Promise<{ clave: string; archivo: string } | null>
   onVistaLista: (cb: (e: { id: string; clave: string }) => void) => () => void
   /** Progreso de una herramienta que se baja o se instala desde Ajustes. */
   onHerramienta: (cb: (p: { id: string; pct: number; texto: string }) => void) => () => void

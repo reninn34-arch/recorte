@@ -3432,6 +3432,9 @@ No pude animar los subtítulos (se animan al exportar): ${e instanceof Error ? e
   ipcMain.handle('vista:cuadro', (_e, id: string, timeline: Timeline, t: number) =>
     timeline && Array.isArray(timeline.clips) && Number.isFinite(t) ? vistaPrevia.cuadro(id, timeline, Math.max(0, t)) : null
   )
+  ipcMain.handle('vista:salida', (_e, id: string, timeline: Timeline, indice: number) =>
+    typeof id === 'string' && timeline && Array.isArray(timeline.clips) && Number.isInteger(indice) && indice > 0 ? vistaPrevia.cuadroSalida(id, timeline, indice) : null
+  )
   ipcMain.handle('actualizacion:estado', () => estadoActualizacion())
   ipcMain.handle('actualizacion:buscar', () => buscarActualizacion())
   ipcMain.handle('actualizacion:instalar', () => instalarActualizacion())

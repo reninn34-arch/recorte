@@ -97,7 +97,7 @@ import type { ClipSuggestion, Project } from '../shared/types'
 
 /** Igual que en el monitor (`DUCKING_FACTOR` de la interfaz): la música baja a un cuarto con voz. */
 const DUCKING_FACTOR = 0.25
-import { A_BT709, argsH264, codificadorH264, ETIQUETAS_BT709, probeVideo, rutaFfmpeg } from './ffmpeg'
+import { A_BT709, argsH264, codificadorH264, ETIQUETAS_BT709, hayTransicionXfade, probeVideo, rutaFfmpeg } from './ffmpeg'
 import {
   colorAss,
   construirBloques,
@@ -745,7 +745,9 @@ async function exportarTimelineAhora(
       const d = t.clip.fundido
       if (d) {
         partes.push(`${previo}tpad=stop_mode=clone:stop_duration=${d.toFixed(3)}[vp${i}]`)
-        const xf = TRANSICIONES.find((x) => x.id === (t.clip.transicion ?? 'fundido'))?.xfade ?? 'fade'
+        const pedida = TRANSICIONES.find((x) => x.id === (t.clip.transicion ?? 'fundido'))?.xfade ?? 'fade'
+        // Un FFmpeg viejo sin esa transición: tapar y destapar se hacen empujando, y las demás con un fundido.
+        const xf = hayTransicionXfade(pedida) ? pedida : /^(cover|reveal)/.test(pedida) ? pedida.replace(/^(cover|reveal)/, 'slide') : 'fade'
         partes.push(`[vp${i}][v${i}]xfade=transition=${xf}:duration=${d.toFixed(3)}:offset=${acumulado.toFixed(3)}${salida}`)
       } else {
         partes.push(`${previo}[v${i}]concat=n=2:v=1:a=0${salida}`)

@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { timelineActiva, type Timeline } from '../shared/timeline'
 import type { Project } from '../shared/types'
-import { claveCuadro, esClaveVista, firmaProyecto, tramosVista, type TramoVista } from '../shared/vistaprevia'
+import { claveCuadro, claveSalida, esClaveVista, firmaProyecto, tramosVista, type TramoVista } from '../shared/vistaprevia'
+import { duracionTimeline, tramos } from '../shared/timeline'
 import { exportarTimeline } from './exportar'
 import { rutaFfmpeg } from './ffmpeg'
 
@@ -78,6 +79,51 @@ export class VistaPrevia {
       mkdirSync(this.carpeta(id), { recursive: true })
       const codigo = await new Promise<number | null>((ok) => {
         const hijo = spawn(rutaFfmpeg(), ['-v', 'error', '-y', '-i', r.output!, '-frames:v', '1', '-q:v', '3', final], { windowsHide: true })
+        hijo.on('error', () => ok(null))
+        hijo.on('close', ok)
+      })
+      return codigo === 0 && existsSync(final) ? { clave, archivo } : null
+    } catch {
+      return null
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+      this.cuadrosEnCurso--
+      void this.trabajar()
+    }
+  }
+
+  /**
+   * El último cuadro del clip que sale en la transición del clip `indice`, con todo su color y su encuadre (sin capas ni
+   * textos): el MP4 lo deja quieto debajo mientras entra el siguiente, y el monitor lo enseña igual.
+   */
+  async cuadroSalida(id: string, timeline: Timeline, indice: number): Promise<{ clave: string; archivo: string } | null> {
+    const proyecto = this.proyectos.get(id)
+    if (!proyecto) return null
+    const fps = proyecto.source.fps > 0 && proyecto.source.fps <= 60 ? proyecto.source.fps : 30
+    const clave = claveSalida(timeline, indice, firmaProyecto(proyecto), fps)
+    if (!clave) return null
+    const archivo = `vista-previa/salida-${clave}.jpg`
+    const final = join(this.proyectos.carpeta(id), archivo)
+    if (existsSync(final)) return { clave, archivo }
+    // Solo el clip que sale (y el de antes, por si entraba con transición): su último cuadro es el del final.
+    const activa = timelineActiva(timeline)
+    const clips = activa.clips.slice(Math.max(0, indice - 2), indice)
+    const base: Timeline = { ...activa, clips, textos: [], capas: [], ajustesCapa: [], voces: [], sonidos: [] }
+    delete base.musica
+    delete base.filtros
+    delete base.subtitulosHF
+    delete base.marcadores
+    const fin = duracionTimeline(base)
+    if (!(fin > 0) || !tramos(base).length) return null
+    this.cuadrosEnCurso++
+    const tmp = mkdtempSync(join(tmpdir(), 'recorte-salida-'))
+    try {
+      const desde = Math.max(0, fin - Math.max(0.2, 4 / fps))
+      const r = await exportarTimeline(proyecto, base, this.proyectos.carpeta(id), { formato: 'original', subtitulos: false, desde, hasta: fin, resolucion: '720', calidad: 'alta' }, () => {}, tmp)
+      if (!r.ok || !r.output || !existsSync(r.output)) return null
+      mkdirSync(this.carpeta(id), { recursive: true })
+      const codigo = await new Promise<number | null>((ok) => {
+        const hijo = spawn(rutaFfmpeg(), ['-v', 'error', '-y', '-sseof', '-0.5', '-i', r.output!, '-vf', 'scale=in_color_matrix=bt709:in_range=tv:out_color_matrix=bt601:out_range=pc', '-pix_fmt', 'yuvj420p', '-update', '1', '-q:v', '2', final], { windowsHide: true })
         hijo.on('error', () => ok(null))
         hijo.on('close', ok)
       })

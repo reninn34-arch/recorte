@@ -3853,3 +3853,33 @@ button { cursor: pointer; }
 /* Cabeceras de pista con «S»: un poco más anchas para que quepa el nombre entero. */
 .ed .tl-nombres { width: 150px; }
 .tl-barra-zoom-fila::before { width: 150px; }
+
+/* Transiciones en el monitor: el clip que sale (su último cuadro) y el que entra, cada uno con su capa. */
+.monitor-pila { position: absolute; inset: 0; isolation: isolate; }
+.monitor-transicion { position: absolute; inset: 0; transform-origin: 50% 50%; }
+.monitor-transicion-fondo { position: absolute; inset: 0; }
+.monitor-salida { transform-origin: 50% 50%; object-fit: fill; }
+
+/* El código de tiempo se toca para escribir a qué momento ir. */
+button.tl-tc-grande { border: none; background: none; cursor: text; border-radius: 4px; }
+button.tl-tc-grande:hover { background: var(--panel-3); }
+.tl-tc-editar { width: 112px; border: 1px solid #5aa9ff; border-radius: 4px; background: var(--bg); outline: none; }
+
+/* La muestra animada de una transición en el panel: A sale y B entra. */
+.tr-muestra { position: relative; display: block; width: 100%; height: 100%; overflow: hidden; isolation: isolate; }
+.tr-muestra-a, .tr-muestra-b { position: absolute; inset: 0; display: grid; place-items: center; font-size: 15px; font-weight: 700; transform-origin: 50% 50%; }
+.tr-muestra-a { background: linear-gradient(135deg, #3b4a2a, #1d2418); color: var(--accent); }
+.tr-muestra-b { background: linear-gradient(135deg, #2b4f6b, #142433); color: var(--blue); }
+
+/* El bloque de la transición al empezar un clip: se ve, se elige y su borde la alarga. */
+.tl-transicion-bloque { position: absolute; left: 0; top: 2px; bottom: 2px; z-index: 3; display: flex; align-items: center; overflow: hidden; border-radius: 4px; border: 1px solid #b9a1ff; background: repeating-linear-gradient(135deg, #6f58c9 0 5px, #5b46b3 5px 10px); cursor: pointer; }
+.tl-transicion-bloque i { padding: 0 8px 0 5px; font-size: 9.5px; font-style: normal; font-weight: 600; color: #fff; text-shadow: 0 1px 2px #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl-transicion-bloque:hover { border-color: #fff; }
+.tl-transicion-borde { position: absolute; right: 0; top: 0; bottom: 0; width: 6px; cursor: ew-resize; background: rgba(255, 255, 255, 0.35); }
+
+/* La transición de entrada en el panel del clip: su muestra y la lista por familias. */
+.ed-transicion { display: flex; align-items: center; gap: 8px; padding: 2px 0 6px 12px; }
+.ed-transicion-muestra { flex-shrink: 0; width: 64px; height: 36px; border-radius: 5px; overflow: hidden; border: 1px solid var(--line-2); background: var(--bg); }
+.ed-transicion-corte { display: grid; place-items: center; height: 100%; font-size: 10.5px; color: var(--dim); }
+.ed-insp .ed-transicion select { flex: 1; min-width: 0; }
+.ed-grupo > .btn { margin: 2px 0 4px 12px; width: calc(100% - 12px); }

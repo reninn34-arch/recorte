@@ -6,7 +6,9 @@ import { LienzoLut } from './LienzoLut'
 import { Medidores } from './Medidores'
 import { aplicarCadena } from '../audio'
 import type { VistaPrevia } from '../hooks/vistaprevia'
-import type { TramoVista } from '../../../shared/vistaprevia'
+import { claveSalida, firmaProyecto, type TramoVista } from '../../../shared/vistaprevia'
+import { vistaTransicion } from '../../../shared/transiciones'
+import { estiloCapaTransicion } from '../transicionCss'
 import {
   ajustesDe,
   APARECER_S,
@@ -15,7 +17,6 @@ import {
   COLOR_PINTADO,
   partesClave,
   sinMarcas,
-  vistaTransicion,
   capaNueva,
   estadoCapa,
   aplicarParalaje,
@@ -120,6 +121,38 @@ const SIN_GUIAS: Guias = { v: [], h: [] }
  * van las capas encima y los rótulos; se eligen con un clic y se mueven arrastrándolos (como en
  * la exportación, su sitio es una fracción del cuadro).
  */
+/**
+ * Los últimos cuadros de los clips que salen en cada transición (los hace el proceso principal, con todo su color):
+ * se piden en cuanto hay una transición, para tenerlos antes de que el cabezal llegue.
+ */
+function useCuadrosSalida(proyecto: Project, timeline: Timeline): { listas: Record<string, string>; clave: (indice: number) => string | null } {
+  const [listas, setListas] = useState<Record<string, string>>({})
+  const pedidas = useRef(new Set<string>())
+  const fps = proyecto.source.fps > 0 && proyecto.source.fps <= 60 ? proyecto.source.fps : 30
+  const firma = firmaProyecto(proyecto)
+  const clave = useCallback((indice: number) => claveSalida(timeline, indice, firma, fps), [timeline, firma, fps])
+  useEffect(() => {
+    if (proyecto.demo || !window.recorte?.vistaSalida) return
+    const id = window.setTimeout(() => {
+      timeline.clips.forEach((c, i) => {
+        if (i === 0 || !c.fundido) return
+        const k = claveSalida(timeline, i, firma, fps)
+        if (!k || pedidas.current.has(k)) return
+        pedidas.current.add(k)
+        void window.recorte
+          .vistaSalida(proyecto.id, timeline, i)
+          .then((r) => {
+            if (r) setListas((x) => ({ ...x, [r.clave]: r.archivo }))
+            else pedidas.current.delete(k)
+          })
+          .catch(() => pedidas.current.delete(k))
+      })
+    }, 500)
+    return () => clearTimeout(id)
+  }, [timeline, proyecto.id, proyecto.demo, firma, fps])
+  return { listas, clave }
+}
+
 export function Monitor({
   proyecto,
   timeline,
@@ -203,9 +236,17 @@ export function Monitor({
   // La transición de entrada: el clip entra sobre negro (en el render, sobre el clip anterior), con su tipo
   // (fundido, barrido, zoom, desenfoque, destello, círculo).
   const tr = clipActual?.fundido && ubicado && ubicado.indice > 0 && enClip < clipActual.fundido ? vistaTransicion(clipActual.transicion, enClip / clipActual.fundido) : null
-  const fundido = tr ? tr.opacidad : 1
+  // Debajo (o encima) queda el último cuadro del clip anterior, quieto y ya con su color, como en el MP4. Mientras no
+  // está hecho, una foto anterior se ve tal cual y un video, en negro.
+  const salidas = useCuadrosSalida(proyecto, timeline)
+  const claveSale = tr && ubicado ? salidas.clave(ubicado.indice) : null
   const clipPrevio = tr && ubicado ? timeline.clips[ubicado.indice - 1] : undefined
-  const previoUrl = clipPrevio && fuentes[clipPrevio.fuente]?.tipo === 'imagen' ? fuentes[clipPrevio.fuente].url : undefined
+  const previoUrl = claveSale && salidas.listas[claveSale]
+    ? mediaUrl(proyecto.id, salidas.listas[claveSale])
+    : clipPrevio && fuentes[clipPrevio.fuente]?.tipo === 'imagen'
+      ? fuentes[clipPrevio.fuente].url
+      : undefined
+  const idTransicion = `tr-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
   // El color tipo Lumetri: la misma curva por canal que el MP4 (lut1d), como filtro SVG.
   const idCurvas = `curvas-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
   const curvas = curvasDeClip(clipActual, a)
@@ -221,15 +262,10 @@ export function Monitor({
   const imagenRef = useRef<HTMLImageElement | null>(null)
   const estiloImagen: React.CSSProperties = {
     visibility: vacia ? 'hidden' : 'visible',
-    transform:
-      z !== 1 || tr
-        ? `${tr && (tr.x || tr.y) ? `translate(${(tr.x * 100).toFixed(2)}%, ${(tr.y * 100).toFixed(2)}%) ` : ''}scale(${(z * (tr?.escala ?? 1)).toFixed(4)})`
-        : undefined,
-    clipPath: tr?.circulo != null ? `circle(${(tr.circulo * 75).toFixed(2)}% at 50% 50%)` : undefined,
+    transform: z !== 1 ? `scale(${z.toFixed(4)})` : undefined,
     transformOrigin: cam.cx !== 0.5 || cam.cy !== 0.5 ? `${(cam.cx * 100).toFixed(3)}% ${(cam.cy * 100).toFixed(3)}%` : undefined,
-    opacity: fundido < 1 ? fundido : undefined,
-    // El color y los efectos del clip (los mismos filtros que salen en el MP4) y, en una transición, su desenfoque.
-    filter: `${tr?.desenfoque ? `blur(${tr.desenfoque.toFixed(1)}px) ` : ''}${curvas ? `url(#${idCurvas}) ` : ''}${filtroColorCss(a)}`.trim() || undefined
+    // El color y los efectos del clip (los mismos filtros que salen en el MP4).
+    filter: `${curvas ? `url(#${idCurvas}) ` : ''}${filtroColorCss(a)}`.trim() || undefined
   }
 
   // El cuadro del video final dentro del monitor (el video se ve con object-fit: contain).
@@ -574,17 +610,24 @@ export function Monitor({
           <div className="monitor-lienzo" style={cw > 0 ? { width: cw, height: ch, filter: filtroAjuste } : undefined}>
             {/* Durante una transición, la foto del clip anterior queda debajo (sale empujada, se acerca o se
                 funde), como en el MP4: sin ella, cada corte con transición parpadeaba a negro. */}
-            {previoUrl && tr && (
-              <img
-                className="monitor-imagen"
-                src={previoUrl}
-                alt=""
-                style={{
-                  transform: `translate(${(tr.previo.x * 100).toFixed(2)}%, ${(tr.previo.y * 100).toFixed(2)}%) scale(${tr.previo.escala.toFixed(4)})`,
-                  opacity: tr.previo.opacidad
-                }}
-              />
+            <div className="monitor-pila">
+            {tr && (
+              <div className="monitor-transicion-fondo" style={{ background: tr.fondo }}>
+                {previoUrl && tr.sale.visible && (
+                  <img className={`monitor-imagen ${claveSale && salidas.listas[claveSale] ? 'monitor-salida' : ''}`} src={previoUrl} alt="" style={estiloCapaTransicion(tr.sale, `${idTransicion}-sale`, cw, tr.saleEncima ? 2 : 0)} />
+                )}
+              </div>
             )}
+            {tr && (tr.entra.desenfoqueX > 0 || tr.sale.desenfoqueX > 0) && (
+              <svg className="monitor-curvas" width="0" height="0" aria-hidden="true" focusable="false">
+                {(['entra', 'sale'] as const).map((k) => (
+                  <filter key={k} id={`${idTransicion}-${k}`} x="-50%" width="200%">
+                    <feGaussianBlur stdDeviation={`${((tr[k].desenfoqueX * cw) / 3.4).toFixed(2)} 0`} />
+                  </filter>
+                ))}
+              </svg>
+            )}
+            <div className="monitor-transicion" style={tr ? estiloCapaTransicion(tr.entra, `${idTransicion}-entra`, cw, 1) : undefined}>
             <div className="monitor-movimiento" style={movimiento}>
               {/* Dos <video>: mientras uno suena, el otro ya está en el clip que sigue, y en el corte solo se cambia. */}
               {([0, 1] as const).map((i) => (
@@ -641,6 +684,8 @@ export function Monitor({
                     </span>
                   )
                 })}
+            </div>
+            </div>
             </div>
             {curvasAjuste.some(Boolean) && (
               <svg className="monitor-curvas" width="0" height="0" aria-hidden="true" focusable="false">
@@ -798,7 +843,6 @@ export function Monitor({
               </div>
             )
           })}
-          {tr && tr.blanco > 0 && <div className="monitor-filtros" style={{ background: '#fff', opacity: tr.blanco }} aria-hidden />}
           {/* Los rótulos van debajo de los filtros (el grano y el polvo también los gastan, como en el kit); los
               subtítulos, encima y limpios. Igual que el MP4. */}
           {[...rotulos.filter((r) => !r.subtitulo), 'filtros' as const, ...rotulos.filter((r) => r.subtitulo)].map((r) => {

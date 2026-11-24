@@ -82,6 +82,7 @@ import {
   cambiarFiltros,
   FILTROS,
   TRANSICIONES,
+  GRUPOS_TRANSICION,
   ANIMACIONES_TEXTO,
   COLOR_PINTADO,
   ANIMAR_CAPA,
@@ -152,6 +153,7 @@ import { resumenGrafico } from '../../../shared/grafico'
 import { ValorArrastrable } from './ValorArrastrable'
 import { CarrilClaves } from './CarrilClaves'
 import { BarraZoom } from './BarraZoom'
+import { MuestraTransicion } from './MuestraTransicion'
 import { moverClave, moverClaveCapa, moverClaveRampa, moverClaveVolumen } from '../../../shared/timeline'
 
 /**
@@ -196,6 +198,24 @@ export function tcCuadros(segundos: number, fps = 30): string {
   const s = Math.floor(total / f)
   const dos = (n: number) => String(n).padStart(2, '0')
   return `${dos(Math.floor(s / 3600))}:${dos(Math.floor(s / 60) % 60)}:${dos(s % 60)}:${dos(cuadro)}`
+}
+
+/**
+ * Lo que se escribe en el código de tiempo, en segundos: «00:01:02:15» (horas, minutos, segundos y cuadros), «1:02»,
+ * «62.5» o «+15» / «-15» (cuadros desde `ahora`). Null si no se entiende.
+ */
+export function leerCodigoTiempo(texto: string, fps = 30, ahora = 0): number | null {
+  const t = texto.trim().replace(',', '.')
+  const f = Math.max(1, Math.round(fps))
+  const relativo = t.match(/^([+-])\s*(\d+)$/)
+  if (relativo) return Math.max(0, ahora + (relativo[1] === '-' ? -1 : 1) * (Number(relativo[2]) / f))
+  if (/^\d+(\.\d+)?$/.test(t)) return Number(t)
+  const partes = t.split(/[:;]/)
+  if (partes.length < 2 || partes.length > 4 || partes.some((x) => !/^\d+(\.\d+)?$/.test(x))) return null
+  const n = partes.map(Number)
+  if (n.length === 4) return n[0] * 3600 + n[1] * 60 + n[2] + n[3] / f
+  if (n.length === 3) return n[0] * 3600 + n[1] * 60 + n[2]
+  return n[0] * 60 + n[1]
 }
 
 /** Las herramientas de la línea de tiempo (como la paleta de Premiere). */
@@ -462,6 +482,8 @@ export function TimelineEditor({
   const [borrador, setBorrador] = useState<Timeline | null>(null)
   const [insercion, setInsercion] = useState<number | null>(null)
   const [zoom, setZoom] = useState(1)
+  const [escribiendoTc, setEscribiendoTc] = useState(false)
+  const [muestraViva, setMuestraViva] = useState<TransicionClip | null>(null)
   // La paleta de herramientas, el imán, la entrada/salida (I/O) y la marca elegida.
   const [herramienta, setHerramienta] = useState<Herramienta>('seleccion')
   const [conIman, setConIman] = useState(true)
@@ -1017,6 +1039,26 @@ export function TimelineEditor({
     const previa = timeline.musica
     historial.aplicar(ponerMusica(timeline, previa ? { ...musica, volumen: previa.volumen, ducking: previa.ducking } : musica))
     onElegir({ tipo: 'musica', id: 'musica' })
+  }
+
+  /** Estira o encoge una transición arrastrando el borde de su bloque en la línea de tiempo. */
+  function estirarTransicion(e: React.PointerEvent, id: string, desde: number) {
+    if (e.button !== 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    const x0 = e.clientX
+    empezarAjuste()
+    const base = timeline
+    const mover = (ev: PointerEvent) => {
+      const d = Math.max(0.1, Math.round((desde + (ev.clientX - x0) / pps) * 30) / 30)
+      deslizar(fundirClip(base, id, d))
+    }
+    const soltar = () => {
+      window.removeEventListener('pointermove', mover)
+      window.removeEventListener('pointerup', soltar)
+    }
+    window.addEventListener('pointermove', mover)
+    window.addEventListener('pointerup', soltar)
   }
 
   /** Deslizadores: el primer movimiento abre un paso de deshacer y los demás lo amplían. */
@@ -1917,30 +1959,38 @@ export function TimelineEditor({
                     )
                   })}
 
-                  {TRANSICIONES.some(coincide) && (
-                    <details className="ed-carpeta" open>
-                      <summary>
-                        Transiciones <small>{TRANSICIONES.filter(coincide).length}</small>
-                      </summary>
-                      <p className="tl-dim">Cómo entra el clip sobre el anterior.</p>
-                      <div className="ed-rejilla ed-efectos">
-                        {TRANSICIONES.filter(coincide).map((x) => (
-                          <button
-                            key={x.id}
-                            className={`ed-efecto ed-efecto-texto ${clipElegido?.clip.fundido && (clipElegido.clip.transicion ?? 'fundido') === x.id ? 'is-on' : ''}`}
-                            draggable
-                            onDragStart={(e) => arrastrarEfecto(e, { tipo: 'transicion', id: x.id })}
-                            onClick={() => aplicarEfecto(clipElegido?.clip.id, { tipo: 'transicion', id: x.id })}
-                          >
-                            <span className="ed-efecto-vista">
-                              <Icon name="layers" size={18} />
-                            </span>
-                            <span>{x.nombre}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </details>
-                  )}
+                  {GRUPOS_TRANSICION.map((grupo) => {
+                    const visibles = TRANSICIONES.filter((x) => x.grupo === grupo && (coincide(x) || /transici/i.test(buscarEfecto)))
+                    if (!visibles.length) return null
+                    return (
+                      <details key={grupo} className="ed-carpeta" open={grupo === 'Disolver' || grupo === 'Deslizar' || Boolean(buscarEfecto)}>
+                        <summary>
+                          Transiciones · {grupo} <small>{visibles.length}</small>
+                        </summary>
+                        <div className="ed-rejilla ed-efectos">
+                          {visibles.map((x) => (
+                            <button
+                              key={x.id}
+                              className={`ed-efecto ${clipElegido?.clip.fundido && (clipElegido.clip.transicion ?? 'fundido') === x.id ? 'is-on' : ''}`}
+                              title={`${x.nombre}: ${x.para}. Arrástrala a un corte o tócala para el clip elegido.`}
+                              draggable
+                              onDragStart={(e) => arrastrarEfecto(e, { tipo: 'transicion', id: x.id })}
+                              onClick={() => aplicarEfecto(clipElegido?.clip.id, { tipo: 'transicion', id: x.id })}
+                              onPointerEnter={() => setMuestraViva(x.id)}
+                              onPointerLeave={() => setMuestraViva((v) => (v === x.id ? null : v))}
+                              onFocus={() => setMuestraViva(x.id)}
+                              onBlur={() => setMuestraViva((v) => (v === x.id ? null : v))}
+                            >
+                              <span className="ed-efecto-vista">
+                                <MuestraTransicion tipo={x.id} viva={muestraViva === x.id} />
+                              </span>
+                              <span>{x.nombre}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </details>
+                    )
+                  })}
 
                   {TOMAS_CAMARA.some(coincide) && (
                     <details className="ed-carpeta" open>
@@ -2013,7 +2063,32 @@ export function TimelineEditor({
         )}
 
       <div className="tl-barra">
-        <span className="tl-tc-grande" title="Código de tiempo del cabezal">{tcCuadros(tiempo, fps)}</span>
+        {escribiendoTc ? (
+          <input
+            className="tl-tc-grande tl-tc-editar"
+            autoFocus
+            defaultValue={tcCuadros(tiempo, fps)}
+            aria-label="Ir a un momento"
+            onFocus={(e) => e.currentTarget.select()}
+            onKeyDown={(e) => {
+              e.stopPropagation()
+              if (e.key === 'Escape') setEscribiendoTc(false)
+              if (e.key !== 'Enter') return
+              const t = leerCodigoTiempo(e.currentTarget.value, fps, tiempo)
+              if (t !== null) onBuscar(Math.min(total, Math.max(0, t)))
+              setEscribiendoTc(false)
+            }}
+            onBlur={() => setEscribiendoTc(false)}
+          />
+        ) : (
+          <button
+            className="tl-tc-grande"
+            title="Código de tiempo del cabezal: clic para escribir a qué momento ir (00:00:05:12, 5.4, +10 cuadros…)"
+            onClick={() => setEscribiendoTc(true)}
+          >
+            {tcCuadros(tiempo, fps)}
+          </button>
+        )}
         <div className="tl-paleta" role="toolbar" aria-label="Herramientas">
           {HERRAMIENTAS.map((h) => (
             <button
@@ -2346,6 +2421,25 @@ export function TimelineEditor({
                       <Onda url={ondaDe(t.clip.fuente)!} duracion={t.clip.salida - t.clip.entrada} desde={t.clip.entrada} />
                     )}
                     <span className="tl-asa izquierda" onPointerDown={(e) => recortar(e, t.clip.id, 'entrada')} />
+                    {t.indice > 0 && t.clip.fundido ? (
+                      <span
+                        className="tl-transicion-bloque"
+                        style={{ width: Math.max(6, t.clip.fundido * pps) }}
+                        title={`${TRANSICIONES.find((x) => x.id === (t.clip.transicion ?? 'fundido'))?.nombre ?? 'Transición'} · ${t.clip.fundido.toFixed(2)} s. Arrastra su borde para que dure más o menos.`}
+                        onPointerDown={(e) => {
+                          e.stopPropagation()
+                          onElegir({ tipo: 'clip', id: t.clip.id })
+                        }}
+                        onContextMenu={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          historial.aplicar(fundirClip(timeline, t.clip.id, 0))
+                        }}
+                      >
+                        {t.clip.fundido * pps > 44 && <i>{TRANSICIONES.find((x) => x.id === (t.clip.transicion ?? 'fundido'))?.nombre}</i>}
+                        <span className="tl-transicion-borde" onPointerDown={(e) => estirarTransicion(e, t.clip.id, t.clip.fundido!)} />
+                      </span>
+                    ) : null}
                     {anchoClip > 46 && (
                       <span className="tl-clip-texto">
                         <b>{t.indice + 1}</b>
@@ -3399,10 +3493,30 @@ export function TimelineEditor({
                 Restablecer
               </button>
               {clipElegido.indice > 0 && (
-                <label className="tl-ajuste" title="Cómo entra sobre el clip anterior">
-                  <span>
+                <details className="ed-grupo" open>
+                  <summary className="ed-seccion">
+                    Transición de entrada
+                    {clipElegido.clip.fundido ? (
+                      <button
+                        className="ed-seccion-quitar"
+                        title="Sin transición: corte seco"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          historial.aplicar(fundirClip(timeline, clipElegido.clip.id, 0))
+                        }}
+                      >
+                        Quitar
+                      </button>
+                    ) : null}
+                  </summary>
+                  <div className="ed-transicion">
+                    <span className="ed-transicion-muestra" onPointerEnter={() => setMuestraViva(clipElegido.clip.transicion ?? 'fundido')} onPointerLeave={() => setMuestraViva(null)}>
+                      {clipElegido.clip.fundido ? <MuestraTransicion tipo={clipElegido.clip.transicion ?? 'fundido'} viva={muestraViva === (clipElegido.clip.transicion ?? 'fundido')} /> : <span className="ed-transicion-corte">Corte</span>}
+                    </span>
                     <select
                       className="tl-transicion"
+                      title="Cómo entra este clip sobre el anterior"
+                      aria-label="Transición de entrada"
                       value={clipElegido.clip.fundido ? (clipElegido.clip.transicion ?? 'fundido') : 'corte'}
                       onChange={(e) => {
                         const v = e.target.value
@@ -3414,25 +3528,45 @@ export function TimelineEditor({
                       }}
                     >
                       <option value="corte">Corte seco</option>
-                      {TRANSICIONES.map((x) => (
-                        <option key={x.id} value={x.id}>
-                          {x.nombre}
-                        </option>
+                      {GRUPOS_TRANSICION.map((g) => (
+                        <optgroup key={g} label={g}>
+                          {TRANSICIONES.filter((x) => x.grupo === g).map((x) => (
+                            <option key={x.id} value={x.id} title={x.para}>
+                              {x.nombre}
+                            </option>
+                          ))}
+                        </optgroup>
                       ))}
-                    </select>{' '}
-                    <b>{clipElegido.clip.fundido ? `${clipElegido.clip.fundido.toFixed(1)} s` : ''}</b>
-                  </span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={MAX_FUNDIDO}
-                    step={0.05}
-                    value={clipElegido.clip.fundido ?? 0}
-                    onPointerDown={empezarAjuste}
-                    onFocus={empezarAjuste}
-                    onChange={(e) => deslizar(fundirClip(timeline, clipElegido.clip.id, Number(e.target.value)))}
-                  />
-                </label>
+                    </select>
+                  </div>
+                  {clipElegido.clip.fundido ? (
+                    <div className="tl-ajuste aj">
+                      <span>
+                        Duración
+                        <ValorArrastrable
+                          nombre="Duración de la transición"
+                          valor={clipElegido.clip.fundido}
+                          min={0.1}
+                          max={Math.min(MAX_FUNDIDO, (clipElegido.fin - clipElegido.inicio) / 2)}
+                          paso={1 / 30}
+                          formato={(v) => `${v.toFixed(2).replace('.', ',')} s`}
+                          porDefecto={0.45}
+                          onEmpezar={empezarAjuste}
+                          onCambio={(v) => deslizar(fundirClip(timeline, clipElegido.clip.id, v))}
+                        />
+                      </span>
+                    </div>
+                  ) : null}
+                  {clipElegido.clip.fundido && timeline.clips.length > 2 ? (
+                    <button
+                      className="btn small ghost"
+                      title="La misma transición y la misma duración en todos los cortes"
+                      onClick={() => historial.aplicar(fundirClip(timeline, null, clipElegido.clip.fundido!, clipElegido.clip.transicion ?? 'fundido'))}
+                    >
+                      Ponerla en todos los cortes
+                    </button>
+                  ) : null}
+                </details>
               )}
             </div>
           </>

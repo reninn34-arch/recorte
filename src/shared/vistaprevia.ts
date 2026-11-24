@@ -84,5 +84,17 @@ export function claveCuadro(timeline: Timeline, t: number, firma: string, fps: n
   return huella(JSON.stringify([firma, 'cuadro', u.clip, previo, cuadro]))
 }
 
+/**
+ * La clave del último cuadro del clip que sale en la transición del clip `indice` (el que queda quieto debajo, como en
+ * el MP4): depende de ese clip y del anterior a él (por si aún entraba con su propia transición).
+ */
+export function claveSalida(timeline: Timeline, indice: number, firma: string, fps: number): string | null {
+  const tl = timelineActiva(timeline)
+  const clip = tl.clips[indice]
+  const sale = tl.clips[indice - 1]
+  if (!clip?.fundido || !sale) return null
+  return huella(JSON.stringify([firma, 'salida', fps, sale, indice > 1 ? tl.clips[indice - 2] : null]))
+}
+
 /** Una clave válida (para no leer ni escribir fuera de la carpeta del caché). */
 export const esClaveVista = (c: string): boolean => /^[a-f0-9]{16}$/.test(c)

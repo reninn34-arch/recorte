@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process'
+import { execFile, spawn, spawnSync } from 'node:child_process'
 import { promisify } from 'node:util'
 
 const exec = promisify(execFile)
@@ -17,6 +17,24 @@ export interface VideoInfo {
 
 export const rutaFfmpeg = (): string => process.env.RECORTE_FFMPEG ?? 'ffmpeg'
 export const rutaFfprobe = (): string => process.env.RECORTE_FFPROBE ?? 'ffprobe'
+
+/**
+ * Las transiciones de `xfade` que trae el FFmpeg de este equipo (las de tapar y destapar llegaron en la 7.0). Se
+ * mira una vez; si no se puede saber, se dan por buenas.
+ */
+let transicionesXfade: Set<string> | null | undefined
+export function hayTransicionXfade(nombre: string): boolean {
+  if (transicionesXfade === undefined) {
+    try {
+      const r = spawnSync(rutaFfmpeg(), ['-hide_banner', '-h', 'filter=xfade'], { encoding: 'utf8', windowsHide: true, timeout: 15000 })
+      const nombres = [...(r.stdout ?? '').matchAll(/^\s{4,}([a-z]+)\s+-?\d+\s/gm)].map((m) => m[1])
+      transicionesXfade = nombres.length ? new Set(nombres) : null
+    } catch {
+      transicionesXfade = null
+    }
+  }
+  return transicionesXfade === null || transicionesXfade.has(nombre)
+}
 
 /**
  * El codificador H.264 de este equipo: el de la tarjeta gráfica (NVIDIA NVENC, AMD AMF o Intel Quick Sync) si de verdad
