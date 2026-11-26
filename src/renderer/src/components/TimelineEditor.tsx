@@ -154,6 +154,7 @@ import { ValorArrastrable } from './ValorArrastrable'
 import { CarrilClaves } from './CarrilClaves'
 import { BarraZoom } from './BarraZoom'
 import { MuestraTransicion } from './MuestraTransicion'
+import { PortadaModal } from './PortadaModal'
 import { moverClave, moverClaveCapa, moverClaveRampa, moverClaveVolumen } from '../../../shared/timeline'
 
 /**
@@ -297,8 +298,11 @@ export function TimelineEditor({
   separando,
   seguirZona,
   fps = 30,
-  vistaPrevia
+  vistaPrevia,
+  portadaDe
 }: {
+  /** El proyecto y la medida del video, para la portada (sin ella, no se ofrece: en una demo). */
+  portadaDe?: { proyectoId: string; ancho: number; alto: number }
   /** La vista previa renderizada: se marca en la regla qué tramos pesados ya están listos. */
   vistaPrevia?: VistaPrevia | null
   /** Sigue una zona tapada por el video (una cara que se mueve). */
@@ -484,6 +488,7 @@ export function TimelineEditor({
   const [zoom, setZoom] = useState(1)
   const [escribiendoTc, setEscribiendoTc] = useState(false)
   const [muestraViva, setMuestraViva] = useState<TransicionClip | null>(null)
+  const [portadaAbierta, setPortadaAbierta] = useState(false)
   // La paleta de herramientas, el imán, la entrada/salida (I/O) y la marca elegida.
   const [herramienta, setHerramienta] = useState<Herramienta>('seleccion')
   const [conIman, setConIman] = useState(true)
@@ -2214,6 +2219,16 @@ export function TimelineEditor({
                       <i key={i}>Sonido {filasSonidos - i}</i>
                     ))}
                   </span>
+                ) : p.id === 'video' && portadaDe ? (
+                  <button
+                    className={`tl-portada ${tl.portada?.archivo ? 'tiene' : ''}`}
+                    title={tl.portada?.archivo ? 'La portada del video: toca para cambiarla' : 'Poner una portada: un momento del video o una foto, con título'}
+                    onClick={() => setPortadaAbierta(true)}
+                    style={tl.portada?.archivo && urlDe ? { backgroundImage: `url("${urlDe(tl.portada.archivo)}")` } : undefined}
+                  >
+                    {!tl.portada?.archivo && <Icon name="image" size={13} />}
+                    <span>Portada</span>
+                  </button>
                 ) : (
                   <span className="tl-nombre-texto">{p.nombre}</span>
                 )}
@@ -2614,6 +2629,21 @@ export function TimelineEditor({
         <BarraZoom scrollRef={scrollRef} pps={pps} duracion={Math.max(total, 1)} cabezal={tiempo} onVer={verTramo} onAjustar={ajustar} />
       </div>
 
+      {portadaAbierta && portadaDe && urlDe && (
+        <PortadaModal
+          proyectoId={portadaDe.proyectoId}
+          ancho={portadaDe.ancho}
+          alto={portadaDe.alto}
+          fps={fps}
+          timeline={timeline}
+          historial={historial}
+          tiempo={tiempo}
+          medios={medios ?? []}
+          urlDe={urlDe}
+          miniaturaDe={miniaturaDe}
+          onCerrar={() => setPortadaAbierta(false)}
+        />
+      )}
       {paneles.inspector &&
         createPortal(
           <div className="ed-insp">

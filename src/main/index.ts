@@ -5,7 +5,7 @@ import { usarArchivoMcp } from './adaptadoresagente'
 import { anadirHabilidad, carpetaHabilidadesUsuario, habilidadesConLecciones, leerLecciones, olvidarLeccion } from './habilidades'
 import { anadirEstilo, borrarEstilo, catalogoEstilos, crearEstilo, quitarEstilo, registrarCatalogo } from './estiloscatalogo'
 import { ANIMAR_CAPA, fuenteEnClip, tramos, zonaEn, frasesSubtitulos, huellaSubtitulos, subtitulosAlDia, duracionTimeline, duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, SONIDOS_INCLUIDOS, timelineInicial, timelineVacia, normalizarLetras, type LetraTL, type Timeline } from '../shared/timeline'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, join, resolve, sep } from 'node:path'
 import type {
@@ -3097,6 +3097,47 @@ app.whenReady().then(() => {
     } finally {
       rmSync(tmp, { recursive: true, force: true })
     }
+  })
+  // La portada (como la de CapCut): el cuadro de un momento con todo lo de encima, y la imagen ya compuesta.
+  ipcMain.handle('portada:cuadro', async (_evento, id: unknown, timeline: unknown, segundo: unknown) => {
+    if (typeof id !== 'string' || typeof segundo !== 'number' || !Number.isFinite(segundo)) return { ok: false, error: 'Datos inválidos.' }
+    const proyecto = proyectos.abrir(id)
+    if (!proyecto) return { ok: false, error: 'El proyecto ya no existe.' }
+    const valida = normalizarTimeline(timeline, proyecto.source.duration, duracionesDeMedios(proyecto.medios))
+    const carpeta = proyectos.carpeta(id)
+    // Cada pedido en su carpeta: al mover el momento, el anterior aún puede estar trabajando.
+    const tmp = join(carpeta, `portada-tmp-${randomUUID().slice(0, 8)}`)
+    try {
+      const fps = proyecto.source.fps > 0 ? proyecto.source.fps : 30
+      const t = Math.max(0, Math.min(segundo, duracionTimeline(valida) - 1 / fps))
+      const r = await exportarTimeline(proyecto, valida, carpeta, { formato: 'original', subtitulos: false, desde: t, hasta: t + Math.max(0.12, 3 / fps), calidad: 'alta' }, () => {}, tmp)
+      if (!r.ok || !r.output) return { ok: false, error: r.error ?? 'No pude sacar ese cuadro.' }
+      const dir = join(carpeta, 'portada')
+      mkdirSync(dir, { recursive: true })
+      for (const viejo of readdirSync(dir)) if (viejo.startsWith('fondo-')) rmSync(join(dir, viejo), { force: true })
+      const archivo = `portada/fondo-${Date.now().toString(36)}.png`
+      const e = await ejecutar(
+        [`"${resolverBinario('ffmpeg') ?? 'ffmpeg'}"`, '-y', '-v', 'error', '-i', `"${r.output}"`, '-frames:v', '1', '-vf', 'scale=in_color_matrix=bt709:in_range=tv,format=rgb24', `"${join(carpeta, archivo)}"`],
+        carpeta,
+        60_000
+      )
+      if (e.codigo !== 0 || !existsSync(join(carpeta, archivo))) return { ok: false, error: 'No pude sacar ese cuadro.' }
+      return { ok: true, archivo }
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+  ipcMain.handle('portada:guardar', (_evento, id: unknown, datos: unknown) => {
+    const prefijo = 'data:image/png;base64,'
+    if (typeof id !== 'string' || typeof datos !== 'string' || !datos.startsWith(prefijo) || datos.length > 60_000_000) return { ok: false, error: 'Datos inválidos.' }
+    const proyecto = proyectos.abrir(id)
+    if (!proyecto) return { ok: false, error: 'El proyecto ya no existe.' }
+    const png = Buffer.from(datos.slice(prefijo.length), 'base64')
+    const dir = join(proyectos.carpeta(id), 'portada')
+    mkdirSync(dir, { recursive: true })
+    const archivo = `portada/portada-${createHash('sha1').update(png).digest('hex').slice(0, 12)}.png`
+    writeFileSync(join(proyectos.carpeta(id), archivo), png)
+    return { ok: true, archivo }
   })
   async function exportarProyecto(id: unknown, timeline: unknown, opciones: unknown): Promise<RenderResultado> {
       if (typeof id !== 'string') return { ok: false, error: 'Proyecto inválido.' }

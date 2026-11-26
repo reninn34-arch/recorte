@@ -91,14 +91,15 @@ async function lanzarEdge(ventana: boolean): Promise<void> {
 /** Conecta playwright al Edge del perfil (lo abre sin ventana si hace falta). */
 async function abrirEdge(): Promise<Browser> {
   await lanzarEdge(false)
-  return chromium.connectOverCDP(`http://127.0.0.1:${PUERTO}`)
+  return chromium.connectOverCDP(`http://127.0.0.1:${PUERTO}`, { timeout: 15_000 })
 }
 
 /** Cierra el Edge del perfil entero (la sesión queda en el perfil). */
 async function cerrarEdge(): Promise<void> {
   try {
-    const b = await chromium.connectOverCDP(`http://127.0.0.1:${PUERTO}`)
-    await (await b.newBrowserCDPSession()).send('Browser.close')
+    const b = await chromium.connectOverCDP(`http://127.0.0.1:${PUERTO}`, { timeout: 15_000 })
+    // Con tope: un Edge que ya se está cerrando puede no contestar nunca.
+    await Promise.race([(await b.newBrowserCDPSession()).send('Browser.close'), espera(5_000)])
   } catch {
     // Ya estaba cerrado.
   }
@@ -108,7 +109,7 @@ async function cerrarEdge(): Promise<void> {
 /** ¿El perfil tiene sesión de Google? La cookie SAPISID lo delata. */
 async function sesionEnEdge(): Promise<boolean> {
   try {
-    const b = await chromium.connectOverCDP(`http://127.0.0.1:${PUERTO}`)
+    const b = await chromium.connectOverCDP(`http://127.0.0.1:${PUERTO}`, { timeout: 15_000 })
     try {
       const { cookies } = await (await b.newBrowserCDPSession()).send('Storage.getCookies')
       return (cookies as { name: string; domain: string }[]).some(
@@ -140,7 +141,13 @@ async function abrirDialogo(page: Page) {
     throw new Error('AI Studio pide aceptar sus términos la primera vez: pulsa «Conectar con Google» y acéptalos en la ventana que se abre.')
   }
   if (page.url().startsWith('https://accounts.google.com/')) {
-    throw new Error('La sesión de Google se perdió. Vuelve a conectar tu cuenta.')
+    // La sesión guardada ya no vale (cambió la contraseña, se cerró en otro sitio): la cuenta deja de contar como
+    // conectada, para que la app ofrezca volver a entrar en vez de quedarse a medias.
+    if (correo) {
+      correo = null
+      guardarCuenta()
+    }
+    throw new SesionPerdida()
   }
   const visto = await correoDe(page)
   if (visto && visto !== correo) {
@@ -153,6 +160,41 @@ async function abrirDialogo(page: Page) {
   }
   await caja.waitFor({ timeout: 20_000 })
   return caja
+}
+
+/** Google pide volver a entrar: la sesión del perfil ya no vale. */
+class SesionPerdida extends Error {
+  constructor() {
+    super('La sesión de Google se perdió (¿cambiaste la contraseña?). Vuelve a conectar tu cuenta.')
+  }
+}
+
+/**
+ * Borra la sesión de Google del perfil (sus cookies) y deja Edge cerrado: la próxima entrada empieza de cero. Las
+ * borra en el Edge abierto y, ya cerrado, también su archivo (Edge tarda en guardar el cambio y, al cerrarlo enseguida,
+ * la sesión vieja volvía).
+ */
+async function borrarSesion(): Promise<void> {
+  try {
+    const b = await chromium.connectOverCDP(`http://127.0.0.1:${PUERTO}`, { timeout: 15_000 })
+    try {
+      await (await b.newBrowserCDPSession()).send('Storage.clearCookies')
+    } finally {
+      await b.close()
+    }
+  } catch {
+    // Sin Edge abierto: basta con el archivo.
+  }
+  await cerrarEdge()
+  for (const ruta of [join(perfil(), 'Default', 'Network'), join(perfil(), 'Default')]) {
+    for (const nombre of ['Cookies', 'Cookies-journal']) {
+      try {
+        rmSync(join(ruta, nombre), { force: true, maxRetries: 10, retryDelay: 300 })
+      } catch {
+        // Si Edge aún lo tiene abierto, se queda: al menos se borró en el navegador.
+      }
+    }
+  }
 }
 
 const hablante = (page: Page) => page.locator('button:has-text("Speaker 1")').first()
@@ -306,20 +348,52 @@ async function conectarVozGoogleYa(): Promise<EstadoVozGoogle> {
   try {
     // Si el perfil ya tiene la sesión, basta con leer la cuenta.
     await lanzarEdge(false)
+    let limpiar = false
     if (await sesionEnEdge()) {
+      let fallo: unknown = null
       const b = await abrirEdge()
       try {
         const page = await b.contexts()[0].newPage()
         await abrirDialogo(page)
+      } catch (e) {
+        fallo = e
       } finally {
         await b.close()
       }
-      await cerrarEdge()
-      if (!correo) throw new Error('AI Studio no abrió con tu cuenta de Google.')
-      return estadoVozGoogle()
+      if (!fallo && correo) {
+        await cerrarEdge()
+        return estadoVozGoogle()
+      }
+      // La sesión guardada ya no sirve (contraseña cambiada, sesión cerrada en otro equipo, otra cuenta): se borra y se
+      // entra de nuevo con la ventana. Si solo faltaban los términos de AI Studio, la sesión se queda y la ventana
+      // sirve para aceptarlos.
+      if (!(fallo instanceof Error && /términos/.test(fallo.message))) {
+        await borrarSesion()
+        limpiar = true
+      }
+    }
+    // Sin una sesión que sirva, la cuenta de antes ya no cuenta como conectada (hasta que se entre de nuevo).
+    if (correo) {
+      correo = null
+      guardarCuenta()
     }
     await cerrarEdge()
     await lanzarEdge(true)
+    // Por si Edge no llegó a guardar el borrado: en la ventana ya abierta se borra otra vez y se vuelve a la entrada.
+    if (limpiar) {
+      // Con un tope: si el usuario cierra la ventana a mitad, no se queda esperando.
+      const otraVez = (async () => {
+        const b = await chromium.connectOverCDP(`http://127.0.0.1:${PUERTO}`, { timeout: 15_000 })
+        try {
+          await (await b.newBrowserCDPSession()).send('Storage.clearCookies')
+          const pagina = b.contexts()[0]?.pages()[0]
+          await pagina?.goto(ENTRAR, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {})
+        } finally {
+          void b.close().catch(() => {})
+        }
+      })().catch(() => {})
+      await Promise.race([otraVez, espera(35_000)])
+    }
     // Google pone la sesión al llegar a AI Studio; se piden unos segundos seguidos ahí.
     let sesion = false
     for (let i = 0, seguidas = 0; i < 400 && !sesion; i++) {
@@ -353,10 +427,22 @@ async function conectarVozGoogleYa(): Promise<EstadoVozGoogle> {
 /** El correo de la cuenta de la voz (para Flow, que genera con ella). */
 export const correoVozGoogle = (): string | null => correo
 
-/** Olvida la cuenta (el perfil de Edge se queda por si vuelves). */
-export function desconectarVozGoogle(): EstadoVozGoogle {
+/**
+ * Desconecta la cuenta: la olvida y cierra su sesión en el perfil de Edge, así la próxima vez se puede entrar con
+ * otra cuenta (o con la misma y su contraseña nueva) desde cero.
+ */
+export async function desconectarVozGoogle(): Promise<EstadoVozGoogle> {
   correo = null
+  error = undefined
   guardarCuenta()
+  if (!edgeExe()) return estadoVozGoogle()
+  await perfilDeLaVoz()
+    .enTurno(async () => {
+      await lanzarEdge(false)
+      await borrarSesion()
+      await cerrarEdge()
+    })
+    .catch(() => {})
   return estadoVozGoogle()
 }
 

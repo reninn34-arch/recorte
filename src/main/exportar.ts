@@ -1,8 +1,8 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { escribirCube, leerCube, mezclarLut } from '../shared/lut'
 import { rutaScriptPython } from './transcribir'
-import { join } from 'node:path'
+import { extname, isAbsolute, join } from 'node:path'
 import {
   ajustesDe,
   camaraEn,
@@ -386,6 +386,42 @@ export function exportarTimeline(...args: Parameters<typeof exportarTimelineAhor
   const turno = colaExport.then(() => exportarTimelineAhora(...args))
   colaExport = turno.catch(() => {})
   return turno
+}
+
+/**
+ * Windows no acepta una línea de órdenes de más de 32 767 caracteres: con cientos de capas (subtítulos hechos
+ * imagen, gráficos), solo las rutas de sus archivos ya pasan de eso y FFmpeg ni arranca (ENAMETOOLONG). Pasado un
+ * límite, cada archivo de entrada se enlaza dentro de la carpeta del proyecto con un nombre corto (`e/12.png`, sin
+ * copiarlo: es el mismo archivo) y FFmpeg, que trabaja en esa carpeta, lo lee por ahí. El video sale igual.
+ */
+export const LIMITE_ORDEN = 24000
+export function acortarEntradas(entradas: string[], carpeta: string, limite = LIMITE_ORDEN): string[] {
+  const largo = entradas.reduce((t, x) => t + x.length + 3, 0)
+  if (largo <= limite) return entradas
+  const dir = join(carpeta, 'e')
+  rmSync(dir, { recursive: true, force: true })
+  mkdirSync(dir, { recursive: true })
+  const alias = new Map<string, string>()
+  return entradas.map((x, i) => {
+    if (entradas[i - 1] !== '-i' || !isAbsolute(x) || !existsSync(x)) return x
+    const hecho = alias.get(x)
+    if (hecho) return hecho
+    const corto = `e/${alias.size + 1}${extname(x).toLowerCase()}`
+    const ruta = join(carpeta, corto)
+    try {
+      linkSync(x, ruta)
+    } catch {
+      // En otro disco no se puede enlazar: una imagen se copia (es pequeña); un video se deja con su ruta.
+      try {
+        if (statSync(x).size > 40 * 1024 * 1024) return x
+        copyFileSync(x, ruta)
+      } catch {
+        return x
+      }
+    }
+    alias.set(x, corto)
+    return corto
+  })
 }
 
 async function exportarTimelineAhora(
@@ -934,7 +970,17 @@ async function exportarTimelineAhora(
     partes.push(...filtrosFfmpeg(timeline.filtros, capaBase, '[filtrado]', ancho, alto, fps, duracion))
     capaBase = '[filtrado]'
   }
-  partes.push(ass ? `${capaBase}subtitles=${ass}${letrasEn(carpeta) ? ':fontsdir=fuentes' : ''}[vout]` : `${capaBase}null[vout]`)
+  // La portada también en el primer cuadro (las redes lo toman de miniatura): encima, un solo cuadro.
+  const portada = portadaDe(timeline, carpeta)
+  const conPortadaAlInicio = Boolean(portada && timeline.portada?.alInicio && !conTramo && !opciones.soloAudio)
+  const finalVideo = conPortadaAlInicio ? '[vprePortada]' : '[vout]'
+  partes.push(ass ? `${capaBase}subtitles=${ass}${letrasEn(carpeta) ? ':fontsdir=fuentes' : ''}${finalVideo}` : `${capaBase}null${finalVideo}`)
+  if (conPortadaAlInicio) {
+    entradas.push('-loop', '1', '-framerate', String(fps), '-t', '0.5', '-i', portada!)
+    const k = n++
+    partes.push(`[${k}:v]scale=${ancho}:${alto}:flags=lanczos,setsar=1,format=yuva420p[imgPortada]`)
+    partes.push(`[vprePortada][imgPortada]overlay=0:0:enable='lt(t,${(0.5 / fps).toFixed(5)})':eof_action=pass:format=auto[vout]`)
+  }
 
   if (musica) {
     // La música se repite (-stream_loop) y se corta a la duración, con fundido de salida.
@@ -999,14 +1045,15 @@ async function exportarTimelineAhora(
         salida
       ]
     : null
+  const cortas = acortarEntradas(entradas, carpeta)
   const argumentos = soloAudio
-    ? ['-y', '-hide_banner', '-loglevel', 'error', ...entradas, '-/filter_complex', archivoFiltro, ...soloAudio]
+    ? ['-y', '-hide_banner', '-loglevel', 'error', ...cortas, '-/filter_complex', archivoFiltro, ...soloAudio]
     : [
     '-y',
     '-hide_banner',
     '-loglevel',
     'error',
-    ...entradas,
+    ...cortas,
     // El grafo va en un archivo: con muchos clips o tramos de voz no cabría en la línea de órdenes.
     '-/filter_complex',
     archivoFiltro,
@@ -1062,15 +1109,57 @@ async function exportarTimelineAhora(
         terminar({ ok: true, output: salida })
         return
       }
-      void crearPortada(salida, duracion).then((portada) => {
+      // Con portada propia: va pegada al MP4 como su miniatura (y en el .jpg de al lado). Sin ella, un cuadro del video.
+      const propia = !conTramo ? portadaDe(timeline, carpeta) : null
+      void (propia ? pegarPortada(salida, propia) : crearPortada(salida, duracion)).then((cubierta) => {
         onProgreso(1, 'Exportación lista')
-        terminar({ ok: true, output: salida, cover: portada })
+        terminar({ ok: true, output: salida, cover: cubierta })
       })
     })
   })
 }
 
 const n3 = (v: number) => (Math.round(v * 1000) / 1000).toString()
+
+/** La imagen de la portada del proyecto, si tiene una y está en su carpeta. */
+function portadaDe(timeline: Timeline, carpeta: string): string | null {
+  const archivo = timeline.portada?.archivo
+  if (!archivo) return null
+  const ruta = join(carpeta, archivo)
+  return existsSync(ruta) ? ruta : null
+}
+
+/**
+ * Pega la portada al MP4 como su miniatura (la que enseñan el Explorador de Windows, el Finder y los reproductores,
+ * como la portada de CapCut) y la deja como .jpg al lado. Sin volver a codificar el video: solo se copia.
+ */
+function pegarPortada(salida: string, portada: string): Promise<string | undefined> {
+  const jpg = salida.replace(/\.mp4$/i, '.jpg')
+  const temporal = salida.replace(/\.mp4$/i, '.portada.mp4')
+  const correr = (args: string[]) =>
+    new Promise<boolean>((ok) => {
+      const hijo = spawn(rutaFfmpeg(), ['-y', '-hide_banner', '-loglevel', 'error', ...args], { windowsHide: true })
+      hijo.on('error', () => ok(false))
+      hijo.on('close', (codigo) => ok(codigo === 0))
+    })
+  return (async () => {
+    await correr(['-i', portada, '-frames:v', '1', '-q:v', '2', jpg])
+    const pegada = await correr([
+      '-i', salida, '-i', portada,
+      '-map', '0', '-map', '1', '-c', 'copy',
+      '-c:v:1', 'mjpeg', '-q:v:1', '2', '-pix_fmt:v:1', 'yuvj420p', '-disposition:v:1', 'attached_pic',
+      '-movflags', '+faststart', temporal
+    ])
+    if (pegada && existsSync(temporal)) {
+      try {
+        renameSync(temporal, salida)
+      } catch {
+        rmSync(temporal, { force: true })
+      }
+    } else rmSync(temporal, { force: true })
+    return existsSync(jpg) ? jpg : undefined
+  })()
+}
 
 /**
  * La opacidad y el desenfoque con fotogramas clave de una capa. `geq` los calculaba píxel a píxel (lentísimo) y

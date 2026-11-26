@@ -960,6 +960,10 @@ export function Monitor({
           reproduciendo={reproductor.reproduciendo}
         />
       )}
+      {/* La portada en el primer cuadro (como en el MP4): solo en el segundo 0, encima de todo. */}
+      {src && !proyecto.demo && timeline.portada?.alInicio && timeline.portada.archivo && reproductor.tiempo < 0.5 / (proyecto.source.fps > 0 ? proyecto.source.fps : 30) && cw > 0 && (
+        <img className="monitor-portada" src={mediaUrl(proyecto.id, timeline.portada.archivo)} alt="" style={{ width: cw, height: ch }} />
+      )}
       {!reproductor.reproduciendo && src && !vacia && (
         <span className="monitor-play"><Icon name="play" size={26} /></span>
       )}

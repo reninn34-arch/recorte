@@ -1259,6 +1259,70 @@ export interface Timeline {
    * frases y valores se hizo: si cambian, hay que volver a animarlos (mientras, se ven como texto normal).
    */
   subtitulosHF?: SubtitulosHF
+  /** La portada del video (como la de CapCut): la miniatura que se ve antes de darle a reproducir. */
+  portada?: PortadaTL
+}
+
+/**
+ * La portada: un momento del video o una foto de la biblioteca, con un título encima si se quiere. `archivo` es la
+ * imagen ya compuesta (en la carpeta del proyecto), la que se pega al MP4 como miniatura.
+ */
+export interface PortadaTL {
+  origen: 'cuadro' | 'imagen'
+  /** El segundo de la timeline (con `origen: 'cuadro'`). */
+  t?: number
+  /** La foto de la biblioteca (con `origen: 'imagen'`). */
+  fuente?: FuenteId
+  /** Cómo se encuadra la foto: 0 a 1, de qué lado se recorta si no tiene la forma del video. */
+  cx?: number
+  cy?: number
+  /** El título de la portada (vacío: sin título). */
+  texto?: string
+  /** Su letra (de FUENTES_TEXTO), su tamaño (fracción del alto) y sus colores. */
+  letra?: string
+  tamano?: number
+  color?: string
+  contorno?: string
+  /** Su altura (0 arriba, 1 abajo). */
+  y?: number
+  /** La imagen ya compuesta, dentro de la carpeta del proyecto. */
+  archivo?: string
+  /**
+   * También como primer cuadro del video: Instagram, TikTok y WhatsApp toman ese de miniatura. Dura un solo cuadro y
+   * no cambia lo que dura el video.
+   */
+  alInicio?: boolean
+}
+
+export function normalizarPortada(entrada: unknown, esFuente: (f: string) => boolean): PortadaTL | undefined {
+  if (!entrada || typeof entrada !== 'object') return undefined
+  const x = entrada as Partial<PortadaTL>
+  const num = (v: unknown, min: number, max: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : undefined)
+  const color = (v: unknown) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : undefined)
+  const origen = x.origen === 'imagen' && typeof x.fuente === 'string' && esFuente(x.fuente) ? 'imagen' : 'cuadro'
+  const archivo = typeof x.archivo === 'string' && /^portada\/[\w.-]+\.png$/.test(x.archivo) ? x.archivo : undefined
+  const texto = typeof x.texto === 'string' ? x.texto.slice(0, 200) : ''
+  const salida: PortadaTL = { origen }
+  if (origen === 'imagen') salida.fuente = x.fuente
+  else salida.t = num(x.t, 0, 1e6) ?? 0
+  for (const k of ['cx', 'cy', 'y'] as const) {
+    const v = num(x[k], 0, 1)
+    if (v !== undefined) salida[k] = v
+  }
+  if (texto.trim()) salida.texto = texto
+  if (typeof x.letra === 'string' && FUENTES_TEXTO[x.letra]) salida.letra = x.letra
+  const tam = num(x.tamano, 0.02, 0.4)
+  if (tam !== undefined) salida.tamano = tam
+  if (color(x.color)) salida.color = color(x.color)
+  if (color(x.contorno)) salida.contorno = color(x.contorno)
+  if (archivo) salida.archivo = archivo
+  if (x.alInicio === true) salida.alInicio = true
+  return salida
+}
+
+export function ponerPortada(tl: Timeline, portada: PortadaTL | null): Timeline {
+  const { portada: _antes, ...resto } = tl
+  return portada ? { ...resto, portada } : resto
 }
 
 export interface SubtitulosHF {
@@ -2031,7 +2095,8 @@ export function normalizarTimeline(entrada: unknown, duracionFuente: number, otr
     ...(normalizarMulticam(crudo.multicam, (f) => f === FUENTE_PRINCIPAL || otras[f] !== undefined)
       ? { multicam: normalizarMulticam(crudo.multicam, (f) => f === FUENTE_PRINCIPAL || otras[f] !== undefined) }
       : {}),
-    ...(normalizarSubtitulosHF(crudo.subtitulosHF, otras) ? { subtitulosHF: normalizarSubtitulosHF(crudo.subtitulosHF, otras) } : {})
+    ...(normalizarSubtitulosHF(crudo.subtitulosHF, otras) ? { subtitulosHF: normalizarSubtitulosHF(crudo.subtitulosHF, otras) } : {}),
+    ...(normalizarPortada(crudo.portada, (f) => otras[f] !== undefined) ? { portada: normalizarPortada(crudo.portada, (f) => otras[f] !== undefined) } : {})
   }
 }
 

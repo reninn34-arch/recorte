@@ -718,6 +718,7 @@ export function Editor({
         paneles={{ biblioteca: panelBiblioteca, inspector: panelInspector, transporte: panelTransporte }}
         miniaturaDe={miniaturaDe}
         urlDe={proyecto.demo ? undefined : (archivo) => mediaUrl(proyecto.id, archivo)}
+        portadaDe={proyecto.demo ? undefined : { proyectoId: proyecto.id, ancho: proyecto.source.width || 1920, alto: proyecto.source.height || 1080 }}
         ondaDe={proyecto.demo ? undefined : (fuente) => `onda:${proyecto.id}:${fuente}`}
         panelSubtitulos={
           proyecto.demo ? undefined : <SubtitulosAnimados proyecto={proyecto} timeline={timeline} historial={historial} onMedios={onMedios} onAviso={onAviso} />

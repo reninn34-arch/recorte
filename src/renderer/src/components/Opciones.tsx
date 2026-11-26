@@ -417,6 +417,7 @@ export function Opciones({
             <div className="op-fila-texto">
               <strong>Google AI Studio</strong>
               <span>Gemini 3.8 Flash TTS · 30 voces · con tu cuenta de Google o tu llave gratis</span>
+              {voz?.google?.error && !voz.google.correo && !voz.google.conectando && <span className="op-error">{voz.google.error}</span>}
             </div>
             <div className="op-fila-lado">
               {voz?.google?.correo ? (

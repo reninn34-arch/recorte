@@ -538,6 +538,10 @@ export interface RecorteApi {
   vistaCuadro: (id: string, timeline: Timeline, t: number) => Promise<{ clave: string; archivo: string } | null>
   /** El último cuadro del clip que sale en la transición del clip `indice` (quieto debajo, como en el MP4). */
   vistaSalida: (id: string, timeline: Timeline, indice: number) => Promise<{ clave: string; archivo: string } | null>
+  /** El cuadro de un momento, con todo lo de encima, para la portada (queda en `portada/` del proyecto). */
+  portadaCuadro: (id: string, timeline: Timeline, segundo: number) => Promise<{ ok: boolean; archivo?: string; error?: string }>
+  /** Guarda la portada ya compuesta (un PNG en data URL) y devuelve su archivo en el proyecto. */
+  portadaGuardar: (id: string, datos: string) => Promise<{ ok: boolean; archivo?: string; error?: string }>
   onVistaLista: (cb: (e: { id: string; clave: string }) => void) => () => void
   /** Progreso de una herramienta que se baja o se instala desde Ajustes. */
   onHerramienta: (cb: (p: { id: string; pct: number; texto: string }) => void) => () => void

@@ -3883,3 +3883,40 @@ button.tl-tc-grande:hover { background: var(--panel-3); }
 .ed-transicion-corte { display: grid; place-items: center; height: 100%; font-size: 10.5px; color: var(--dim); }
 .ed-insp .ed-transicion select { flex: 1; min-width: 0; }
 .ed-grupo > .btn { margin: 2px 0 4px 12px; width: calc(100% - 12px); }
+
+/* La portada (como la de CapCut): el botón en la cabecera de la pista de video y su ventana. */
+.tl-portada { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; width: 52px; height: 42px; flex-shrink: 0; margin-right: 2px; padding: 0; border: 1px dashed var(--line-2); border-radius: 5px; background: var(--panel-2) center / cover no-repeat; color: var(--muted); font-size: 9px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; cursor: pointer; overflow: hidden; }
+.tl-portada:hover { border-color: var(--accent); color: var(--text); }
+.tl-portada.tiene { border: 1px solid var(--line-2); justify-content: flex-end; }
+.tl-portada.tiene span { width: 100%; padding: 1px 0; background: rgba(0, 0, 0, 0.6); color: #fff; text-align: center; }
+.portada-fondo { position: fixed; inset: 0; z-index: 85; display: grid; place-items: center; padding: 24px; background: rgba(0, 0, 0, 0.6); }
+.portada-caja { display: flex; flex-direction: column; width: min(920px, 100%); max-height: 100%; border: 1px solid var(--line-2); border-radius: 12px; background: var(--panel); box-shadow: 0 24px 60px #000c; overflow: hidden; }
+.portada-cabeza { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.portada-cabeza .tl-dim { flex: 1; font-size: 11.5px; }
+.portada-cuerpo { display: flex; gap: 16px; padding: 14px; min-height: 0; overflow: auto; }
+.portada-vista { position: relative; flex: 1; max-height: 560px; min-width: 0; align-self: flex-start; margin: 0 auto; max-width: 100%; border-radius: 8px; overflow: hidden; background: #000; }
+.portada-vista canvas { display: block; width: 100%; height: 100%; }
+.portada-cargando { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, 0.45); color: var(--muted); font-size: 12px; }
+.portada-ajustes { display: flex; flex-direction: column; gap: 8px; width: 300px; flex-shrink: 0; }
+.portada-pestanas { display: flex; gap: 4px; padding: 3px; border-radius: 8px; background: var(--panel-2); }
+.portada-pestanas button { flex: 1; padding: 6px; border: none; border-radius: 6px; background: none; color: var(--muted); font-size: 12px; font-weight: 600; }
+.portada-pestanas button.is-on { background: var(--panel-3); color: var(--accent); }
+.portada-momento { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.portada-momento input[type='range'] { width: 100%; accent-color: var(--accent); }
+.portada-tc { font-family: var(--mono); font-size: 12px; color: var(--blue); }
+.portada-fotos { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; max-height: 150px; overflow-y: auto; }
+.portada-fotos button { aspect-ratio: 1; padding: 0; border: 2px solid transparent; border-radius: 6px; overflow: hidden; background: var(--panel-2); }
+.portada-fotos button.is-on { border-color: var(--accent); }
+.portada-fotos img { width: 100%; height: 100%; object-fit: cover; }
+.portada-texto { width: 100%; resize: vertical; padding: 6px 8px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--panel-2); color: var(--text); font: inherit; font-size: 12.5px; }
+.portada-colores { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
+.portada-colores label { display: flex; align-items: center; gap: 6px; }
+.portada-colores input[type='color'] { width: 28px; height: 22px; padding: 0; border: 1px solid var(--line-2); border-radius: 4px; background: none; }
+.portada-inicio { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; color: var(--text); }
+.portada-inicio small { display: block; color: var(--dim); font-size: 11px; }
+.portada-error { margin: 0; color: var(--danger); font-size: 12px; }
+.portada-botones { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.monitor-portada { position: absolute; inset: 0; margin: auto; z-index: 6; pointer-events: none; object-fit: fill; }
+.portada-ajustes select { width: 100%; padding: 5px 8px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--panel-2); color: var(--text); font: inherit; font-size: 12.5px; }
+.portada-ajustes .ed-campo { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--muted); }
+.op-fila-texto .op-error { display: block; margin-top: 3px; color: var(--danger); font-size: 11.5px; }
