@@ -40,6 +40,28 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.4.3',
+    fecha: '2026-11-26',
+    resumen: 'Portada para tus videos, como en CapCut, y dos arreglos: exportar con cientos de capas y volver a conectar tu cuenta de Google.',
+    novedades: [
+      {
+        icono: 'image',
+        titulo: 'Portada para tu video',
+        texto: 'Toca «Portada», al lado de la pista de video, y elige un momento del video o una foto, con un título si quieres. El MP4 la lleva como su miniatura y, si lo dejas marcado, también en su primer cuadro: Instagram, TikTok y WhatsApp toman ese.'
+      },
+      {
+        icono: 'download',
+        titulo: 'Exporta aunque tenga cientos de capas',
+        texto: 'Un video con muchos subtítulos o gráficos ya no falla al exportar con «ENAMETOOLONG».'
+      },
+      {
+        icono: 'volumen',
+        titulo: 'Vuelve a conectar tu cuenta de Google',
+        texto: 'Si cambiaste la contraseña o cerraste la sesión en otro lado, «Conectar cuenta» ya no se queda a medias: borra la sesión vieja y te deja entrar de nuevo, con esa cuenta o con otra. «Salir» también la cierra, y si algo falla, Ajustes te dice qué.'
+      }
+    ]
+  },
+  {
     version: '0.4.2',
     fecha: '2026-11-23',
     resumen: 'El editor se maneja como uno serio: números que se arrastran, la línea de cada fotograma clave, 37 transiciones y el volumen en LUFS.',
