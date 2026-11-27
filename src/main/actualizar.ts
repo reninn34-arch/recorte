@@ -23,6 +23,15 @@ const CADA = 4 * 60 * 60_000
  */
 const A_MANO = process.platform === 'darwin'
 const PAGINA_VERSIONES = 'https://github.com/reninn34-arch/recorte/releases/latest'
+const API_ULTIMA = 'https://api.github.com/repos/reninn34-arch/recorte/releases/latest'
+/** Los archivos de cada versión (latest.yml, el instalador): responden aunque la página de GitHub falle. */
+const ARCHIVOS = 'https://github.com/reninn34-arch/recorte/releases'
+/** Tras un fallo de GitHub o de la red, se vuelve a mirar a los 10 minutos (no a las 4 horas). */
+const REINTENTO = 10 * 60_000
+let reintento: ReturnType<typeof setTimeout> | null = null
+/** El resumen de las notas que dio la API (el latest.yml no las trae). */
+let notasApi: string | undefined
+type Release = { tag_name?: string; body?: string; assets?: { name: string; browser_download_url?: string }[] }
 const carpetaBajada = () => join(app.getPath('userData'), 'actualizacion')
 /** El .dmg ya bajado y comprobado de la versión nueva (Mac). */
 let dmgListo: string | null = null
@@ -32,9 +41,67 @@ let estado: EstadoActualizacion = { fase: 'nada', version: app.getVersion() }
 /** El error del actualizador, en palabras del usuario. */
 function explicar(e: unknown): string {
   const t = e instanceof Error ? e.message : String(e)
-  if (/404/.test(t)) return 'todavía no hay versiones publicadas'
-  if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|net::/i.test(t)) return 'sin conexión a internet'
+  if (sinRed(t)) return 'sin conexión a internet; lo vuelvo a intentar solo en unos minutos'
+  if (pasajero(t)) return 'GitHub no responde ahora mismo; lo vuelvo a intentar solo en unos minutos'
+  if (/\b404\b/.test(t)) return 'todavía no hay versiones publicadas'
   return t.split(String.fromCharCode(10))[0].slice(0, 200)
+}
+
+function sinRed(t: string): boolean {
+  return /ENOTFOUND|ECONNREFUSED|ETIMEDOUT|ECONNRESET|EAI_AGAIN|socket hang up|net::/i.test(t)
+}
+
+/** Un fallo que se arregla solo: GitHub caído o lento (5xx, 429) o la red. */
+function pasajero(t: string): boolean {
+  return sinRed(t) || /\b(5\d\d|429)\b/.test(t)
+}
+
+/** Si el fallo es pasajero (GitHub a veces da 502/504 un momento), espera un poco y prueba otra vez. */
+async function conReintento(hacer: () => Promise<void>): Promise<void> {
+  try {
+    await hacer()
+  } catch (e) {
+    if (!pasajero(e instanceof Error ? e.message : String(e))) throw e
+    await new Promise((ok) => setTimeout(ok, 5_000))
+    await hacer()
+  }
+}
+
+/** La última versión publicada, según la API de GitHub (no según su página, que a veces falla con 504). */
+async function ultimaVersion(): Promise<Release> {
+  const r = await fetch(API_ULTIMA, { headers: { 'User-Agent': `Recorte/${app.getVersion()}`, Accept: 'application/vnd.github+json' } })
+  if (!r.ok) throw new Error(`GitHub respondió ${r.status}`)
+  return (await r.json()) as Release
+}
+
+/**
+ * Windows: electron-updater, pero leyendo los archivos de la versión publicada en vez de la página «latest» de GitHub
+ * (que da 504 cuando GitHub anda mal, aunque los archivos respondan). Si la API tampoco contesta, los toma de
+ * `latest/download`, que lleva a los de la última versión.
+ */
+async function revisarWindows(): Promise<void> {
+  let carpeta = `${ARCHIVOS}/latest/download`
+  try {
+    const rel = await ultimaVersion()
+    if (rel.tag_name) {
+      carpeta = `${ARCHIVOS}/download/${rel.tag_name}`
+      notasApi = resumenNotas(rel.body)
+    }
+  } catch {
+    // Sin la API: se queda con latest/download.
+  }
+  autoUpdater.setFeedURL({ provider: 'generic', url: carpeta })
+  await autoUpdater.checkForUpdates()
+}
+
+/** Avisa del fallo y, si es pasajero, vuelve a mirar en unos minutos. */
+function fallo(e: unknown): void {
+  avisar({ fase: 'error', error: explicar(e) })
+  if (reintento || !pasajero(e instanceof Error ? e.message : String(e))) return
+  reintento = setTimeout(() => {
+    reintento = null
+    void buscarActualizacion()
+  }, REINTENTO)
 }
 
 /** La primera frase de las notas del release (vienen en HTML o Markdown). */
@@ -66,10 +133,9 @@ export async function buscarActualizacion(): Promise<EstadoActualizacion> {
   if (estado.fase === 'bajando' || estado.fase === 'lista' || estado.fase === 'manual') return estado
   try {
     avisar({ fase: 'buscando', error: undefined })
-    if (A_MANO) await revisarAMano()
-    else await autoUpdater.checkForUpdates()
+    await conReintento(A_MANO ? revisarAMano : revisarWindows)
   } catch (e) {
-    avisar({ fase: 'error', error: explicar(e) })
+    fallo(e)
   }
   return estado
 }
@@ -88,11 +154,7 @@ export function esMasNueva(nueva: string, actual: string): boolean {
  * no se publica.
  */
 async function revisarAMano(): Promise<void> {
-  const r = await fetch('https://api.github.com/repos/reninn34-arch/recorte/releases/latest', {
-    headers: { 'User-Agent': `Recorte/${app.getVersion()}`, Accept: 'application/vnd.github+json' }
-  })
-  if (!r.ok) throw new Error(`GitHub respondió ${r.status}`)
-  const rel = (await r.json()) as { tag_name?: string; body?: string; assets?: { name: string }[] }
+  const rel = await ultimaVersion()
   const nueva = (rel.tag_name ?? '').replace(/^v/, '')
   // El .dmg de esta Mac (chip Apple o Intel) y el latest-mac.yml con su huella: los de Mac se suben un rato después que
   // el de Windows, y hasta que estén no hay nada que ofrecer.
@@ -178,15 +240,16 @@ export function prepararActualizaciones(): void {
   }
   autoUpdater.autoDownload = !A_MANO
   autoUpdater.autoInstallOnAppQuit = !A_MANO
-  autoUpdater.on('update-available', (info) =>
-    avisar(A_MANO ? { fase: 'manual', nueva: info.version, notas: resumenNotas(info.releaseNotes) } : { fase: 'bajando', nueva: info.version, pct: 0, notas: resumenNotas(info.releaseNotes) })
-  )
+  autoUpdater.on('update-available', (info) => avisar({ fase: 'bajando', nueva: info.version, pct: 0, notas: resumenNotas(info.releaseNotes) ?? notasApi }))
   autoUpdater.on('update-not-available', () => avisar({ fase: 'al-dia', revisado: Date.now() }))
   autoUpdater.on('download-progress', (p) => avisar({ fase: 'bajando', pct: Math.round(p.percent) }))
   autoUpdater.on('update-downloaded', (info) =>
-    avisar({ fase: 'lista', nueva: info.version, pct: 100, notas: resumenNotas(info.releaseNotes) ?? estado.notas })
+    avisar({ fase: 'lista', nueva: info.version, pct: 100, notas: resumenNotas(info.releaseNotes) ?? notasApi ?? estado.notas })
   )
-  autoUpdater.on('error', (e) => avisar({ fase: 'error', error: explicar(e) }))
+  // El error de la búsqueda ya lo trata buscarActualizacion; aquí llegan los de la descarga.
+  autoUpdater.on('error', (e) => {
+    if (estado.fase !== 'buscando') fallo(e)
+  })
   setTimeout(() => void buscarActualizacion(), 8_000)
   setInterval(() => void buscarActualizacion(), CADA)
 }
