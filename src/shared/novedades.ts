@@ -40,6 +40,38 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.4.4',
+    fecha: '2026-11-27',
+    resumen: 'La portada, como en CapCut; los videos del agente se ven igual de bien en el editor, y el equipo ya no se congela al exportar.',
+    novedades: [
+      {
+        icono: 'image',
+        titulo: 'La portada, como en CapCut',
+        texto: 'Elige el momento en la tira de cuadros del video o sube una imagen de cualquier carpeta de tu equipo. Escribe el título, toca uno de sus estilos y arrástralo encima. La vista tiene la forma de tu video, sea vertical u horizontal.'
+      },
+      {
+        icono: 'palette',
+        titulo: 'El color, sin manchas',
+        texto: 'El oscurecido de los títulos del agente, las capas de ajuste y el color de cada clip se calculan con más precisión: lo oscuro y las texturas ya no salen a manchas ni a escalones, ni en el MP4 ni al reproducir en el monitor.'
+      },
+      {
+        icono: 'type',
+        titulo: 'Las letras del agente, iguales en el editor',
+        texto: 'Al pasar un video del agente al editor, cada título conserva su letra y su sombra suave, sin el borde grueso.'
+      },
+      {
+        icono: 'clock',
+        titulo: 'El equipo ya no se congela al exportar',
+        texto: 'Con muchos subtítulos o capas, la exportación usa la mitad de memoria y muchos menos recursos, con prioridad baja: puedes seguir usando el equipo mientras tanto.'
+      },
+      {
+        icono: 'settings',
+        titulo: 'Tu navegador para las cuentas',
+        texto: 'La voz de Google y Flow se abren en tu navegador predeterminado (Chrome, Edge, Brave, Vivaldi u Opera). Si es Firefox o Safari, se usa Edge o Chrome, y Ajustes te lo dice.'
+      }
+    ]
+  },
+  {
     version: '0.4.3',
     fecha: '2026-11-26',
     resumen: 'Portada para tus videos, como en CapCut, y dos arreglos: exportar con cientos de capas y volver a conectar tu cuenta de Google.',
