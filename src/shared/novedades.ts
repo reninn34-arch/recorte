@@ -40,6 +40,33 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.5.0',
+    fecha: '2026-11-27',
+    resumen: 'La portada se diseña como en CapCut: eliges la imagen y luego la editas a pantalla completa, con el título directo sobre ella.',
+    novedades: [
+      {
+        icono: 'image',
+        titulo: 'La portada, en dos pasos',
+        texto: 'Primero eliges la imagen: un momento del video en su tira de cuadros, una imagen de tu equipo o una foto de la biblioteca. Luego la diseñas a pantalla completa. Si el video ya tiene portada, se abre directo en el diseño.'
+      },
+      {
+        icono: 'type',
+        titulo: 'El título, sobre la portada',
+        texto: 'Tócalo para elegirlo: arrástralo (se queda en el centro solo), agrándalo desde las esquinas, ensánchalo desde los lados y gíralo con el tirador de arriba. Haz doble clic para escribir encima.'
+      },
+      {
+        icono: 'palette',
+        titulo: 'Letra y color, a la vista',
+        texto: 'Una barra encima del título cambia la letra (cada una se ve con su forma), el tamaño, la negrita, la cursiva, las mayúsculas, el color, el contorno y la caja. El color se toma con el gotero, de los colores del cuadro o de la paleta.'
+      },
+      {
+        icono: 'lapiz',
+        titulo: 'La portada en la línea de tiempo',
+        texto: 'El botón de la portada muestra su miniatura. Pasa el mouse encima y toca la × para quitarla sin abrir nada.'
+      }
+    ]
+  },
+  {
     version: '0.4.4',
     fecha: '2026-11-27',
     resumen: 'La portada, como en CapCut; los videos del agente se ven igual de bien en el editor, y el equipo ya no se congela al exportar.',
