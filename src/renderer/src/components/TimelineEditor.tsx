@@ -156,6 +156,7 @@ import { BarraZoom } from './BarraZoom'
 import { MuestraTransicion } from './MuestraTransicion'
 import { PortadaModal } from './PortadaModal'
 import { moverClave, moverClaveCapa, moverClaveRampa, moverClaveVolumen } from '../../../shared/timeline'
+import { ponerPortada } from '../../../shared/timeline'
 
 /**
  * La timeline editable: regla, pista de video magnética, pista de textos y la voz
@@ -2220,15 +2221,22 @@ export function TimelineEditor({
                     ))}
                   </span>
                 ) : p.id === 'video' && portadaDe ? (
-                  <button
-                    className={`tl-portada ${tl.portada?.archivo ? 'tiene' : ''}`}
-                    title={tl.portada?.archivo ? 'La portada del video: toca para cambiarla' : 'Poner una portada: un momento del video o una foto, con título'}
-                    onClick={() => setPortadaAbierta(true)}
-                    style={tl.portada?.archivo && urlDe ? { backgroundImage: `url("${urlDe(tl.portada.archivo)}")` } : undefined}
-                  >
-                    {!tl.portada?.archivo && <Icon name="image" size={13} />}
-                    <span>Portada</span>
-                  </button>
+                  <span className={`tl-portada ${tl.portada?.archivo ? 'tiene' : ''}`}>
+                    <button
+                      className="tl-portada-abrir"
+                      title={tl.portada?.archivo ? 'La portada del video: toca para editarla' : 'Poner una portada: un momento del video o una foto, con título'}
+                      onClick={() => setPortadaAbierta(true)}
+                      style={tl.portada?.archivo && urlDe ? { backgroundImage: `url("${urlDe(tl.portada.archivo)}")` } : undefined}
+                    >
+                      <Icon name="lapiz" size={12} />
+                      <span>Portada</span>
+                    </button>
+                    {tl.portada && (
+                      <button className="tl-portada-quitar" title="Quitar la portada" aria-label="Quitar la portada" onClick={() => historial.aplicar(ponerPortada(timeline, null))}>
+                        <Icon name="x" size={10} />
+                      </button>
+                    )}
+                  </span>
                 ) : (
                   <span className="tl-nombre-texto">{p.nombre}</span>
                 )}

@@ -1292,6 +1292,16 @@ export interface PortadaTL {
   y?: number
   /** Una caja de color detrás del título (como los estilos de CapCut), o nada. */
   caja?: string
+  /** Su giro, en grados (positivo: como las agujas del reloj). */
+  giro?: number
+  /** Hasta dónde llega una línea antes de partirse: fracción del ancho del video (sin él, el 88 %). */
+  ancho?: number
+  /** Cambian lo que trae la letra: negrita y cursiva; y todo en mayúsculas. */
+  negrita?: boolean
+  cursiva?: boolean
+  mayusculas?: boolean
+  /** Cómo se alinean las líneas dentro de su caja (sin él, al centro). */
+  alinear?: 'izquierda' | 'centro' | 'derecha'
   /** La imagen ya compuesta, dentro de la carpeta del proyecto. */
   archivo?: string
   /**
@@ -1325,6 +1335,12 @@ export function normalizarPortada(entrada: unknown, esFuente: (f: string) => boo
   if (color(x.color)) salida.color = color(x.color)
   if (color(x.contorno)) salida.contorno = color(x.contorno)
   if (color(x.caja)) salida.caja = color(x.caja)
+  const giro = num(x.giro, -180, 180)
+  if (giro) salida.giro = giro
+  const ancho = num(x.ancho, 0.1, 1)
+  if (ancho !== undefined) salida.ancho = ancho
+  for (const k of ['negrita', 'cursiva', 'mayusculas'] as const) if (typeof x[k] === 'boolean') salida[k] = x[k]
+  if (x.alinear === 'izquierda' || x.alinear === 'derecha') salida.alinear = x.alinear
   if (archivo) salida.archivo = archivo
   if (x.alInicio === true) salida.alInicio = true
   return salida

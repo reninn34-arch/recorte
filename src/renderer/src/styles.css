@@ -3884,61 +3884,157 @@ button.tl-tc-grande:hover { background: var(--panel-3); }
 .ed-insp .ed-transicion select { flex: 1; min-width: 0; }
 .ed-grupo > .btn { margin: 2px 0 4px 12px; width: calc(100% - 12px); }
 
-/* La portada (como la de CapCut): el botón en la cabecera de la pista de video y su ventana. */
-.tl-portada { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; width: 52px; height: 42px; flex-shrink: 0; margin-right: 2px; padding: 0; border: 1px dashed var(--line-2); border-radius: 5px; background: var(--panel-2) center / cover no-repeat; color: var(--muted); font-size: 9px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; cursor: pointer; overflow: hidden; }
-.tl-portada:hover { border-color: var(--accent); color: var(--text); }
-.tl-portada.tiene { border: 1px solid var(--line-2); justify-content: flex-end; }
-.tl-portada.tiene span { width: 100%; padding: 1px 0; background: rgba(0, 0, 0, 0.6); color: #fff; text-align: center; }
 .monitor-portada { position: absolute; inset: 0; margin: auto; z-index: 6; pointer-events: none; object-fit: fill; }
 .op-fila-texto .op-error { display: block; margin-top: 3px; color: var(--danger); font-size: 11.5px; }
 
-/* La ventana de la portada, como la de CapCut: la vista grande con la forma del video, la tira de cuadros debajo y el
-   título a la derecha. */
+/* La portada (como la de CapCut): el botón en la cabecera de la pista de video. Sin portada, un lápiz y «Portada»; con
+   ella, su miniatura entera con el lápiz encima y, al pasar el mouse, una × para quitarla sin abrir nada. */
+.tl-portada { position: relative; flex-shrink: 0; width: 52px; height: 42px; margin-right: 2px; }
+.tl-portada-abrir { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 100%; height: 100%; padding: 0; border: 1px solid var(--line-2); border-radius: 6px; background: var(--panel-3) center / cover no-repeat; color: var(--text); font-size: 10.5px; font-weight: 500; cursor: pointer; overflow: hidden; }
+.tl-portada-abrir:hover { border-color: var(--accent); }
+.tl-portada.tiene .tl-portada-abrir { justify-content: flex-end; gap: 0; padding-bottom: 3px; background-color: #000; box-shadow: inset 0 -22px 16px -6px rgba(0, 0, 0, 0.75); color: #fff; }
+.tl-portada.tiene .tl-portada-abrir svg { margin-bottom: 1px; }
+.tl-portada-quitar { position: absolute; top: 2px; right: 2px; z-index: 2; display: none; place-items: center; width: 16px; height: 16px; padding: 0; border: 1px solid var(--line-2); border-radius: 50%; background: var(--panel); color: var(--text); }
+.tl-portada:hover .tl-portada-quitar, .tl-portada-quitar:focus-visible { display: grid; }
+.tl-portada-quitar:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+
+/* Paso 1: elegir la imagen, en una ventana pequeña (la vista, las pestañas y la tira o la imagen subida). */
 .portada-fondo { position: fixed; inset: 0; z-index: 85; display: grid; place-items: center; padding: 20px; background: rgba(0, 0, 0, 0.66); }
-.portada-caja { display: flex; flex-direction: column; width: min(1120px, 100%); max-height: 100%; border: 1px solid var(--line-2); border-radius: 14px; background: var(--panel); box-shadow: 0 30px 80px #000d; overflow: hidden; }
-.portada-cabeza { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 14px; }
-.portada-cabeza .tl-dim { flex: 1; font-size: 12px; }
-.portada-cuerpo { display: flex; min-height: 0; overflow: hidden; }
-.portada-izq { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; padding: 14px 16px 16px; background: var(--bg); }
-.portada-modos { display: flex; justify-content: center; gap: 4px; padding: 3px; margin: 0 auto; border-radius: 9px; background: var(--panel-2); }
-.portada-modos button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border: none; border-radius: 7px; background: none; color: var(--muted); font-size: 12.5px; font-weight: 600; }
-.portada-modos button:hover { color: var(--text); }
-.portada-modos button.is-on { background: var(--panel-3); color: var(--accent); }
-.portada-escenario { display: flex; align-items: center; justify-content: center; height: min(56vh, 520px); border-radius: 10px; background: repeating-conic-gradient(#15170f 0% 25%, #101209 0% 50%) 0 0 / 22px 22px; }
-.portada-marco { position: relative; display: flex; line-height: 0; box-shadow: 0 8px 30px #000a; }
-.portada-marco canvas { display: block; width: auto; height: auto; max-width: min(calc(100vw - 420px), 760px); max-height: min(56vh, 520px); border-radius: 6px; cursor: default; touch-action: none; }
-.portada-marco canvas.se-encuadra { cursor: grab; }
-.portada-marco canvas:active { cursor: grabbing; }
-.portada-cargando { position: absolute; inset: 0; display: grid; place-items: center; border-radius: 6px; background: rgba(0, 0, 0, 0.5); color: var(--text); font-size: 12.5px; line-height: 1.4; pointer-events: none; }
-.portada-tira-caja { display: flex; flex-direction: column; gap: 6px; }
-.portada-tira { position: relative; display: flex; height: 64px; border-radius: 7px; overflow: hidden; background: var(--panel-2); cursor: ew-resize; user-select: none; touch-action: none; }
-.portada-tira img { flex: 1; min-width: 0; height: 100%; object-fit: cover; pointer-events: none; }
-.portada-tira .tl-dim { margin: auto; font-size: 12px; }
-.portada-tira-marca { position: absolute; top: 0; bottom: 0; width: 46px; margin-left: -23px; border: 3px solid #fff; border-radius: 6px; box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.42), 0 2px 10px #000; pointer-events: none; }
-.portada-tira-pie { display: flex; align-items: center; justify-content: space-between; }
-.portada-tc { font-family: var(--mono); font-size: 12.5px; color: var(--blue); }
-.portada-subir { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 0 2px; }
-.portada-subir .btn { display: inline-flex; align-items: center; gap: 7px; }
+.pe-caja { display: flex; flex-direction: column; width: min(680px, 100%); max-height: 100%; border: 1px solid var(--line-2); border-radius: 12px; background: var(--panel); box-shadow: 0 30px 80px #000d; overflow: hidden; }
+.pe-cabeza { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.pe-vista { display: flex; align-items: center; justify-content: center; height: min(52vh, 400px); padding: 16px; }
+.pe-vista .portada-marco canvas { max-height: calc(min(52vh, 400px) - 32px); max-width: 100%; }
+.pe-subir { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 100%; max-width: 100%; padding: 16px; border: 1.5px dashed var(--line-2); border-radius: 10px; background: var(--panel-2); color: var(--text); text-align: center; }
+.pe-subir:hover { border-color: var(--accent); }
+.pe-subir b { font-size: 13px; font-weight: 600; }
+.pe-subir small { color: var(--dim); font-size: 11.5px; }
+.pe-mas { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--accent); color: var(--ink); }
+.pe-modos { display: flex; gap: 2px; align-self: center; padding: 3px; border-radius: 8px; background: var(--panel-2); }
+.pe-modos button { padding: 6px 14px; border: none; border-radius: 6px; background: none; color: var(--muted); font-size: 12.5px; font-weight: 500; }
+.pe-modos button:hover { color: var(--text); }
+.pe-modos button.is-on { background: var(--panel-3); color: var(--text); box-shadow: 0 1px 2px #0006; }
+.pe-abajo { min-height: 74px; padding: 14px 16px 4px; }
+.pe-archivo { display: flex; align-items: center; justify-content: center; gap: 10px; padding-top: 10px; font-size: 12px; }
+.pe-error { padding: 0 16px; }
+.pe-pie { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 10px 16px; border-top: 1px solid var(--line); }
+
+.portada-marco { position: relative; display: flex; line-height: 0; }
+.portada-marco canvas { display: block; width: auto; height: auto; border-radius: 4px; }
+.portada-cargando { position: absolute; inset: 0; display: grid; place-items: center; border-radius: 4px; background: rgba(0, 0, 0, 0.5); color: var(--text); font-size: 12.5px; line-height: 1.4; pointer-events: none; }
+
+/* La tira de cuadros, a todo lo ancho y sin huecos; el momento se marca con una línea fina y un tirador arriba. */
+.portada-tira { position: relative; height: 46px; margin-top: 8px; cursor: ew-resize; user-select: none; touch-action: none; }
+.portada-tira-cuadros { position: absolute; inset: 0; display: flex; border-radius: 4px; overflow: hidden; background: var(--panel-2); }
+.portada-tira-cuadros img { flex: 1; min-width: 0; height: 100%; object-fit: cover; pointer-events: none; }
+.portada-tira-cuadros .tl-dim { margin: auto; font-size: 12px; }
+.portada-tira-marca { position: absolute; top: -4px; bottom: -2px; width: 2px; margin-left: -1px; border-radius: 1px; background: #fff; box-shadow: 0 0 4px #000a; pointer-events: none; }
+.portada-tira-marca::before { content: ''; position: absolute; top: -9px; left: 50%; width: 12px; height: 14px; margin-left: -6px; border-radius: 6px 6px 6px 6px / 6px 6px 8px 8px; background: #fff; box-shadow: 0 1px 4px #000a; }
+.portada-tira-marca i { position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%); color: var(--dim); font-family: var(--mono); font-size: 10.5px; font-style: normal; line-height: 1; white-space: nowrap; }
+
 .portada-fotos { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
-.portada-fotos button { flex: 0 0 auto; width: 74px; height: 74px; padding: 0; border: 2px solid transparent; border-radius: 7px; overflow: hidden; background: var(--panel-2); }
+.portada-fotos button { flex: 0 0 auto; width: 64px; height: 64px; padding: 0; border: 2px solid transparent; border-radius: 7px; overflow: hidden; background: var(--panel-2); }
 .portada-fotos button.is-on { border-color: var(--accent); }
 .portada-fotos img { width: 100%; height: 100%; object-fit: cover; }
-.portada-der { display: flex; flex-direction: column; gap: 10px; width: 320px; flex-shrink: 0; padding: 14px 16px 16px; border-left: 1px solid var(--line); overflow-y: auto; }
-.portada-texto { width: 100%; resize: vertical; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--panel-2); color: var(--text); font: inherit; font-size: 13px; }
-.portada-texto:focus { outline: none; border-color: var(--accent); }
-.portada-estilos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-.portada-estilos button { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 4px 6px; border: 1px solid var(--line); border-radius: 8px; background: #2a2d33; color: var(--muted); }
-.portada-estilos button span { font-size: 17px; line-height: 1.2; }
-.portada-estilos button small { font-size: 10px; }
-.portada-estilos button:hover { border-color: var(--line-2); color: var(--text); }
-.portada-estilos button.is-on { border-color: var(--accent); color: var(--accent); }
-.portada-der select { width: 100%; padding: 6px 8px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--panel-2); color: var(--text); font: inherit; font-size: 12.5px; }
-.portada-der .ed-campo { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--muted); }
-.portada-colores { display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 12px; color: var(--muted); }
-.portada-colores label { display: flex; align-items: center; gap: 5px; }
-.portada-colores input[type='color'] { width: 24px; height: 20px; padding: 0; border: 1px solid var(--line-2); border-radius: 4px; background: none; }
-.portada-posicion { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11.5px; }
-.portada-inicio { display: flex; gap: 8px; align-items: flex-start; padding-top: 4px; border-top: 1px solid var(--line); font-size: 12px; color: var(--text); }
+.portada-inicio { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; color: var(--text); }
 .portada-inicio small { display: block; color: var(--dim); font-size: 11px; }
 .portada-error { margin: 0; color: var(--danger); font-size: 12px; }
-.portada-botones { display: flex; align-items: center; gap: 6px; }
+
+/* Paso 2: el diseño, a pantalla completa. A la izquierda el texto y la imagen; al centro la vista, con la barra del
+   título flotando encima cuando está elegido; abajo guardar o cancelar. */
+.pd-fondo { position: fixed; inset: 0; z-index: 85; display: flex; flex-direction: column; background: #0a0b09; color: var(--text); }
+.pd-cabeza { display: flex; align-items: baseline; gap: 10px; padding: 12px 18px; font-size: 13.5px; }
+.pd-cabeza .tl-dim { font-size: 12px; }
+.pd-cuerpo { flex: 1; min-height: 0; display: flex; gap: 12px; padding: 0 12px; }
+.pd-panel { display: flex; flex-direction: column; gap: 8px; width: 248px; flex-shrink: 0; align-self: flex-start; max-height: 100%; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); overflow-y: auto; }
+.pd-titulo { font-size: 13.5px; font-weight: 600; }
+.pd-titulo:not(:first-child) { margin-top: 10px; }
+.pd-sub { margin-top: 4px; color: var(--dim); font-size: 11.5px; }
+.pd-anadir { padding: 11px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--panel-3); color: var(--text); font-size: 18px; letter-spacing: 0.01em; }
+.pd-anadir:hover { border-color: var(--accent); }
+.pd-estilos { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.pd-estilos button { display: grid; place-items: center; height: 58px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: #2b2f27 linear-gradient(160deg, #3b4234, #1b1e18); overflow: hidden; }
+.pd-estilos button span { font-size: 19px; line-height: 1.25; }
+.pd-estilos button:hover { border-color: var(--line-2); }
+.pd-estilos button.is-on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.pd-imagen { display: flex; align-items: center; gap: 10px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--text); text-align: left; }
+.pd-imagen:hover { border-color: var(--accent); }
+.pd-imagen img { width: 40px; height: 54px; flex-shrink: 0; border-radius: 4px; object-fit: cover; }
+.pd-imagen b { display: block; font-size: 12.5px; font-weight: 600; }
+.pd-imagen small { color: var(--dim); font-size: 11px; }
+
+.pd-escenario { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 64px 12px 52px; }
+.pd-marco { position: relative; display: flex; line-height: 0; box-shadow: 0 10px 40px #000c; }
+.pd-marco canvas { display: block; width: auto; height: auto; max-width: calc(100vw - 340px); max-height: calc(100vh - 250px); }
+.pd-capa { position: absolute; inset: 0; touch-action: none; }
+.pd-capa.se-encuadra { cursor: grab; }
+.pd-capa.se-encuadra:active { cursor: grabbing; }
+.pd-pista { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); width: min(420px, 90%); margin: 0; text-align: center; font-size: 12px; line-height: 1.5; }
+.pd-guia { position: absolute; z-index: 1; pointer-events: none; background: #ff4fd8; }
+.pd-guia.v { top: 0; bottom: 0; left: 50%; width: 1px; }
+.pd-guia.h { left: 0; right: 0; top: 50%; height: 1px; }
+
+/* El título elegido: un recuadro fino del color de acento, esquinas que lo agrandan, lados que cambian su ancho y un
+   tirador de girar arriba. */
+.pd-sel { position: absolute; z-index: 2; outline: 1.5px solid var(--accent); outline-offset: 0; cursor: move; transform-origin: center; }
+.pd-tir { position: absolute; z-index: 1; background: #fff; box-shadow: 0 0 0 1px #0005, 0 1px 3px #0008; }
+.pd-tir.esquina { width: 11px; height: 11px; border-radius: 50%; }
+.pd-tir.nw { top: -6px; left: -6px; cursor: nwse-resize; }
+.pd-tir.ne { top: -6px; right: -6px; cursor: nesw-resize; }
+.pd-tir.sw { bottom: -6px; left: -6px; cursor: nesw-resize; }
+.pd-tir.se { bottom: -6px; right: -6px; cursor: nwse-resize; }
+.pd-tir.lado { top: 50%; width: 6px; height: 18px; margin-top: -9px; border-radius: 3px; cursor: ew-resize; }
+.pd-tir.w { left: -3.5px; }
+.pd-tir.e { right: -3.5px; }
+.pd-girar { position: absolute; top: -30px; left: 50%; display: grid; place-items: center; width: 22px; height: 22px; margin-left: -11px; border-radius: 50%; background: #fff; color: #111; box-shadow: 0 1px 4px #0009; cursor: grab; }
+.pd-girar:active { cursor: grabbing; }
+.pd-escribir { position: absolute; z-index: 3; margin: 0; border: none; outline: 1.5px dashed var(--accent); border-radius: 2px; overflow: hidden; resize: none; caret-color: var(--accent); white-space: pre-wrap; word-break: normal; }
+
+/* La barra del título, flotando sobre la vista. */
+.pd-barra { position: absolute; top: 12px; left: 50%; z-index: 5; display: flex; align-items: center; gap: 2px; padding: 5px 6px; transform: translateX(-50%); border: 1px solid var(--line-2); border-radius: 10px; background: var(--panel); box-shadow: 0 8px 24px #000b; white-space: nowrap; }
+.pd-sep { width: 1px; height: 20px; margin: 0 4px; background: var(--line-2); }
+.pt-boton { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 30px; height: 30px; padding: 0 7px; border: none; border-radius: 7px; background: none; color: var(--text); }
+.pt-boton:hover { background: var(--panel-3); }
+.pt-boton.is-on { background: var(--panel-3); color: var(--accent); }
+.pd-letra { min-width: 132px; justify-content: space-between; padding: 0 10px; font-size: 13.5px; }
+.pd-letra svg { transform: rotate(90deg); opacity: 0.7; }
+.pd-tam { display: flex; align-items: center; }
+.pd-tam .pt-boton { min-width: 24px; padding: 0 4px; }
+.pd-tam input { width: 42px; height: 26px; padding: 0; border: 1px solid var(--line-2); border-radius: 6px; background: var(--panel-2); text-align: center; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.pd-color { width: 18px; height: 18px; border-radius: 50%; box-shadow: inset 0 0 0 1px #fff5, 0 0 0 1px #0008; }
+
+.pt-desp { position: relative; }
+.pt-pop { position: absolute; top: calc(100% + 8px); left: 50%; z-index: 10; max-height: min(70vh, 520px); padding: 10px; transform: translateX(-50%); border: 1px solid var(--line-2); border-radius: 10px; background: var(--panel); box-shadow: 0 14px 40px #000c; overflow-y: auto; white-space: normal; }
+.pt-sub { display: block; margin: 8px 0 6px; color: var(--dim); font-size: 11px; }
+.pt-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.pt-chips button { padding: 4px 9px; border: 1px solid var(--line-2); border-radius: 99px; background: none; color: var(--muted); font-size: 11.5px; }
+.pt-chips button.is-on { border-color: var(--text); color: var(--text); }
+.pt-letras-lista { display: flex; flex-direction: column; }
+.pt-letras-lista button { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border: none; border-radius: 6px; background: none; color: var(--text); font-size: 17px; text-align: left; }
+.pt-letras-lista button:hover { background: var(--panel-3); }
+.pt-letras-lista button.is-on { color: var(--accent); }
+.pt-color-fila { display: flex; align-items: center; gap: 6px; }
+.pt-hex { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--panel-2); font-family: var(--mono); font-size: 12px; }
+.pt-muestras { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.pt-muestra { display: block; width: 100%; aspect-ratio: 1; padding: 0; border: none; border-radius: 6px; box-shadow: inset 0 0 0 1px #ffffff22; cursor: pointer; }
+.pt-muestra:hover { transform: scale(1.08); }
+.pt-muestra.is-on { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px var(--accent); }
+.pt-muestra.grande { width: 28px; height: 28px; flex-shrink: 0; cursor: default; }
+.pt-muestra.grande:hover { transform: none; }
+.pt-muestra.otro { position: relative; width: 28px; height: 28px; flex-shrink: 0; background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); overflow: hidden; }
+.pt-muestra.otro input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.pd-efectos { display: flex; flex-direction: column; gap: 10px; }
+.pd-efecto + .pd-efecto { padding-top: 10px; border-top: 1px solid var(--line); }
+.pd-efecto-cabeza { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; font-weight: 600; }
+.pd-efecto .pt-color { margin-top: 6px; }
+.pd-posicion-rejilla { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.pd-posicion-rejilla button { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border: none; border-radius: 6px; background: var(--panel-2); color: var(--text); font-size: 12px; }
+.pd-posicion-rejilla button:hover { background: var(--panel-3); }
+.pd-giro { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.pd-giro input { width: 56px; height: 28px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--panel-2); }
+.pd-giro .btn { margin-left: auto; }
+
+.pd-pie { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--line); background: var(--panel); }
+.pd-preguntar { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); }
+.pd-preguntar-caja { display: flex; flex-direction: column; gap: 6px; width: min(360px, calc(100% - 32px)); padding: 18px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--panel); box-shadow: 0 20px 60px #000d; font-size: 14px; }
+.pd-preguntar-caja .tl-dim { font-size: 12.5px; }
+.pd-preguntar-botones { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }

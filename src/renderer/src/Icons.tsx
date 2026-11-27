@@ -57,6 +57,24 @@ import {
   ChevronsLeftRight,
   SlidersVertical,
   Camera,
+  Pencil,
+  Bold,
+  Italic,
+  CaseSensitive,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  RotateCw,
+  Pipette,
+  AlignStartHorizontal,
+  AlignCenterHorizontal,
+  AlignEndHorizontal,
+  AlignStartVertical,
+  AlignCenterVertical,
+  AlignEndVertical,
+  Minus,
+  Wand2,
+  Move,
   type LucideIcon
 } from 'lucide-react'
 
@@ -124,7 +142,25 @@ const ICONOS = {
   deslizar: MoveHorizontal,
   desplazar: ChevronsLeftRight,
   mezclador: SlidersVertical,
-  camara: Camera
+  camara: Camera,
+  lapiz: Pencil,
+  negrita: Bold,
+  cursiva: Italic,
+  mayusculas: CaseSensitive,
+  'alinear-izq': AlignLeft,
+  'alinear-centro': AlignCenter,
+  'alinear-der': AlignRight,
+  girar: RotateCw,
+  gotero: Pipette,
+  'pagina-arriba': AlignStartHorizontal,
+  'pagina-medio': AlignCenterHorizontal,
+  'pagina-abajo': AlignEndHorizontal,
+  'pagina-izq': AlignStartVertical,
+  'pagina-centro': AlignCenterVertical,
+  'pagina-der': AlignEndVertical,
+  menos: Minus,
+  efectos: Wand2,
+  mover: Move
 } satisfies Record<string, LucideIcon>
 
 export type IconName = keyof typeof ICONOS
