@@ -31,6 +31,8 @@ export interface OpcionesExport {
   normalizar?: boolean
   /** Solo el sonido de la mezcla final, en WAV (sin pérdida) o MP3 (liviano): sin video. */
   soloAudio?: 'wav' | 'mp3'
+  /** Un trabajo de fondo (la vista previa del monitor): FFmpeg con la prioridad más baja, para no frenar el equipo. */
+  segundoPlano?: boolean
 }
 
 export interface EstadoAgente {
@@ -146,12 +148,17 @@ export interface ConexionResultado {
   pendiente?: boolean
 }
 
-/** La voz con la cuenta de Google (AI Studio abierto en Edge, manejado por la app). */
+/** La voz con la cuenta de Google (AI Studio abierto en el navegador del usuario, manejado por la app). */
 export interface EstadoVozGoogle {
   correo: string | null
   conectando: boolean
-  /** Navegador que se usa para entrar (hoy siempre Edge). */
+  /** El programa del navegador con que se entra (null si no hay ninguno que sirva). */
   navegador: string | null
+  /** Su nombre (Chrome, Edge, Brave…) y si es el predeterminado del usuario. */
+  nombreNavegador?: string
+  predeterminado?: boolean
+  /** El predeterminado no se puede usar (Firefox, Safari): cuál es. */
+  noCompatible?: string
   error?: string
 }
 
@@ -542,6 +549,10 @@ export interface RecorteApi {
   portadaCuadro: (id: string, timeline: Timeline, segundo: number) => Promise<{ ok: boolean; archivo?: string; error?: string }>
   /** Guarda la portada ya compuesta (un PNG en data URL) y devuelve su archivo en el proyecto. */
   portadaGuardar: (id: string, datos: string) => Promise<{ ok: boolean; archivo?: string; error?: string }>
+  /** Elige una imagen de una carpeta del usuario y la copia a `portada/` del proyecto (sin pasar por la biblioteca). */
+  portadaImportar: (id: string) => Promise<{ ok: boolean; archivo?: string; nombre?: string; error?: string }>
+  /** Cuadros pequeños a lo largo del video, para elegir el momento de la portada. */
+  portadaTira: (id: string, timeline: Timeline, cuantos: number) => Promise<{ ok: boolean; cuadros: { t: number; archivo: string }[] }>
   onVistaLista: (cb: (e: { id: string; clave: string }) => void) => () => void
   /** Progreso de una herramienta que se baja o se instala desde Ajustes. */
   onHerramienta: (cb: (p: { id: string; pct: number; texto: string }) => void) => () => void

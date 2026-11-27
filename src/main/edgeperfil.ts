@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer, type AddressInfo } from 'node:net'
 import { homedir } from 'node:os'
@@ -21,45 +21,142 @@ const espera = (ms: number) => new Promise((r) => setTimeout(r, ms))
 /** Lo que el Edge compartido sigue abierto sin nadie: el kit pide imágenes, clips y frases seguidas. */
 export const GRACIA_MS = 90_000
 
-/** Dónde puede estar el navegador en cada sistema: primero Microsoft Edge y, si no, Google Chrome (se manejan igual). */
-function candidatosNavegador(): { exe: string; nombre: 'Edge' | 'Chrome' }[] {
+/**
+ * Los navegadores que Recorte puede manejar por dentro (todos son Chromium: se abren con un perfil propio y se manejan
+ * por CDP). Firefox y Safari no dejan, así que con ellos se usa Edge o Chrome.
+ */
+const CHROMIUM: { id: string; nombre: string; progId: RegExp; exe: RegExp; bundle: string; mac: string }[] = [
+  { id: 'edge', nombre: 'Edge', progId: /^MSEdge/i, exe: /msedge(\.exe)?$/i, bundle: 'com.microsoft.edgemac', mac: 'Microsoft Edge' },
+  { id: 'chrome', nombre: 'Chrome', progId: /^ChromeHTML/i, exe: /chrome(\.exe)?$|google-chrome/i, bundle: 'com.google.chrome', mac: 'Google Chrome' },
+  { id: 'brave', nombre: 'Brave', progId: /^Brave/i, exe: /brave(\.exe)?$|brave-browser/i, bundle: 'com.brave.browser', mac: 'Brave Browser' },
+  { id: 'vivaldi', nombre: 'Vivaldi', progId: /^Vivaldi/i, exe: /vivaldi(\.exe)?$/i, bundle: 'com.vivaldi.vivaldi', mac: 'Vivaldi' },
+  { id: 'opera', nombre: 'Opera', progId: /^Opera/i, exe: /opera(\.exe)?$|launcher\.exe$/i, bundle: 'com.operasoftware.opera', mac: 'Opera' },
+  { id: 'chromium', nombre: 'Chromium', progId: /^Chromium/i, exe: /chromium(-browser)?(\.exe)?$/i, bundle: 'org.chromium.chromium', mac: 'Chromium' }
+]
+
+export interface Navegador {
+  exe: string
+  /** Su nombre para el usuario (Chrome, Edge, Brave…). */
+  nombre: string
+  id: string
+  /** Es el navegador predeterminado del usuario. */
+  predeterminado: boolean
+  /** El predeterminado no se puede usar (Firefox, Safari): cuál es, para decírselo. */
+  noCompatible?: string
+}
+
+/** Lo que dice una orden del sistema (vacío si falla). */
+function orden(exe: string, args: string[]): string {
+  try {
+    const r = spawnSync(exe, args, { encoding: 'utf8', windowsHide: true, timeout: 5000 })
+    return r.status === 0 ? (r.stdout ?? '') : ''
+  } catch {
+    return ''
+  }
+}
+
+/** El navegador predeterminado del usuario: su programa y su identificador (ProgId, bundle o .desktop). */
+function predeterminado(): { exe: string | null; marca: string; nombre: string } | null {
+  if (process.platform === 'win32') {
+    const elegido = orden('reg', ['query', 'HKCU\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice', '/v', 'ProgId'])
+    // RECORTE_PROGID_PRUEBA: para las pruebas, como si el predeterminado fuera otro (ChromeHTML, FirefoxURL…).
+    const progId = process.env.RECORTE_PROGID_PRUEBA || elegido.match(/ProgId\s+REG_SZ\s+(\S+)/i)?.[1]
+    if (!progId) return null
+    const comando = orden('reg', ['query', `HKCR\\${progId}\\shell\\open\\command`, '/ve'])
+    const linea = comando.match(/REG_(?:EXPAND_)?SZ\s+(.+)$/im)?.[1]?.trim() ?? ''
+    const exe = (linea.match(/^"([^"]+)"/)?.[1] ?? linea.split(/\s+/)[0] ?? '').replace(/%([^%]+)%/g, (_, v: string) => process.env[v] ?? '')
+    const nombre = /firefox/i.test(progId) ? 'Firefox' : progId.replace(/(HTML?|URL|\.\w+)$/i, '').replace(/-.*$/, '')
+    return { exe: exe && existsSync(exe) ? exe : null, marca: progId, nombre }
+  }
+  if (process.platform === 'darwin') {
+    const plist = join(homedir(), 'Library', 'Preferences', 'com.apple.LaunchServices', 'com.apple.launchservices.secure.plist')
+    if (!existsSync(plist)) return { exe: null, marca: 'com.apple.safari', nombre: 'Safari' }
+    try {
+      const datos = JSON.parse(orden('plutil', ['-convert', 'json', '-o', '-', plist]) || '{}') as { LSHandlers?: { LSHandlerURLScheme?: string; LSHandlerRoleAll?: string }[] }
+      const bundle = datos.LSHandlers?.find((h) => h.LSHandlerURLScheme === 'https')?.LSHandlerRoleAll ?? 'com.apple.safari'
+      const app = orden('mdfind', [`kMDItemCFBundleIdentifier == '${bundle.replace(/'/g, '')}'`]).split('\n').find((x) => x.endsWith('.app'))
+      const conocido = CHROMIUM.find((c) => c.bundle === bundle.toLowerCase())
+      const exe = app && conocido ? join(app, 'Contents', 'MacOS', conocido.mac) : null
+      return { exe: exe && existsSync(exe) ? exe : null, marca: bundle, nombre: conocido?.nombre ?? (/safari/i.test(bundle) ? 'Safari' : /firefox/i.test(bundle) ? 'Firefox' : bundle) }
+    } catch {
+      return null
+    }
+  }
+  const escritorio = orden('xdg-settings', ['get', 'default-web-browser']).trim()
+  if (!escritorio) return null
+  const conocido = CHROMIUM.find((c) => c.exe.test(escritorio.replace(/\.desktop$/, '')))
+  const exe = conocido ? ['/usr/bin/', '/snap/bin/'].map((d) => d + escritorio.replace(/\.desktop$/, '')).find((x) => existsSync(x)) ?? null : null
+  return { exe, marca: escritorio, nombre: conocido?.nombre ?? escritorio.replace(/\.desktop$/, '') }
+}
+
+/** Dónde puede estar Edge o Chrome, por si el predeterminado no se puede usar. */
+function candidatosNavegador(): { exe: string; id: 'edge' | 'chrome'; nombre: 'Edge' | 'Chrome' }[] {
   if (process.platform === 'win32') {
     const bases = [process.env['ProgramFiles(x86)'], process.env.ProgramFiles].filter((b): b is string => Boolean(b))
     return [
-      ...bases.map((b) => ({ exe: join(b, 'Microsoft', 'Edge', 'Application', 'msedge.exe'), nombre: 'Edge' as const })),
-      ...[...bases, process.env.LOCALAPPDATA ?? ''].filter(Boolean).map((b) => ({ exe: join(b, 'Google', 'Chrome', 'Application', 'chrome.exe'), nombre: 'Chrome' as const }))
+      ...bases.map((b) => ({ exe: join(b, 'Microsoft', 'Edge', 'Application', 'msedge.exe'), id: 'edge' as const, nombre: 'Edge' as const })),
+      ...[...bases, process.env.LOCALAPPDATA ?? ''].filter(Boolean).map((b) => ({ exe: join(b, 'Google', 'Chrome', 'Application', 'chrome.exe'), id: 'chrome' as const, nombre: 'Chrome' as const }))
     ]
   }
   if (process.platform === 'darwin') {
     const apps = ['/Applications', join(homedir(), 'Applications')]
     return [
-      ...apps.map((a) => ({ exe: join(a, 'Microsoft Edge.app', 'Contents', 'MacOS', 'Microsoft Edge'), nombre: 'Edge' as const })),
-      ...apps.map((a) => ({ exe: join(a, 'Google Chrome.app', 'Contents', 'MacOS', 'Google Chrome'), nombre: 'Chrome' as const }))
+      ...apps.map((a) => ({ exe: join(a, 'Microsoft Edge.app', 'Contents', 'MacOS', 'Microsoft Edge'), id: 'edge' as const, nombre: 'Edge' as const })),
+      ...apps.map((a) => ({ exe: join(a, 'Google Chrome.app', 'Contents', 'MacOS', 'Google Chrome'), id: 'chrome' as const, nombre: 'Chrome' as const }))
     ]
   }
   return [
-    { exe: '/usr/bin/microsoft-edge', nombre: 'Edge' },
-    { exe: '/usr/bin/google-chrome', nombre: 'Chrome' },
-    { exe: '/usr/bin/chromium', nombre: 'Chrome' }
+    { exe: '/usr/bin/microsoft-edge', id: 'edge', nombre: 'Edge' },
+    { exe: '/usr/bin/google-chrome', id: 'chrome', nombre: 'Chrome' },
+    { exe: '/usr/bin/chromium', id: 'chrome', nombre: 'Chrome' }
   ]
 }
 
-/** El navegador para entrar con Google (Edge o Chrome) y su nombre, o null si no hay ninguno. */
-export function navegadorGoogle(): { exe: string; nombre: 'Edge' | 'Chrome' } | null {
-  return candidatosNavegador().find((c) => existsSync(c.exe)) ?? null
+let recordado: { cuando: number; nav: Navegador | null } | null = null
+/**
+ * El navegador para entrar con las cuentas (Google, Flow): el predeterminado del usuario si es de los que Recorte
+ * puede manejar (Chrome, Edge, Brave, Vivaldi, Opera, Chromium); si no (Firefox, Safari), Edge o Chrome. Se mira de
+ * nuevo cada medio minuto, por si lo cambia.
+ */
+export function navegadorGoogle(): Navegador | null {
+  if (recordado && Date.now() - recordado.cuando < 30_000) return recordado.nav
+  let nav: Navegador | null = null
+  const suyo = predeterminado()
+  const compatible = suyo && CHROMIUM.find((c) => c.progId.test(suyo.marca) || c.bundle === suyo.marca.toLowerCase() || (suyo.exe ? c.exe.test(suyo.exe) : false))
+  if (suyo?.exe && compatible) nav = { exe: suyo.exe, nombre: compatible.nombre, id: compatible.id, predeterminado: true }
+  else {
+    const otro = candidatosNavegador().find((c) => existsSync(c.exe))
+    if (otro) nav = { ...otro, predeterminado: false, ...(suyo && !compatible ? { noCompatible: suyo.nombre } : {}) }
+  }
+  recordado = { cuando: Date.now(), nav }
+  return nav
 }
 
-/** El programa del navegador para entrar con Google: Edge o, si no está, Chrome. (El nombre viene de cuando era solo Edge.) */
+/** El programa del navegador para entrar con las cuentas. (El nombre viene de cuando era solo Edge.) */
 export function edgeExe(): string | null {
   return navegadorGoogle()?.exe ?? null
+}
+
+/**
+ * La carpeta del perfil de Recorte para este navegador: cada navegador tiene la suya (un perfil de uno no se abre
+ * bien en otro). La de Edge se queda donde estaba, para no perder la sesión de quien ya entró.
+ */
+export function carpetaPerfil(base: string): string {
+  const id = navegadorGoogle()?.id ?? 'edge'
+  return id === 'edge' ? base : `${base}-${id}`
 }
 
 /** El puerto fijo del Edge de la voz (`vozgoogle.ts`). */
 export const PUERTO_VOZ = 9336
 let deLaVoz: EdgePerfil | null = null
+let rutaDeLaVoz = ''
 /** El perfil de la cuenta de la voz: lo comparten la voz y Flow, en el mismo turno. */
 export function perfilDeLaVoz(): EdgePerfil {
-  deLaVoz ??= edgePerfil(join(app.getPath('userData'), 'voz', 'perfil'), PUERTO_VOZ)
+  const ruta = carpetaPerfil(join(app.getPath('userData'), 'voz', 'perfil'))
+  if (!deLaVoz || rutaDeLaVoz !== ruta) {
+    deLaVoz = edgePerfil(ruta, PUERTO_VOZ)
+    rutaDeLaVoz = ruta
+  }
   return deLaVoz
 }
 

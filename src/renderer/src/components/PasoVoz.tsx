@@ -249,7 +249,7 @@ export function PasoVoz({ creacion, ocupado, control }: { creacion: Creacion; oc
           <div className="voz-clave">
             <div className="voz-google">
               <p>
-                Entra con tu cuenta de Google y Recorte usa AI Studio por ti, sin llaves. Se abre Edge o Chrome para que inicies
+                Entra con tu cuenta de Google y Recorte usa AI Studio por ti, sin llaves. Se abre {control.google?.nombreNavegador ?? 'tu navegador'} para que inicies
                 sesión: Google no deja entrar desde dentro de las apps.
               </p>
               <button

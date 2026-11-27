@@ -11,7 +11,8 @@ import type { Project } from './types'
 /** Lo que dura cada tramo, en segundos. */
 export const LARGO_VISTA = 4
 /** Sube si cambia cómo se renderiza (y así no se usan los tramos viejos). */
-const VERSION_VISTA = 2
+// 3: los tramos se hacen a 1080 y con calidad alta (y el color a 16 bits); los de antes se rehacen.
+const VERSION_VISTA = 3
 
 export interface TramoVista {
   desde: number

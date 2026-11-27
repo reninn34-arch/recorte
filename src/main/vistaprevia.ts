@@ -80,7 +80,7 @@ export class VistaPrevia {
     delete base.subtitulosHF
     const tmp = mkdtempSync(join(tmpdir(), 'recorte-cuadro-'))
     try {
-      const r = await exportarTimeline(proyecto, base, this.proyectos.carpeta(id), { formato: 'original', subtitulos: false, desde: t, hasta: t + Math.max(0.12, 3 / fps), resolucion: '720', calidad: 'alta' }, () => {}, tmp)
+      const r = await exportarTimeline(proyecto, base, this.proyectos.carpeta(id), { formato: 'original', subtitulos: false, desde: t, hasta: t + Math.max(0.12, 3 / fps), resolucion: '720', calidad: 'alta', segundoPlano: true }, () => {}, tmp)
       if (!r.ok || !r.output || !existsSync(r.output)) return null
       mkdirSync(this.carpeta(id), { recursive: true })
       const codigo = await new Promise<number | null>((ok) => {
@@ -125,7 +125,7 @@ export class VistaPrevia {
     const tmp = mkdtempSync(join(tmpdir(), 'recorte-salida-'))
     try {
       const desde = Math.max(0, fin - Math.max(0.2, 4 / fps))
-      const r = await exportarTimeline(proyecto, base, this.proyectos.carpeta(id), { formato: 'original', subtitulos: false, desde, hasta: fin, resolucion: '720', calidad: 'alta' }, () => {}, tmp)
+      const r = await exportarTimeline(proyecto, base, this.proyectos.carpeta(id), { formato: 'original', subtitulos: false, desde, hasta: fin, resolucion: '720', calidad: 'alta', segundoPlano: true }, () => {}, tmp)
       if (!r.ok || !r.output || !existsSync(r.output)) return null
       mkdirSync(this.carpeta(id), { recursive: true })
       const codigo = await new Promise<number | null>((ok) => {
@@ -190,7 +190,8 @@ export class VistaPrevia {
         proyecto,
         timeline,
         this.proyectos.carpeta(id),
-        { formato: 'original', subtitulos: false, desde: tramo.desde, hasta: tramo.hasta, resolucion: '720', calidad: 'ligera' },
+        // Lo que se ve al reproducir: a 1080 y con calidad alta (a 720 y ligera se veía a manchas en lo oscuro).
+        { formato: 'original', subtitulos: false, desde: tramo.desde, hasta: tramo.hasta, resolucion: '1080', calidad: 'alta', segundoPlano: true },
         () => {},
         tmp
       )

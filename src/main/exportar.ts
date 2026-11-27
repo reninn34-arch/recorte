@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSyn
 import { escribirCube, leerCube, mezclarLut } from '../shared/lut'
 import { rutaScriptPython } from './transcribir'
 import { extname, isAbsolute, join } from 'node:path'
+import { constants, setPriority } from 'node:os'
 import {
   ajustesDe,
   camaraEn,
@@ -395,6 +396,26 @@ export function exportarTimeline(...args: Parameters<typeof exportarTimelineAhor
  * copiarlo: es el mismo archivo) y FFmpeg, que trabaja en esa carpeta, lo lee por ahí. El video sale igual.
  */
 export const LIMITE_ORDEN = 24000
+
+/**
+ * Las imágenes fijas (fotos, capas, subtítulos hechos imagen, marcos) se leen con un solo hilo. FFmpeg da a cada
+ * entrada tantos hilos como núcleos: con cientos de capas eran miles de hilos y gigas de memoria, y el equipo entero se
+ * congelaba. Una imagen fija no gana nada con más.
+ */
+export function unHiloPorImagen(entradas: string[]): string[] {
+  const salida: string[] = []
+  let desde = 0
+  entradas.forEach((x, i) => {
+    if (x === '-i' && entradas[i - 1] !== undefined) {
+      const opciones = entradas.slice(desde, i)
+      const esImagen = opciones.some((o, k) => o === '-loop' && opciones[k + 1] === '1')
+      if (esImagen && !opciones.includes('-threads')) salida.push('-threads', '1')
+    }
+    salida.push(x)
+    if (entradas[i - 1] === '-i') desde = i + 1
+  })
+  return salida
+}
 export function acortarEntradas(entradas: string[], carpeta: string, limite = LIMITE_ORDEN): string[] {
   const largo = entradas.reduce((t, x) => t + x.length + 3, 0)
   if (largo <= limite) return entradas
@@ -619,7 +640,8 @@ async function exportarTimelineAhora(
     const borroso = desenfoqueDeCampo(a, 0)
     const fondoBorroso = borroso > 0.005 ? `,gblur=sigma=${(borroso * DESENFOQUE_MAX * ancho).toFixed(2)}` : ''
     // El color tipo Lumetri (exposición, luces, sombras, blancos, negros, temperatura y tinte): la misma curva que el
-    // monitor, en un archivo .cube que aplica lut1d antes del resto del color.
+    // monitor, en un archivo .cube que aplica lut1d antes del resto del color. El color se trabaja a 16 bits (en 8,
+    // los tonos vecinos se juntaban y lo oscuro salía a manchas y escalones).
     // El LUT 3D del clip (con su intensidad ya mezclada en el archivo), antes del resto del color, como en el monitor.
     let lut3d = ''
     if (t.clip.lut && existsSync(join(carpeta, t.clip.lut.archivo))) {
@@ -627,7 +649,7 @@ async function exportarTimelineAhora(
         const base = leerCube(readFileSync(join(carpeta, t.clip.lut.archivo), 'utf8'))
         const archivo = `lut-clip-${i}.cube`
         writeFileSync(join(carpeta, archivo), escribirCube(mezclarLut(base, t.clip.lut.intensidad)), 'utf8')
-        lut3d = `format=rgb24,lut3d=file=${archivo}:interp=trilinear,`
+        lut3d = `format=gbrp16le,lut3d=file=${archivo}:interp=trilinear,`
       } catch {
         // Un LUT que ya no se puede leer: el clip sale sin él (el editor ya avisó al cargarlo).
       }
@@ -657,18 +679,18 @@ async function exportarTimelineAhora(
           return `,lut1d=file=${archivo}:interp=linear:enable='gte(t,${x.a.toFixed(4)})*${fin}'`
         })
         .join('')
-      lut = filtros ? `,format=gbrp${filtros}` : ''
+      lut = filtros ? `,format=gbrp16le${filtros}` : ''
     } else if (curvas) {
       const archivo = `color-clip-${i}.cube`
       writeFileSync(join(carpeta, archivo), cuboDeCurvas(curvas), 'utf8')
-      lut = `,format=gbrp,lut1d=file=${archivo}:interp=linear`
+      lut = `,format=gbrp16le,lut1d=file=${archivo}:interp=linear`
     }
     // El color por zonas (cambia solo un color): una LUT 3D, después del color del clip.
     let zona = ''
     if (zonaColorActiva(a)) {
       const archivo = `zona-color-${i}.cube`
       writeFileSync(join(carpeta, archivo), cuboDeZona(a), 'utf8')
-      zona = `,format=gbrp,lut3d=file=${archivo}:interp=tetrahedral`
+      zona = `,format=gbrp16le,lut3d=file=${archivo}:interp=tetrahedral`
     }
     const crudo = `[${iv}:v]${ritmo},fps=${fps},${lut3d}${zoom}${encuadre}${lento}${fondoBorroso},setsar=1${lut}${color}${zona}${efectos}`
     // Las zonas tapadas (una cara, una placa): cada una se recorta, se difumina o se pinta de negro y se pega en su sitio.
@@ -951,10 +973,12 @@ async function exportarTimelineAhora(
     if (curvasAj) {
       const archivo = `ajuste-${k}.cube`
       writeFileSync(join(carpeta, archivo), cuboDeCurvas(curvasAj), 'utf8')
-      cadena += `format=gbrp,lut1d=file=${archivo}:interp=linear:${en},`
+      // A 16 bits: oscurecer en 8 bits juntaba tonos vecinos y en lo oscuro y las texturas salían manchas y escalones
+      // (el kit lo hace con más precisión). Al volver a 8 bits, FFmpeg reparte el redondeo (tramado).
+      cadena += `format=gbrp16le,lut1d=file=${archivo}:interp=linear:${en},`
     }
     if (aj.brillo !== 0 || aj.contraste !== 1 || aj.saturacion !== 1)
-      cadena += `eq=brightness=${aj.brillo.toFixed(3)}:contrast=${aj.contraste.toFixed(3)}:saturation=${aj.saturacion.toFixed(3)}:${en},`
+      cadena += `${curvasAj ? 'format=yuv444p,' : ''}eq=brightness=${aj.brillo.toFixed(3)}:contrast=${aj.contraste.toFixed(3)}:saturation=${aj.saturacion.toFixed(3)}:${en},`
     if (aj.desenfoque > 0.005) cadena += `gblur=sigma=${(aj.desenfoque * DESENFOQUE_CLIP * ancho).toFixed(2)}:${en},`
     if (!cadena) continue
     partes.push(`${capaBase}${cadena}format=yuv420p[ajuste${k}]`)
@@ -1045,14 +1069,19 @@ async function exportarTimelineAhora(
         salida
       ]
     : null
-  const cortas = acortarEntradas(entradas, carpeta)
+  const cortas = acortarEntradas(unHiloPorImagen(entradas), carpeta)
+  // Con muchas entradas (capas), cada filtro abría hilos para todos los núcleos: cientos de filtros, miles de hilos.
+  // Dos por filtro bastan: el trabajo lo reparten entre todos.
+  const muchas = entradas.filter((x) => x === '-i').length > 30
+  const hilosFiltros = muchas ? ['-filter_complex_threads', '2'] : []
   const argumentos = soloAudio
-    ? ['-y', '-hide_banner', '-loglevel', 'error', ...cortas, '-/filter_complex', archivoFiltro, ...soloAudio]
+    ? ['-y', '-hide_banner', '-loglevel', 'error', ...hilosFiltros, ...cortas, '-/filter_complex', archivoFiltro, ...soloAudio]
     : [
     '-y',
     '-hide_banner',
     '-loglevel',
     'error',
+    ...hilosFiltros,
     ...cortas,
     // El grafo va en un archivo: con muchos clips o tramos de voz no cabría en la línea de órdenes.
     '-/filter_complex',
@@ -1077,6 +1106,12 @@ async function exportarTimelineAhora(
 
   return new Promise((resolver) => {
     const hijo = spawn(rutaFfmpeg(), argumentos, { cwd: carpeta, windowsHide: true })
+    // Por debajo de lo normal (y lo más bajo en la vista previa de fondo): el equipo sigue respondiendo mientras exporta.
+    try {
+      if (hijo.pid) setPriority(hijo.pid, opciones.segundoPlano ? constants.priority.PRIORITY_LOW : constants.priority.PRIORITY_BELOW_NORMAL)
+    } catch {
+      // Si el sistema no deja cambiarla, sigue con la normal.
+    }
     let error = ''
     let cola = ''
     let resuelto = false

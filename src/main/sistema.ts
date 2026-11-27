@@ -131,10 +131,16 @@ async function herramientas(): Promise<Herramienta[]> {
     },
     {
       id: 'edge',
-      nombre: 'Microsoft Edge o Google Chrome',
-      descripcion: 'Opcional: para entrar con tu cuenta de Google (la voz de AI Studio y Flow).',
+      nombre: 'Navegador para tus cuentas',
+      descripcion: (() => {
+        const nav = navegadorGoogle()
+        if (!nav) return 'Opcional: para entrar con tu cuenta de Google (la voz de AI Studio y Flow) hace falta Chrome, Edge, Brave, Vivaldi u Opera.'
+        if (nav.predeterminado) return `Para entrar con tu cuenta de Google (la voz de AI Studio y Flow) se usa tu navegador predeterminado, ${nav.nombre}.`
+        if (nav.noCompatible) return `Tu navegador predeterminado (${nav.noCompatible}) no deja que Recorte lo maneje: para tus cuentas de Google se usa ${nav.nombre}.`
+        return `Para entrar con tu cuenta de Google (la voz de AI Studio y Flow) se usa ${nav.nombre}.`
+      })(),
       estado: edgeExe() ? 'ok' : 'opcional',
-      version: edgeExe() ? (navegadorGoogle()?.nombre ?? 'instalado') : null
+      version: edgeExe() ? `${navegadorGoogle()?.nombre ?? 'instalado'}${navegadorGoogle()?.predeterminado ? ' · predeterminado' : ''}` : null
     }
   ]
 }

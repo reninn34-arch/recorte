@@ -198,6 +198,8 @@ const api: RecorteApi = {
   vistaSalida: (id, timeline, indice) => ipcRenderer.invoke('vista:salida', id, timeline, indice),
   portadaCuadro: (id, timeline, segundo) => ipcRenderer.invoke('portada:cuadro', id, timeline, segundo),
   portadaGuardar: (id, datos) => ipcRenderer.invoke('portada:guardar', id, datos),
+  portadaImportar: (id) => ipcRenderer.invoke('portada:importar', id),
+  portadaTira: (id, timeline, cuantos) => ipcRenderer.invoke('portada:tira', id, timeline, cuantos),
   onVistaLista: (cb) => {
     const listener = (_evento: Electron.IpcRendererEvent, e: { id: string; clave: string }) => cb(e)
     ipcRenderer.on('vista:lista', listener)

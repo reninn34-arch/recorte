@@ -44,6 +44,7 @@
     "prueba:zona": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-zona.mjs",
     "prueba:sonido": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-sonido.mjs",
     "prueba:antigravity": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-antigravity.mjs",
+    "prueba:navegador-predeterminado": "node scripts/prueba-navegador-predeterminado.mjs",
     "prueba:navegador": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-navegador.mjs",
     "prueba:actualizar-mac": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs scripts/prueba-actualizar-mac.mjs",
     "prueba:niveles": "node --experimental-strip-types --no-warnings --import ./scripts/ts-sin-extension.mjs --import ./scripts/electron-falso.mjs scripts/prueba-niveles.mjs",

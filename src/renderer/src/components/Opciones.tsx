@@ -434,7 +434,7 @@ export function Opciones({
                   </button>
                 </>
               ) : voz?.google?.conectando ? (
-                <span className="ag-estado"><span className="agente-punto medio" /> Entra en la ventana del navegador…</span>
+                <span className="ag-estado"><span className="agente-punto medio" /> Entra en la ventana de {voz.google.nombreNavegador ?? 'tu navegador'}…</span>
               ) : (
                 <button className="btn small primary" onClick={() => void conectarGoogle()} disabled={!voz?.google?.navegador}>
                   Conectar cuenta
@@ -492,7 +492,16 @@ export function Opciones({
             </div>
           </div>
           {!voz?.google?.navegador && voz && (
-            <p className="op-nota op-dentro">Para entrar con tu cuenta de Google hace falta Microsoft Edge o Google Chrome; con la llave no.</p>
+            <p className="op-nota op-dentro">Para entrar con tu cuenta de Google hace falta Chrome, Edge, Brave, Vivaldi u Opera; con la llave no.</p>
+          )}
+          {voz?.google?.navegador && voz.google.nombreNavegador && (
+            <p className="op-nota op-dentro">
+              {voz.google.predeterminado
+                ? `Se entra con tu navegador predeterminado, ${voz.google.nombreNavegador}, en una ventana aparte solo para Recorte.`
+                : voz.google.noCompatible
+                  ? `Tu navegador predeterminado (${voz.google.noCompatible}) no deja que Recorte lo maneje: se entra con ${voz.google.nombreNavegador}.`
+                  : `Se entra con ${voz.google.nombreNavegador}.`}
+            </p>
           )}
         </Seccion>
           </>

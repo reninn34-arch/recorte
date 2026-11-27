@@ -5,7 +5,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
 import { chromium, type Browser, type Page } from 'playwright-core'
-import { edgeExe, perfilDeLaVoz } from './edgeperfil'
+import { carpetaPerfil, edgeExe, navegadorGoogle, perfilDeLaVoz } from './edgeperfil'
 
 /**
  * La voz de Gemini con la cuenta de Google del usuario, sin llave de API: se genera
@@ -28,11 +28,18 @@ export interface EstadoVozGoogle {
   correo: string | null
   conectando: boolean
   navegador: string | null
+  /** Con qué navegador se entra (Chrome, Edge, Brave…) y si es el predeterminado del usuario. */
+  nombreNavegador?: string
+  predeterminado?: boolean
+  /** El predeterminado no se puede usar (Firefox, Safari): cuál es. */
+  noCompatible?: string
   error?: string
 }
 
 const carpeta = () => join(app.getPath('userData'), 'voz')
-const perfil = () => join(carpeta(), 'perfil')
+const perfil = () => carpetaPerfil(join(carpeta(), 'perfil'))
+/** El nombre del navegador con que se entra (el predeterminado del usuario, o Edge o Chrome). */
+const navegador = () => navegadorGoogle()?.nombre ?? 'el navegador'
 const archivoCuenta = () => join(carpeta(), 'cuenta.json')
 
 let correo: string | null = null
@@ -50,7 +57,14 @@ function guardarCuenta() {
 }
 
 export function estadoVozGoogle(): EstadoVozGoogle {
-  return { correo, conectando, navegador: edgeExe(), ...(error ? { error } : {}) }
+  const nav = navegadorGoogle()
+  return {
+    correo,
+    conectando,
+    navegador: edgeExe(),
+    ...(nav ? { nombreNavegador: nav.nombre, predeterminado: nav.predeterminado, ...(nav.noCompatible ? { noCompatible: nav.noCompatible } : {}) } : {}),
+    ...(error ? { error } : {})
+  }
 }
 
 export { edgeExe }
@@ -74,7 +88,7 @@ const enAIStudio = () =>
 async function lanzarEdge(ventana: boolean): Promise<void> {
   if (await responde()) return
   const exe = edgeExe()
-  if (!exe) throw new Error('No encuentro Edge en este equipo: hace falta para entrar con Google.')
+  if (!exe) throw new Error('No encuentro un navegador que Recorte pueda usar para entrar con Google (Chrome, Edge, Brave, Vivaldi u Opera).')
   mkdirSync(perfil(), { recursive: true })
   const args = [
     `--remote-debugging-port=${PUERTO}`,
@@ -85,7 +99,7 @@ async function lanzarEdge(ventana: boolean): Promise<void> {
   ]
   spawn(exe, args, { detached: true, stdio: 'ignore', windowsHide: !ventana }).unref()
   for (let i = 0; i < 40 && !(await responde()); i++) await espera(500)
-  if (!(await responde())) throw new Error('Edge no respondió al abrirlo.')
+  if (!(await responde())) throw new Error(`${navegador()} no respondió al abrirlo.`)
 }
 
 /** Conecta playwright al Edge del perfil (lo abre sin ventana si hace falta). */
@@ -340,7 +354,7 @@ export async function conectarVozGoogle(): Promise<EstadoVozGoogle> {
 async function conectarVozGoogleYa(): Promise<EstadoVozGoogle> {
   if (conectando) return estadoVozGoogle()
   if (!edgeExe()) {
-    error = 'No encuentro Edge en este equipo: hace falta para entrar con Google.'
+    error = 'No encuentro un navegador que Recorte pueda usar para entrar con Google (Chrome, Edge, Brave, Vivaldi u Opera).'
     return estadoVozGoogle()
   }
   conectando = true
@@ -402,7 +416,7 @@ async function conectarVozGoogleYa(): Promise<EstadoVozGoogle> {
       seguidas = (await enAIStudio()) && (await sesionEnEdge()) ? seguidas + 1 : 0
       sesion = seguidas >= 3
     }
-    if (!sesion) throw new Error('No entraste con Google en la ventana de Edge. Vuelve a intentarlo.')
+    if (!sesion) throw new Error(`No entraste con Google en la ventana de ${navegador()}. Vuelve a intentarlo.`)
     const b = await abrirEdge().catch(() => null)
     if (b) {
       try {

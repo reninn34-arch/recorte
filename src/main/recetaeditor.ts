@@ -45,8 +45,11 @@ import type { LetraTL } from '../shared/timeline'
 const EXT_IMAGEN = ['.png', '.jpg', '.jpeg', '.webp']
 /** Las piezas del kit que se dibujan encima de la escena y en el editor son rótulos sueltos. */
 export const PIEZAS_ENCIMA = ['titulo', 'etiqueta', 'palabras']
-/** Las letras del kit y su equivalente en el editor. */
-const LETRA_EDITOR: Record<string, string> = { fina: 'fina', normal: 'normal', negrita: 'normal', gruesa: 'gruesa', serif: 'elegante', cursiva: 'cursiva', titular: 'titular', impacto: 'impacto' }
+/**
+ * Las letras del kit y su equivalente en el editor, la misma letra: la «fina» del kit es Segoe UI Light (la «ligera»
+ * del editor), su «normal» es Segoe UI (la «fina» del editor) y su «negrita», negrita (la «normal», Arial negrita).
+ */
+const LETRA_EDITOR: Record<string, string> = { fina: 'ligera', normal: 'fina', negrita: 'normal', gruesa: 'gruesa', serif: 'elegante', cursiva: 'cursiva', titular: 'titular', impacto: 'impacto' }
 /** Dónde caen las palabras sueltas si la receta no lo dice: igual que SITIOS_PALABRAS del kit. */
 const SITIOS_PALABRAS: [number, number][] = [[0.3, 0.3], [0.68, 0.24], [0.5, 0.42], [0.24, 0.55], [0.72, 0.5], [0.42, 0.66], [0.66, 0.74], [0.3, 0.8], [0.55, 0.18], [0.8, 0.62]]
 const EXT_VIDEO = ['.mp4', '.mov', '.webm', '.mkv', '.m4v']
@@ -186,7 +189,7 @@ export async function proyectoDesdeReceta(
     if (!letras.some((l) => l.id === letra.id)) letras.push(letra)
     return letra.id
   }
-  const fuenteTexto = letraPropia(receta.fuente) ?? ({ fina: 'fina', normal: 'normal', negrita: 'normal', gruesa: 'gruesa' } as Record<string, string>)[String(receta.fuente ?? 'fina')] ?? 'fina'
+  const fuenteTexto = letraPropia(receta.fuente) ?? LETRA_EDITOR[String(receta.fuente ?? 'fina')] ?? 'fina'
   const estiloRotulo = { sinCaja: true, ...(colorTexto ? { color: colorTexto } : {}), ...(fuenteTexto !== 'normal' ? { fuente: fuenteTexto } : {}) }
   let editables = 0
   let fijos = 0
@@ -276,6 +279,9 @@ export async function proyectoDesdeReceta(
           tamano: tamEditor(num(l.tam, 0.06)),
           ...(color && color !== '#ffffff' ? { color } : !color && colorTexto ? { color: colorTexto } : {}),
           fuente: letra(l.fuente ?? m.fuente, String(receta.fuente ?? 'fina')),
+          // El kit da a los títulos una sombra suave, sin borde: sin el halo del editor, con una sombra leve.
+          contorno: 0,
+          sombra: 0.025,
           ...(m.entrada === 'palabras' || m.entrada === 'maquina' || m.entrada === 'pop' ? { animacion: m.entrada } : { animacion: 'subir' as const })
         })
         y += altos[i]
@@ -347,7 +353,7 @@ export async function proyectoDesdeReceta(
   // El kit mide en píxeles; el editor, relativo a su tamaño de rótulo (6 % del lado corto).
   // El kit da la eme de la letra; el monitor dibuja la eme del rótulo al 93 % de su 6 % (como los títulos, tamEditor).
   const tamSub = num(subs.tam, anchoReceta * 0.058) / (Math.min(anchoReceta, altoReceta) * 0.06 * 0.93)
-  const fuenteSub = letraPropia(subs.fuente ?? receta.fuente) ?? ({ fina: 'fina', normal: 'normal', negrita: 'normal', gruesa: 'gruesa' } as Record<string, string>)[String(subs.fuente ?? receta.fuente ?? 'negrita')] ?? 'normal'
+  const fuenteSub = letraPropia(subs.fuente ?? receta.fuente) ?? LETRA_EDITOR[String(subs.fuente ?? receta.fuente ?? 'negrita')] ?? 'normal'
   const estiloSub = {
     ...(hex(subs.color) && hex(subs.color) !== '#ffffff' ? { color: hex(subs.color) } : {}),
     ...(subs.caja === null || subs.caja === false ? { sinCaja: true } : hex(subs.caja) ? { caja: hex(subs.caja) } : {}),

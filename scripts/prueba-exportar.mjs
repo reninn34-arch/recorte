@@ -562,7 +562,12 @@ assert.ok(Math.abs(centro6(1.7) - centro6(1.4)) > 40, 'en el corte la capa salta
   assert.ok(exp[0] > base[0] + 30, `la exposición +1 no aclaró: ${base} → ${exp}`)
   assert.ok(Math.abs(exp[0] - esperado) <= 8, `el MP4 no sigue la curva del monitor: ${exp[0]} en vez de ~${esperado}`)
   const calido = (await exportarCon({ temperatura: 1 }, 'salidas-color2'))(316, 176)
-  assert.ok(calido[0] > calido[2] + 25, `la temperatura cálida no subió el rojo frente al azul: ${calido}`)
+  // Lo mismo que el monitor (la curva cálida de ese gris), canal por canal.
+  const curvaCalida = curvasColor({ ...ajustesDe(undefined), temperatura: 1 })
+  const enCurva = (canal) => Math.round(canal[Math.round((base[0] / 255) * (canal.length - 1))] * 255)
+  const calidoMonitor = [enCurva(curvaCalida.r), enCurva(curvaCalida.g), enCurva(curvaCalida.b)]
+  assert.ok(calido[0] > calido[2] + 15, `la temperatura cálida no subió el rojo frente al azul: ${calido}`)
+  assert.ok(calido.every((v, k) => Math.abs(v - calidoMonitor[k]) <= 5), `la temperatura cálida del MP4 no es la del monitor: ${calido} en vez de ~${calidoMonitor}`)
   const sombras = (await exportarCon({ sombras: 1, negros: 1 }, 'salidas-color3'))(316, 176)
   assert.ok(sombras[0] > base[0] + 10, `abrir sombras y negros no aclaró el gris medio: ${base} → ${sombras}`)
   console.log(`color tipo Lumetri en el MP4: exposición ${base[0]} → ${exp[0]} (curva del monitor: ${esperado}), cálido R${calido[0]}/B${calido[2]}, sombras ${sombras[0]} ✓`)

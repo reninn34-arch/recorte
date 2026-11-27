@@ -672,6 +672,7 @@ function normalizarTiempos(tiempos: unknown, texto: string, duracion: number): n
 export const FUENTES_TEXTO: Record<string, { nombre: string; familia: string; negrita: boolean; cursiva?: boolean; linea: number }> = {
   normal: { nombre: 'Normal', familia: 'Arial', negrita: true, linea: 1.117 },
   fina: { nombre: 'Fina', familia: 'Segoe UI', negrita: false, linea: 1.33 },
+  ligera: { nombre: 'Ligera', familia: 'Segoe UI Light', negrita: false, linea: 1.33 },
   gruesa: { nombre: 'Gruesa', familia: 'Arial Black', negrita: false, linea: 1.41 },
   negra: { nombre: 'Negra', familia: 'Segoe UI Black', negrita: false, linea: 1.33 },
   impacto: { nombre: 'Impacto', familia: 'Impact', negrita: false, linea: 1.22 },
@@ -1268,11 +1269,14 @@ export interface Timeline {
  * imagen ya compuesta (en la carpeta del proyecto), la que se pega al MP4 como miniatura.
  */
 export interface PortadaTL {
-  origen: 'cuadro' | 'imagen'
+  /** Un momento del video, una foto de la biblioteca o una imagen subida desde una carpeta del usuario. */
+  origen: 'cuadro' | 'imagen' | 'archivo'
   /** El segundo de la timeline (con `origen: 'cuadro'`). */
   t?: number
   /** La foto de la biblioteca (con `origen: 'imagen'`). */
   fuente?: FuenteId
+  /** La imagen subida (con `origen: 'archivo'`): una copia en `portada/` del proyecto. */
+  foto?: string
   /** Cómo se encuadra la foto: 0 a 1, de qué lado se recorta si no tiene la forma del video. */
   cx?: number
   cy?: number
@@ -1283,8 +1287,11 @@ export interface PortadaTL {
   tamano?: number
   color?: string
   contorno?: string
-  /** Su altura (0 arriba, 1 abajo). */
+  /** Dónde va el centro del título (0 a 1 de izquierda a derecha y de arriba abajo). */
+  x?: number
   y?: number
+  /** Una caja de color detrás del título (como los estilos de CapCut), o nada. */
+  caja?: string
   /** La imagen ya compuesta, dentro de la carpeta del proyecto. */
   archivo?: string
   /**
@@ -1299,13 +1306,15 @@ export function normalizarPortada(entrada: unknown, esFuente: (f: string) => boo
   const x = entrada as Partial<PortadaTL>
   const num = (v: unknown, min: number, max: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : undefined)
   const color = (v: unknown) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : undefined)
-  const origen = x.origen === 'imagen' && typeof x.fuente === 'string' && esFuente(x.fuente) ? 'imagen' : 'cuadro'
+  const foto = typeof x.foto === 'string' && /^portada\/foto-[\w.-]+\.(png|jpe?g|webp)$/i.test(x.foto) ? x.foto : undefined
+  const origen = x.origen === 'imagen' && typeof x.fuente === 'string' && esFuente(x.fuente) ? 'imagen' : x.origen === 'archivo' && foto ? 'archivo' : 'cuadro'
   const archivo = typeof x.archivo === 'string' && /^portada\/[\w.-]+\.png$/.test(x.archivo) ? x.archivo : undefined
   const texto = typeof x.texto === 'string' ? x.texto.slice(0, 200) : ''
   const salida: PortadaTL = { origen }
   if (origen === 'imagen') salida.fuente = x.fuente
+  else if (origen === 'archivo') salida.foto = foto
   else salida.t = num(x.t, 0, 1e6) ?? 0
-  for (const k of ['cx', 'cy', 'y'] as const) {
+  for (const k of ['cx', 'cy', 'x', 'y'] as const) {
     const v = num(x[k], 0, 1)
     if (v !== undefined) salida[k] = v
   }
@@ -1315,6 +1324,7 @@ export function normalizarPortada(entrada: unknown, esFuente: (f: string) => boo
   if (tam !== undefined) salida.tamano = tam
   if (color(x.color)) salida.color = color(x.color)
   if (color(x.contorno)) salida.contorno = color(x.contorno)
+  if (color(x.caja)) salida.caja = color(x.caja)
   if (archivo) salida.archivo = archivo
   if (x.alInicio === true) salida.alInicio = true
   return salida

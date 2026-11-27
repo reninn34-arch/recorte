@@ -16,6 +16,9 @@ writeFileSync(join(datos, 'voz', 'cuenta.json'), JSON.stringify({ correo: 'vieja
 const { chromium } = await import('playwright-core')
 const g = await import('../src/main/vozgoogle.ts')
 const PUERTO = 9336
+// La carpeta del perfil del navegador de ahora (cada navegador tiene la suya).
+const { carpetaPerfil } = await import('../src/main/edgeperfil.ts')
+const perfilVoz = carpetaPerfil(join(datos, 'voz', 'perfil'))
 const espera = (ms) => new Promise((r) => setTimeout(r, ms))
 const responde = () => fetch(`http://127.0.0.1:${PUERTO}/json/version`).then((r) => r.ok, () => false)
 const cookies = async () => {
@@ -66,7 +69,7 @@ try {
   assert.ok(exe, 'hace falta Edge')
 
   // 1) Un perfil con la sesión vieja (cookies que Google ya no acepta).
-  spawn(exe, [`--remote-debugging-port=${PUERTO}`, `--user-data-dir=${join(datos, 'voz', 'perfil')}`, '--no-first-run', '--headless=new', 'about:blank'], { detached: true, stdio: 'ignore' }).unref()
+  spawn(exe, [`--remote-debugging-port=${PUERTO}`, `--user-data-dir=${perfilVoz}`, '--no-first-run', '--headless=new', 'about:blank'], { detached: true, stdio: 'ignore' }).unref()
   for (let i = 0; i < 40 && !(await responde()); i++) await espera(500)
   await sesionFalsa()
   assert.ok((await cookies()).some((c) => c.name === 'SAPISID'), 'el perfil tiene la sesión vieja')
@@ -98,17 +101,17 @@ try {
   assert.equal(g.estadoVozGoogle().conectando, false, 'y deja de estar «conectando»')
 
   // 3) «Salir» también borra la sesión del perfil.
-  spawn(exe, [`--remote-debugging-port=${PUERTO}`, `--user-data-dir=${join(datos, 'voz', 'perfil')}`, '--no-first-run', '--headless=new', 'about:blank'], { detached: true, stdio: 'ignore' }).unref()
+  spawn(exe, [`--remote-debugging-port=${PUERTO}`, `--user-data-dir=${perfilVoz}`, '--no-first-run', '--headless=new', 'about:blank'], { detached: true, stdio: 'ignore' }).unref()
   for (let i = 0; i < 40 && !(await responde()); i++) await espera(500)
   await sesionFalsa()
   await cerrarTodo()
   const tras = await g.desconectarVozGoogle()
   assert.equal(tras.correo, null)
-  spawn(exe, [`--remote-debugging-port=${PUERTO}`, `--user-data-dir=${join(datos, 'voz', 'perfil')}`, '--no-first-run', '--headless=new', 'about:blank'], { detached: true, stdio: 'ignore' }).unref()
+  spawn(exe, [`--remote-debugging-port=${PUERTO}`, `--user-data-dir=${perfilVoz}`, '--no-first-run', '--headless=new', 'about:blank'], { detached: true, stdio: 'ignore' }).unref()
   for (let i = 0; i < 40 && !(await responde()); i++) await espera(500)
   assert.ok(!(await cookies()).some((c) => c.name === 'SAPISID'), '«Salir» borra la sesión de Google del perfil')
   await cerrarTodo()
-  console.log('cuenta de Google: con la sesión vieja, «Conectar» deja entrar de nuevo y «Salir» la borra ✓')
+  console.log(`cuenta de Google (${g.estadoVozGoogle().nombreNavegador}): con la sesión vieja, «Conectar» deja entrar de nuevo y «Salir» la borra ✓`)
 } finally {
   await cerrarTodo()
   await espera(500)

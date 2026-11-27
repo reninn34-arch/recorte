@@ -1,5 +1,6 @@
-// La portada, como en CapCut: se pone desde el botón de al lado de la pista de video (un momento del video con título,
-// o una foto) y el MP4 la lleva como miniatura y en su primer cuadro. Uso: npm run build && node scripts/vista-portada.mjs
+// La portada, como en CapCut, con un video vertical: la vista tiene la forma del video, la tira de cuadros elige el
+// momento, el título se arrastra en la vista con un estilo con caja, se sube una imagen de una carpeta (sin pasar por
+// la biblioteca) y el MP4 la lleva como miniatura. Uso: npm run build && node scripts/vista-portada.mjs
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -17,12 +18,14 @@ const ff = (args) => {
   if (r.status !== 0) throw new Error(r.stderr)
 }
 const video = join(datos, 'prueba-portada.mp4')
-ff(['-f', 'lavfi', '-i', 'testsrc2=s=640x360:d=4:r=30', '-f', 'lavfi', '-i', 'sine=f=300:r=48000', '-t', '4', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', video])
+ff(['-f', 'lavfi', '-i', 'testsrc2=s=720x1280:d=4:r=30', '-f', 'lavfi', '-i', 'sine=f=300:r=48000', '-t', '4', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', video])
 const foto = join(datos, 'foto.png')
 ff(['-f', 'lavfi', '-i', 'color=c=0x0a6cf0:s=400x400', '-frames:v', '1', foto])
 
 const entorno = { ...process.env }
 delete entorno.ELECTRON_RUN_AS_NODE
+// «Subir imagen» elige esta foto sin diálogo (en una prueba no hay quien elija).
+entorno.RECORTE_PRUEBA_IMAGEN_PORTADA = foto
 const app = spawn(electronPath, ['.', `--remote-debugging-port=${puerto}`, `--user-data-dir=${datos}`], { cwd: raiz, stdio: 'ignore', env: entorno })
 
 async function pagina() {
@@ -111,9 +114,6 @@ try {
   await esperar(1500)
   const ingesta = await evaluar(`window.recorte.crearProyecto(${JSON.stringify(video)})`)
   id = ingesta.project.id
-  const agregados = await evaluar(`window.recorte.agregarRutasProyecto(${JSON.stringify(id)}, [${JSON.stringify(foto)}])`)
-  const imagen = agregados?.agregados?.[0]
-  comprobar(Boolean(imagen), 'la foto entró a la biblioteca')
   await evaluar(`location.reload()`).catch(() => {})
   await esperar(2500)
   c.cerrar()
@@ -138,70 +138,79 @@ try {
   await evaluar(`[...document.querySelectorAll('button')].find((b) => /Ahora no/.test(b.textContent || ''))?.click()`)
   await esperar(600)
 
-  // 1) La portada está al lado de la pista de video, como en CapCut.
+  // 1) La portada, al lado de la pista de video.
   const boton = await caja('.tl-nombre.p-video .tl-portada')
   comprobar(Boolean(boton), 'al lado de la pista de video está el botón «Portada»')
   await clic(boton.x + boton.w / 2, boton.y + boton.h / 2)
   await esperar(800)
   comprobar(await evaluar(`Boolean(document.querySelector('.portada-caja'))`), 'se abre la ventana de la portada')
 
-  // 2) Del video: un momento (2 s), con título.
-  await evaluar(`(() => { const r = document.querySelector('.portada-momento input[type=range]'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(r, '2'); r.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+  // 2) La vista tiene la forma del video (vertical), sin aplastarse.
+  for (let i = 0; i < 40 && (await evaluar(`Boolean(document.querySelector('.portada-cargando'))`)); i++) await esperar(500)
+  const vista = await caja('.portada-marco canvas')
+  const forma = vista.w / vista.h
+  comprobar(Math.abs(forma - 720 / 1280) < 0.01, `la vista tiene la forma del video vertical (${vista.w.toFixed(0)}×${vista.h.toFixed(0)}, ${forma.toFixed(3)} y debe ser ${(720 / 1280).toFixed(3)})`)
+
+  // 3) La tira de cuadros: aparece, y arrastrar en ella elige el momento.
+  for (let i = 0; i < 40 && (await evaluar(`document.querySelectorAll('.portada-tira img').length`)) < 4; i++) await esperar(500)
+  const nTira = await evaluar(`document.querySelectorAll('.portada-tira img').length`)
+  comprobar(nTira >= 10, `debajo sale la tira de cuadros del video (${nTira})`)
+  const tira = await caja('.portada-tira')
+  await arrastrar(tira.x + tira.w * 0.2, tira.y + tira.h / 2, tira.w * 0.5)
+  const tc = await evaluar(`document.querySelector('.portada-tc').textContent`)
+  comprobar(/^00:00:0[2-3]:/.test(tc), `arrastrar en la tira lleva el momento a ~2,8 s (${tc})`)
+  for (let i = 0; i < 40 && (await evaluar(`Boolean(document.querySelector('.portada-cargando'))`)); i++) await esperar(500)
+  comprobar(!(await evaluar(`Boolean(document.querySelector('.portada-cargando'))`)), 'al soltar llega el cuadro exacto')
+
+  // 4) El título: un estilo con caja, y se arrastra en la vista.
   const area = await caja('.portada-texto')
   await clic(area.x + 20, area.y + 10)
   await c.enviar('Input.insertText', { text: 'MI PORTADA' })
-  // Espera a que llegue el cuadro (lo pinta FFmpeg).
-  for (let i = 0; i < 60 && (await evaluar(`Boolean(document.querySelector('.portada-cargando'))`)); i++) await esperar(500)
-  comprobar(!(await evaluar(`Boolean(document.querySelector('.portada-cargando'))`)), 'llega el cuadro de ese momento')
-  await esperar(500)
-  await captura('ventana.png')
-  // El título se pinta en amarillo para reconocerlo luego en el MP4.
-  await evaluar(`(() => { const i = [...document.querySelectorAll('.portada-colores input[type=color]')][0]; const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, '#ffee00'); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+  await evaluar(`[...document.querySelectorAll('.portada-estilos button')].find((b) => /Caja roja/.test(b.textContent))?.click()`)
+  await esperar(600)
+  await captura('ventana-vertical.png')
+  // El título está abajo (80 %): se arrastra hacia arriba.
+  const v2 = await caja('.portada-marco canvas')
+  await arrastrar(v2.x + v2.w / 2, v2.y + v2.h * 0.8, 0, -v2.h * 0.5)
   await esperar(400)
+
   await evaluar(`[...document.querySelectorAll('.portada-botones button')].find((b) => /Guardar portada/.test(b.textContent))?.click()`)
   await esperar(2500)
   let tl = (await evaluar(`window.recorte.abrirProyecto(${JSON.stringify(id)})`)).timeline
   const p = tl.portada
-  comprobar(p && p.origen === 'cuadro' && Math.abs(p.t - 2) < 0.05 && p.texto === 'MI PORTADA' && /^portada\/portada-[a-f0-9]+\.png$/.test(p.archivo ?? '') && p.alInicio === true, `la portada queda en el proyecto (${JSON.stringify(p)})`)
-  comprobar(await evaluar(`getComputedStyle(document.querySelector('.tl-portada')).backgroundImage.includes('portada')`), 'el botón enseña la portada')
-  // 3) En el monitor, en el segundo 0, se ve la portada (igual que el primer cuadro del MP4).
-  comprobar(await evaluar(`Boolean(document.querySelector('.monitor-portada'))`), 'en el segundo 0 el monitor enseña la portada')
+  comprobar(p && p.origen === 'cuadro' && p.t > 2 && p.t < 3.5 && p.texto === 'MI PORTADA' && p.caja === '#e3262e' && p.y < 0.45 && /^portada\/portada-[a-f0-9]+\.png$/.test(p.archivo ?? ''), `la portada queda con su momento, su título arrastrado arriba y su caja (${JSON.stringify(p)})`)
+  // La imagen guardada tiene la medida del video.
+  const medida = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', join(datos, 'proyectos', id, p.archivo)], { encoding: 'utf8' }).stdout.trim()
+  comprobar(medida === '720,1280', `la portada guardada mide como el video (${medida})`)
+  // Arriba, la caja roja del título.
+  const rojo = [...spawnSync('ffmpeg', ['-v', 'error', '-i', join(datos, 'proyectos', id, p.archivo), '-vf', `crop=iw:ih*0.12:0:ih*${(p.y - 0.06).toFixed(3)},scale=32:4`, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']).stdout]
+  let rojos = 0
+  for (let i = 0; i < rojo.length; i += 3) if (rojo[i] > 180 && rojo[i + 1] < 90 && rojo[i + 2] < 90) rojos++
+  comprobar(rojos > 6, `en la portada se ve la caja roja donde quedó el título (${rojos} zonas rojas)`)
 
-  // 4) El MP4: la portada como miniatura y en el primer cuadro; el segundo cuadro ya es el video.
+  // 5) Subir una imagen de una carpeta (sin pasar por la biblioteca).
+  await clic(boton.x + boton.w / 2, boton.y + boton.h / 2)
+  await esperar(800)
+  await evaluar(`[...document.querySelectorAll('.portada-modos button')].find((b) => /Subir imagen/.test(b.textContent))?.click()`)
+  await esperar(400)
+  await evaluar(`document.querySelector('.portada-subir .btn')?.click()`)
+  await esperar(1500)
+  await captura('subida.png')
+  await evaluar(`[...document.querySelectorAll('.portada-botones button')].find((b) => /Guardar portada/.test(b.textContent))?.click()`)
+  await esperar(2500)
+  tl = (await evaluar(`window.recorte.abrirProyecto(${JSON.stringify(id)})`)).timeline
+  comprobar(tl.portada?.origen === 'archivo' && /^portada\/foto-[a-f0-9]+\.png$/.test(tl.portada.foto ?? ''), `la portada pasa a ser la imagen subida (${tl.portada?.origen} ${tl.portada?.foto})`)
+  const biblioteca = (await evaluar(`window.recorte.abrirProyecto(${JSON.stringify(id)})`)).medios ?? []
+  comprobar(biblioteca.length === 0, 'la imagen subida no entra a la biblioteca')
+
+  // 6) El MP4 la lleva como miniatura.
   const r = await evaluar(`window.recorte.exportarTimeline(${JSON.stringify(id)}, ${JSON.stringify(tl)}, { formato: 'original', subtitulos: false }).catch((e) => ({ ok: false, error: String(e) }))`)
   comprobar(r?.ok && r.output, `se exportó el MP4 (${r?.error ?? 'bien'})`)
   if (r?.ok) {
     const sp = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=index,codec_name:stream_disposition=attached_pic', '-of', 'json', r.output], { encoding: 'utf8' })
     const streams = JSON.parse(sp.stdout).streams
     comprobar(streams.some((s) => s.disposition?.attached_pic === 1), `el MP4 lleva la portada como miniatura (${streams.map((s) => `${s.codec_name}${s.disposition?.attached_pic ? '·portada' : ''}`).join(', ')})`)
-    const dur = Number(spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'format=duration', '-of', 'csv=p=0', r.output], { encoding: 'utf8' }).stdout)
-    comprobar(Math.abs(dur - 4) < 0.1, `dura lo mismo (${dur.toFixed(2)} s)`)
-    const amarillo = (n) => {
-      const px = [...spawnSync('ffmpeg', ['-v', 'error', '-i', r.output, '-map', '0:v:0', '-vf', `select=eq(n\\,${n}),crop=iw:ih*0.12:0:ih*0.72,scale=64:8`, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']).stdout]
-      let k = 0
-      for (let i = 0; i < px.length; i += 3) if (px[i] > 200 && px[i + 1] > 200 && px[i + 2] < 90) k++
-      return k
-    }
-    comprobar(amarillo(0) > 8, `el primer cuadro es la portada, con su título amarillo (${amarillo(0)} puntos)`)
-    // El tercer cuadro ya es el video: distinto del primero (que trae el título) y casi igual al cuarto.
-    const cuadro = (n) => [...spawnSync('ffmpeg', ['-v', 'error', '-i', r.output, '-map', '0:v:0', '-vf', `select=eq(n\\,${n}),scale=32:18`, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']).stdout]
-    const dif = (a, b) => a.reduce((t, x, i) => t + Math.abs(x - b[i]), 0) / a.length
-    const [c0, c2, c3] = [cuadro(0), cuadro(2), cuadro(3)]
-    comprobar(dif(c0, c2) > 6 && dif(c0, c2) > 3 * dif(c2, c3), `el tercer cuadro ya es el video (del primero al tercero cambia ${dif(c0, c2).toFixed(1)}; del tercero al cuarto, ${dif(c2, c3).toFixed(1)})`)
-    comprobar(existsSync(r.output.replace(/\.mp4$/i, '.jpg')), 'al lado queda la portada en .jpg')
   }
-
-  // 5) Una foto de la biblioteca en vez de un momento.
-  await clic(boton.x + boton.w / 2, boton.y + boton.h / 2)
-  await esperar(800)
-  await evaluar(`[...document.querySelectorAll('.portada-pestanas button')].find((b) => /Una foto/.test(b.textContent))?.click()`)
-  await esperar(1500)
-  comprobar(await evaluar(`document.querySelectorAll('.portada-fotos button').length`) === 1, 'en «Una foto» salen las fotos de la biblioteca')
-  await evaluar(`[...document.querySelectorAll('.portada-botones button')].find((b) => /Guardar portada/.test(b.textContent))?.click()`)
-  await esperar(2500)
-  tl = (await evaluar(`window.recorte.abrirProyecto(${JSON.stringify(id)})`)).timeline
-  comprobar(tl.portada?.origen === 'imagen' && tl.portada.fuente === imagen, `la portada pasa a ser la foto (${tl.portada?.origen})`)
-  await captura('final.png')
 } catch (error) {
   console.error(error)
   fallos++

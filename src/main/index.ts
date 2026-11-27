@@ -4,7 +4,7 @@ import { AGENTES_CHAT_HERRAMIENTAS, turnoChatHerramientas } from './chatherramie
 import { usarArchivoMcp } from './adaptadoresagente'
 import { anadirHabilidad, carpetaHabilidadesUsuario, habilidadesConLecciones, leerLecciones, olvidarLeccion } from './habilidades'
 import { anadirEstilo, borrarEstilo, catalogoEstilos, crearEstilo, quitarEstilo, registrarCatalogo } from './estiloscatalogo'
-import { ANIMAR_CAPA, fuenteEnClip, tramos, zonaEn, frasesSubtitulos, huellaSubtitulos, subtitulosAlDia, duracionTimeline, duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, SONIDOS_INCLUIDOS, timelineInicial, timelineVacia, normalizarLetras, type LetraTL, type Timeline } from '../shared/timeline'
+import { ANIMAR_CAPA, fuenteEnClip, timelineActiva, ubicar, tramos, zonaEn, frasesSubtitulos, huellaSubtitulos, subtitulosAlDia, duracionTimeline, duracionesDeMedios, FUENTE_PRINCIPAL, insertarClip, normalizarTimeline, quitarFuente, SONIDOS_INCLUIDOS, timelineInicial, timelineVacia, normalizarLetras, type LetraTL, type Timeline } from '../shared/timeline'
 import { createHash, randomUUID } from 'node:crypto'
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, extname, join, resolve, sep } from 'node:path'
@@ -3126,6 +3126,63 @@ app.whenReady().then(() => {
     } finally {
       rmSync(tmp, { recursive: true, force: true })
     }
+  })
+  // Una imagen de una carpeta del usuario (como «Subir» de CapCut): se copia a `portada/` del proyecto, sin pasar por
+  // la biblioteca.
+  ipcMain.handle('portada:importar', async (_evento, id: unknown) => {
+    if (typeof id !== 'string') return { ok: false, error: 'Datos inválidos.' }
+    const proyecto = proyectos.abrir(id)
+    if (!proyecto) return { ok: false, error: 'El proyecto ya no existe.' }
+    // En las pruebas (RECORTE_PRUEBA_IMAGEN_PORTADA) no hay quien elija en el diálogo.
+    const prueba = process.env.RECORTE_PRUEBA_IMAGEN_PORTADA
+    const r = prueba
+      ? { canceled: false, filePaths: [prueba] }
+      : await dialog.showOpenDialog({
+          title: 'La imagen para la portada',
+          properties: ['openFile'],
+          filters: [{ name: 'Imágenes', extensions: ['png', 'jpg', 'jpeg', 'webp'] }]
+        })
+    const origen = r.filePaths[0]
+    if (r.canceled || !origen) return { ok: false }
+    const ext = extname(origen).toLowerCase().replace('.jpeg', '.jpg')
+    if (!['.png', '.jpg', '.webp'].includes(ext)) return { ok: false, error: 'Elige una imagen PNG, JPG o WebP.' }
+    const dir = join(proyectos.carpeta(id), 'portada')
+    mkdirSync(dir, { recursive: true })
+    const archivo = `portada/foto-${createHash('sha1').update(readFileSync(origen)).digest('hex').slice(0, 12)}${ext}`
+    copyFileSync(origen, join(proyectos.carpeta(id), archivo))
+    return { ok: true, archivo, nombre: basename(origen) }
+  })
+  // La tira de cuadros para elegir el momento (como la de CapCut): cuadros pequeños del material, rápidos, a lo largo
+  // del video. El cuadro final (con todo lo de encima) lo hace «portada:cuadro» al soltar.
+  ipcMain.handle('portada:tira', async (_evento, id: unknown, timeline: unknown, cuantos: unknown) => {
+    if (typeof id !== 'string') return { ok: false, cuadros: [] }
+    const proyecto = proyectos.abrir(id)
+    if (!proyecto) return { ok: false, cuadros: [] }
+    const valida = timelineActiva(normalizarTimeline(timeline, proyecto.source.duration, duracionesDeMedios(proyecto.medios)))
+    const total = duracionTimeline(valida)
+    const n = Math.max(4, Math.min(24, typeof cuantos === 'number' ? Math.round(cuantos) : 12))
+    const carpeta = proyectos.carpeta(id)
+    const dir = join(carpeta, 'portada', 'tira')
+    rmSync(dir, { recursive: true, force: true })
+    mkdirSync(dir, { recursive: true })
+    const sello = Date.now().toString(36)
+    const cuadros: { t: number; archivo: string }[] = []
+    for (let i = 0; i < n; i++) {
+      const t = ((i + 0.5) / n) * total
+      const u = ubicar(valida, t)
+      if (!u) continue
+      const ruta = u.clip.fuente === FUENTE_PRINCIPAL ? proyecto.source.path : proyecto.medios?.find((m) => m.id === u.clip.fuente)?.ruta
+      if (!ruta || !existsSync(ruta)) continue
+      const esImagen = proyecto.medios?.find((m) => m.id === u.clip.fuente)?.tipo === 'imagen'
+      const archivo = `portada/tira/${sello}-${i}.jpg`
+      const e = await ejecutar(
+        [`"${resolverBinario('ffmpeg') ?? 'ffmpeg'}"`, '-y', '-v', 'error', ...(esImagen ? [] : ['-ss', u.tFuente.toFixed(3)]), '-i', `"${ruta}"`, '-frames:v', '1', '-vf', 'scale=-2:200', '-q:v', '4', `"${join(carpeta, archivo)}"`],
+        carpeta,
+        30_000
+      )
+      if (e.codigo === 0 && existsSync(join(carpeta, archivo))) cuadros.push({ t, archivo })
+    }
+    return { ok: true, cuadros }
   })
   ipcMain.handle('portada:guardar', (_evento, id: unknown, datos: unknown) => {
     const prefijo = 'data:image/png;base64,'

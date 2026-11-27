@@ -17,7 +17,7 @@ import {
 } from '../shared/flow'
 import { guardar } from './disco'
 import type { Browser } from 'playwright-core'
-import { edgeExe, edgePerfil, perfilDeLaVoz, type EdgePerfil } from './edgeperfil'
+import { carpetaPerfil, edgeExe, edgePerfil, perfilDeLaVoz, type EdgePerfil } from './edgeperfil'
 import {
   abrirPagina,
   abrirPestanaFlow,
@@ -97,11 +97,13 @@ const guardarDatos = () => {
 }
 
 const edges = new Map<string, EdgePerfil>()
+/** El navegador de cada cuenta, con su perfil para el navegador de ahora (el predeterminado del usuario). */
 const edgeDe = (id: string) => {
-  let e = edges.get(id)
+  const ruta = carpetaPerfil(join(carpeta(), 'cuentas', id, 'perfil'))
+  let e = edges.get(ruta)
   if (!e) {
-    e = edgePerfil(join(carpeta(), 'cuentas', id, 'perfil'))
-    edges.set(id, e)
+    e = edgePerfil(ruta)
+    edges.set(ruta, e)
   }
   return e
 }
