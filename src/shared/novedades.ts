@@ -40,6 +40,18 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.5.1',
+    fecha: '2026-11-27',
+    resumen: 'Buscar actualizaciones ya no falla cuando GitHub anda lento.',
+    novedades: [
+      {
+        icono: 'download',
+        titulo: 'Las actualizaciones, sin errores raros',
+        texto: 'Si GitHub no responde un momento, Recorte lo vuelve a intentar solo y te lo dice en palabras claras, en vez de mostrar un error largo en inglés.'
+      }
+    ]
+  },
+  {
     version: '0.5.0',
     fecha: '2026-11-27',
     resumen: 'La portada se diseña como en CapCut: eliges la imagen y luego la editas a pantalla completa, con el título directo sobre ella.',
