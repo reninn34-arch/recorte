@@ -40,6 +40,23 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.5.4',
+    fecha: '2026-11-28',
+    resumen: 'La línea de tiempo ya no salta al reproducir y la edición con Omni se baja bien.',
+    novedades: [
+      {
+        icono: 'film',
+        titulo: 'La línea de tiempo quieta al reproducir',
+        texto: 'Al reproducir, la línea de tiempo subía y bajaba sin parar: el medidor de sonoridad (LUFS) aparecía y desaparecía y la barra de herramientas pasaba a dos líneas. Ahora la barra se queda en su sitio.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Editar con Omni, más fiable',
+        texto: 'Recorte baja el video que editó Omni y no otro de los del proyecto de Flow. Avisa si el trozo dura menos de 3 s (Flow no los edita) en vez de dejar la cuenta descansando.'
+      }
+    ]
+  },
+  {
     version: '0.5.3',
     fecha: '2026-11-28',
     resumen: 'Pídele al agente que edite un clip con Omni de Google Flow: otro fondo, otra persona, otra luz.',
