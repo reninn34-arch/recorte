@@ -154,8 +154,9 @@ import { BarraZoom } from './BarraZoom'
 import { MuestraTransicion } from './MuestraTransicion'
 import { PortadaModal } from './PortadaModal'
 import { AnimacionesTexto } from './AnimacionesTexto'
+import { EstilosTexto } from './EstilosTexto'
 import { moverClave, moverClaveCapa, moverClaveRampa, moverClaveVolumen } from '../../../shared/timeline'
-import { durEntradaTexto, ponerPortada } from '../../../shared/timeline'
+import { durEntradaTexto, ponerPintaTexto, ponerPortada } from '../../../shared/timeline'
 
 /**
  * La timeline editable: regla, pista de video magnética, pista de textos y la voz
@@ -4198,6 +4199,8 @@ export function TimelineEditor({
                 escribiendo.current = true
               }}
             />
+            <span className="ed-seccion">Estilo</span>
+            <EstilosTexto texto={textoElegido} onPoner={(pinta) => historial.aplicar(ponerPintaTexto(timeline, textoElegido.id, pinta))} />
             <label className="ed-campo"><span>Posición</span><select
               value={typeof textoElegido.x === 'number' ? 'libre' : textoElegido.posicion}
               title="Dónde va; arrástralo en el monitor para ponerlo donde quieras"

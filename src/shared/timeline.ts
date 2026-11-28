@@ -827,6 +827,38 @@ export function estiloDeTexto(t: TextoTL): EstiloTexto {
   return estiloTexto(t)
 }
 
+/** Lo que es la «pinta» de un texto (lo que aplica un estilo listo o uno guardado): no su tamaño, sitio ni animación. */
+export const CAMPOS_PINTA_TEXTO = ['fuente', 'color', 'sinCaja', 'caja', 'contorno', 'colorContorno', 'sombra', 'colorSombra', 'mayusculas', 'espaciado'] as const
+export type PintaTexto = Pick<TextoTL, (typeof CAMPOS_PINTA_TEXTO)[number]>
+
+/** La pinta de un texto (o de algo que llega de fuera, ya limpio): solo sus campos de pinta. */
+export function pintaDeTexto(t: Partial<TextoTL>): PintaTexto {
+  const e = estiloTexto(t) as Partial<TextoTL>
+  return Object.fromEntries(CAMPOS_PINTA_TEXTO.filter((k) => e[k] !== undefined).map((k) => [k, e[k]])) as PintaTexto
+}
+
+/** Le pone a un texto una pinta: los campos de pinta que no trae se quitan (vuelven a los de siempre). */
+export function ponerPintaTexto(tl: Timeline, id: string, pinta: PintaTexto): Timeline {
+  const vacio = Object.fromEntries(CAMPOS_PINTA_TEXTO.map((k) => [k, undefined])) as Partial<TextoTL>
+  return cambiarTexto(tl, id, { ...vacio, ...pinta })
+}
+
+/** Los estilos listos de los textos (como los «Aa» de CapCut): un toque y el texto toma esa pinta. */
+export const ESTILOS_TEXTO_LISTOS: { id: string; nombre: string; pinta: PintaTexto }[] = [
+  { id: 'caja', nombre: 'Caja oscura', pinta: {} },
+  { id: 'blanco-borde', nombre: 'Blanco con borde', pinta: { sinCaja: true, fuente: 'gruesa', contorno: 0.07 } },
+  { id: 'amarillo-borde', nombre: 'Amarillo con borde', pinta: { sinCaja: true, fuente: 'gruesa', color: '#ffe11a', contorno: 0.07 } },
+  { id: 'sombra', nombre: 'Con sombra', pinta: { sinCaja: true, fuente: 'negra', sombra: 0.06 } },
+  { id: 'rojo-borde', nombre: 'Rojo con borde blanco', pinta: { sinCaja: true, fuente: 'gruesa', color: '#ff3b30', contorno: 0.07, colorContorno: '#ffffff' } },
+  { id: 'caja-blanca', nombre: 'Caja blanca', pinta: { fuente: 'negra', color: '#111111', caja: '#ffffff' } },
+  { id: 'caja-roja', nombre: 'Caja roja', pinta: { fuente: 'gruesa', caja: '#e3262e' } },
+  { id: 'caja-amarilla', nombre: 'Caja amarilla', pinta: { fuente: 'gruesa', color: '#111111', caja: '#ffe11a' } },
+  { id: 'azul', nombre: 'Azul con sombra', pinta: { sinCaja: true, fuente: 'negra', color: '#5fd7ff', sombra: 0.06, colorSombra: '#0b2a66' } },
+  { id: 'titular', nombre: 'Titular', pinta: { sinCaja: true, fuente: 'titular', mayusculas: true, sombra: 0.05 } },
+  { id: 'elegante', nombre: 'Elegante', pinta: { sinCaja: true, fuente: 'elegante' } },
+  { id: 'maquina', nombre: 'Máquina', pinta: { sinCaja: true, fuente: 'maquina', contorno: 0.05 } }
+]
+
 function estiloTexto(t: Partial<TextoTL>): EstiloTexto {
   const tamano = typeof t.tamano === 'number' && Number.isFinite(t.tamano) ? Math.round(pinza(t.tamano, LIMITES_TAMANO[0], LIMITES_TAMANO[1]) * 100) / 100 : 1
   const color = typeof t.color === 'string' && COLOR_HEX.test(t.color) ? t.color.toLowerCase() : '#ffffff'

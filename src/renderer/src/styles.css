@@ -4101,3 +4101,47 @@ button.tl-tc-grande:hover { background: var(--panel-3); }
 @keyframes at-b-respirar { 50% { transform: scale(1.04); } }
 @keyframes at-b-balanceo { 25% { transform: rotate(-4deg); } 75% { transform: rotate(4deg); } }
 @keyframes at-b-temblor { 25% { transform: rotate(-1.5deg); } 75% { transform: rotate(1.5deg); } }
+
+/* Los estilos de un texto, como los «Aa» de CapCut: los listos y los del usuario, en tarjetas que muestran la pinta. */
+.et { display: flex; flex-direction: column; gap: 8px; }
+.et-cabeza { display: flex; align-items: center; gap: 6px; }
+.et-pestanas { flex: 1; }
+.et-guardar { display: inline-flex; align-items: center; justify-content: center; gap: 5px; border-style: dashed; white-space: nowrap; }
+.et-pestanas button { white-space: nowrap; }
+.et-rejilla { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.et-celda { position: relative; }
+.et-tarjeta { display: grid; place-items: center; width: 100%; height: 46px; padding: 0; border: 1.5px solid var(--line); border-radius: 8px; background: #3a4232 linear-gradient(160deg, #56614a, #2a3024); overflow: hidden; }
+.et-tarjeta:hover { border-color: var(--line-2); }
+.et-tarjeta.is-on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.et-aa { font-size: 19px; line-height: 1.15; }
+.et-borrar { position: absolute; top: -5px; right: -5px; display: none; place-items: center; width: 16px; height: 16px; padding: 0; border: 1px solid var(--line-2); border-radius: 50%; background: var(--panel); color: var(--text); }
+.et-celda:hover .et-borrar, .et-borrar:focus-visible { display: grid; }
+.et-borrar:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+.et-vacio { margin: 0; font-size: 12px; line-height: 1.5; }
+
+/* Las voces del editor, en tarjetas con su nombre, cómo suena y ▶ para oírla (como la galería de voces de CapCut). */
+.voz-tarjetas { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 5px; flex: 1 1 100%; max-height: 150px; overflow-y: auto; padding: 1px; }
+.voz-tarjeta { position: relative; display: flex; border: 1.5px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.voz-tarjeta:hover { border-color: var(--line-2); }
+.voz-tarjeta.is-on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.voz-tarjeta-elegir { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 6px 26px 6px 8px; border: none; background: none; color: var(--text); text-align: left; }
+.voz-tarjeta-elegir b { font-size: 12px; font-weight: 600; }
+.voz-tarjeta-elegir small { overflow: hidden; max-width: 100%; color: var(--dim); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+.voz-tarjeta.is-on .voz-tarjeta-elegir b { color: var(--accent); }
+.voz-tarjeta-oir { position: absolute; top: 50%; right: 5px; display: grid; place-items: center; width: 20px; height: 20px; margin-top: -10px; padding: 0; border: none; border-radius: 50%; background: var(--panel-3); color: var(--text); }
+.voz-tarjeta-oir:hover, .voz-tarjeta-oir.sonando { background: var(--accent); color: var(--ink); }
+.voz-cargando { width: 10px; height: 10px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: voz-gira 0.7s linear infinite; }
+@keyframes voz-gira { to { transform: rotate(360deg); } }
+
+/* El aviso de que Recorte está trabajando (generar una voz…): en el centro, con ondas que se mueven y Cancelar. */
+.aviso-trabajo { position: fixed; inset: 0; z-index: 95; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); animation: aviso-entra 0.15s ease-out; }
+.aviso-trabajo-caja { display: flex; flex-direction: column; align-items: center; gap: 8px; width: min(340px, calc(100% - 32px)); padding: 22px 22px 18px; border: 1px solid var(--line-2); border-radius: 14px; background: var(--panel); box-shadow: 0 24px 70px #000d; text-align: center; }
+.aviso-trabajo-caja b { font-size: 14.5px; font-weight: 600; }
+.aviso-trabajo-detalle { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.aviso-trabajo-tiempo { color: var(--dim); font-family: var(--mono); font-size: 11.5px; }
+.aviso-trabajo-caja .btn { margin-top: 4px; min-width: 110px; }
+.aviso-trabajo-ondas { display: flex; align-items: center; gap: 4px; height: 34px; margin-bottom: 4px; }
+.aviso-trabajo-ondas i { width: 5px; height: 100%; border-radius: 3px; background: var(--accent); animation: aviso-onda 0.9s ease-in-out infinite; transform-origin: center; }
+@keyframes aviso-onda { 0%, 100% { transform: scaleY(0.25); opacity: 0.6; } 50% { transform: scaleY(1); opacity: 1; } }
+@keyframes aviso-entra { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .aviso-trabajo-ondas i, .voz-cargando { animation: none; } }

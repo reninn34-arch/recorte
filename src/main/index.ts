@@ -83,6 +83,7 @@ import { leerCube as leerCubeLut } from '../shared/lut'
 import { archivosVersion, armarBase, baseDe, EstilosPropios, versionBase } from './estilospropios'
 import { turnoAgente } from './chat'
 import { buscarActualizacion, estadoActualizacion, instalarActualizacion, prepararActualizaciones } from './actualizar'
+import { borrarEstiloTexto, guardarEstiloTexto, leerEstilosTexto } from './estilostexto'
 import { activarGustos, agregarGustos, bloqueGustos, cargarGustos, olvidarGustos, quitarGusto, senalGusto, usoCreacion } from './gustos'
 import { aplicarOperaciones, type MensajeChat, type OperacionTL } from '../shared/chat'
 import { buscarPython, rutaScriptPython, transcribir, transcribirArchivo } from './transcribir'
@@ -3589,6 +3590,9 @@ No pude animar los subtítulos (se animan al exportar): ${e instanceof Error ? e
 
   // El criterio que Recorte aprende del usuario (ver shared/gustos.ts).
   ipcMain.handle('gustos:ver', () => cargarGustos())
+  ipcMain.handle('estilos-texto:ver', () => leerEstilosTexto())
+  ipcMain.handle('estilos-texto:guardar', (_evento, nombre: unknown, pinta: unknown) => guardarEstiloTexto(typeof nombre === 'string' ? nombre : 'Mi estilo', pinta))
+  ipcMain.handle('estilos-texto:borrar', (_evento, id: unknown) => (typeof id === 'string' ? borrarEstiloTexto(id) : leerEstilosTexto()))
   ipcMain.handle('gustos:agregar', (_evento, texto: unknown) => {
     if (typeof texto === 'string' && texto.trim()) agregarGustos([texto], 'dicho')
     return cargarGustos()

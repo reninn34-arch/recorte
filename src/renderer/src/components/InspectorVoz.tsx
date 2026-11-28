@@ -3,6 +3,7 @@ import { VOCES_GEMINI } from '../../../shared/creacion'
 import { anadirVoz, borrarVoz, cambiarVoz, type Timeline, type VozTL } from '../../../shared/timeline'
 import type { Historial } from '../hooks/timeline'
 import { Icon } from '../Icons'
+import { AvisoTrabajo } from './AvisoTrabajo'
 
 /** Lo que devuelve Recorte al generar una frase: su audio ya está en la carpeta del proyecto. */
 export type FraseGenerada = { archivo: string; duracion: number; texto: string; voz: string }
@@ -42,6 +43,17 @@ export function InspectorVoz({
   const [voz, setVoz] = useState(frase?.voz ?? timeline.voces?.find((v) => v.voz)?.voz ?? 'Kore')
   const [ocupado, setOcupado] = useState<string | null>(null)
   const ajustando = useRef(false)
+  /** Cancelar deja de esperar: lo que llegue después se descarta. */
+  const cancelado = useRef(false)
+  const oir = useMuestraVoz()
+  const empezar = (que: string) => {
+    cancelado.current = false
+    setOcupado(que)
+  }
+  const cancelar = () => {
+    cancelado.current = true
+    setOcupado(null)
+  }
 
   // Al elegir otra frase, el panel enseña la suya.
   useEffect(() => {
@@ -76,16 +88,18 @@ export function InspectorVoz({
 
   async function regenerar() {
     if (!frase || !texto.trim() || ocupado) return
-    setOcupado('Generando la frase')
+    empezar(`Generando la voz con ${voz}`)
     const r = await generar(texto.trim(), voz)
+    if (cancelado.current) return
     setOcupado(null)
     if (r) historial.aplicar(cambiarVoz(timeline, frase.id, { archivo: r.archivo, duracion: r.duracion, texto: r.texto, voz: r.voz }))
   }
 
   async function nueva() {
     if (!texto.trim() || ocupado) return
-    setOcupado('Generando la frase')
+    empezar(`Generando la voz con ${voz}`)
     const r = await generar(texto.trim(), voz)
+    if (cancelado.current) return
     setOcupado(null)
     if (!r) return
     const { timeline: con, id } = anadirVoz(timeline, { inicio: tiempo, duracion: r.duracion, archivo: r.archivo, texto: r.texto, voz: r.voz })
@@ -99,10 +113,12 @@ export function InspectorVoz({
     const lista = (timeline.voces ?? []).filter((v) => v.texto.trim() && !esVozPropia(v))
     if (!lista.length || ocupado) return
     let tl = timeline
+    cancelado.current = false
     for (const [i, v] of lista.entries()) {
-      setOcupado(`Cambiando la voz: frase ${i + 1} de ${lista.length}`)
+      setOcupado(`Cambiando la voz a ${voz}: frase ${i + 1} de ${lista.length}`)
       const r = await generar(v.texto, voz)
-      if (!r) break
+      // Al cancelar, se quedan las frases que ya se hicieron.
+      if (!r || cancelado.current) break
       tl = cambiarVoz(tl, v.id, { archivo: r.archivo, duracion: r.duracion, texto: r.texto, voz: r.voz })
     }
     setOcupado(null)
@@ -123,13 +139,25 @@ export function InspectorVoz({
           if (e.key === 'Enter') void (frase ? regenerar() : nueva())
         }}
       />
-      <select value={voz} disabled={Boolean(ocupado)} onChange={(e) => setVoz(e.target.value)} title="La voz de Gemini que la dice">
+      <div className="voz-tarjetas" role="listbox" aria-label="La voz que la dice">
         {VOCES_GEMINI.map((v) => (
-          <option key={v.id} value={v.id}>
-            {v.id} · {v.descripcion}
-          </option>
+          <div key={v.id} className={`voz-tarjeta ${voz === v.id ? 'is-on' : ''}`}>
+            <button role="option" aria-selected={voz === v.id} className="voz-tarjeta-elegir" disabled={Boolean(ocupado)} onClick={() => setVoz(v.id)} title={`${v.id}: ${v.descripcion}`}>
+              <b>{v.id}</b>
+              <small>{v.descripcion}</small>
+            </button>
+            <button
+              className={`voz-tarjeta-oir ${oir.sonando === v.id ? 'sonando' : ''}`}
+              onClick={() => void oir.alternar(v.id)}
+              title={oir.sonando === v.id ? 'Parar' : `Escuchar a ${v.id}`}
+              aria-label={oir.sonando === v.id ? 'Parar' : `Escuchar a ${v.id}`}
+            >
+              {oir.cargando === v.id ? <span className="voz-cargando" /> : <Icon name={oir.sonando === v.id ? 'pause' : 'play'} size={11} />}
+            </button>
+          </div>
         ))}
-      </select>
+      </div>
+      {oir.error && <span className="crear-error">{oir.error}</span>}
       {grabar && (
         <button
           className={`btn small ${grabador.estado === 'grabando' ? 'primary' : ''}`}
@@ -174,6 +202,7 @@ export function InspectorVoz({
         </button>
       )}
       {grabador.error && <span className="crear-error">{grabador.error}</span>}
+      {ocupado && <AvisoTrabajo titulo={`${ocupado}…`} detalle={texto.trim() ? `«${texto.trim().slice(0, 90)}${texto.trim().length > 90 ? '…' : ''}»` : undefined} onCancelar={cancelar} />}
       {ocupado ? (
         <span className="tl-dim">{ocupado}…</span>
       ) : (
@@ -210,6 +239,37 @@ export function InspectorVoz({
       )}
     </div>
   )
+}
+
+/** Oír la muestra de una voz (se hace una vez y queda guardada): tocar otra vez la para. */
+function useMuestraVoz() {
+  const [sonando, setSonando] = useState<string | null>(null)
+  const [cargando, setCargando] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const audio = useRef<HTMLAudioElement | null>(null)
+  useEffect(() => () => audio.current?.pause(), [])
+  async function alternar(id: string) {
+    audio.current?.pause()
+    if (sonando === id) {
+      setSonando(null)
+      return
+    }
+    setError(null)
+    setCargando(id)
+    try {
+      const a = new Audio(await window.recorte.vozMuestra(id))
+      audio.current = a
+      a.onended = () => setSonando((x) => (x === id ? null : x))
+      setSonando(id)
+      await a.play()
+    } catch (e) {
+      setSonando(null)
+      setError(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))
+    } finally {
+      setCargando(null)
+    }
+  }
+  return { sonando, cargando, error, alternar }
 }
 
 /** El micrófono: empezar, parar (devuelve lo grabado) y cuántos segundos van. */

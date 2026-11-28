@@ -9,7 +9,14 @@ export interface HabilidadVista {
   origen: 'recorte' | 'usuario'
   aprendido: string[]
 }
-import type { LetraTL, MusicaTL, Timeline, LutClip } from './timeline'
+import type { LetraTL, MusicaTL, Timeline, LutClip, PintaTexto } from './timeline'
+
+/** Un estilo de texto guardado por el usuario («Guardar como mi estilo»): su nombre y su pinta. */
+export interface EstiloTextoGuardado {
+  id: string
+  nombre: string
+  pinta: PintaTexto
+}
 import type { Grafico } from './grafico'
 import type { ProblemaAudio } from './audio'
 import type { PiezaAnimada, ValoresPieza } from './piezas'
@@ -523,6 +530,10 @@ export interface RecorteApi {
   gustosOlvidar: () => Promise<Gustos>
   /** Lo que hizo el usuario con una propuesta del agente (el agente lo lee para aprender). */
   gustoSenal: (tipo: SenalGusto['tipo'], detalle: string) => Promise<void>
+  /** Los estilos de texto guardados por el usuario, para todos sus proyectos. */
+  estilosTexto: () => Promise<EstiloTextoGuardado[]>
+  estiloTextoGuardar: (nombre: string, pinta: PintaTexto) => Promise<EstiloTextoGuardado[]>
+  estiloTextoBorrar: (id: string) => Promise<EstiloTextoGuardado[]>
   /** Para al agente del chat de ese proyecto (deja de gastar al instante). */
   pararAgente: (id: string) => Promise<boolean>
   /** Para lo que el agente esté haciendo en esa creación (guion, Flow, render). */
