@@ -127,6 +127,8 @@ export interface PedidoFlow {
 export const MODELO_EDITAR_VIDEO = 'Omni 1.2 Flash'
 /** Lo más largo que Omni edita de una vez. */
 export const MAX_EDITAR_VIDEO_S = 10
+/** Lo más corto que Flow acepta para editar (con menos, no dice el costo ni deja mandarlo; noviembre de 2026). */
+export const MIN_EDITAR_VIDEO_S = 3
 /** Lo que cuesta editar con Omni a 720p, en puntos por segundo (21 puntos por 7 s, noviembre de 2026). */
 export const PUNTOS_POR_SEGUNDO_OMNI = 3
 

@@ -6,7 +6,7 @@ import { basename, extname, join } from 'node:path'
 import { aplicarOperaciones, describirTimelineParaAgente, OPERACIONES_DOC, validarOperaciones, type OperacionTL } from '../shared/chat'
 import type { EstadoUso, RenderResultado, TranscripcionResultado } from '../shared/api'
 import { COSTO_CLIP, ID_SEGURO, MAX_CLIPS_VEO, textoMuestra, VOCES_GEMINI, type Creacion, type PeticionCreacion } from '../shared/creacion'
-import { MAX_EDITAR_VIDEO_S, MODELO_EDITAR_VIDEO, MODELOS_IMAGEN, modelosVideoVigentes, PUNTOS_POR_SEGUNDO_OMNI, type PedidoFlow, type ResultadoFlow } from '../shared/flow'
+import { MAX_EDITAR_VIDEO_S, MIN_EDITAR_VIDEO_S, MODELO_EDITAR_VIDEO, MODELOS_IMAGEN, modelosVideoVigentes, PUNTOS_POR_SEGUNDO_OMNI, type PedidoFlow, type ResultadoFlow } from '../shared/flow'
 import { tramos, velocidadDe, anadirCapa, anadirVoz, ANIMAR_CAPA, cambiarCapa, duracionesDeMedios, duracionTimeline, escalaAnimada, conSubtitulosAnimados, normalizarTimeline, ponerMusica, timelineInicial, ventanaTimeline, type LetraTL, type Timeline, type TipoAnimar } from '../shared/timeline'
 import type { Project } from '../shared/types'
 import { prepararGraficos, type Grafico } from '../shared/grafico'
@@ -1220,7 +1220,7 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
         descripcion:
           `Edita un trozo de video que ya existe con ${MODELO_EDITAR_VIDEO} de Google Flow: cambia lo que se pida (otra persona o personaje, ` +
           'otro fondo o paisaje, otra luz, otra ropa, quitar o añadir algo) y conserva lo demás, incluido el movimiento y el encuadre. ' +
-          `Toma hasta ${MAX_EDITAR_VIDEO_S} s: de un clip de la timeline («clip», y «desde»/«hasta» en segundos de la timeline) o de un video ` +
+          `Toma de ${MIN_EDITAR_VIDEO_S} a ${MAX_EDITAR_VIDEO_S} s: de un clip de la timeline («clip», y «desde»/«hasta» en segundos de la timeline) o de un video ` +
           'de la biblioteca («medio», y «desde»/«hasta» en segundos de ese video). Gasta puntos de Flow (unos ' +
           `${PUNTOS_POR_SEGUNDO_OMNI} por segundo): la primera llamada devuelve el costo y un código; repítela con "confirmacion" solo si el ` +
           'usuario acepta. Lo editado queda en la biblioteca y, si salió de un clip, encima de ese tramo como capa (el sonido sigue siendo ' +
@@ -1275,7 +1275,12 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
             ruta = m.ruta
           } else return fallo('Di qué editar: «clip» (de la timeline) o «medio» (un video de la biblioteca).')
           if (!existsSync(ruta)) return fallo('No encuentro el archivo de ese video.')
-          if (dura < 1) return fallo('El trozo es muy corto: tiene que durar al menos 1 s.')
+          if (dura < MIN_EDITAR_VIDEO_S - 0.01)
+            return fallo(
+              `El trozo dura ${dura.toFixed(1).replace('.', ',')} s y Flow solo edita trozos de ${MIN_EDITAR_VIDEO_S} s o más. Si el clip es más corto, ` +
+                'edita un tramo más largo del video del que salió («medio» con desde/hasta: por ejemplo el video exportado sin textos) y ponlo ' +
+                'encima de esos clips con editar_timeline («anadir_capa»).'
+            )
           if (dura > MAX_EDITAR_VIDEO_S + 0.01) return fallo(`Omni edita ${MAX_EDITAR_VIDEO_S} s como mucho de una vez: pide un trozo más corto (o varios).`)
           const estimado = Math.ceil(dura * PUNTOS_POR_SEGUNDO_OMNI)
           const conservar = texto(args.conservar).trim().slice(0, 600)

@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { mkdirSync, readFileSync, renameSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import type { Browser, Locator, Page } from 'playwright-core'
-import { costoDe, creditosDe, ICONO_FORMATO, MODELOS_IMAGEN, MODELOS_VIDEO, PALABRA_CREDITOS, type PedidoFlow } from '../shared/flow'
+import { costoDe, creditosDe, ICONO_FORMATO, MIN_EDITAR_VIDEO_S, MODELOS_IMAGEN, MODELOS_VIDEO, PALABRA_CREDITOS, type PedidoFlow } from '../shared/flow'
 
 /**
  * Lo que Recorte hace en la página de Google Flow, como lo haría la persona: entrar al
@@ -473,7 +473,12 @@ export async function generarEnPestana(
       if (p.video) {
         // Lo elegido ya no vale para el siguiente pedido (el costo era el de este video).
         pest.olvidarEleccion()
-        creditos = await costoAhora(page)
+        // Si Flow no dice el costo con el video puesto es que no lo acepta (muy corto, por ejemplo): no es culpa de la
+        // cuenta, así que es un error normal (un NoEmpezo la dejaría descansando como si no tuviera puntos).
+        creditos = await costoAhora(page).catch((e) => {
+          if (e instanceof NoEmpezo) throw new Error(`Flow no acepta este video para editarlo (dura menos de ${MIN_EDITAR_VIDEO_S} s o no lo admite). No se generó nada.`)
+          throw e
+        })
         if (creditos > tope) throw new NoEmpezo(`Editar este video cuesta ${creditos} puntos y el tope es ${tope}. No se generó nada.`, '')
         if (creditos > 0 && (await sinPuntos(page))) {
           throw new NoEmpezo(`A esta cuenta de Flow no le quedan puntos para esto (cuesta ${creditos}). No se generó nada.`, 'puntos insuficientes')
