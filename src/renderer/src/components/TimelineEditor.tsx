@@ -2237,11 +2237,11 @@ export function TimelineEditor({
         >
           <Icon name="mezclador" size={15} />
           <Medidor horizontal nivel={niveles.general} />
-          {reproduciendo && Number.isFinite(sonoridad.corta) && sonoridad.corta > -70 && (
-            <span className="tl-lufs" title="Sonoridad de los últimos 3 s (las redes dejan los videos en −14 LUFS)">
-              {textoLufs(sonoridad.corta)} LUFS
-            </span>
-          )}
+          {/* Siempre ocupa su sitio (vacío si no suena): si apareciera y desapareciera, la barra cambiaría de ancho y
+              saltaría a dos líneas y vuelta mientras se reproduce, moviendo toda la línea de tiempo. */}
+          <span className="tl-lufs" title="Sonoridad de los últimos 3 s (las redes dejan los videos en −14 LUFS)">
+            {reproduciendo && Number.isFinite(sonoridad.corta) && sonoridad.corta > -70 ? `${textoLufs(sonoridad.corta)} LUFS` : ''}
+          </span>
         </button>
         <button className="tl-boton" onClick={ajustar} title="Ver toda la línea de tiempo (para acercar: la barra de debajo, Ctrl+rueda o + y −)">
           Ajustar

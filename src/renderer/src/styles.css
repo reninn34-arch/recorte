@@ -1511,7 +1511,7 @@ button { cursor: pointer; }
   border-bottom: 1px solid var(--line);
   container-type: inline-size;
 }
-@container (max-width: 860px) {
+@container (max-width: 980px) {
   .tl-barra .tl-boton { padding: 0 5px; gap: 3px; }
   .tl-barra .tl-separador { display: none; }
 }
@@ -3848,7 +3848,11 @@ button { cursor: pointer; }
 .lufs-datos dd { margin: 0; font-family: var(--mono); color: var(--text); font-variant-numeric: tabular-nums; text-align: right; }
 .lufs-reiniciar { border: none; background: none; padding: 0; color: var(--muted); font-size: 10.5px; }
 .lufs-reiniciar:hover { color: var(--text); text-decoration: underline; }
-.tl-lufs { margin-left: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tl-lufs { display: inline-block; min-width: 10.5ch; margin-left: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: left; }
+/* Con la línea de tiempo estrecha no se enseña (está en el mezclador): que no obligue a la barra a ocupar dos líneas. */
+@container (max-width: 980px) {
+  .tl-barra .tl-lufs { display: none; }
+}
 
 /* Cabeceras de pista con «S»: un poco más anchas para que quepa el nombre entero. */
 .ed .tl-nombres { width: 150px; }
