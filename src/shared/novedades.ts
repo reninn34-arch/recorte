@@ -40,6 +40,43 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.5.2',
+    fecha: '2026-11-28',
+    resumen: 'Los textos se animan y se pintan como en CapCut, las voces se eligen escuchándolas y la línea de tiempo se maneja más rápido.',
+    novedades: [
+      {
+        icono: 'efectos',
+        titulo: 'Animaciones de texto: entrada, salida y en bucle',
+        texto: 'En el texto elegido, tres pestañas con tarjetas que muestran cada animación moviéndose. Toca una y se ve al momento en el monitor. Hay entradas nuevas (desde grande, desde un lado), una salida que se agranda y bucles para que el texto lata, respire o se balancee mientras está.'
+      },
+      {
+        icono: 'type',
+        titulo: 'Estilos de texto listos y los tuyos',
+        texto: 'Tarjetas «Aa» con estilos listos (con borde, con sombra, con caja, neón…). Arregla un texto como te guste y guárdalo con «Guardar este estilo como mío» para usarlo en cualquier proyecto.'
+      },
+      {
+        icono: 'sparkles',
+        titulo: 'Brillo, y letra y color más fáciles',
+        texto: 'Los textos sin caja pueden llevar un brillo de color alrededor. La letra se elige viendo cada una escrita con su forma, y el color con gotero, los colores que ya usa el proyecto o la paleta.'
+      },
+      {
+        icono: 'music',
+        titulo: 'Voces que se escuchan antes',
+        texto: 'Al poner una frase de voz en el editor, las voces son tarjetas con ▶ para oírlas. Mientras se genera aparece un aviso en el centro con lo que va a decir, los segundos que lleva y Cancelar.'
+      },
+      {
+        icono: 'scissors',
+        titulo: 'La línea de tiempo, más rápida',
+        texto: 'Q y W borran lo que queda a la izquierda o a la derecha del cabezal en el clip y cierran el hueco. La barra cambia según lo que elijas, los textos muestran cuánto dura su animación y la música puede subir al empezar y bajar al terminar.'
+      },
+      {
+        icono: 'girar',
+        titulo: 'Cada ajuste con ↺ y ◆',
+        texto: 'Tamaño, opacidad, giro y sitio de un texto tienen su fotograma clave al lado, con flechas para ir de una clave a otra. Cada número tiene ↺ para volver a su valor de siempre.'
+      }
+    ]
+  },
+  {
     version: '0.5.1',
     fecha: '2026-11-27',
     resumen: 'Buscar actualizaciones ya no falla cuando GitHub anda lento.',
