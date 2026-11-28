@@ -321,12 +321,17 @@ export class PestanaFlow {
     return this.page.locator('flow-tile-container').nth(this.puestas - puestaSuya)
   }
 
-  /** La primera tarjeta que ya tiene imagen y su posición: la marca para contar las que salen encima. */
+  /**
+   * La primera tarjeta ya hecha y su posición: la marca para contar las que salen encima. Una imagen se reconoce por su
+   * data-media-id; un video no lo tiene (ni los generados ni los subidos para editar), así que vale el src de su video.
+   */
   ancla(): Promise<Ancla | null> {
     return this.page.evaluate(() => {
+      const idDe = (t: Element) =>
+        t.querySelector('[data-media-id]')?.getAttribute('data-media-id') || t.querySelector('video[src]')?.getAttribute('src') || ''
       const ts = [...document.querySelectorAll('flow-tile-container')]
-      const i = ts.findIndex((t) => t.querySelector('[data-media-id]'))
-      return i < 0 ? null : { i, id: ts[i].querySelector('[data-media-id]')?.getAttribute('data-media-id') ?? '' }
+      const i = ts.findIndex((t) => idDe(t))
+      return i < 0 ? null : { i, id: idDe(ts[i]) }
     })
   }
 
@@ -334,7 +339,10 @@ export class PestanaFlow {
   async nuevasDesde(ancla: Ancla | null): Promise<number> {
     if (!ancla) return 0
     const j = await this.page.evaluate(
-      (id) => [...document.querySelectorAll('flow-tile-container')].findIndex((t) => t.querySelector(`[data-media-id="${id}"]`)),
+      (id) =>
+        [...document.querySelectorAll('flow-tile-container')].findIndex(
+          (t) => (t.querySelector('[data-media-id]')?.getAttribute('data-media-id') || t.querySelector('video[src]')?.getAttribute('src')) === id
+        ),
       ancla.id
     )
     return j < 0 ? 0 : Math.max(0, j - ancla.i)
