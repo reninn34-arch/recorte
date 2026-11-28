@@ -139,7 +139,7 @@ import { EditorCurvas } from './EditorCurvas'
 import { Medidor, Mezclador, textoLufs, useNiveles, useSonoridad } from './Mezclador'
 import { useMenuContextual, type OpcionMenu } from './MenuContextual'
 import { InspectorVoz, type GenerarVoz, type GrabarVoz } from './InspectorVoz'
-import { EstiloTexto } from './EstiloTexto'
+import { EstiloTexto, RomboTexto } from './EstiloTexto'
 import { alinearPiezas, cajaDePieza, moverPiezas, type Alineacion, type Pieza } from '../grupo'
 import type { Caja } from '../guias'
 import { duplicarCapa, duplicarTexto, estiloDeCapa, estiloDeTexto, ordenarCapa, pegarEstiloCapa, pegarEstiloTexto, type EstiloCapa, type TextoTL } from '../../../shared/timeline'
@@ -157,7 +157,7 @@ import { AnimacionesTexto } from './AnimacionesTexto'
 import { EstilosTexto } from './EstilosTexto'
 import { ColorBoton, coloresDelProyecto, LetraBoton } from './ControlesTexto'
 import { moverClave, moverClaveCapa, moverClaveRampa, moverClaveVolumen } from '../../../shared/timeline'
-import { borrarHastaCabezal, durEntradaTexto, FUNDIDO_SALIDA_MUSICA, ponerPintaTexto, ponerPortada } from '../../../shared/timeline'
+import { borrarHastaCabezal, SALIDA_TEXTO_S, durEntradaTexto, FUNDIDO_SALIDA_MUSICA, ponerPintaTexto, ponerPortada } from '../../../shared/timeline'
 
 /**
  * La timeline editable: regla, pista de video magnética, pista de textos y la voz
@@ -3881,6 +3881,7 @@ export function TimelineEditor({
                     max={180}
                     paso={1}
                     formato={(v) => `${Math.round(v)}°`}
+                    porDefecto={0}
                     onEmpezar={empezarAjuste}
                     onCambio={(v) => deslizar(ponerClaveCapa(timeline, capaElegida.id, 'giro', Math.min(capaElegida.duracion, Math.max(0, tiempo - capaElegida.inicio)), v, medidas))}
                   />
@@ -4200,6 +4201,7 @@ export function TimelineEditor({
                 <ValorArrastrable
                   nombre="Volumen de la música"
                   valor={musicaElegida.volumen}
+                  porDefecto={0.35}
                   min={0}
                   max={1}
                   paso={0.01}
@@ -4300,9 +4302,21 @@ export function TimelineEditor({
               <option value="centro">Centro</option>
               <option value="abajo">Abajo</option>
             </select></label>
-            <div className="tl-ajuste aj en-linea">
+            <div className="tl-ajuste aj en-linea con-claves">
               <span>
-                Tamaño
+                <span className="tl-ajuste-nombre">
+                  Tamaño
+                  <RomboTexto
+                    t={textoElegido}
+                    params={['tamano']}
+                    nombre="Tamaño"
+                    dt={Math.min(textoElegido.duracion, Math.max(0, tiempo - textoElegido.inicio))}
+                    valor={() => ({ tamano: textoAhora?.tamano ?? 1 })}
+                    timeline={timeline}
+                    historial={historial}
+                    onBuscar={onBuscar}
+                  />
+                </span>
                 <ValorArrastrable
                   nombre="Tamaño del texto"
                   valor={textoAhora?.tamano ?? 1}
@@ -4363,6 +4377,7 @@ export function TimelineEditor({
               duracionSalida={
                 <DuracionAnimacion
                   nombre="Dura la salida"
+                  porDefecto={SALIDA_TEXTO_S}
                   valor={durSalidaTexto(textoElegido)}
                   onCambio={(v) => deslizar(cambiarTexto(timeline, textoElegido.id, { durSalida: v }))}
                   empezar={empezarAjuste}
@@ -4566,7 +4581,7 @@ function PanelOrden({
 }
 
 /** Lo que dura una entrada o una salida, de 0,1 a 2 s. */
-function DuracionAnimacion({ nombre, valor, onCambio, empezar }: { nombre: string; valor: number; onCambio: (v: number) => void; empezar: () => void }) {
+function DuracionAnimacion({ nombre, valor, onCambio, empezar, porDefecto }: { nombre: string; valor: number; onCambio: (v: number) => void; empezar: () => void; porDefecto?: number }) {
   return (
     <div className="tl-ajuste aj en-linea">
       <span>
@@ -4578,6 +4593,7 @@ function DuracionAnimacion({ nombre, valor, onCambio, empezar }: { nombre: strin
           max={DURACIONES_ANIMACION[1]}
           paso={0.05}
           formato={(v) => `${v.toFixed(2).replace('.', ',')} s`}
+          porDefecto={porDefecto}
           onEmpezar={empezar}
           onCambio={onCambio}
         />
