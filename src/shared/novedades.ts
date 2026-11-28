@@ -40,6 +40,18 @@ export interface VersionNovedades {
 
 export const NOVEDADES: VersionNovedades[] = [
   {
+    version: '0.5.3',
+    fecha: '2026-11-28',
+    resumen: 'Pídele al agente que edite un clip con Omni de Google Flow: otro fondo, otra persona, otra luz.',
+    novedades: [
+      {
+        icono: 'sparkles',
+        titulo: 'Editar un clip con Omni 1.2 Flash',
+        texto: 'Dile al agente (o a Claude por el conector) qué cambiar en un clip: «ponle otro paisaje», «cámbiale la persona». Corta ese tramo (hasta 10 s), te dice cuántos puntos de Flow cuesta y, si aceptas, lo edita con Omni y lo pone encima del tramo con el sonido original. Se quita con Ctrl+Z.'
+      }
+    ]
+  },
+  {
     version: '0.5.2',
     fecha: '2026-11-28',
     resumen: 'Los textos se animan y se pintan como en CapCut, las voces se eligen escuchándolas y la línea de tiempo se maneja más rápido.',
