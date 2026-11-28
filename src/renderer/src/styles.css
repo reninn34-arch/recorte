@@ -4038,3 +4038,66 @@ button.tl-tc-grande:hover { background: var(--panel-3); }
 .pd-preguntar-caja { display: flex; flex-direction: column; gap: 6px; width: min(360px, calc(100% - 32px)); padding: 18px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--panel); box-shadow: 0 20px 60px #000d; font-size: 14px; }
 .pd-preguntar-caja .tl-dim { font-size: 12.5px; }
 .pd-preguntar-botones { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+
+/* Las animaciones de un texto, como en CapCut: pestañas Entrada · Salida · En bucle y tarjetas que muestran cada una
+   moviéndose (las muestras se repiten solas; la elegida lleva el borde de acento). */
+.at { display: flex; flex-direction: column; gap: 8px; }
+.at-pestanas { display: flex; gap: 2px; padding: 3px; border-radius: 8px; background: var(--panel-2); }
+.at-pestanas button { position: relative; flex: 1; padding: 6px 4px; border: none; border-radius: 6px; background: none; color: var(--muted); font-size: 12px; font-weight: 500; }
+.at-pestanas button:hover { color: var(--text); }
+.at-pestanas button.is-on { background: var(--panel-3); color: var(--text); box-shadow: 0 1px 2px #0006; }
+.at-punto { position: absolute; top: 5px; right: 6px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.at-rejilla { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.at-tarjeta { display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 0; border: none; background: none; color: var(--muted); text-align: center; }
+.at-tarjeta small { overflow: hidden; font-size: 10.5px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.at-muestra { display: grid; place-items: center; height: 52px; border: 1.5px solid var(--line); border-radius: 8px; background: #20241b linear-gradient(160deg, #2c3326, #171a13); overflow: hidden; color: var(--text); }
+.at-tarjeta:hover .at-muestra { border-color: var(--line-2); }
+.at-tarjeta:hover small { color: var(--text); }
+.at-tarjeta.is-on .at-muestra { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.at-tarjeta.is-on small { color: var(--accent); }
+.at-nada { color: var(--dim); }
+.at-demo { display: inline-flex; gap: 3px; font-size: 19px; font-weight: 800; line-height: 1; letter-spacing: 0.01em; animation-duration: 1.8s; animation-iteration-count: infinite; animation-timing-function: ease-out; }
+.at-demo b { display: inline-block; font-weight: 800; animation-duration: 1.8s; animation-iteration-count: infinite; animation-fill-mode: both; }
+@media (prefers-reduced-motion: reduce) { .at-demo, .at-demo b { animation: none !important; } }
+
+/* Entradas (aparecen en el primer cuarto y se quedan). */
+.at-entrada-rotulo { animation-name: at-rotulo; }
+.at-entrada-pop { animation-name: at-pop; }
+.at-entrada-subir { animation-name: at-subir; }
+.at-entrada-desenfoque { animation-name: at-desenfoque; }
+.at-entrada-zoom { animation-name: at-zoom; }
+.at-entrada-izquierda { animation-name: at-izquierda; }
+.at-entrada-derecha { animation-name: at-derecha; }
+.at-entrada-palabras b, .at-entrada-maquina b { animation-name: at-aparece; }
+.at-entrada-palabras-desenfoque b { animation-name: at-nitida; }
+.at-entrada-pintar b { animation-name: at-pinta; }
+@keyframes at-rotulo { 0% { opacity: 0; transform: scale(0.86); } 12%, 85% { opacity: 1; transform: scale(1); } 100% { opacity: 0; } }
+@keyframes at-pop { 0% { opacity: 0; transform: scale(0.45); } 8% { opacity: 1; transform: scale(1.17); } 14%, 85% { transform: scale(1); opacity: 1; } 100% { opacity: 0; } }
+@keyframes at-subir { 0% { opacity: 0; transform: translateY(0.6em); } 20%, 85% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+@keyframes at-desenfoque { 0% { opacity: 0; filter: blur(5px); } 20%, 85% { opacity: 1; filter: none; } 100% { opacity: 0; } }
+@keyframes at-zoom { 0% { opacity: 0; transform: scale(1.6); } 17%, 85% { opacity: 1; transform: scale(1); } 100% { opacity: 0; } }
+@keyframes at-izquierda { 0% { opacity: 0; transform: translateX(-1.2em); } 20%, 85% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+@keyframes at-derecha { 0% { opacity: 0; transform: translateX(1.2em); } 20%, 85% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+@keyframes at-aparece { 0%, 10% { opacity: 0; } 14%, 85% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes at-nitida { 0%, 8% { opacity: 0; filter: blur(5px); } 26%, 85% { opacity: 1; filter: none; } 100% { opacity: 0; } }
+@keyframes at-pinta { 0%, 12% { color: var(--text); } 22%, 85% { color: #ffe14d; } 100% { color: var(--text); } }
+
+/* Salidas (quietas y se van al final). */
+.at-salida-fundido { animation-name: at-s-fundido; }
+.at-salida-encoger { animation-name: at-s-encoger; }
+.at-salida-desenfoque { animation-name: at-s-desenfoque; }
+.at-salida-agrandar { animation-name: at-s-agrandar; }
+@keyframes at-s-fundido { 0%, 55% { opacity: 1; } 80%, 100% { opacity: 0; } }
+@keyframes at-s-encoger { 0%, 55% { opacity: 1; transform: none; } 80%, 100% { opacity: 0; transform: scale(0.4); } }
+@keyframes at-s-desenfoque { 0%, 55% { opacity: 1; filter: none; } 80%, 100% { opacity: 0; filter: blur(5px); } }
+@keyframes at-s-agrandar { 0%, 55% { opacity: 1; transform: none; } 80%, 100% { opacity: 0; transform: scale(1.4); } }
+
+/* En bucle (una y otra vez). */
+.at-bucle-latido { animation: at-b-latido 0.8s ease-in-out infinite; }
+.at-bucle-respirar { animation: at-b-respirar 2s ease-in-out infinite; }
+.at-bucle-balanceo { animation: at-b-balanceo 1.4s ease-in-out infinite; }
+.at-bucle-temblor { animation: at-b-temblor 0.16s linear infinite; }
+@keyframes at-b-latido { 50% { transform: scale(1.08); } }
+@keyframes at-b-respirar { 50% { transform: scale(1.04); } }
+@keyframes at-b-balanceo { 25% { transform: rotate(-4deg); } 75% { transform: rotate(4deg); } }
+@keyframes at-b-temblor { 25% { transform: rotate(-1.5deg); } 75% { transform: rotate(1.5deg); } }

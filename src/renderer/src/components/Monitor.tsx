@@ -62,6 +62,7 @@ import {
   porPalabras,
   letraDe,
   salidaTexto,
+  bucleTexto,
   textoEn,
   cambiarTextoEn,
   DESENFOQUE_TEXTO,
@@ -862,7 +863,7 @@ export function Monitor({
                   ...corrido(r.id),
                   ...(libre ? { left: `${libre.x * 100}%`, top: `${libre.y * 100}%`, ...anclajeRotulo(r, b?.giro) } : {}),
                   ...estiloRotulo(r),
-                  ...(reproductor.reproduciendo && (r.salida || animaEntero(r.animacion)) ? estiloAnimado(r, reproductor.tiempo - r.inicio, libre ? String(anclajeRotulo(r, b?.giro).transform) : null) : {}),
+                  ...(reproductor.reproduciendo && (r.salida || r.bucle || animaEntero(r.animacion)) ? estiloAnimado(r, reproductor.tiempo - r.inicio, libre ? String(anclajeRotulo(r, b?.giro).transform) : null) : {}),
                   ...((b?.tamano ?? r.tamano) ? { fontSize: `calc(var(--rotulo) * ${b?.tamano ?? r.tamano})` } : {}),
                   ...(r.color ? { color: r.color } : {}),
                   ...(r.caja && !r.sinCaja ? { background: r.caja } : {}),
@@ -1089,10 +1090,11 @@ function ConClave({ texto }: { texto: TextoTL }) {
  * anclaje, como en el MP4 (arriba, abajo o su sitio propio).
  */
 /** Las entradas que mueven el rótulo entero (con su caja, como en el MP4): no las de palabra o letra a letra. */
-const animaEntero = (a: TextoTL['animacion']): boolean => a === 'pop' || a === 'rotulo' || a === 'subir' || a === 'desenfoque'
+const animaEntero = (a: TextoTL['animacion']): boolean =>
+  a === 'pop' || a === 'rotulo' || a === 'subir' || a === 'desenfoque' || a === 'zoom' || a === 'izquierda' || a === 'derecha'
 
 /** Cómo está la entrada de un rótulo que se anima entero `dt` segundos después de aparecer (lo mismo que animarAss). */
-function entradaEntera(r: TextoTL, dt: number): { opacidad: number; escala: number; sube: number; desenfoque: number } {
+function entradaEntera(r: TextoTL, dt: number): { opacidad: number; escala: number; sube: number; desenfoque: number; lado?: number } {
   if (r.animacion === 'pop') {
     const e = dt < 0.13 ? 0.45 + (dt / 0.13) * 0.72 : dt < 0.24 ? 1.17 - ((dt - 0.13) / 0.11) * 0.17 : 1
     return { opacidad: Math.min(1, dt / 0.08), escala: e, sube: 0, desenfoque: 0 }
@@ -1100,6 +1102,10 @@ function entradaEntera(r: TextoTL, dt: number): { opacidad: number; escala: numb
   if (r.animacion === 'rotulo') return { opacidad: Math.min(1, dt / 0.15), escala: 0.86 + 0.14 * Math.min(1, dt / 0.2), sube: 0, desenfoque: 0 }
   if (r.animacion === 'subir') return { opacidad: Math.min(1, dt / 0.25), escala: 1, sube: Math.max(0, 1 - dt / 0.35), desenfoque: 0 }
   if (r.animacion === 'desenfoque') return { opacidad: Math.min(1, dt / 0.25), escala: 1, sube: 0, desenfoque: DESENFOQUE_TEXTO * (1 - Math.min(1, dt / 0.35)) }
+  if (r.animacion === 'zoom') return { opacidad: Math.min(1, dt / 0.2), escala: 1.6 - 0.6 * Math.min(1, dt / 0.3), sube: 0, desenfoque: 0 }
+  // Desde un lado: lo que le falta por llegar, hacia la izquierda (-) o la derecha (+).
+  if (r.animacion === 'izquierda' || r.animacion === 'derecha')
+    return { opacidad: Math.min(1, dt / 0.25), escala: 1, sube: 0, desenfoque: 0, lado: (r.animacion === 'izquierda' ? -1 : 1) * Math.max(0, 1 - dt / 0.35) }
   return { opacidad: 1, escala: 1, sube: 0, desenfoque: 0 }
 }
 
@@ -1110,16 +1116,19 @@ function entradaEntera(r: TextoTL, dt: number): { opacidad: number; escala: numb
 function estiloAnimado(r: TextoTL, dt: number, transformLibre: string | null): React.CSSProperties {
   const s = salidaTexto(r, dt)
   const e = animaEntero(r.animacion) ? entradaEntera(r, dt) : { opacidad: 1, escala: 1, sube: 0, desenfoque: 0 }
-  const escala = s.escala * e.escala
+  const lado = e.lado ?? 0
+  // El bucle (late, se balancea…) mientras está, encima de todo lo demás.
+  const bu = bucleTexto(r, dt)
+  const escala = s.escala * e.escala * bu.escala
   const base = transformLibre ?? (r.posicion === 'centro' ? 'translate(-50%, -50%)' : 'translateX(-50%)')
   // Con caja, el MP4 la centra en su sitio (y la escala sobre su centro); sin caja, arriba o abajo se ancla en su borde.
   const borde = !transformLibre && r.sinCaja && r.posicion !== 'centro'
   const desenfoque = s.desenfoque + e.desenfoque
   return {
     opacity: (r.opacidad ?? 1) * s.opacidad * e.opacidad,
-    ...(escala !== 1 || e.sube > 0
+    ...(escala !== 1 || e.sube > 0 || lado !== 0 || bu.giro !== 0
       ? {
-          transform: `${base}${e.sube > 0 ? ` translateY(${(e.sube * 0.6).toFixed(3)}em)` : ''}${escala !== 1 ? ` scale(${escala.toFixed(4)})` : ''}`,
+          transform: `${base}${e.sube > 0 ? ` translateY(${(e.sube * 0.6).toFixed(3)}em)` : ''}${lado !== 0 ? ` translateX(${(lado * 1.2).toFixed(3)}em)` : ''}${bu.giro !== 0 ? ` rotate(${bu.giro.toFixed(2)}deg)` : ''}${escala !== 1 ? ` scale(${escala.toFixed(4)})` : ''}`,
           ...(borde ? { transformOrigin: r.posicion === 'arriba' ? 'center top' : 'center bottom' } : {})
         }
       : {}),

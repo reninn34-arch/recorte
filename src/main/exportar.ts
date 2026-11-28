@@ -26,6 +26,7 @@ import {
   destinoLado,
   DESENFOQUE_TEXTO,
   durSalidaTexto,
+  tramosBucle,
   porPalabras,
   finReal,
   textoEn,
@@ -1606,7 +1607,8 @@ export const PALABRA_NITIDA_S = 0.3
  * La salida de un rótulo en ASS, sobre las etiquetas de su entrada: se funde (\fad, con el fundido de entrada que ya
  * tuviera), se encoge (\fscx) o se desenfoca (\blur) en sus últimos segundos. Lo mismo que salidaTexto (el monitor).
  */
-export function conSalidaAss(t: TextoTL, inicio: string, eme: number): string {
+export function conSalidaAss(t: TextoTL, inicio0: string, eme: number): string {
+  const inicio = conBucleAss(t, inicio0)
   const d = durSalidaTexto(t)
   if (!d) return inicio
   const ms = (s: number) => Math.round(s * 1000)
@@ -1621,8 +1623,27 @@ export function conSalidaAss(t: TextoTL, inicio: string, eme: number): string {
       : `\\fad(0,${ms(d)})${inicio}`
     : `${inicio}\\t(${desde},${fin},\\alpha&HFF&)`
   if (t.salida === 'encoger') etiquetas += `\\t(${desde},${fin},\\fscx40\\fscy40)`
+  if (t.salida === 'agrandar') etiquetas += `\\t(${desde},${fin},\\fscx140\\fscy140)`
   if (t.salida === 'desenfoque') etiquetas += `\\t(${desde},${fin},\\blur${Math.round(DESENFOQUE_TEXTO * eme * 10) / 10})`
   return etiquetas
+}
+
+/**
+ * El bucle de un rótulo en ASS: un \t por tramo (tramosBucle), que lleva la escala y el giro de un estado al otro y,
+ * al final, de vuelta. El giro se suma al del rótulo (el MP4 lo gira al revés que el monitor: \frz es antihorario).
+ * Lo mismo que bucleTexto (el monitor).
+ */
+export function conBucleAss(t: TextoTL, inicio: string): string {
+  const tramos = tramosBucle(t)
+  if (!tramos.length) return inicio
+  const ms = (s: number) => Math.round(s * 1000)
+  const giroBase = t.giro ?? 0
+  const giraTodo = tramos.some((x) => x.giro !== 0)
+  const partes = tramos.map((x) => {
+    const escala = Math.round(x.escala * 1000) / 10
+    return `\\t(${ms(x.desde)},${ms(x.hasta)},\\fscx${escala}\\fscy${escala}${giraTodo ? `\\frz${Math.round(-(giroBase + x.giro) * 10) / 10}` : ''})`
+  })
+  return `${inicio}${partes.join('')}`
 }
 
 export function animarAss(t: TextoTL, lineas: string, libre: { x: number; y: number; baja: number } | null, eme = 60): { inicio: string; cuerpo: string } {
@@ -1638,6 +1659,13 @@ export function animarAss(t: TextoTL, lineas: string, libre: { x: number; y: num
   if (t.animacion === 'rotulo') {
     // Rótulo: aparece fundiéndose y crece un poco hasta su tamaño (como las etiquetas de un buen video explicativo).
     return { inicio: '\\fad(150,80)\\fscx86\\fscy86\\t(0,200,\\fscx100\\fscy100)', cuerpo: lineas }
+  }
+  if (t.animacion === 'zoom') {
+    return { inicio: '\\fscx160\\fscy160\\fad(200,0)\\t(0,300,\\fscx100\\fscy100)', cuerpo: lineas }
+  }
+  if (t.animacion === 'izquierda' || t.animacion === 'derecha') {
+    const lado = t.animacion === 'izquierda' ? -1 : 1
+    return { inicio: libre ? `\\move(${libre.x + lado * libre.baja * 2},${libre.y},${libre.x},${libre.y},0,350)\\fad(250,0)` : '\\fad(300,0)', cuerpo: lineas }
   }
   if (t.animacion === 'subir') {
     return { inicio: libre ? `\\move(${libre.x},${libre.y + libre.baja},${libre.x},${libre.y},0,350)\\fad(250,0)` : '\\fad(300,0)', cuerpo: lineas }

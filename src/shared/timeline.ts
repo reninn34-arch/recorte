@@ -471,6 +471,8 @@ export interface TextoTL {
   fuente?: string
   /** Cómo aparece: palabra a palabra, letra a letra (máquina), con rebote (pop), subiendo o pintando cada palabra. Sin ella, de golpe. */
   animacion?: AnimacionTexto
+  /** Cómo se mueve mientras está (late, se balancea…), una y otra vez. Sin él, quieto. */
+  bucle?: BucleTexto
   /** El color con que se pintan las palabras en «pintar» (`#rrggbb`); sin él, amarillo. */
   pintado?: string
   /** El color de las palabras resaltadas (las que van entre asteriscos: «No es *timidez*»); sin él, amarillo. */
@@ -546,7 +548,7 @@ export function trazoTexto(t: Pick<TextoTL, 'sinCaja' | 'contorno' | 'sombra' | 
 /** El texto como se ve (en mayúsculas si lo pide), lo mismo en el monitor y en el MP4. */
 export const textoVisible = (t: Pick<TextoTL, 'texto' | 'mayusculas'>): string => (t.mayusculas ? t.texto.toLocaleUpperCase('es') : t.texto)
 
-export type AnimacionTexto = 'palabras' | 'maquina' | 'pop' | 'subir' | 'pintar' | 'rotulo' | 'desenfoque' | 'palabras-desenfoque'
+export type AnimacionTexto = 'palabras' | 'maquina' | 'pop' | 'subir' | 'pintar' | 'rotulo' | 'desenfoque' | 'palabras-desenfoque' | 'zoom' | 'izquierda' | 'derecha'
 export const ANIMACIONES_TEXTO: { id: AnimacionTexto; nombre: string }[] = [
   { id: 'rotulo', nombre: 'Rótulo (aparece y crece un poco)' },
   { id: 'palabras', nombre: 'Palabra a palabra' },
@@ -555,8 +557,81 @@ export const ANIMACIONES_TEXTO: { id: AnimacionTexto; nombre: string }[] = [
   { id: 'pintar', nombre: 'Pintar palabras' },
   { id: 'maquina', nombre: 'Letra a letra' },
   { id: 'pop', nombre: 'Con rebote' },
-  { id: 'subir', nombre: 'Subiendo' }
+  { id: 'subir', nombre: 'Subiendo' },
+  { id: 'zoom', nombre: 'Desde grande' },
+  { id: 'izquierda', nombre: 'Desde la izquierda' },
+  { id: 'derecha', nombre: 'Desde la derecha' }
 ]
+
+/** Lo que dura la entrada de un rótulo que se anima entero (pop, subir…), en segundos; 0 si no se anima entero. */
+export function durEntradaTexto(a: AnimacionTexto | undefined): number {
+  switch (a) {
+    case 'pop':
+      return 0.24
+    case 'rotulo':
+      return 0.2
+    case 'zoom':
+      return 0.3
+    case 'subir':
+    case 'desenfoque':
+    case 'izquierda':
+    case 'derecha':
+      return 0.35
+    default:
+      return 0
+  }
+}
+
+/** Cómo se mueve un rótulo mientras está (después de entrar y antes de irse), una y otra vez. Sin ella, quieto. */
+export type BucleTexto = 'latido' | 'respirar' | 'balanceo' | 'temblor'
+/**
+ * Los bucles: cada uno va y vuelve entre dos estados (`a` y `b`), medio `periodo` cada tramo, y al final vuelve a su
+ * tamaño y giro de siempre. `escala` multiplica el tamaño; `giro`, en grados, se suma al del rótulo. Lo mismo dibujan el
+ * monitor (bucleTexto) y el MP4 (\t de libass, tramo a tramo).
+ */
+export const BUCLES_TEXTO: { id: BucleTexto; nombre: string; periodo: number; a: { escala: number; giro: number }; b: { escala: number; giro: number } }[] = [
+  { id: 'latido', nombre: 'Latido', periodo: 0.8, a: { escala: 1.08, giro: 0 }, b: { escala: 1, giro: 0 } },
+  { id: 'respirar', nombre: 'Respira', periodo: 2, a: { escala: 1.04, giro: 0 }, b: { escala: 1, giro: 0 } },
+  { id: 'balanceo', nombre: 'Balanceo', periodo: 1.4, a: { escala: 1, giro: 4 }, b: { escala: 1, giro: -4 } },
+  { id: 'temblor', nombre: 'Temblor', periodo: 0.16, a: { escala: 1, giro: 1.5 }, b: { escala: 1, giro: -1.5 } }
+]
+
+/**
+ * Los tramos del bucle de un rótulo, en segundos desde que aparece: de `desde` a `hasta` va al estado `a` o `b`
+ * (alternando) y el último vuelve al de siempre. Empieza al terminar de entrar y termina antes de irse.
+ */
+export function tramosBucle(t: Pick<TextoTL, 'bucle' | 'animacion' | 'salida' | 'durSalida' | 'duracion' | 'cola'>): { desde: number; hasta: number; escala: number; giro: number }[] {
+  const b = BUCLES_TEXTO.find((x) => x.id === t.bucle)
+  if (!b) return []
+  const ini = durEntradaTexto(t.animacion)
+  const fin = t.duracion + (t.cola ?? 0) - durSalidaTexto(t)
+  const medio = b.periodo / 2
+  const n = Math.floor((fin - ini) / medio) - 1
+  if (n < 1) return []
+  const tramos: { desde: number; hasta: number; escala: number; giro: number }[] = []
+  for (let i = 0; i < Math.min(n, 400); i++) {
+    const e = i % 2 === 0 ? b.a : b.b
+    tramos.push({ desde: ini + i * medio, hasta: ini + (i + 1) * medio, escala: e.escala, giro: e.giro })
+  }
+  const ultimo = tramos[tramos.length - 1].hasta
+  tramos.push({ desde: ultimo, hasta: ultimo + medio, escala: 1, giro: 0 })
+  return tramos
+}
+
+/** Cómo está el bucle de un rótulo `dt` segundos después de aparecer: su escala y lo que se gira de más. */
+export function bucleTexto(t: Pick<TextoTL, 'bucle' | 'animacion' | 'salida' | 'durSalida' | 'duracion' | 'cola'>, dt: number): { escala: number; giro: number } {
+  const tramos = tramosBucle(t)
+  let previo = { escala: 1, giro: 0 }
+  for (const x of tramos) {
+    if (dt < x.desde) break
+    if (dt < x.hasta) {
+      const p = (dt - x.desde) / (x.hasta - x.desde)
+      return { escala: previo.escala + (x.escala - previo.escala) * p, giro: previo.giro + (x.giro - previo.giro) * p }
+    }
+    previo = { escala: x.escala, giro: x.giro }
+  }
+  return { escala: 1, giro: 0 }
+}
 
 /**
  * Si la letra de un rótulo es oscura (tinta sobre un papel, un cartel claro). Sin caja, la letra clara lleva un halo
@@ -573,11 +648,12 @@ export function letraOscura(t: Pick<TextoTL, 'color'>): boolean {
 export const porPalabras = (a: AnimacionTexto | undefined): boolean => a === 'palabras' || a === 'palabras-desenfoque'
 
 /** Cómo se va un rótulo al terminar: fundiéndose, encogiéndose o desenfocándose. Sin ella, de golpe. */
-export type SalidaTexto = 'fundido' | 'encoger' | 'desenfoque'
+export type SalidaTexto = 'fundido' | 'encoger' | 'desenfoque' | 'agrandar'
 export const SALIDAS_TEXTO: { id: SalidaTexto; nombre: string }[] = [
   { id: 'fundido', nombre: 'Se funde' },
   { id: 'encoger', nombre: 'Se encoge' },
-  { id: 'desenfoque', nombre: 'Se desenfoca' }
+  { id: 'desenfoque', nombre: 'Se desenfoca' },
+  { id: 'agrandar', nombre: 'Se agranda' }
 ]
 /** Lo que dura la salida de un rótulo si no se dice (segundos). */
 export const SALIDA_TEXTO_S = 0.3
@@ -598,7 +674,7 @@ export function salidaTexto(t: Pick<TextoTL, 'salida' | 'durSalida' | 'duracion'
   const p = Math.min(1, Math.max(0, 1 - (t.duracion + (t.cola ?? 0) - dt) / d))
   return {
     opacidad: 1 - p,
-    escala: t.salida === 'encoger' ? 1 - 0.6 * p : 1,
+    escala: t.salida === 'encoger' ? 1 - 0.6 * p : t.salida === 'agrandar' ? 1 + 0.4 * p : 1,
     desenfoque: t.salida === 'desenfoque' ? DESENFOQUE_TEXTO * p : 0
   }
 }
@@ -743,7 +819,7 @@ const COLOR_HEX = /^#[0-9a-f]{6}$/i
 
 /** El estilo de un rótulo, limpio: lo neutro no se guarda. */
 /** Los campos de estilo de un rótulo (los que `estiloTexto` limpia). */
-const CAMPOS_ESTILO_TEXTO = ['tamano', 'color', 'sinCaja', 'fuente', 'caja', 'animacion', 'pintado', 'colorClave', 'contorno', 'colorContorno', 'sombra', 'colorSombra', 'alineacion', 'espaciado', 'mayusculas', 'opacidad', 'giro', 'salida', 'durSalida'] as const
+const CAMPOS_ESTILO_TEXTO = ['tamano', 'color', 'sinCaja', 'fuente', 'caja', 'animacion', 'pintado', 'colorClave', 'contorno', 'colorContorno', 'sombra', 'colorSombra', 'alineacion', 'espaciado', 'mayusculas', 'opacidad', 'giro', 'salida', 'durSalida', 'bucle'] as const
 type EstiloTexto = Pick<TextoTL, (typeof CAMPOS_ESTILO_TEXTO)[number]>
 
 /** El estilo de un rótulo para copiarlo en otro (Copiar estilo / Pegar estilo). */
@@ -774,6 +850,7 @@ function estiloTexto(t: Partial<TextoTL>): EstiloTexto {
     ...(typeof t.caja === 'string' && COLOR_HEX.test(t.caja) ? { caja: t.caja.toLowerCase() } : {}),
     ...(typeof t.fuente === 'string' && t.fuente !== 'normal' && (t.fuente in FUENTES_TEXTO || esIdLetra(t.fuente)) ? { fuente: t.fuente } : {}),
     ...(t.animacion && ANIMACIONES_TEXTO.some((a) => a.id === t.animacion) ? { animacion: t.animacion } : {}),
+    ...(t.bucle && BUCLES_TEXTO.some((b) => b.id === t.bucle) ? { bucle: t.bucle } : {}),
     ...(typeof t.pintado === 'string' && COLOR_HEX.test(t.pintado) && t.pintado.toLowerCase() !== COLOR_PINTADO ? { pintado: t.pintado.toLowerCase() } : {}),
     ...(typeof t.colorClave === 'string' && COLOR_HEX.test(t.colorClave) ? { colorClave: t.colorClave.toLowerCase() } : {})
   }

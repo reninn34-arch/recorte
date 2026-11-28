@@ -83,12 +83,10 @@ import {
   FILTROS,
   TRANSICIONES,
   GRUPOS_TRANSICION,
-  ANIMACIONES_TEXTO,
   COLOR_PINTADO,
   ANIMAR_CAPA,
   TOMAS_CAMARA,
   type TipoAnimar,
-  type AnimacionTexto,
   type TransicionClip,
   MOVIMIENTOS_CAPA,
   type EntradaCapa,
@@ -147,7 +145,7 @@ import type { Caja } from '../guias'
 import { duplicarCapa, duplicarTexto, estiloDeCapa, estiloDeTexto, ordenarCapa, pegarEstiloCapa, pegarEstiloTexto, type EstiloCapa, type TextoTL } from '../../../shared/timeline'
 import { cambiarTextoEn, textoEn } from '../../../shared/timeline'
 import { LIMITE_BORDE_CAPA, CURVAS_CLAVE, curvaClaveCapa, type CurvaClave } from '../../../shared/timeline'
-import { DURACIONES_ANIMACION, durEntradaCapa, durSalidaCapa, durSalidaTexto, porPalabras, SALIDAS_TEXTO, type SalidaCapa, type SalidaTexto } from '../../../shared/timeline'
+import { DURACIONES_ANIMACION, durEntradaCapa, durSalidaCapa, durSalidaTexto, porPalabras, type SalidaCapa } from '../../../shared/timeline'
 import { reanclarTexto, rotuloEnMonitor } from '../rotulos'
 import { resumenGrafico } from '../../../shared/grafico'
 import { ValorArrastrable } from './ValorArrastrable'
@@ -155,8 +153,9 @@ import { CarrilClaves } from './CarrilClaves'
 import { BarraZoom } from './BarraZoom'
 import { MuestraTransicion } from './MuestraTransicion'
 import { PortadaModal } from './PortadaModal'
+import { AnimacionesTexto } from './AnimacionesTexto'
 import { moverClave, moverClaveCapa, moverClaveRampa, moverClaveVolumen } from '../../../shared/timeline'
-import { ponerPortada } from '../../../shared/timeline'
+import { durEntradaTexto, ponerPortada } from '../../../shared/timeline'
 
 /**
  * La timeline editable: regla, pista de video magnética, pista de textos y la voz
@@ -490,6 +489,13 @@ export function TimelineEditor({
   const [escribiendoTc, setEscribiendoTc] = useState(false)
   const [muestraViva, setMuestraViva] = useState<TransicionClip | null>(null)
   const [portadaAbierta, setPortadaAbierta] = useState(false)
+
+  /** Al elegir una animación de un texto, el cabezal va donde se ve y reproduce (como CapCut, que la muestra al momento). */
+  function verAnimacionTexto(t: TextoTL, que: 'entrada' | 'salida' | 'bucle') {
+    const desde = que === 'salida' ? Math.max(t.inicio, t.inicio + t.duracion - 1) : que === 'bucle' ? t.inicio + durEntradaTexto(t.animacion) : t.inicio
+    onBuscar(desde)
+    if (!reproduciendo) onAlternar()
+  }
   // La paleta de herramientas, el imán, la entrada/salida (I/O) y la marca elegida.
   const [herramienta, setHerramienta] = useState<Herramienta>('seleccion')
   const [conIman, setConIman] = useState(true)
@@ -4237,18 +4243,6 @@ export function TimelineEditor({
                 </option>
               ))}
             </select></label>
-            <label className="ed-campo"><span>Animación</span><select
-              value={textoElegido.animacion ?? 'golpe'}
-              title="Cómo aparece (se ve al reproducir)"
-              onChange={(e) => historial.aplicar(cambiarTexto(timeline, textoElegido.id, { animacion: e.target.value === 'golpe' ? undefined : (e.target.value as AnimacionTexto) }))}
-            >
-              <option value="golpe">Aparece de golpe</option>
-              {ANIMACIONES_TEXTO.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.nombre}
-                </option>
-              ))}
-            </select></label>
             <input
               type="color"
               className="tl-color"
@@ -4283,26 +4277,20 @@ export function TimelineEditor({
             ) : (
               <span className="tl-dim">Para resaltar una palabra en color, escríbela entre *asteriscos*.</span>
             )}
-            <label className="ed-campo"><span>Salida</span><select
-              value={textoElegido.salida ?? 'golpe'}
-              title="Cómo se va al terminar (se ve al reproducir)"
-              onChange={(e) => historial.aplicar(cambiarTexto(timeline, textoElegido.id, { salida: e.target.value === 'golpe' ? undefined : (e.target.value as SalidaTexto) }))}
-            >
-              <option value="golpe">Se va de golpe</option>
-              {SALIDAS_TEXTO.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.nombre}
-                </option>
-              ))}
-            </select></label>
-            {textoElegido.salida && (
-              <DuracionAnimacion
-                nombre="Dura la salida"
-                valor={durSalidaTexto(textoElegido)}
-                onCambio={(v) => deslizar(cambiarTexto(timeline, textoElegido.id, { durSalida: v }))}
-                empezar={empezarAjuste}
-              />
-            )}
+            <span className="ed-seccion">Animación</span>
+            <AnimacionesTexto
+              texto={textoElegido}
+              onCambio={(cambio) => historial.aplicar(cambiarTexto(timeline, textoElegido.id, cambio))}
+              onVer={(que) => verAnimacionTexto(textoElegido, que)}
+              duracionSalida={
+                <DuracionAnimacion
+                  nombre="Dura la salida"
+                  valor={durSalidaTexto(textoElegido)}
+                  onCambio={(v) => deslizar(cambiarTexto(timeline, textoElegido.id, { durSalida: v }))}
+                  empezar={empezarAjuste}
+                />
+              }
+            />
             {(textoElegido.animacion === 'pintar' || porPalabras(textoElegido.animacion)) && (
               <span className="tl-dim" title="Los subtítulos hechos desde la voz saben cuándo se dice cada palabra">
                 {textoElegido.tiempos ? 'Al ritmo de la voz' : 'Repartidas en lo que dura (hazlo desde la voz para que vaya con ella)'}
