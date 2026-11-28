@@ -145,7 +145,11 @@ async function elegir(page: Page, p: PedidoFlow): Promise<number> {
   const modelo = p.modelo ?? (p.tipo === 'video' ? MODELOS_VIDEO[0] : MODELOS_IMAGEN[0])
   await page.locator('button:has(mat-icon:text-is("arrow_drop_down"))').first().click({ timeout: 10_000 })
   await page.getByRole('menuitem').filter({ hasText: modelo }).first().click({ timeout: 10_000 })
-  // El costo se recalcula tras elegir: vale cuando dos lecturas seguidas coinciden.
+  return costoEnPanel(page)
+}
+
+/** Lee el costo en el panel de ajustes del compositor (abierto): vale cuando dos lecturas seguidas coinciden. Lo cierra. */
+async function costoEnPanel(page: Page): Promise<number> {
   const leer = () =>
     page
       .locator('[role=radio]')
@@ -179,9 +183,10 @@ async function subirReferencia(page: Page, ruta: string): Promise<void> {
   const ext = extname(ruta).toLowerCase()
   const nombre = `recorte-${randomBytes(4).toString('hex')}${ext}`
   const antes = await referenciasPuestas(page).count()
+  const esVideo = ['.mp4', '.mov', '.webm'].includes(ext)
   await selector.setFiles({
     name: nombre,
-    mimeType: ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg',
+    mimeType: esVideo ? (ext === '.mov' ? 'video/quicktime' : ext === '.webm' ? 'video/webm' : 'video/mp4') : ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg',
     buffer: readFileSync(ruta)
   })
   // Si Flow pide confirmar los derechos de la imagen (el usuario los declaró en Ajustes): solo en un diálogo que
@@ -194,17 +199,28 @@ async function subirReferencia(page: Page, ruta: string): Promise<void> {
     .click({ timeout: 3000 })
     .catch(() => {})
   // Está subida cuando deja de decir «Subiendo» (Flow ya no enseña miniatura de lo que subes, solo un icono).
-  const item = panel.locator('button[role=option]').filter({ hasText: nombre }).first()
+  // Por su nombre sin extensión: Flow enseña los videos subidos sin «.mp4» (las imágenes, con ella).
+  const item = panel.locator('button[role=option]').filter({ hasText: nombre.slice(0, -ext.length) }).first()
   await item.waitFor({ timeout: 30_000 }).catch(() => {
     throw new Error(`Flow no empezó a subir la referencia ${ruta}.`)
   })
-  for (const limite = Date.now() + 120_000; ; ) {
+  // Un video tarda más en subir y procesarse que una imagen.
+  for (const limite = Date.now() + (esVideo ? 300_000 : 120_000); ; ) {
     const texto = await item.innerText().catch(() => 'subiendo')
-    if (!/subiendo|uploading|cargando|loading/i.test(texto)) break
-    if (Date.now() > limite) throw new Error(`Flow no terminó de subir la referencia ${ruta} en 2 minutos.`)
+    if (!/subiendo|uploading|cargando|loading|procesando|processing/i.test(texto)) break
+    if (Date.now() > limite) throw new Error(`Flow no terminó de subir ${esVideo ? 'el video' : 'la referencia'} ${ruta} a tiempo.`)
     await page.waitForTimeout(1000)
   }
   await item.click({ timeout: 10_000 })
+  // Un video recién subido queda puesto al elegirlo; uno que ya estaba enseña antes su tira para recortar el tramo: se usa
+  // entero (ya va cortado) con «Añadir a petición».
+  if (esVideo) {
+    const anadir = page.getByText(/Añadir a petición|Add to prompt/i).first()
+    for (const limite = Date.now() + 20_000; (await referenciasPuestas(page).count()) <= antes && Date.now() < limite; ) {
+      if (await anadir.isVisible().catch(() => false)) await anadir.click({ timeout: 5000 }).catch(() => {})
+      await page.waitForTimeout(500)
+    }
+  }
   // Elegida, queda puesta como «ingrediente» en el compositor.
   for (const limite = Date.now() + 10_000; (await referenciasPuestas(page).count()) <= antes; ) {
     if (Date.now() > limite) throw new Error(`Flow subió la referencia ${ruta} pero no la puso en el pedido.`)
@@ -212,14 +228,22 @@ async function subirReferencia(page: Page, ruta: string): Promise<void> {
   }
 }
 
+/** El costo con lo que ya está puesto en el compositor (un video a editar cambia lo que dura y lo que cuesta). */
+async function costoAhora(page: Page): Promise<number> {
+  await page.locator('.base-prompt-box button:has(mat-icon:text-matches("^crop_"))').first().click({ timeout: 15_000 })
+  await page.waitForTimeout(800)
+  return costoEnPanel(page)
+}
+
 /** Las referencias puestas en el compositor (antes iban en `.prompt-top-row`; ahora son «ingredientes»). */
-const referenciasPuestas = (page: Page) => page.locator('.base-prompt-box flow-image-ingredient-chip, .base-prompt-box .prompt-top-row img')
+const referenciasPuestas = (page: Page) =>
+  page.locator('.base-prompt-box flow-ingredient-chip, .base-prompt-box flow-image-ingredient-chip, .base-prompt-box flow-video-ingredient-chip, .base-prompt-box .prompt-top-row img')
 
 async function ponerReferencias(page: Page, rutas: string[]) {
   // Las del pedido anterior se quitan: cada una se quita al pulsarla (enseña una ✕).
   for (let i = await referenciasPuestas(page).count(); i > 0; i--) {
     await page
-      .locator('.base-prompt-box flow-image-ingredient-chip button, .base-prompt-box button:has(mat-icon:text-is("cancel"))')
+      .locator('.base-prompt-box flow-ingredient-chip button, .base-prompt-box flow-image-ingredient-chip button, .base-prompt-box button:has(mat-icon:text-is("cancel"))')
       .first()
       .click({ timeout: 5000 })
     await page.waitForTimeout(400)
@@ -439,12 +463,22 @@ export async function generarEnPestana(
     // también si algo falla: de eso depende encontrar las tarjetas de los demás pedidos de la pestaña.
     const marca = await pest.ancla()
     try {
-      const creditos = await pest.costo(p)
-      if (creditos > tope) throw new NoEmpezo(`Cuesta ${creditos} créditos y el tope es ${tope}. No se generó nada.`, '')
-      if (creditos > 0 && (await sinPuntos(page))) {
+      let creditos = await pest.costo(p)
+      // Editando un video, lo que cuesta depende de lo que dura: se mira cuando ya está puesto.
+      if (!p.video && creditos > tope) throw new NoEmpezo(`Cuesta ${creditos} créditos y el tope es ${tope}. No se generó nada.`, '')
+      if (!p.video && creditos > 0 && (await sinPuntos(page))) {
         throw new NoEmpezo(`A esta cuenta de Flow no le quedan puntos para esto (cuesta ${creditos}). No se generó nada.`, 'puntos insuficientes')
       }
-      await ponerReferencias(page, p.referencias ?? [])
+      await ponerReferencias(page, [...(p.referencias ?? []), ...(p.video ? [p.video] : [])])
+      if (p.video) {
+        // Lo elegido ya no vale para el siguiente pedido (el costo era el de este video).
+        pest.olvidarEleccion()
+        creditos = await costoAhora(page)
+        if (creditos > tope) throw new NoEmpezo(`Editar este video cuesta ${creditos} puntos y el tope es ${tope}. No se generó nada.`, '')
+        if (creditos > 0 && (await sinPuntos(page))) {
+          throw new NoEmpezo(`A esta cuenta de Flow no le quedan puntos para esto (cuesta ${creditos}). No se generó nada.`, 'puntos insuficientes')
+        }
+      }
       await caja(page).click({ timeout: 10_000 })
       await page.keyboard.insertText(p.prompt.split(/\s+/).join(' '))
       await page.waitForTimeout(400)

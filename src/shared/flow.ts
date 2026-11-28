@@ -116,7 +116,19 @@ export interface PedidoFlow {
   tope?: number
   /** Imágenes de referencia (rutas absolutas): solo con `derechos`. */
   referencias?: string[]
+  /**
+   * Un video para EDITAR (ruta absoluta, de 10 s como mucho): va como ingrediente y el modelo (Omni) lo cambia según el
+   * prompt, conservando lo demás. El costo lo dice Flow cuando ya está puesto (depende de lo que dura). Solo con `derechos`.
+   */
+  video?: string
 }
+
+/** El modelo de Flow que edita videos (los demás solo los crean). */
+export const MODELO_EDITAR_VIDEO = 'Omni 1.2 Flash'
+/** Lo más largo que Omni edita de una vez. */
+export const MAX_EDITAR_VIDEO_S = 10
+/** Lo que cuesta editar con Omni a 720p, en puntos por segundo (21 puntos por 7 s, noviembre de 2026). */
+export const PUNTOS_POR_SEGUNDO_OMNI = 3
 
 export interface ResultadoFlow {
   archivo: string

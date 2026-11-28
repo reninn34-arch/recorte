@@ -6,8 +6,8 @@ import { basename, extname, join } from 'node:path'
 import { aplicarOperaciones, describirTimelineParaAgente, OPERACIONES_DOC, validarOperaciones, type OperacionTL } from '../shared/chat'
 import type { EstadoUso, RenderResultado, TranscripcionResultado } from '../shared/api'
 import { COSTO_CLIP, ID_SEGURO, MAX_CLIPS_VEO, textoMuestra, VOCES_GEMINI, type Creacion, type PeticionCreacion } from '../shared/creacion'
-import { MODELOS_IMAGEN, modelosVideoVigentes, type PedidoFlow, type ResultadoFlow } from '../shared/flow'
-import { anadirCapa, anadirVoz, ANIMAR_CAPA, cambiarCapa, duracionesDeMedios, duracionTimeline, escalaAnimada, conSubtitulosAnimados, normalizarTimeline, ponerMusica, timelineInicial, ventanaTimeline, type LetraTL, type Timeline, type TipoAnimar } from '../shared/timeline'
+import { MAX_EDITAR_VIDEO_S, MODELO_EDITAR_VIDEO, MODELOS_IMAGEN, modelosVideoVigentes, PUNTOS_POR_SEGUNDO_OMNI, type PedidoFlow, type ResultadoFlow } from '../shared/flow'
+import { tramos, velocidadDe, anadirCapa, anadirVoz, ANIMAR_CAPA, cambiarCapa, duracionesDeMedios, duracionTimeline, escalaAnimada, conSubtitulosAnimados, normalizarTimeline, ponerMusica, timelineInicial, ventanaTimeline, type LetraTL, type Timeline, type TipoAnimar } from '../shared/timeline'
 import type { Project } from '../shared/types'
 import { prepararGraficos, type Grafico } from '../shared/grafico'
 
@@ -1210,6 +1210,119 @@ export function herramientasRecorte(ctx: ContextoMcp): HerramientaMcp[] {
             return ok(`Listo: ${medio.id} = ${medio.tipo} «${medio.nombre}»${r.creditos ? ` (gastó ${r.creditos} créditos de ${r.correo})` : ''}.${recorte} Úsalo con editar_timeline.`)
           } catch (e) {
             return fallo(`Flow no pudo: ${e instanceof Error ? e.message : String(e)}`)
+          } finally {
+            rmSync(tmp, { recursive: true, force: true })
+          }
+        }
+      },
+      {
+        nombre: 'editar_video_con_flow',
+        descripcion:
+          `Edita un trozo de video que ya existe con ${MODELO_EDITAR_VIDEO} de Google Flow: cambia lo que se pida (otra persona o personaje, ` +
+          'otro fondo o paisaje, otra luz, otra ropa, quitar o añadir algo) y conserva lo demás, incluido el movimiento y el encuadre. ' +
+          `Toma hasta ${MAX_EDITAR_VIDEO_S} s: de un clip de la timeline («clip», y «desde»/«hasta» en segundos de la timeline) o de un video ` +
+          'de la biblioteca («medio», y «desde»/«hasta» en segundos de ese video). Gasta puntos de Flow (unos ' +
+          `${PUNTOS_POR_SEGUNDO_OMNI} por segundo): la primera llamada devuelve el costo y un código; repítela con "confirmacion" solo si el ` +
+          'usuario acepta. Lo editado queda en la biblioteca y, si salió de un clip, encima de ese tramo como capa (el sonido sigue siendo ' +
+          'el del clip; se quita con Ctrl+Z). No cambia la voz. Omni puede negarse con personas reales reconocibles. Para más de ' +
+          `${MAX_EDITAR_VIDEO_S} s, llámala por tramos. Tarda unos minutos.`,
+        esquema: {
+          type: 'object',
+          properties: {
+            proyecto: proyectoArg,
+            clip: { type: 'number', description: 'El número del clip de la timeline (ver_proyecto), si se edita un clip.' },
+            medio: { type: 'string', description: 'El id de un video de la biblioteca, si se edita un video suelto.' },
+            desde: { type: 'number', description: 'Desde qué segundo (de la timeline con «clip»; del video con «medio»). Por defecto, el principio.' },
+            hasta: { type: 'number', description: `Hasta qué segundo (como mucho ${MAX_EDITAR_VIDEO_S} s después de «desde»).` },
+            cambio: { type: 'string', description: 'Qué cambiar, en palabras del usuario y con detalle: «la doctora por un hombre joven de bata azul», «el fondo por una playa al atardecer».' },
+            conservar: { type: 'string', description: 'Qué no tocar (opcional): «la cara del paciente, los movimientos de las manos».' },
+            confirmacion: confirmacionArg
+          },
+          required: ['proyecto', 'cambio']
+        },
+        correr: async (args, sesion) => {
+          const p = buscar(args.proyecto)
+          const cambio = texto(args.cambio).trim().slice(0, 1500)
+          if (!cambio) return fallo('Falta «cambio»: qué hay que cambiar en el video.')
+          if (!ctx.flow.conectado()) return fallo('No hay cuentas de Google Flow conectadas: el usuario las conecta en Recorte, Ajustes → Google Flow.')
+          if (!ctx.flow.derechos()) return fallo('Para mandarle un video a Flow, el usuario confirma en Ajustes → Google Flow que tiene sus derechos.')
+          const tl = timelineDe(p)
+          const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+          // De dónde sale el trozo: su archivo, desde qué segundo de él y cuánto dura; y, si es un clip, dónde va en la timeline.
+          let ruta = ''
+          let tFuente = 0
+          let dura = 0
+          let enTimeline: number | null = null
+          if (args.clip !== undefined) {
+            const tramo = tramos(tl)[Math.round(Number(args.clip)) - 1]
+            if (!tramo) return fallo(`No existe el clip ${String(args.clip)}.`)
+            if (tramo.clip.rampa || Math.abs(velocidadDe(tramo.clip) - 1) > 0.001) return fallo('Ese clip tiene la velocidad cambiada: edítalo a velocidad normal (o usa «medio» con el video original).')
+            const desde = Math.max(tramo.inicio, Math.min(num(args.desde) ?? tramo.inicio, tramo.fin - 1))
+            const hasta = Math.min(tramo.fin, num(args.hasta) ?? desde + MAX_EDITAR_VIDEO_S)
+            dura = hasta - desde
+            tFuente = tramo.clip.entrada + (desde - tramo.inicio)
+            enTimeline = desde
+            const f = tramo.clip.fuente
+            const m = f === 'principal' ? null : p.medios?.find((x) => x.id === f)
+            if (m && m.tipo !== 'video') return fallo('Ese clip es una imagen, no un video.')
+            ruta = m ? m.ruta : p.source.path
+          } else if (args.medio !== undefined) {
+            const m = p.medios?.find((x) => x.id === texto(args.medio))
+            if (!m || m.tipo !== 'video') return fallo('Ese medio no es un video de la biblioteca (ver_proyecto).')
+            const total = m.duracion || (await duracionMedio(m.ruta)) || MAX_EDITAR_VIDEO_S
+            tFuente = Math.max(0, Math.min(num(args.desde) ?? 0, total - 1))
+            dura = Math.min(total, num(args.hasta) ?? tFuente + MAX_EDITAR_VIDEO_S) - tFuente
+            ruta = m.ruta
+          } else return fallo('Di qué editar: «clip» (de la timeline) o «medio» (un video de la biblioteca).')
+          if (!existsSync(ruta)) return fallo('No encuentro el archivo de ese video.')
+          if (dura < 1) return fallo('El trozo es muy corto: tiene que durar al menos 1 s.')
+          if (dura > MAX_EDITAR_VIDEO_S + 0.01) return fallo(`Omni edita ${MAX_EDITAR_VIDEO_S} s como mucho de una vez: pide un trozo más corto (o varios).`)
+          const estimado = Math.ceil(dura * PUNTOS_POR_SEGUNDO_OMNI)
+          const conservar = texto(args.conservar).trim().slice(0, 600)
+          const clave = `omni:${p.id}:${ruta}:${tFuente.toFixed(2)}:${dura.toFixed(2)}:${cambio}:${conservar}`
+          if (!confirmado(clave, args))
+            return pedirPermiso(clave, `editar ${dura.toFixed(1).replace('.', ',')} s de video con ${MODELO_EDITAR_VIDEO} en Google Flow: unos ${estimado} puntos de tus cuentas.`)
+          const tmp = mkdtempSync(join(tmpdir(), 'recorte-omni-'))
+          try {
+            // El trozo, sin sonido y a 1280 px como mucho (lo que Flow edita a 720p), en H.264.
+            const tramoArchivo = join(tmp, 'tramo.mp4')
+            const r0 = spawnSync(
+              rutaFfmpeg(),
+              ['-v', 'error', '-y', '-ss', tFuente.toFixed(3), '-i', ruta, '-t', dura.toFixed(3), '-an', '-vf', "scale='if(gt(iw,ih),min(1280,iw),-2)':'if(gt(iw,ih),-2,min(1280,ih))'", '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', tramoArchivo],
+              { encoding: 'utf8', windowsHide: true, timeout: 180_000 }
+            )
+            if (r0.status !== 0 || !existsSync(tramoArchivo)) return fallo(`No pude cortar el trozo: ${(r0.stderr || '').slice(0, 300)}`)
+            // El pedido como lo entiende mejor Omni: qué cambiar, qué conservar y que no toque lo demás.
+            const pedido =
+              `Edit this video. Change: ${cambio}. ` +
+              `Keep: ${conservar || 'everything else exactly as it is: the camera movement, the framing, the timing and the motion of the people'}. ` +
+              'Do not change anything that was not asked for.'
+            const formato = p.source.height > p.source.width ? '9:16' : '16:9'
+            const r = await ctx.flow.generar({ tipo: 'video', prompt: pedido, formato, modelo: MODELO_EDITAR_VIDEO, video: tramoArchivo, tope: estimado + 6 }, tmp)
+            const agregado = await ctx.agregarRutas(p.id, [r.archivo])
+            ctx.avisarCambio(agregado.project, sesion.cliente)
+            const medio = (agregado.project.medios ?? []).find((m) => agregado.agregados.includes(m.id))
+            if (!medio) return fallo(`Flow lo editó pero no pude agregarlo: ${agregado.fallos.join(', ') || 'archivo inválido'}.`)
+            const gasto = r.creditos ? ` Gastó ${r.creditos} puntos de ${r.correo}.` : ''
+            if (enTimeline === null) return ok(`Listo: ${medio.id} = el video editado («${medio.nombre}»).${gasto} Úsalo con editar_timeline.`)
+            // Encima del tramo que se editó, a todo el cuadro: tapa el original y el sonido sigue siendo el del clip.
+            const actual = ctx.proyectos.get(p.id)!
+            const tlA = timelineDe(actual)
+            const medios = { principal: actual.source.duration, ...duracionesDeMedios(actual.medios) }
+            const largo = Math.min(dura, medio.duracion || dura)
+            const hecho = anadirCapa(tlA, { fuente: medio.id, inicio: enTimeline, duracion: largo, x: 0.5, y: 0.5, ancho: 1, pista: 1 }, medios)
+            if (hecho.timeline === tlA) return ok(`Listo: ${medio.id} = el video editado.${gasto} No pude ponerlo en la timeline: ponlo con editar_timeline («anadir_capa»).`)
+            actual.timeline = hecho.timeline
+            delete actual.timelinePendiente
+            actual.updatedAt = Date.now()
+            ctx.proyectos.save(actual)
+            ctx.avisarCambio(actual, sesion.cliente, true)
+            return ok(
+              `Listo: el clip ${String(args.clip)} quedó editado de ${enTimeline.toFixed(2)} a ${(enTimeline + largo).toFixed(2)} s (capa encima, con el ` +
+                `sonido original).${gasto} Míralo con ver_cuadro; si no gusta, se quita con Ctrl+Z en el editor o borrando esa capa.`
+            )
+          } catch (e) {
+            return fallo(`Flow no pudo editarlo: ${e instanceof Error ? e.message : String(e)}`)
           } finally {
             rmSync(tmp, { recursive: true, force: true })
           }

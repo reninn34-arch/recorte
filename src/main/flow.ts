@@ -260,7 +260,7 @@ function repartir() {
 /** Pide algo a Flow; se resuelve con el archivo bajado a `carpetaSalida`. */
 export function pedirFlow(pedido: PedidoFlow, carpetaSalida: string, senal?: AbortSignal): Promise<ResultadoFlow> {
   if (senal?.aborted) return Promise.reject(new Parado())
-  if (pedido.referencias?.length && !datos.derechos) {
+  if ((pedido.referencias?.length || pedido.video) && !datos.derechos) {
     return Promise.reject(new Error('Para mandar imágenes a Flow confirma en Ajustes → Google Flow que tienes sus derechos.'))
   }
   if (!cuentas().length) return Promise.reject(new Error('Conecta una cuenta de Google en Ajustes → Google Flow (o la de la voz).'))
