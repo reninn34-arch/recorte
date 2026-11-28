@@ -157,7 +157,7 @@ import { AnimacionesTexto } from './AnimacionesTexto'
 import { EstilosTexto } from './EstilosTexto'
 import { ColorBoton, coloresDelProyecto, LetraBoton } from './ControlesTexto'
 import { moverClave, moverClaveCapa, moverClaveRampa, moverClaveVolumen } from '../../../shared/timeline'
-import { durEntradaTexto, ponerPintaTexto, ponerPortada } from '../../../shared/timeline'
+import { borrarHastaCabezal, durEntradaTexto, FUNDIDO_SALIDA_MUSICA, ponerPintaTexto, ponerPortada } from '../../../shared/timeline'
 
 /**
  * La timeline editable: regla, pista de video magnética, pista de textos y la voz
@@ -491,6 +491,18 @@ export function TimelineEditor({
   const [escribiendoTc, setEscribiendoTc] = useState(false)
   const [muestraViva, setMuestraViva] = useState<TransicionClip | null>(null)
   const [portadaAbierta, setPortadaAbierta] = useState(false)
+
+  /** Q y W: borra lo que queda a la izquierda o a la derecha del cabezal en el clip de debajo y cierra el hueco. */
+  function accionHastaCabezal(lado: 'izquierda' | 'derecha') {
+    const nueva = borrarHastaCabezal(timeline, tiempo, lado)
+    if (nueva === timeline) return
+    historial.aplicar(nueva)
+    // Al borrar lo de la izquierda, lo que estaba en el cabezal pasa a donde empezaba el trozo borrado.
+    if (lado === 'izquierda') {
+      const corrido = duracionTimeline(timeline) - duracionTimeline(nueva)
+      onBuscar(Math.max(0, tiempo - corrido))
+    }
+  }
 
   /** Al elegir una animación de un texto, el cabezal va donde se ve y reproduce (como CapCut, que la muestra al momento). */
   function verAnimacionTexto(t: TextoTL, que: 'entrada' | 'salida' | 'bucle') {
@@ -1338,6 +1350,8 @@ export function TimelineEditor({
       const video = esVideo(c.fuente)
       abrirMenu(e, [
         { nombre: 'Dividir aquí', atajo: 'S', accion: () => historial.aplicar(dividir(timeline, t)) },
+        { nombre: 'Borrar a la izquierda del cabezal', atajo: 'Q', desactivada: borrarHastaCabezal(timeline, tiempo, 'izquierda') === timeline, accion: () => accionHastaCabezal('izquierda') },
+        { nombre: 'Borrar a la derecha del cabezal', atajo: 'W', desactivada: borrarHastaCabezal(timeline, tiempo, 'derecha') === timeline, accion: () => accionHastaCabezal('derecha') },
         { nombre: 'Duplicar', atajo: 'Ctrl+D', accion: () => historial.aplicar(duplicarClip(timeline, c.id)) },
         ...copiarCortar,
         { nombre: 'Pegar en el cabezal', atajo: 'Ctrl+V', desactivada: !portapapeles.current, accion: () => acciones.current.accionPegar() },
@@ -1591,6 +1605,8 @@ export function TimelineEditor({
       const r = cambiarAngulo(timeline, tiempo, Number(e.key) - 1, limiteFuente)
       if (r !== timeline) historial.aplicar(r)
     }
+    else if (tecla === 'q' && !e.shiftKey) accionHastaCabezal('izquierda')
+    else if (tecla === 'w' && !e.shiftKey) accionHastaCabezal('derecha')
     else if (tecla === 'n') setHerramienta('rodar')
     else if (tecla === 'y') setHerramienta('deslizar')
     else if (tecla === 'u') setHerramienta('desplazar')
@@ -2170,12 +2186,41 @@ export function TimelineEditor({
             <Icon name="pause" size={15} /> {congelando ? 'Congelando…' : 'Congelar'}
           </button>
         )}
-        <button className="tl-boton" onClick={accionDuplicar} title="Duplicar el clip elegido" disabled={!clipElegido}>
+        <button className="tl-boton" onClick={accionDuplicar} title="Duplicar lo elegido (Ctrl+D)" disabled={!clipElegido && !textoElegido && !capaElegida}>
           <Icon name="copy" size={16} />
         </button>
         <button className="tl-boton" onClick={accionBorrar} title="Borrar lo elegido (Supr)" disabled={!elegido}>
           <Icon name="trash" size={16} />
         </button>
+        {/* Según lo elegido, como en CapCut: lo que más se usa con eso, a mano. */}
+        {(() => {
+          const bajoCabezal = tl.clips.length > 0 && borrarHastaCabezal(timeline, tiempo, 'izquierda') !== timeline
+          if (clipElegido || (!elegido && bajoCabezal))
+            return (
+              <span className="tl-segun" role="group" aria-label="Para el clip">
+                <span className="tl-separador" />
+                <button className="tl-boton" onClick={() => accionHastaCabezal('izquierda')} disabled={!bajoCabezal} title="Borrar lo que queda a la izquierda del cabezal en el clip y cerrar el hueco (Q)" aria-label="Borrar a la izquierda del cabezal">
+                  <Icon name="inicio" size={15} />
+                </button>
+                <button className="tl-boton" onClick={() => accionHastaCabezal('derecha')} disabled={!bajoCabezal} title="Borrar lo que queda a la derecha del cabezal en el clip y cerrar el hueco (W)" aria-label="Borrar a la derecha del cabezal">
+                  <Icon name="final" size={15} />
+                </button>
+              </span>
+            )
+          if (textoElegido)
+            return (
+              <span className="tl-segun" role="group" aria-label="Para el texto">
+                <span className="tl-separador" />
+                <button className="tl-boton" onClick={() => acciones.current.copiarEstilo()} title="Copiar el estilo del texto (Ctrl+Alt+C)">
+                  Copiar estilo
+                </button>
+                <button className="tl-boton" onClick={() => acciones.current.pegarEstilo()} disabled={hayEstilo !== 'texto'} title="Pegar el estilo copiado (Ctrl+Alt+V)">
+                  Pegar estilo
+                </button>
+              </span>
+            )
+          return null
+        })()}
         <span className="tl-separador" />
         <button className="tl-boton" onClick={historial.deshacer} title="Deshacer (Ctrl+Z)" disabled={!historial.puedeDeshacer}>
           <Icon name="undo" size={16} />
@@ -2516,7 +2561,10 @@ export function TimelineEditor({
                   title={x.texto.replace(/\*([^*]+)\*/g, '$1')}
                 >
                   <span className="tl-asa izquierda" onPointerDown={(e) => arrastrarTexto(e, x.id, 'inicio')} />
-                  <span className="tl-clip-texto">{x.bloqueado ? '🔒 ' : ''}{x.oculto ? '(oculto) ' : ''}{x.texto ? conResaltes(x.texto) : 'Texto vacío'}</span>
+                  <span className="tl-clip-texto">{x.bloqueado ? '🔒 ' : ''}{x.oculto ? '(oculto) ' : ''}{x.bucle ? '↻ ' : ''}{x.texto ? conResaltes(x.texto) : 'Texto vacío'}</span>
+                  {/* Lo que duran su entrada y su salida, como las rayitas de CapCut. */}
+                  {x.animacion && <span className="tl-anim entra" style={{ width: Math.min(x.duracion, durEntradaTexto(x.animacion) || Math.min(1, x.duracion / 2)) * pps }} />}
+                  {x.salida && <span className="tl-anim sale" style={{ width: Math.min(x.duracion, durSalidaTexto(x)) * pps }} />}
                   {x.claves &&
                     [...new Set(Object.values(x.claves).flatMap((l) => (l ?? []).map((k) => k.f)))]
                       .filter((f) => f >= 0 && f <= x.duracion)
@@ -2539,7 +2587,12 @@ export function TimelineEditor({
                     onPointerDown={(e) => sumar(e, { tipo: 'voz', id: v.id }) || arrastrarFrase(e, v.id)}
                   >
                     {urlDe && v.archivo && <Onda url={urlDe(v.archivo)} duracion={v.duracion} desde={v.desde ?? 0} />}
-                    {anchoFrase > 30 && <span className="tl-clip-texto">{v.texto || 'Narración'}</span>}
+                    {anchoFrase > 30 && (
+                      <span className="tl-clip-texto">
+                        {v.voz && <b className="tl-voz-nombre">{v.voz}</b>}
+                        {v.texto || 'Narración'}
+                      </span>
+                    )}
                     <span className="tl-asa izquierda" onPointerDown={(e) => arrastrarFrase(e, v.id, 'inicio')} />
                     <span className="tl-asa derecha" onPointerDown={(e) => arrastrarFrase(e, v.id, 'fin')} />
                   </div>
@@ -4153,6 +4206,38 @@ export function TimelineEditor({
                   formato={(v) => `${Math.round(v * 100)} %`}
                   onEmpezar={empezarAjuste}
                   onCambio={(v) => deslizar(cambiarMusica(timeline, { volumen: v }))}
+                />
+              </span>
+            </div>
+            <div className="tl-ajuste aj en-linea" title="Lo que tarda la música en subir al empezar el video">
+              <span>
+                Sube al empezar
+                <ValorArrastrable
+                  nombre="Fundido de entrada de la música"
+                  valor={musicaElegida.entra ?? 0}
+                  min={0}
+                  max={10}
+                  paso={0.1}
+                  formato={(v) => (v > 0.01 ? `${v.toFixed(1).replace('.', ',')} s` : 'no')}
+                  porDefecto={0}
+                  onEmpezar={empezarAjuste}
+                  onCambio={(v) => deslizar(cambiarMusica(timeline, { entra: v }))}
+                />
+              </span>
+            </div>
+            <div className="tl-ajuste aj en-linea" title="Lo que tarda la música en bajar al terminar el video">
+              <span>
+                Baja al terminar
+                <ValorArrastrable
+                  nombre="Fundido de salida de la música"
+                  valor={musicaElegida.sale ?? FUNDIDO_SALIDA_MUSICA}
+                  min={0}
+                  max={10}
+                  paso={0.1}
+                  formato={(v) => (v > 0.01 ? `${v.toFixed(1).replace('.', ',')} s` : 'no')}
+                  porDefecto={FUNDIDO_SALIDA_MUSICA}
+                  onEmpezar={empezarAjuste}
+                  onCambio={(v) => deslizar(cambiarMusica(timeline, { sale: v }))}
                 />
               </span>
             </div>

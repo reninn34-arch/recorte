@@ -80,6 +80,7 @@ import {
   MODOS_FUSION,
   curvasDeClip,
   tramosMusica,
+  FUNDIDO_SALIDA_MUSICA,
   type TramoMusica
 } from '../shared/timeline'
 import type { OpcionesExport } from '../shared/api'
@@ -508,13 +509,21 @@ async function exportarTimelineAhora(
   const hayBus = conAudio || frases.length > 0 || efectos.length > 0
 
   // La música vive en la carpeta del proyecto; normalizarMusica ya validó la ruta.
-  let musica: { ruta: string; volumen: number; ducking: boolean; tramos?: TramoMusica[] } | null = null
+  let musica: { ruta: string; volumen: number; ducking: boolean; entra: number; sale: number; tramos?: TramoMusica[] } | null = null
   if (timeline.musica) {
     const ruta = join(carpeta, timeline.musica.archivo)
     if (!existsSync(ruta)) return { ok: false, error: `No encuentro la música «${timeline.musica.nombre}». Vuelve a añadirla.` }
     const trozos = timeline.musica.tramos ? tramosMusica(timeline) : undefined
     // Cortada en trozos y sin ninguno dentro de lo que se exporta: no suena.
-    if (!trozos || trozos.length) musica = { ruta, volumen: timeline.musica.volumen, ducking: timeline.musica.ducking, ...(trozos ? { tramos: trozos } : {}) }
+    if (!trozos || trozos.length)
+      musica = {
+        ruta,
+        volumen: timeline.musica.volumen,
+        ducking: timeline.musica.ducking,
+        entra: timeline.musica.entra ?? 0,
+        sale: timeline.musica.sale ?? FUNDIDO_SALIDA_MUSICA,
+        ...(trozos ? { tramos: trozos } : {})
+      }
   }
 
   const { ancho, alto } = dimensiones(proyecto, opciones.formato, opciones.resolucion)
@@ -1025,7 +1034,10 @@ async function exportarTimelineAhora(
     const m = n++
     entradas.push('-stream_loop', '-1', '-i', musica.ruta)
     const formato = 'aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo'
-    const final = `volume=${musica.volumen.toFixed(3)},afade=t=out:st=${Math.max(0, duracion - 1.5).toFixed(3)}:d=1.5[mus]`
+    // Sube al empezar (si se eligió) y baja al terminar (1,5 s si no se eligió otra cosa), como en el monitor.
+    const sube = musica.entra > 0.01 ? `,afade=t=in:st=0:d=${Math.min(musica.entra, duracion).toFixed(3)}` : ''
+    const baja = musica.sale > 0.01 ? `,afade=t=out:st=${Math.max(0, duracion - musica.sale).toFixed(3)}:d=${Math.min(musica.sale, duracion).toFixed(3)}` : ''
+    const final = `volume=${musica.volumen.toFixed(3)}${sube}${baja}[mus]`
     if (musica.tramos) {
       // (Tras la mezcla, asetpts=N/SR/TB: con un solo trozo, atrim se comería el silencio que puso adelay.)
       // En trozos (como clips de audio): cada uno, su tramo de la música repetida, en su segundo, con un fundido

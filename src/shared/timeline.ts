@@ -430,12 +430,19 @@ export interface MusicaTL {
   volumen: number
   /** Si baja sola mientras hay voz. */
   ducking: boolean
+  /** Lo que tarda en subir al empezar el video (segundos); sin él, entra de golpe. */
+  entra?: number
+  /** Lo que tarda en bajar al terminar el video (segundos); sin él, FUNDIDO_SALIDA_MUSICA. 0: sin fundido. */
+  sale?: number
   /**
    * Los trozos donde suena, si se dividió o recortó (como clips de audio). Sin ellos suena en todo el video.
    * `desde` es el segundo de la música (que se repite) con el que empieza el trozo.
    */
   tramos?: TramoMusica[]
 }
+
+/** Lo que tarda la música en bajar al final del video si no se elige. */
+export const FUNDIDO_SALIDA_MUSICA = 1.5
 
 export interface TramoMusica {
   id: string
@@ -2443,6 +2450,8 @@ export function normalizarMusica(entrada: unknown): MusicaTL | undefined {
     nombre: typeof m.nombre === 'string' && m.nombre ? m.nombre.slice(0, 120) : m.archivo.slice(6),
     volumen: typeof m.volumen === 'number' && Number.isFinite(m.volumen) ? pinza(m.volumen, 0, 1) : 0.35,
     ducking: m.ducking !== false,
+    ...(typeof m.entra === 'number' && Number.isFinite(m.entra) && m.entra > 0.01 ? { entra: Math.round(pinza(m.entra, 0, 10) * 100) / 100 } : {}),
+    ...(typeof m.sale === 'number' && Number.isFinite(m.sale) ? { sale: Math.round(pinza(m.sale, 0, 10) * 100) / 100 } : {}),
     ...(Array.isArray(m.tramos) ? { tramos: normalizarTramosMusica(m.tramos) } : {})
   }
 }
@@ -3606,6 +3615,19 @@ export function dividir(tl: Timeline, t: number): Timeline {
   return normalizarSonidos2({ ...tl, clips })
 }
 
+/**
+ * Borra lo que queda a la izquierda (o a la derecha) del cabezal en el clip que está debajo y cierra el hueco: la Q y la
+ * W de CapCut y de Premiere. Si el cabezal está pegado a un borde del clip, no hace nada.
+ */
+export function borrarHastaCabezal(tl: Timeline, t: number, lado: 'izquierda' | 'derecha'): Timeline {
+  const u = ubicar(tl, t)
+  if (!u) return tl
+  const partida = dividir(tl, t)
+  if (partida === tl) return tl
+  const quitar = lado === 'izquierda' ? partida.clips[u.indice] : partida.clips[u.indice + 1]
+  return quitar ? borrarClip(partida, quitar.id) : tl
+}
+
 /** Quita un clip y cierra el hueco. */
 export function borrarClip(tl: Timeline, id: string): Timeline {
   if (!tl.clips.some((c) => c.id === id)) return tl
@@ -3853,7 +3875,7 @@ export function ponerMusica(tl: Timeline, musica: MusicaTL | undefined): Timelin
   return valida ? { ...resto, musica: valida } : resto
 }
 
-export function cambiarMusica(tl: Timeline, cambio: Partial<Pick<MusicaTL, 'volumen' | 'ducking'>>): Timeline {
+export function cambiarMusica(tl: Timeline, cambio: Partial<Pick<MusicaTL, 'volumen' | 'ducking' | 'entra' | 'sale'>>): Timeline {
   if (!tl.musica) return tl
   return ponerMusica(tl, { ...tl.musica, ...cambio })
 }

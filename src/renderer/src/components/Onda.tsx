@@ -63,7 +63,7 @@ export function Onda({ url, duracion, desde = 0 }: { url: string; duracion: numb
       const g = lienzo.getContext('2d')
       if (!g) return
       g.clearRect(0, 0, ancho, alto)
-      g.fillStyle = getComputedStyle(lienzo).color
+      const color = getComputedStyle(lienzo).color
       const porPixel = (duracion * PPS) / ancho
       for (let x = 0; x < ancho; x++) {
         const a = Math.floor(desde * PPS + x * porPixel)
@@ -72,6 +72,8 @@ export function Onda({ url, duracion, desde = 0 }: { url: string; duracion: numb
         for (let i = a; i < b && i < picos.length; i++) if (picos[i] > max) max = picos[i]
         // Un poco de curva: lo suave también se ve.
         const h = Math.max(1, Math.round(Math.sqrt(max) * (alto - 2)))
+        // Casi al tope (satura y suena roto): en naranja, como en CapCut.
+        g.fillStyle = max >= 0.98 ? '#ff8a3c' : color
         g.fillRect(x, (alto - h) / 2, 1, h)
       }
     }

@@ -433,7 +433,9 @@ export function useMusica(
     const audio = audioRef.current
     if (!audio || !musica) return
     const hablando = voz.some((v) => tiempo >= v.inicio - 0.1 && tiempo < v.fin + 0.25)
-    const fundido = Math.max(0, Math.min(1, (total - tiempo) / FUNDIDO_MUSICA))
+    const sale = musica.sale ?? FUNDIDO_MUSICA
+    const entra = musica.entra ?? 0
+    const fundido = Math.max(0, Math.min(1, sale > 0.01 ? (total - tiempo) / sale : 1, entra > 0.01 ? tiempo / entra : 1))
     audio.volume = Math.max(0, Math.min(1, musica.volumen * (hablando ? DUCKING_FACTOR : 1) * fundido))
   }, [tiempo, voz, musica, total])
 
