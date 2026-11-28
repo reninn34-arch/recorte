@@ -473,6 +473,9 @@ export interface TextoTL {
   animacion?: AnimacionTexto
   /** Cómo se mueve mientras está (late, se balancea…), una y otra vez. Sin él, quieto. */
   bucle?: BucleTexto
+  /** Sin caja: un brillo alrededor de la letra (lo lejos que llega, en fracción del tamaño de la letra) y su color. */
+  brillo?: number
+  colorBrillo?: string
   /** El color con que se pintan las palabras en «pintar» (`#rrggbb`); sin él, amarillo. */
   pintado?: string
   /** El color de las palabras resaltadas (las que van entre asteriscos: «No es *timidez*»); sin él, amarillo. */
@@ -533,6 +536,10 @@ export interface TextoTL {
 export type AlineacionTexto = 'izquierda' | 'derecha'
 /** Lo más grueso que puede ser el contorno o lo más lejos la sombra (en fracción del tamaño de la letra). */
 export const LIMITE_TRAZO = 0.25
+/** Lo más lejos que llega el brillo de un rótulo (en fracción del tamaño de la letra). */
+export const LIMITE_BRILLO = 0.5
+/** El color del brillo si no se elige (un amarillo cálido). */
+export const COLOR_BRILLO = '#ffd23f'
 /** La eme de la letra en el monitor es el 93 % del tamaño del rótulo del MP4 (ver `letra` en el monitor): el contorno, la sombra y el espaciado se miden con ella. */
 export const EME_ROTULO = 0.93
 
@@ -819,7 +826,7 @@ const COLOR_HEX = /^#[0-9a-f]{6}$/i
 
 /** El estilo de un rótulo, limpio: lo neutro no se guarda. */
 /** Los campos de estilo de un rótulo (los que `estiloTexto` limpia). */
-const CAMPOS_ESTILO_TEXTO = ['tamano', 'color', 'sinCaja', 'fuente', 'caja', 'animacion', 'pintado', 'colorClave', 'contorno', 'colorContorno', 'sombra', 'colorSombra', 'alineacion', 'espaciado', 'mayusculas', 'opacidad', 'giro', 'salida', 'durSalida', 'bucle'] as const
+const CAMPOS_ESTILO_TEXTO = ['tamano', 'color', 'sinCaja', 'fuente', 'caja', 'animacion', 'pintado', 'colorClave', 'contorno', 'colorContorno', 'sombra', 'colorSombra', 'alineacion', 'espaciado', 'mayusculas', 'opacidad', 'giro', 'salida', 'durSalida', 'bucle', 'brillo', 'colorBrillo'] as const
 type EstiloTexto = Pick<TextoTL, (typeof CAMPOS_ESTILO_TEXTO)[number]>
 
 /** El estilo de un rótulo para copiarlo en otro (Copiar estilo / Pegar estilo). */
@@ -828,7 +835,7 @@ export function estiloDeTexto(t: TextoTL): EstiloTexto {
 }
 
 /** Lo que es la «pinta» de un texto (lo que aplica un estilo listo o uno guardado): no su tamaño, sitio ni animación. */
-export const CAMPOS_PINTA_TEXTO = ['fuente', 'color', 'sinCaja', 'caja', 'contorno', 'colorContorno', 'sombra', 'colorSombra', 'mayusculas', 'espaciado'] as const
+export const CAMPOS_PINTA_TEXTO = ['fuente', 'color', 'sinCaja', 'caja', 'contorno', 'colorContorno', 'sombra', 'colorSombra', 'brillo', 'colorBrillo', 'mayusculas', 'espaciado'] as const
 export type PintaTexto = Pick<TextoTL, (typeof CAMPOS_PINTA_TEXTO)[number]>
 
 /** La pinta de un texto (o de algo que llega de fuera, ya limpio): solo sus campos de pinta. */
@@ -856,7 +863,9 @@ export const ESTILOS_TEXTO_LISTOS: { id: string; nombre: string; pinta: PintaTex
   { id: 'azul', nombre: 'Azul con sombra', pinta: { sinCaja: true, fuente: 'negra', color: '#5fd7ff', sombra: 0.06, colorSombra: '#0b2a66' } },
   { id: 'titular', nombre: 'Titular', pinta: { sinCaja: true, fuente: 'titular', mayusculas: true, sombra: 0.05 } },
   { id: 'elegante', nombre: 'Elegante', pinta: { sinCaja: true, fuente: 'elegante' } },
-  { id: 'maquina', nombre: 'Máquina', pinta: { sinCaja: true, fuente: 'maquina', contorno: 0.05 } }
+  { id: 'maquina', nombre: 'Máquina', pinta: { sinCaja: true, fuente: 'maquina', contorno: 0.05 } },
+  { id: 'neon', nombre: 'Neón', pinta: { sinCaja: true, fuente: 'gruesa', color: '#ffffff', brillo: 0.18, colorBrillo: '#28c8ff' } },
+  { id: 'dorado', nombre: 'Brillo cálido', pinta: { sinCaja: true, fuente: 'negra', color: '#fff6d8', brillo: 0.15, colorBrillo: '#ffb020' } }
 ]
 
 function estiloTexto(t: Partial<TextoTL>): EstiloTexto {
@@ -883,6 +892,8 @@ function estiloTexto(t: Partial<TextoTL>): EstiloTexto {
     ...(typeof t.fuente === 'string' && t.fuente !== 'normal' && (t.fuente in FUENTES_TEXTO || esIdLetra(t.fuente)) ? { fuente: t.fuente } : {}),
     ...(t.animacion && ANIMACIONES_TEXTO.some((a) => a.id === t.animacion) ? { animacion: t.animacion } : {}),
     ...(t.bucle && BUCLES_TEXTO.some((b) => b.id === t.bucle) ? { bucle: t.bucle } : {}),
+    ...(num(t.brillo) && t.brillo > 0.002 ? { brillo: r(pinza(t.brillo, 0, LIMITE_BRILLO)) } : {}),
+    ...(typeof t.colorBrillo === 'string' && COLOR_HEX.test(t.colorBrillo) ? { colorBrillo: t.colorBrillo.toLowerCase() } : {}),
     ...(typeof t.pintado === 'string' && COLOR_HEX.test(t.pintado) && t.pintado.toLowerCase() !== COLOR_PINTADO ? { pintado: t.pintado.toLowerCase() } : {}),
     ...(typeof t.colorClave === 'string' && COLOR_HEX.test(t.colorClave) ? { colorClave: t.colorClave.toLowerCase() } : {})
   }

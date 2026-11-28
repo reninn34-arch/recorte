@@ -4145,3 +4145,11 @@ button.tl-tc-grande:hover { background: var(--panel-3); }
 @keyframes aviso-onda { 0%, 100% { transform: scaleY(0.25); opacity: 0.6; } 50% { transform: scaleY(1); opacity: 1; } }
 @keyframes aviso-entra { from { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .aviso-trabajo-ondas i, .voz-cargando { animation: none; } }
+
+/* Los controles de texto de Recorte (letra y color), los mismos de la portada: botones que abren su lista o su paleta. */
+.ct-fila { display: flex; align-items: flex-end; gap: 10px; }
+.ct-campo { flex: 1; min-width: 0; }
+.ct-letra { width: 100%; justify-content: space-between; height: 32px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--panel-2); font-size: 14px; }
+.ct-letra svg { transform: rotate(90deg); opacity: 0.7; }
+.ct-color { width: 34px; height: 32px; padding: 0; border: 1px solid var(--line-2); border-radius: 7px; background: var(--panel-2); }
+.ct-muestra { display: block; width: 18px; height: 18px; border-radius: 50%; box-shadow: inset 0 0 0 1px #fff5, 0 0 0 1px #0008; }

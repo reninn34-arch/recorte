@@ -1,5 +1,5 @@
 import type React from 'react'
-import { trazoTexto, type AlineacionTexto, type CapaTL, type RecorteCapa, type TextoTL } from '../../shared/timeline'
+import { COLOR_BRILLO, trazoTexto, type AlineacionTexto, type CapaTL, type RecorteCapa, type TextoTL } from '../../shared/timeline'
 
 /**
  * Cómo se dibujan en el monitor el estilo y el anclaje de un rótulo, y cómo se ubica en el cuadro. Lo mismo que hace
@@ -24,9 +24,21 @@ export function anclajeRotulo(t: Pick<TextoTL, 'alineacion' | 'giro'>, giro = t.
   }
 }
 
-/** El contorno, la sombra, el espaciado, las mayúsculas y la opacidad de un rótulo. */
+/**
+ * El brillo de un rótulo en CSS: varios halos de su color, del más cercano al más lejano, para que se vea tan fuerte como
+ * el del MP4 (un borde ancho y difuminado en libass).
+ */
+export function sombraBrillo(brillo: number, color: string): string {
+  return [0.25, 0.5, 0.9, 1.4].map((f) => `0 0 ${(brillo * f).toFixed(3)}em ${color}`).join(', ')
+}
+
+/** El contorno, la sombra, el brillo, el espaciado, las mayúsculas y la opacidad de un rótulo. */
 export function estiloRotulo(t: TextoTL): React.CSSProperties {
   const trazo = trazoTexto(t)
+  // El brillo (sin caja): dos halos difusos de su color, en vez del halo oscuro de siempre; con sombra, la sombra encima.
+  const colorBrillo = t.colorBrillo ?? COLOR_BRILLO
+  const brillo = t.sinCaja && t.brillo ? sombraBrillo(t.brillo, colorBrillo) : ''
+  const sombra = trazo && trazo.sombra > 0 ? `${trazo.sombra}em ${trazo.sombra}em 0 ${trazo.colorSombra}` : ''
   return {
     ...(t.mayusculas ? { textTransform: 'uppercase' } : {}),
     ...(t.espaciado ? { letterSpacing: `${t.espaciado}em` } : {}),
@@ -36,9 +48,11 @@ export function estiloRotulo(t: TextoTL): React.CSSProperties {
       ? {
           WebkitTextStroke: trazo.contorno > 0 ? `${(trazo.contorno * 2).toFixed(3)}em ${trazo.colorContorno}` : undefined,
           paintOrder: 'stroke fill',
-          textShadow: trazo.sombra > 0 ? `${trazo.sombra}em ${trazo.sombra}em 0 ${trazo.colorSombra}` : 'none'
+          textShadow: [sombra, brillo].filter(Boolean).join(', ') || 'none'
         }
-      : {})
+      : brillo
+        ? { textShadow: brillo }
+        : {})
   }
 }
 

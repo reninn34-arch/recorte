@@ -155,6 +155,7 @@ import { MuestraTransicion } from './MuestraTransicion'
 import { PortadaModal } from './PortadaModal'
 import { AnimacionesTexto } from './AnimacionesTexto'
 import { EstilosTexto } from './EstilosTexto'
+import { ColorBoton, coloresDelProyecto, LetraBoton } from './ControlesTexto'
 import { moverClave, moverClaveCapa, moverClaveRampa, moverClaveVolumen } from '../../../shared/timeline'
 import { durEntradaTexto, ponerPintaTexto, ponerPortada } from '../../../shared/timeline'
 
@@ -4230,51 +4231,40 @@ export function TimelineEditor({
                 />
               </span>
             </div>
-            <label className="ed-campo"><span>Letra</span><select
-              value={textoElegido.fuente ?? 'normal'}
-              title="La letra"
-              onChange={(e) => historial.aplicar(cambiarTexto(timeline, textoElegido.id, { fuente: e.target.value }))}
-            >
-              {Object.entries(FUENTES_TEXTO).map(([clave, f]) => (
-                <option key={clave} value={clave} style={{ fontFamily: f.familia }}>
-                  {f.nombre}
-                </option>
-              ))}
-              {(tl.letras ?? []).map((l) => (
-                <option key={l.id} value={l.id} style={{ fontFamily: `"Recorte ${l.id}"` }}>
-                  {l.nombre} (del proyecto)
-                </option>
-              ))}
-            </select></label>
-            <input
-              type="color"
-              className="tl-color"
-              title="Color de la letra"
-              value={textoElegido.color ?? '#ffffff'}
-              onPointerDown={empezarAjuste}
-              onChange={(e) => deslizar(cambiarTexto(timeline, textoElegido.id, { color: e.target.value }))}
-            />
+            <div className="ct-fila">
+              <div className="ed-campo ct-campo">
+                <span>Letra</span>
+                <LetraBoton valor={textoElegido.fuente ?? 'normal'} propias={tl.letras ?? []} onCambio={(fuente) => historial.aplicar(cambiarTexto(timeline, textoElegido.id, { fuente }))} />
+              </div>
+              <div className="ed-campo">
+                <span>Color</span>
+                <ColorBoton
+                  titulo="Color de la letra"
+                  valor={textoElegido.color ?? '#ffffff'}
+                  colores={coloresDelProyecto(tl)}
+                  onCambio={(color) => historial.aplicar(cambiarTexto(timeline, textoElegido.id, { color }))}
+                />
+              </div>
+            </div>
             {textoElegido.animacion === 'pintar' && (
               <label className="ed-campo" title="El color con que se pinta cada palabra cuando se dice">
                 <span>Se pinta de</span>
-                <input
-                  type="color"
-                  className="tl-color"
-                  value={textoElegido.pintado ?? COLOR_PINTADO}
-                  onPointerDown={empezarAjuste}
-                  onChange={(e) => deslizar(cambiarTexto(timeline, textoElegido.id, { pintado: e.target.value }))}
+                <ColorBoton
+                  titulo="El color con que se pinta cada palabra"
+                  valor={textoElegido.pintado ?? COLOR_PINTADO}
+                  colores={coloresDelProyecto(tl)}
+                  onCambio={(pintado) => historial.aplicar(cambiarTexto(timeline, textoElegido.id, { pintado }))}
                 />
               </label>
             )}
             {textoElegido.texto.includes('*') ? (
               <label className="ed-campo" title="El color de las palabras que van entre asteriscos">
                 <span>Palabras resaltadas</span>
-                <input
-                  type="color"
-                  className="tl-color"
-                  value={textoElegido.colorClave ?? COLOR_PINTADO}
-                  onPointerDown={empezarAjuste}
-                  onChange={(e) => deslizar(cambiarTexto(timeline, textoElegido.id, { colorClave: e.target.value }))}
+                <ColorBoton
+                  titulo="El color de las palabras entre asteriscos"
+                  valor={textoElegido.colorClave ?? COLOR_PINTADO}
+                  colores={coloresDelProyecto(tl)}
+                  onCambio={(colorClave) => historial.aplicar(cambiarTexto(timeline, textoElegido.id, { colorClave }))}
                 />
               </label>
             ) : (

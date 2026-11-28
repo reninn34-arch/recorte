@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { ESTILOS_TEXTO_LISTOS, FUENTES_TEXTO, pintaDeTexto, type PintaTexto, type TextoTL } from '../../../shared/timeline'
+import { COLOR_BRILLO, ESTILOS_TEXTO_LISTOS, FUENTES_TEXTO, pintaDeTexto, type PintaTexto, type TextoTL } from '../../../shared/timeline'
+import { sombraBrillo } from '../rotulos'
 import type { EstiloTextoGuardado } from '../../../shared/api'
 import { Icon } from '../Icons'
 
@@ -22,7 +23,11 @@ function Muestra({ pinta }: { pinta: PintaTexto }) {
         textTransform: pinta.mayusculas ? 'uppercase' : 'none',
         WebkitTextStroke: !conCaja && pinta.contorno ? `${(pinta.contorno * 2).toFixed(3)}em ${pinta.colorContorno ?? '#000000'}` : undefined,
         paintOrder: 'stroke fill',
-        textShadow: !conCaja && pinta.sombra ? `${pinta.sombra}em ${pinta.sombra}em 0 ${pinta.colorSombra ?? '#000000'}` : !conCaja && !pinta.contorno ? '0 0 0.12em #000c' : 'none',
+        textShadow: conCaja
+          ? 'none'
+          : [pinta.sombra ? `${pinta.sombra}em ${pinta.sombra}em 0 ${pinta.colorSombra ?? '#000000'}` : '', pinta.brillo ? sombraBrillo(pinta.brillo, pinta.colorBrillo ?? COLOR_BRILLO) : '']
+              .filter(Boolean)
+              .join(', ') || (pinta.contorno ? 'none' : '0 0 0.12em #000c'),
         letterSpacing: pinta.espaciado ? `${pinta.espaciado}em` : undefined
       }}
     >
@@ -83,7 +88,7 @@ export function EstilosTexto({ texto, onPoner }: { texto: TextoTL; onPoner: (pin
         <div className="et-rejilla" role="listbox" aria-label={pestana === 'listos' ? 'Estilos listos' : 'Mis estilos'}>
           {lista.map((e) => (
             <div key={e.id} className="et-celda">
-              <button role="option" aria-selected={igual(actual, e.pinta)} className={`et-tarjeta ${igual(actual, e.pinta) ? 'is-on' : ''}`} title={e.nombre} aria-label={e.nombre} onClick={() => onPoner(e.pinta)}>
+              <button role="option" aria-selected={igual(actual, pintaDeTexto(e.pinta))} className={`et-tarjeta ${igual(actual, pintaDeTexto(e.pinta)) ? 'is-on' : ''}`} title={e.nombre} aria-label={e.nombre} onClick={() => onPoner(e.pinta)}>
                 <Muestra pinta={e.pinta} />
               </button>
               {pestana === 'mios' && (

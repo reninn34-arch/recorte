@@ -25,6 +25,7 @@ import {
   durSalidaCapa,
   destinoLado,
   DESENFOQUE_TEXTO,
+  COLOR_BRILLO,
   durSalidaTexto,
   tramosBucle,
   porPalabras,
@@ -295,6 +296,8 @@ function escribirAss(
         ...(caja ? ['\\bord0\\shad0'] : []),
         // Letra oscura sin caja (tinta sobre papel): sin el borde ni la sombra negros, que la emborronan.
         ...(t.sinCaja && letraOscura(t) && !trazo ? ['\\bord0\\shad0'] : []),
+        // Con brillo (y sin contorno ni sombra elegidos), el brillo reemplaza al halo oscuro de siempre, como en el monitor.
+        ...(t.sinCaja && t.brillo && !trazo && !letraOscura(t) ? ['\\bord0\\shad0'] : []),
         // El contorno y la sombra elegidos (en vez del halo de siempre): fuera de la letra, como el monitor.
         ...(trazo
           ? [`\\bord${px(trazo.contorno)}\\3c${colorAss(trazo.colorContorno).replace('&H00', '&H')}&\\shad${px(trazo.sombra)}\\4c${colorAss(trazo.colorSombra).replace('&H00', '&H')}&`]
@@ -340,6 +343,16 @@ function escribirAss(
       const cuerpo = troceado && !pintarCorrido ? correrTiemposAss(animado.cuerpo, s, completo.duracion) : animado.cuerpo
       const entrada = troceado ? correrTiemposAss(conSalidaAss(anima, animado.inicio, eme), s, completo.duracion) : conSalidaAss(anima, animado.inicio, eme)
       const texto = `Dialogue: 1,${tiempoAss(a)},${tiempoAss(b)},${nombreEstilo[t.posicion]}${t.sinCaja || caja ? 'Libre' : ''},,0,0,0,,{${entrada.includes('\\move(') ? etiquetas.replace(/\\pos\([^)]*\)/, '') : etiquetas}${entrada}}${cuerpo}`
+      // El brillo (sin caja): la misma línea debajo, sin letra, con un borde ancho y difuminado de su color.
+      if (!caja && t.sinCaja && t.brillo) {
+        const fuerza = t.brillo
+        const color = colorAss(t.colorBrillo ?? COLOR_BRILLO).replace('&H00', '&H')
+        const halo = `\\bord${px(fuerza * 0.9)}\\blur${px(fuerza * 0.8)}\\3c${color}&\\3a&H40&\\shad0\\1a&HFF&\\2a&HFF&`
+        const base = entrada.includes('\\move(') ? etiquetas.replace(/\\pos\([^)]*\)/, '') : etiquetas
+        // Las palabras que aparecen una a una prenden su letra (1a): en el brillo la letra sigue sin verse.
+        const cuerpoHalo = cuerpo.replace(/\\1a&H[0-9A-F]{2}&/gi, '\\1a&HFF&')
+        return `Dialogue: 0,${tiempoAss(a)},${tiempoAss(b)},${nombreEstilo[t.posicion]}Libre,,0,0,0,,{${base}${entrada}${halo}}${cuerpoHalo}\n${texto}`
+      }
       if (!caja) return texto
       // La caja: el mismo sitio, giro y animación de entrada y salida que el texto (no las de cada palabra), debajo.
       const an = libre && t.alineacion === 'izquierda' ? 4 : libre && t.alineacion === 'derecha' ? 6 : 5

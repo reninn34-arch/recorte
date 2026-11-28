@@ -1,4 +1,7 @@
+import { ColorBoton, coloresDelProyecto } from './ControlesTexto'
 import {
+  COLOR_BRILLO,
+  LIMITE_BRILLO,
   cambiarTexto,
   cambiarTextoEn,
   CURVAS_CLAVE,
@@ -193,28 +196,33 @@ export function EstiloTexto({
       <ClavesDelTexto t={t} ahora={ahora} dt={dt} timeline={timeline} historial={historial} onBuscar={onBuscar} />
       {t.sinCaja && (
         <>
-          <span className="ed-seccion">Contorno y sombra</span>
+          <span className="ed-seccion">Contorno, sombra y brillo</span>
           {!trazoElegido && <span className="tl-dim">Ahora lleva el halo oscuro de siempre. Mueve el contorno o la sombra para elegirlos tú.</span>}
           <div className="ed-fila-color">
             {deslizador('Contorno', t.contorno ?? 0, 0, LIMITE_TRAZO, 0.005, t.contorno ? `${Math.round(t.contorno * 100)}` : 'no', (v) => cambiar({ contorno: v, ...(t.sombra === undefined ? { sombra: 0 } : {}) }), 'El grosor del borde de la letra')}
-            <input
-              type="color"
-              className="tl-color"
-              title="Color del contorno"
-              value={t.colorContorno ?? '#000000'}
-              onPointerDown={empezarAjuste}
-              onChange={(e) => deslizar(cambiar({ colorContorno: e.target.value, ...(t.contorno === undefined ? { contorno: 0.06, sombra: t.sombra ?? 0 } : {}) }))}
+            <ColorBoton
+              titulo="Color del contorno"
+              valor={t.colorContorno ?? '#000000'}
+              colores={coloresDelProyecto(timeline)}
+              onCambio={(c) => historial.aplicar(cambiar({ colorContorno: c, ...(t.contorno === undefined ? { contorno: 0.06, sombra: t.sombra ?? 0 } : {}) }))}
             />
           </div>
           <div className="ed-fila-color">
             {deslizador('Sombra', t.sombra ?? 0, 0, LIMITE_TRAZO, 0.005, t.sombra ? `${Math.round(t.sombra * 100)}` : 'no', (v) => cambiar({ sombra: v, ...(t.contorno === undefined ? { contorno: 0 } : {}) }), 'Lo que se separa la sombra (abajo a la derecha)')}
-            <input
-              type="color"
-              className="tl-color"
-              title="Color de la sombra"
-              value={t.colorSombra ?? '#000000'}
-              onPointerDown={empezarAjuste}
-              onChange={(e) => deslizar(cambiar({ colorSombra: e.target.value, ...(t.sombra === undefined ? { sombra: 0.06, contorno: t.contorno ?? 0 } : {}) }))}
+            <ColorBoton
+              titulo="Color de la sombra"
+              valor={t.colorSombra ?? '#000000'}
+              colores={coloresDelProyecto(timeline)}
+              onCambio={(c) => historial.aplicar(cambiar({ colorSombra: c, ...(t.sombra === undefined ? { sombra: 0.06, contorno: t.contorno ?? 0 } : {}) }))}
+            />
+          </div>
+          <div className="ed-fila-color">
+            {deslizador('Brillo', t.brillo ?? 0, 0, LIMITE_BRILLO, 0.01, t.brillo ? `${Math.round(t.brillo * 100)}` : 'no', (v) => cambiar({ brillo: v || undefined }), 'Un brillo de color alrededor de la letra (como el neón)')}
+            <ColorBoton
+              titulo="Color del brillo"
+              valor={t.colorBrillo ?? COLOR_BRILLO}
+              colores={coloresDelProyecto(timeline)}
+              onCambio={(c) => historial.aplicar(cambiar({ colorBrillo: c, ...(t.brillo ? {} : { brillo: 0.15 }) }))}
             />
           </div>
           {trazoElegido && (

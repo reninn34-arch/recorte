@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { FUENTES_TEXTO } from '../../../shared/timeline'
 import { Icon } from '../Icons'
 
 /** Cierra algo flotante al tocar fuera de él o con Escape. */
-function useFuera(abierto: boolean, ref: React.RefObject<HTMLElement | null>, onCerrar: () => void) {
+function useFuera(abierto: boolean, ref: React.RefObject<HTMLElement | null>, onCerrar: () => void, ref2?: React.RefObject<HTMLElement | null>) {
   useEffect(() => {
     if (!abierto) return
     const fuera = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onCerrar()
+      const en = e.target as Node
+      if (ref.current && !ref.current.contains(en) && !ref2?.current?.contains(en)) onCerrar()
     }
     const tecla = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -21,7 +23,7 @@ function useFuera(abierto: boolean, ref: React.RefObject<HTMLElement | null>, on
       window.removeEventListener('mousedown', fuera)
       window.removeEventListener('keydown', tecla, true)
     }
-  }, [abierto, ref, onCerrar])
+  }, [abierto, ref, ref2, onCerrar])
 }
 
 /** Un botón de la barra que abre un panel flotante debajo. */
@@ -41,19 +43,41 @@ export function Desplegable({
   children: (cerrar: () => void) => ReactNode
 }) {
   const [abierto, setAbierto] = useState(false)
+  /** Dónde va el panel en la pantalla (fijo: así no lo corta un panel que se desplaza, como el inspector). */
+  const [sitio, setSitio] = useState<{ top?: number; bottom?: number; left: number; maxHeight: number } | null>(null)
   const ref = useRef<HTMLDivElement>(null)
+  const pop = useRef<HTMLDivElement>(null)
   const cerrar = () => setAbierto(false)
-  useFuera(abierto, ref, cerrar)
+  useFuera(abierto, ref, cerrar, pop)
+  const abrir = () => {
+    const r = ref.current?.getBoundingClientRect()
+    if (r) {
+      const abajo = window.innerHeight - r.bottom - 16
+      const arriba = r.top - 16
+      const haciaArriba = abajo < 260 && arriba > abajo
+      const alto = Math.min(520, Math.max(160, haciaArriba ? arriba : abajo))
+      setSitio({
+        left: Math.min(window.innerWidth - ancho - 8, Math.max(8, r.left + r.width / 2 - ancho / 2)),
+        ...(haciaArriba ? { bottom: window.innerHeight - r.top + 8 } : { top: r.bottom + 8 }),
+        maxHeight: alto
+      })
+    }
+    setAbierto(true)
+  }
   return (
     <div className="pt-desp" ref={ref}>
-      <button className={`pt-boton ${className} ${abierto || activo ? 'is-on' : ''}`} title={titulo} aria-label={titulo} aria-expanded={abierto} onClick={() => setAbierto((a) => !a)}>
+      <button className={`pt-boton ${className} ${abierto || activo ? 'is-on' : ''}`} title={titulo} aria-label={titulo} aria-expanded={abierto} onClick={() => (abierto ? cerrar() : abrir())}>
         {boton}
       </button>
-      {abierto && (
-        <div className="pt-pop" style={{ width: ancho }} role="dialog" aria-label={titulo}>
-          {children(cerrar)}
-        </div>
-      )}
+      {abierto &&
+        sitio &&
+        // Va fuera, en la página: dentro de un panel que se desplaza (el inspector) quedaría cortado.
+        createPortal(
+          <div ref={pop} className="pt-pop" style={{ width: ancho, position: 'fixed', transform: 'none', zIndex: 100, ...sitio }} role="dialog" aria-label={titulo}>
+            {children(cerrar)}
+          </div>,
+          document.body
+        )}
     </div>
   )
 }
@@ -66,7 +90,7 @@ const GRUPOS_LETRA: { id: string; nombre: string; letras: string[] }[] = [
 ]
 
 /** La lista de letras: cada una escrita con su propia letra, con filtros arriba. */
-export function ListaLetras({ valor, onCambio }: { valor: string; onCambio: (letra: string) => void }) {
+export function ListaLetras({ valor, onCambio, propias = [] }: { valor: string; onCambio: (letra: string) => void; propias?: { id: string; nombre: string; familia: string }[] }) {
   const [grupo, setGrupo] = useState('todas')
   const letras = GRUPOS_LETRA.find((g) => g.id === grupo)?.letras ?? []
   return (
@@ -95,6 +119,13 @@ export function ListaLetras({ valor, onCambio }: { valor: string; onCambio: (let
             </button>
           )
         })}
+        {grupo === 'todas' &&
+          propias.map((l) => (
+            <button key={l.id} role="option" aria-selected={valor === l.id} className={valor === l.id ? 'is-on' : ''} onClick={() => onCambio(l.id)} style={{ fontFamily: `"${l.familia}", Arial` }} title="Letra propia del proyecto">
+              {l.nombre}
+              {valor === l.id && <Icon name="check" size={14} />}
+            </button>
+          ))}
       </div>
     </div>
   )
@@ -110,7 +141,7 @@ const PALETA = [
 type ConGotero = { EyeDropper?: new () => { open: () => Promise<{ sRGBHex: string }> } }
 
 /** El selector de color: el gotero, los colores del cuadro elegido y una paleta fija; o un hex a mano. */
-export function SelectorColor({ valor, onCambio, deFoto }: { valor: string; onCambio: (color: string) => void; deFoto: string[] }) {
+export function SelectorColor({ valor, onCambio, deFoto, tituloFoto = 'Del cuadro' }: { valor: string; onCambio: (color: string) => void; deFoto: string[]; tituloFoto?: string }) {
   const [hex, setHex] = useState(valor)
   useEffect(() => setHex(valor), [valor])
   const Gotero = (window as unknown as ConGotero).EyeDropper
@@ -154,7 +185,7 @@ export function SelectorColor({ valor, onCambio, deFoto }: { valor: string; onCa
       </div>
       {deFoto.length > 0 && (
         <>
-          <span className="pt-sub">Del cuadro</span>
+          <span className="pt-sub">{tituloFoto}</span>
           <div className="pt-muestras">{deFoto.map(muestra)}</div>
         </>
       )}
